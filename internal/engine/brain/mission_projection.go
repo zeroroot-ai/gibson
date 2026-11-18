@@ -355,6 +355,9 @@ func checkRun(w *World, ev Event) runCheck {
 		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
 	case AgentSkillLoaded:
 		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case OutsideAgentCalled:
+		// The span holds no run of the mission, so the call is not run-scoped.
+		return runCheck{}
 	}
 	return runCheck{}
 }
@@ -417,6 +420,9 @@ func detachEvidence(ev Event) Event {
 		e.MissionID = ""
 		return e
 	case AgentSkillLoaded:
+		e.MissionID = ""
+		return e
+	case OutsideAgentCalled:
 		e.MissionID = ""
 		return e
 	}

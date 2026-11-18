@@ -88,6 +88,10 @@ type worldSnapshotData struct {
 	// the loads would vanish across a snapshot and trim cycle.
 	AgentSkillLoads []AgentSkillLoad `json:"agent_skill_loads,omitempty"`
 
+	// OutsideAgentCalls is each delegation to an outside agent (outside_call.go).
+	// Without it the calls would vanish across a snapshot and trim cycle.
+	OutsideAgentCalls []OutsideAgentCall `json:"outside_agent_calls,omitempty"`
+
 	// MissionRewinds is the parent of each mission that a rewind started
 	// (ADR-0170). Without it the link from a rewound mission to its earlier
 	// run would vanish across a snapshot and trim cycle.
@@ -138,6 +142,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		ProofReviews:         w.ProofReviewSnapshot(),
 		MissionRewinds:       w.MissionRewindSnapshot(),
 		AgentSkillLoads:      w.AgentSkillLoadSnapshot(),
+		OutsideAgentCalls:    w.OutsideAgentCallSnapshot(),
 
 		NextHostID:        w.nextHostID,
 		NextDomainID:      w.nextDomainID,
@@ -475,6 +480,9 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	}
 
 	// Replay the loads of Agent Skills, in Timeline order.
+	for _, c := range data.OutsideAgentCalls {
+		Reduce(w, OutsideAgentCalled(c))
+	}
 	for _, l := range data.AgentSkillLoads {
 		Reduce(w, AgentSkillLoaded(l))
 	}

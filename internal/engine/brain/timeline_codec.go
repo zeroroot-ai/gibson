@@ -140,6 +140,9 @@ func init() {
 	// skill_load.go
 	registerEvent("agent_skill.loaded", func() Event { return &AgentSkillLoaded{} })
 
+	// outside_call.go
+	registerEvent("outside_agent.called", func() Event { return &OutsideAgentCalled{} })
+
 	// flight_recorder.go
 	registerEvent("flight_recorder.policy_set", func() Event { return &FlightRecorderPolicySet{} })
 	registerEvent("flight_recorder.retention_swept", func() Event { return &FlightRecorderRetentionSwept{} })
@@ -280,6 +283,8 @@ func dereferenceEvent(ev Event) Event {
 	case *AgentToolCallObserved:
 		return *v
 	case *AgentSkillLoaded:
+		return *v
+	case *OutsideAgentCalled:
 		return *v
 	case *FlightRecorderPolicySet:
 		return *v

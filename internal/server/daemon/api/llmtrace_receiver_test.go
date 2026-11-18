@@ -21,6 +21,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 )
 
 const collectorSVID = "spiffe://example.org/platform/otel-collector"
@@ -35,6 +36,8 @@ func spanFromFixture(t *testing.T, name string, override map[string]string) *tra
 	}
 	var f struct {
 		Attributes map[string]any `json:"attributes"`
+		Start      uint64         `json:"start_unix_nano"`
+		End        uint64         `json:"end_unix_nano"`
 	}
 	if err := json.Unmarshal(data, &f); err != nil {
 		t.Fatal(err)
@@ -42,7 +45,7 @@ func spanFromFixture(t *testing.T, name string, override map[string]string) *tra
 	for k, v := range override {
 		f.Attributes[k] = v
 	}
-	sp := &tracepb.Span{Name: "POST /*"}
+	sp := &tracepb.Span{Name: "POST /*", StartTimeUnixNano: f.Start, EndTimeUnixNano: f.End}
 	for k, v := range f.Attributes {
 		kv := &commonpb.KeyValue{Key: k}
 		switch x := v.(type) {
@@ -190,6 +193,166 @@ func TestTraceReceiver_AStoppedEngineFailsTheCall(t *testing.T) {
 	r := NewTraceReceiver(collectorSVID, reg, nil)
 	span := spanFromFixture(t, "messages_plain", map[string]string{"gibson.tenant": "acme"})
 	_, err := r.Export(peerCtx(t, collectorSVID), exportOf(span))
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable", status.Code(err))
+	}
+}
+
+// oneOutsideStore is an outside agent store with one registered name for one
+// tenant.
+type oneOutsideStore struct {
+	tenant, name string
+	err          error
+}
+
+func (m *oneOutsideStore) Register(context.Context, string, outsideagentstore.Entry) (*outsideagentstore.Entry, error) {
+	return nil, errors.New("not used")
+}
+
+func (m *oneOutsideStore) List(context.Context, string) ([]outsideagentstore.Entry, error) {
+	return nil, errors.New("not used")
+}
+
+func (m *oneOutsideStore) Get(_ context.Context, tenant, name string) (*outsideagentstore.Entry, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if tenant == m.tenant && name == m.name {
+		return &outsideagentstore.Entry{Name: name}, nil
+	}
+	return nil, outsideagentstore.ErrNotFound
+}
+
+func (m *oneOutsideStore) Delete(context.Context, string, string) error {
+	return errors.New("not used")
+}
+
+func awaitOutsideCalls(t *testing.T, eng *brain.Engine, want int) []brain.OutsideAgentCall {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if got := eng.OutsideAgentCalls(); len(got) == want {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("outside calls = %d, want %d", len(eng.OutsideAgentCalls()), want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// The real A2A span of the gateway becomes one Timeline event of the tenant, with
+// the caller, the target, the times and the outcome. A second delivery of the
+// span keeps one event.
+func TestTraceReceiver_AnA2ASpanToAnOutsideAgentBecomesATimelineEvent(t *testing.T) {
+	r, reg := newReceiver(t)
+	store := &oneOutsideStore{tenant: "acme", name: "partner-scout"}
+	r.WithOutsideAgents(func() outsideagentstore.Store { return store })
+	ctx := peerCtx(t, collectorSVID)
+	span := spanFromFixture(t, "a2a_send_message", map[string]string{"gibson.tenant": "acme"})
+	engine := reg.For("acme")
+
+	before := testutil.ToFloat64(gatewayOutsideCallsTotal.WithLabelValues(outsideRecorded))
+	for range 2 {
+		if _, err := r.Export(ctx, exportOf(span)); err != nil {
+			t.Fatalf("Export: %v", err)
+		}
+	}
+	calls := awaitOutsideCalls(t, engine, 1)
+	time.Sleep(50 * time.Millisecond)
+	if got := engine.OutsideAgentCalls(); len(got) != 1 {
+		t.Fatalf("calls after a second delivery = %d, want 1", len(got))
+	}
+	c := calls[0]
+	if c.Target != "partner-scout" || c.MissionID != "m-1" || c.TaskID != "task-1" || c.Subject != "user:u1" ||
+		c.Method != "SendMessage" || c.Status != "ok" || c.HTTPStatus != 200 ||
+		c.StartUnixNano == 0 || c.EndUnixNano < c.StartUnixNano {
+		t.Errorf("call = %+v", c)
+	}
+	if got := testutil.ToFloat64(gatewayOutsideCallsTotal.WithLabelValues(outsideRecorded)) - before; got != 2 {
+		t.Errorf("recorded = %v, want 2 (each delivery counts, the fold keeps one)", got)
+	}
+	// Another tenant holds nothing.
+	if n := len(reg.For("other").OutsideAgentCalls()); n != 0 {
+		t.Errorf("tenant other holds %d calls, want 0", n)
+	}
+}
+
+// An A2A span of a target that is not an outside agent of the tenant is ignored.
+// So is the span of a tenant that registered the name under another tenant.
+func TestTraceReceiver_AnA2ASpanOfAnotherTargetIsIgnored(t *testing.T) {
+	cases := map[string]struct {
+		store *oneOutsideStore
+		over  map[string]string
+	}{
+		"a platform agent":           {&oneOutsideStore{tenant: "acme", name: "partner-scout"}, map[string]string{"gibson.route_agent": "cve-triage"}},
+		"the name of another tenant": {&oneOutsideStore{tenant: "globex", name: "partner-scout"}, nil},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			r, reg := newReceiver(t)
+			r.WithOutsideAgents(func() outsideagentstore.Store { return tc.store })
+			over := map[string]string{"gibson.tenant": "acme"}
+			for k, v := range tc.over {
+				over[k] = v
+			}
+			before := testutil.ToFloat64(gatewayOutsideCallsTotal.WithLabelValues(outsideNotOutside))
+			resp, err := r.Export(peerCtx(t, collectorSVID), exportOf(spanFromFixture(t, "a2a_send_message", over)))
+			if err != nil || resp.GetPartialSuccess().GetRejectedSpans() != 0 {
+				t.Fatalf("Export = %v, %v; want success with no rejected span", resp, err)
+			}
+			if got := testutil.ToFloat64(gatewayOutsideCallsTotal.WithLabelValues(outsideNotOutside)) - before; got != 1 {
+				t.Errorf("not_outside = %v, want 1", got)
+			}
+			time.Sleep(50 * time.Millisecond)
+			if n := len(reg.For("acme").OutsideAgentCalls()); n != 0 {
+				t.Errorf("events = %d, want 0", n)
+			}
+		})
+	}
+
+	// With no store, the span is ignored.
+	r, reg := newReceiver(t)
+	if _, err := r.Export(peerCtx(t, collectorSVID), exportOf(spanFromFixture(t, "a2a_send_message",
+		map[string]string{"gibson.tenant": "acme"}))); err != nil {
+		t.Fatalf("Export with no store: %v", err)
+	}
+	if n := len(reg.For("acme").OutsideAgentCalls()); n != 0 {
+		t.Errorf("events with no store = %d, want 0", n)
+	}
+}
+
+func TestTraceReceiver_AnA2ASpanWithADefectIsRejectedAndCounted(t *testing.T) {
+	r, _ := newReceiver(t)
+	r.WithOutsideAgents(func() outsideagentstore.Store { return &oneOutsideStore{tenant: "acme", name: "partner-scout"} })
+	drops := func(result string) float64 {
+		return testutil.ToFloat64(gatewayOutsideCallsTotal.WithLabelValues(result))
+	}
+	beforeParse, beforeTenant := drops(outsideDropParse), drops(outsideDropTenant)
+
+	noTarget := spanFromFixture(t, "a2a_send_message", map[string]string{"gibson.tenant": "acme", "gibson.route_agent": ""})
+	badTenant := spanFromFixture(t, "a2a_send_message", map[string]string{"gibson.tenant": "NOT A TENANT"})
+	resp, err := r.Export(peerCtx(t, collectorSVID), exportOf(noTarget, badTenant))
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if resp.GetPartialSuccess().GetRejectedSpans() != 2 {
+		t.Errorf("rejected = %d, want 2", resp.GetPartialSuccess().GetRejectedSpans())
+	}
+	if got := drops(outsideDropParse) - beforeParse; got != 1 {
+		t.Errorf("dropped_parse = %v, want 1", got)
+	}
+	if got := drops(outsideDropTenant) - beforeTenant; got != 1 {
+		t.Errorf("dropped_tenant = %v, want 1", got)
+	}
+}
+
+// A store that cannot answer fails the call, so the collector sends it again.
+func TestTraceReceiver_AStoreThatCannotAnswerFailsTheCall(t *testing.T) {
+	r, _ := newReceiver(t)
+	r.WithOutsideAgents(func() outsideagentstore.Store { return &oneOutsideStore{err: errors.New("db down")} })
+	_, err := r.Export(peerCtx(t, collectorSVID), exportOf(spanFromFixture(t, "a2a_send_message",
+		map[string]string{"gibson.tenant": "acme"})))
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("code = %v, want Unavailable", status.Code(err))
 	}

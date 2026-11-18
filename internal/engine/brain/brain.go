@@ -96,6 +96,10 @@ type World struct {
 	// gibson#1364), in Timeline order.
 	agentSkillLoads []AgentSkillLoad
 
+	// outsideAgentCalls holds each delegation to an outside A2A agent
+	// (outside_call.go, epic gibson#1366), in Timeline order.
+	outsideAgentCalls []OutsideAgentCall
+
 	// countedTokenCalls holds, for each mission, the IDs of the model calls
 	// whose tokens the budget already counted (TokenUsed with a CallID). It
 	// makes a repeated delivery of one call count once. The set of a mission is
@@ -520,6 +524,8 @@ func Reduce(w *World, ev Event) {
 		applyMissionOriginated(w, e)
 	case AgentSkillLoaded:
 		applyAgentSkillLoaded(w, e)
+	case OutsideAgentCalled:
+		applyOutsideAgentCalled(w, e)
 	case DomainPackEnabled:
 		applyDomainPackEnabled(w, e)
 	case DomainPackDisabled:

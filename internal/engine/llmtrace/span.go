@@ -61,6 +61,9 @@ var ErrNotAModelCall = errors.New("llmtrace: the span is not a model call")
 // or a bool, as OTLP carries it.
 type Span struct {
 	Attributes map[string]any
+	// StartUnixNano and EndUnixNano are the times of the span. A model call
+	// does not use them. A delegation to an outside agent does.
+	StartUnixNano, EndUnixNano int64
 }
 
 // Cost is the cost of a call in US dollars. Known is false when the gateway

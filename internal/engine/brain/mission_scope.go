@@ -158,6 +158,8 @@ func explicitRunID(ev Event) string {
 		return e.MissionRunID
 	case AgentSkillLoaded:
 		return e.MissionRunID
+	case OutsideAgentCalled:
+		return ""
 	default:
 		return ""
 	}
@@ -234,6 +236,9 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		return e.MissionID != "" && e.MissionID == missionID
 	case AgentSkillLoaded:
 		// A load belongs to the mission whose agent made it.
+		return e.MissionID != "" && e.MissionID == missionID
+	case OutsideAgentCalled:
+		// A delegation belongs to the mission of the grant of the caller.
 		return e.MissionID != "" && e.MissionID == missionID
 	default:
 		// Any other unattributable observation is tenant-ambient.

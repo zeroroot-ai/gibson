@@ -14,11 +14,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	coltrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/llmtrace"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -38,10 +40,26 @@ var (
 		Name: "gibson_gateway_llm_events_delivered_total",
 		Help: "Model call spans whose events were submitted to the Timeline of a tenant.",
 	})
+	// gatewayOutsideCallsTotal counts the A2A spans of the Agent gateway by what
+	// the receiver did with them. A span of a call to an agent that is not an
+	// outside agent is ignored, because the daemon records that call itself.
+	gatewayOutsideCallsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "gibson_gateway_outside_calls_total",
+		Help: "A2A spans of the Agent gateway, by result.",
+	}, []string{"result"})
 	gatewayLLMDroppedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gibson_gateway_llm_dropped_total",
 		Help: "Model call spans that the daemon did not deliver, by reason.",
 	}, []string{"reason"})
+)
+
+// Results of an A2A span, the label of gibson_gateway_outside_calls_total.
+const (
+	outsideRecorded   = "recorded"
+	outsideNotOutside = "not_outside"
+	outsideDropParse  = "dropped_parse"
+	outsideDropTenant = "dropped_tenant"
+	outsideDropLookup = "dropped_lookup"
 )
 
 // Reasons of a dropped span.
@@ -62,6 +80,17 @@ type TraceReceiver struct {
 	logger        *slog.Logger
 	now           func() time.Time
 	usage         UsageRecorder
+	outsideAgents func() outsideagentstore.Store
+}
+
+// WithOutsideAgents wires the source of the outside agent store. The receiver
+// then records an A2A span whose target is an outside agent of the tenant. A
+// source that returns nil, or no source, makes the receiver ignore each A2A
+// span. The source is read for each span, because the data pool is built after
+// the listener options are assembled.
+func (r *TraceReceiver) WithOutsideAgents(src func() outsideagentstore.Store) *TraceReceiver {
+	r.outsideAgents = src
+	return r
 }
 
 // ModelCallUsage is the usage of one model call, for the platform budget. It
@@ -125,7 +154,7 @@ func (r *TraceReceiver) Export(
 	for _, rs := range req.GetResourceSpans() {
 		for _, ss := range rs.GetScopeSpans() {
 			for _, sp := range ss.GetSpans() {
-				switch err := r.deliver(ctx, sp.GetAttributes()); {
+				switch err := r.deliverSpan(ctx, sp); {
 				case err == nil, errors.Is(err, llmtrace.ErrNotAModelCall):
 				case errors.Is(err, errEngineUnavailable):
 					return nil, status.Error(codes.Unavailable, "the World of the tenant is not available; try again later")
@@ -145,6 +174,70 @@ func (r *TraceReceiver) Export(
 		}
 	}
 	return resp, nil
+}
+
+// deliverSpan routes one span. A model call goes to deliver. An A2A call to an
+// outside agent goes to deliverOutside. Any other span is ignored.
+func (r *TraceReceiver) deliverSpan(ctx context.Context, sp *tracepb.Span) error {
+	err := r.deliver(ctx, sp.GetAttributes())
+	if !errors.Is(err, llmtrace.ErrNotAModelCall) {
+		return err
+	}
+	return r.deliverOutside(ctx, llmtrace.Span{
+		Attributes:    spanAttributes(sp.GetAttributes()),
+		StartUnixNano: int64(sp.GetStartTimeUnixNano()), //nolint:gosec // a time in nanoseconds fits int64
+		EndUnixNano:   int64(sp.GetEndTimeUnixNano()),   //nolint:gosec // a time in nanoseconds fits int64
+	})
+}
+
+// deliverOutside records the A2A call of a mission agent to an outside agent as
+// one Timeline event of the tenant. The daemon has no work item for such a call,
+// so the span of the gateway is the one record. The tenant, the mission and the
+// target come from the trusted headers that ext-authz set and that the gateway
+// put on the span. The target is an outside agent only when the tenant registered
+// that name. Any other A2A span returns nil, and the daemon records it elsewhere.
+func (r *TraceReceiver) deliverOutside(ctx context.Context, sp llmtrace.Span) error {
+	call, err := llmtrace.OutsideCallFromSpan(sp)
+	if errors.Is(err, llmtrace.ErrNotAnA2ACall) {
+		return llmtrace.ErrNotAModelCall
+	}
+	if err != nil {
+		gatewayOutsideCallsTotal.WithLabelValues(outsideDropParse).Inc()
+		r.logger.Warn("an A2A span cannot be read", "error", err)
+		return errDropped
+	}
+	tenant, err := auth.NewTenantID(call.Tenant)
+	if err != nil {
+		gatewayOutsideCallsTotal.WithLabelValues(outsideDropTenant).Inc()
+		r.logger.Warn("an A2A span has no valid tenant", "call_id", call.CallID, "error", err)
+		return errDropped
+	}
+	var store outsideagentstore.Store
+	if r.outsideAgents != nil {
+		store = r.outsideAgents()
+	}
+	if store == nil {
+		// Without the store no call can be told apart. The span is ignored.
+		gatewayOutsideCallsTotal.WithLabelValues(outsideNotOutside).Inc()
+		return nil
+	}
+	if _, gerr := store.Get(ctx, tenant.String(), call.Target); gerr != nil {
+		if errors.Is(gerr, outsideagentstore.ErrNotFound) {
+			gatewayOutsideCallsTotal.WithLabelValues(outsideNotOutside).Inc()
+			return nil
+		}
+		gatewayOutsideCallsTotal.WithLabelValues(outsideDropLookup).Inc()
+		r.logger.Warn("the outside agent record could not be read", "call_id", call.CallID, "error", gerr)
+		return errEngineUnavailable
+	}
+	eng, ok := TenantEngine(r.registry, tenant.String())
+	if !ok {
+		r.logger.Warn("the engine of the tenant is not available", "tenant", tenant.String())
+		return errEngineUnavailable
+	}
+	eng.Submit(call.Event(r.now()))
+	gatewayOutsideCallsTotal.WithLabelValues(outsideRecorded).Inc()
+	return nil
 }
 
 var errEngineUnavailable = errors.New("the tenant engine is not available")

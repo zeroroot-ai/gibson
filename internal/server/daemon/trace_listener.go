@@ -96,7 +96,8 @@ func (d *daemonImpl) buildTraceServer(ctx context.Context) (*grpcSubsystem, erro
 	}
 	coltrace.RegisterTraceServiceServer(srv, api.NewTraceReceiver(
 		svid, d.brainRegistry, d.logger.WithComponent("trace-receiver").Slog()).
-		WithUsage(newBudgetUsage(d.budgetEnforcer, d.stateClient.Client(), d.brainRegistry)))
+		WithUsage(newBudgetUsage(d.budgetEnforcer, d.stateClient.Client(), d.brainRegistry)).
+		WithOutsideAgents(d.outsideAgentStore))
 
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {

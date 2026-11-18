@@ -621,6 +621,14 @@ func (e *Engine) AgentSkillLoads() []AgentSkillLoad {
 	return e.World.AgentSkillLoads()
 }
 
+// OutsideAgentCalls returns each delegation to an outside A2A agent that the
+// gateway trace recorded, in the order of the Timeline (epic gibson#1366).
+func (e *Engine) OutsideAgentCalls() []OutsideAgentCall {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.OutsideAgentCalls()
+}
+
 // FlightRecorderPolicy returns the tenant's current retention/redaction policy
 // (ADR-0120, gibson#271).
 func (e *Engine) FlightRecorderPolicy() FlightRecorderPolicy {

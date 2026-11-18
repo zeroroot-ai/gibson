@@ -184,6 +184,10 @@ func (a *authzService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type span struct {
 	Name  string
 	Attrs map[string]string
+	// StartNano and EndNano are the span times, in nanoseconds since the epoch.
+	StartNano, EndNano uint64
+	// StatusCode is the status code of the span: 0 unset, 1 ok, 2 error.
+	StatusCode int32
 	// All holds every attribute with its typed value. A test dumps it as data.
 	All map[string]any
 }
@@ -224,6 +228,8 @@ func (o *otlpReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			for _, sp := range ss.GetSpans() {
 				o.spans = append(o.spans, span{
 					Name: sp.GetName(), Attrs: stringAttrs(sp.GetAttributes()), All: typedAttrs(sp.GetAttributes()),
+					StartNano: sp.GetStartTimeUnixNano(), EndNano: sp.GetEndTimeUnixNano(),
+					StatusCode: int32(sp.GetStatus().GetCode()),
 				})
 			}
 		}
@@ -267,7 +273,10 @@ func dumpSpan(t *testing.T, name string, sp span) {
 	if dir == "" {
 		return
 	}
-	data, err := json.MarshalIndent(map[string]any{"name": sp.Name, "attributes": sp.All}, "", "  ")
+	data, err := json.MarshalIndent(map[string]any{
+		"name": sp.Name, "start_unix_nano": sp.StartNano, "end_unix_nano": sp.EndNano,
+		"status_code": sp.StatusCode, "attributes": sp.All,
+	}, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal span: %v", err)
 	}

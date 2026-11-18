@@ -33,6 +33,22 @@ const a2aConfigTemplate = `config:
   readinessAddr: {{.Readiness}}
   statsAddr: {{.Stats}}
   adminAddr: {{.Admin}}
+  tracing:
+    otlpEndpoint: http://{{.OTLP}}
+    otlpProtocol: http
+    randomSampling: true
+    fields:
+      add:
+        gibson.request_body: string(request.body)
+        gibson.response_body: string(response.body)
+        gibson.tenant: request.headers["x-gibson-tenant"]
+        gibson.subject: request.headers["x-gibson-subject"]
+        gibson.mission: request.headers["x-gibson-mission"]
+        gibson.task: request.headers["x-gibson-task"]
+        gibson.route_agent: request.headers["x-gibson-route-agent"]
+frontendPolicies:
+  http:
+    maxBufferSize: 20971520
 binds:
 - port: {{.Port}}
   listeners:
@@ -124,7 +140,10 @@ func TestA2AThroughGateway(t *testing.T) {
 		t.Fatal("AGENTGATEWAY_BIN is not set. Set it to the path of an agentgateway binary.")
 	}
 	agent := startA2AAgent(t)
-	gw := startGateway(t, bin, a2aConfigTemplate, map[string]any{"Agent": hostOf(agent)})
+	otlp := &otlpReceiver{}
+	otlpSrv := httptest.NewServer(otlp)
+	defer otlpSrv.Close()
+	gw := startGateway(t, bin, a2aConfigTemplate, map[string]any{"Agent": hostOf(agent), "OTLP": hostOf(otlpSrv)})
 
 	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("hello"))
 	sendBody, err := json.Marshal(&a2a.SendMessageRequest{Message: msg})
@@ -179,5 +198,39 @@ func TestA2AThroughGateway(t *testing.T) {
 		if status != http.StatusOK || !strings.Contains(body, "echo: hello") {
 			t.Fatalf("http+json reply: status %d, body %s", status, body)
 		}
+	})
+
+	// The span of an A2A call. The call carries the trusted headers that
+	// ext-authz sets and the route headers of the caller. The span is the one
+	// source of the record of a delegation to an outside agent. The test dumps
+	// it to $GATEWAY_SPAN_DUMP_DIR when the variable is set.
+	t.Run("span_of_a_call", func(t *testing.T) {
+		const marker = "span-marker-1"
+		rpcMsg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(marker))
+		body, err := json.Marshal(&a2a.SendMessageRequest{Message: rpcMsg})
+		if err != nil {
+			t.Fatalf("marshal SendMessageRequest: %v", err)
+		}
+		rpc := fmt.Sprintf(`{"jsonrpc":"2.0","id":"3","method":"SendMessage","params":%s}`, body)
+		req, err := http.NewRequest(http.MethodPost, gw.base+"/jsonrpc", strings.NewReader(rpc))
+		if err != nil {
+			t.Fatalf("build request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("A2A-Version", "1.0")
+		for k, v := range map[string]string{
+			"x-gibson-tenant": "tenant-a", "x-gibson-subject": "user:u1", "x-gibson-mission": "m-1",
+			"x-gibson-task": "task-1", "x-gibson-route-agent": "partner-scout",
+		} {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		_ = resp.Body.Close()
+		sp := otlp.waitSpan(t, marker)
+		dumpSpan(t, "a2a_send_message", sp)
+		t.Logf("a2a span %q attributes: %v", sp.Name, sp.All)
 	})
 }
