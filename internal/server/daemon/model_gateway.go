@@ -97,21 +97,48 @@ func modelGatewayHTTPClient(caFile string) (*http.Client, error) {
 	return &http.Client{Transport: tr}, nil
 }
 
-// modelGatewayInfoFromEnv reads what an SDK agent needs to reach the model
-// gateway: the URL and the PEM bundle of the CA. ResolveModel returns it (the
-// RPC handlers wait for the SDK module that has the RPC).
-func modelGatewayInfoFromEnv() (harness.GatewayInfo, error) {
-	url := strings.TrimSpace(os.Getenv(EnvModelGatewayURL))
+// The public URLs of the gateways, for an agent in a sandbox. A sandbox reaches
+// the cluster only through the Edge, never through an in-cluster service name.
+// The daemon keeps GIBSON_MODEL_GATEWAY_URL for its own model client.
+const (
+	// EnvModelGatewayPublicURL is the public URL of the model gateway: the
+	// Edge route /gateway/model/.
+	EnvModelGatewayPublicURL = "GIBSON_MODEL_GATEWAY_PUBLIC_URL"
+	// EnvAgentGatewayPublicURL is the public URL of the agent gateway: the Edge
+	// route /gateway/agent/.
+	EnvAgentGatewayPublicURL = "GIBSON_AGENT_GATEWAY_PUBLIC_URL"
+	// EnvGatewayPublicCAFile is the optional PEM CA bundle that signs the public
+	// certificate. Unset means a public CA, and the reply holds no bundle.
+	EnvGatewayPublicCAFile = "GIBSON_GATEWAY_PUBLIC_CA_FILE"
+)
+
+// publicGatewayInfo reads one public gateway URL and the optional public CA.
+func publicGatewayInfo(urlEnv string) (harness.GatewayInfo, error) {
+	url := strings.TrimSpace(os.Getenv(urlEnv))
 	if url == "" {
-		return harness.GatewayInfo{}, fmt.Errorf("%s is not set", EnvModelGatewayURL)
+		return harness.GatewayInfo{}, fmt.Errorf("%s is not set", urlEnv)
 	}
-	caFile := strings.TrimSpace(os.Getenv(EnvModelGatewayCAFile))
-	if caFile == "" {
-		return harness.GatewayInfo{}, fmt.Errorf("%s is not set", EnvModelGatewayCAFile)
+	info := harness.GatewayInfo{URL: url}
+	if caFile := strings.TrimSpace(os.Getenv(EnvGatewayPublicCAFile)); caFile != "" {
+		pemBytes, err := os.ReadFile(caFile) //nolint:gosec // G304: the path is operator configuration
+		if err != nil {
+			return harness.GatewayInfo{}, fmt.Errorf("read %s: %w", EnvGatewayPublicCAFile, err)
+		}
+		info.CAPEM = string(pemBytes)
 	}
-	pemBytes, err := os.ReadFile(caFile) //nolint:gosec // G304: the path is operator configuration
-	if err != nil {
-		return harness.GatewayInfo{}, fmt.Errorf("read %s: %w", EnvModelGatewayCAFile, err)
-	}
-	return harness.GatewayInfo{URL: url, CAPEM: string(pemBytes)}, nil
+	return info, nil
+}
+
+// modelGatewayInfoFromEnv reads what an SDK agent needs to reach the model
+// gateway: the PUBLIC URL and, when a private CA signs it, the PEM bundle.
+// ResolveModel returns it (the RPC handlers wait for the SDK module that has the
+// RPC).
+func modelGatewayInfoFromEnv() (harness.GatewayInfo, error) {
+	return publicGatewayInfo(EnvModelGatewayPublicURL)
+}
+
+// agentGatewayInfoFromEnv reads what an SDK agent needs to reach the agent
+// gateway. ResolveAgent returns it.
+func agentGatewayInfoFromEnv() (harness.GatewayInfo, error) {
+	return publicGatewayInfo(EnvAgentGatewayPublicURL)
 }

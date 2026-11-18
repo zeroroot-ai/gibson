@@ -96,25 +96,43 @@ func selfSignedPEM(t *testing.T) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
-func TestModelGatewayInfoFromEnv(t *testing.T) {
+func TestGatewayInfoFromEnv_GivesThePublicURLs(t *testing.T) {
 	dir := t.TempDir()
 	ca := filepath.Join(dir, "ca.pem")
 	if err := os.WriteFile(ca, selfSignedPEM(t), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(EnvModelGatewayURL, "https://gw.example")
-	t.Setenv(EnvModelGatewayCAFile, ca)
-	info, err := modelGatewayInfoFromEnv()
-	if err != nil || info.URL != "https://gw.example" || info.CAPEM == "" {
-		t.Fatalf("info = %+v, %v", info, err)
+	t.Setenv(EnvModelGatewayURL, "https://model.svc.internal")
+	t.Setenv(EnvModelGatewayPublicURL, "https://edge.example/gateway/model")
+	t.Setenv(EnvAgentGatewayPublicURL, "https://edge.example/gateway/agent")
+	t.Setenv(EnvGatewayPublicCAFile, ca)
+
+	m, err := modelGatewayInfoFromEnv()
+	if err != nil || m.URL != "https://edge.example/gateway/model" || m.CAPEM == "" {
+		t.Fatalf("model info = %+v, %v", m, err)
 	}
-	t.Setenv(EnvModelGatewayURL, "")
-	if _, err := modelGatewayInfoFromEnv(); err == nil {
-		t.Error("no URL was accepted")
+	a, err := agentGatewayInfoFromEnv()
+	if err != nil || a.URL != "https://edge.example/gateway/agent" || a.CAPEM == "" {
+		t.Fatalf("agent info = %+v, %v", a, err)
 	}
-	t.Setenv(EnvModelGatewayURL, "https://gw.example")
-	t.Setenv(EnvModelGatewayCAFile, filepath.Join(dir, "missing.pem"))
+	if m.URL == "https://model.svc.internal" {
+		t.Error("an agent got the in-cluster URL")
+	}
+
+	// With no public CA file, the reply holds no bundle: a public CA signs it.
+	t.Setenv(EnvGatewayPublicCAFile, "")
+	if m, err := modelGatewayInfoFromEnv(); err != nil || m.CAPEM != "" {
+		t.Errorf("with no CA file: %+v, %v", m, err)
+	}
+	// A CA file that is set and missing is an error.
+	t.Setenv(EnvGatewayPublicCAFile, filepath.Join(dir, "missing.pem"))
 	if _, err := modelGatewayInfoFromEnv(); err == nil {
 		t.Error("a missing CA file was accepted")
+	}
+	// No public URL is an error. The in-cluster URL is not a fallback.
+	t.Setenv(EnvGatewayPublicCAFile, "")
+	t.Setenv(EnvModelGatewayPublicURL, "")
+	if _, err := modelGatewayInfoFromEnv(); err == nil {
+		t.Error("no public URL was accepted")
 	}
 }
