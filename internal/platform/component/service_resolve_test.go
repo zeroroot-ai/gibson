@@ -313,7 +313,9 @@ func (m *memOutsideAgents) Get(_ context.Context, tenant, name string) (*outside
 	return nil, outsideagentstore.ErrNotFound
 }
 
-func (m *memOutsideAgents) Delete(context.Context, string, string) error { return errors.New("not used") }
+func (m *memOutsideAgents) Delete(context.Context, string, string) error {
+	return errors.New("not used")
+}
 
 // An outside agent resolves to the same gateway URL and the same route headers as
 // any agent. No registered instance is needed. The record of another tenant does
