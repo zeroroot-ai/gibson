@@ -44,7 +44,18 @@ const grpcAuthzConfigTemplate = `config:
 binds:
 - port: {{.Port}}
   listeners:
-  - routes:
+  - policies:
+      # ext-authz is at the listener (the Gateway) level, before any route
+      # policy. It knows no route, so it gets no context extension. The caller
+      # claims its route with two headers that the route also matches.
+      extAuthz:
+        host: {{.Authz}}
+        includeRequestHeaders: ["x-capability-grant", "x-gibson-route-tenant", "x-gibson-route-provider", "x-gibson-subject", "x-gibson-mission", ":path", ":method"]
+        protocol:
+          grpc:
+            metadata:
+              gibson: '{"model": json(request.body).model}'
+    routes:
     - name: tenant-a-anthropic
       matches:
       - headers:
@@ -67,13 +78,8 @@ binds:
             /v1/models: passthrough
         backendAuth:
           key: key-of-tenant-a
-        extAuthz:
-          host: {{.Authz}}
-          includeRequestHeaders: ["x-capability-grant", "x-gibson-route-tenant", "x-gibson-route-provider", "x-gibson-subject", "x-gibson-mission", ":path", ":method"]
-          protocol:
-            grpc:
-              metadata:
-                gibson: '{"model": json(request.body).model}'
+        requestHeaderModifier:
+          remove: ["x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task", "x-gibson-route-tenant", "x-gibson-route-provider"]
 `
 
 // recordingAuthz is a gRPC ext-authz service. It records each CheckRequest and
@@ -185,23 +191,20 @@ func TestExtAuthzGRPCCheckRequestFields(t *testing.T) {
 		t.Errorf("x-capability-grant = %q, want grant-token", got)
 	}
 
-	// The provider got the values of ext-authz, and not the copies of the caller.
+	// ext-authz ran before the route policy, and the route policy removed each
+	// trusted and route header after it. The provider sees none of them.
 	var seen bool
 	for _, r := range provider.Requests() {
 		if r.Path != "/v1/responses" {
 			continue
 		}
 		seen = true
-		if got := r.Header.Get("X-Gibson-Subject"); got != "component:agent:claude" {
-			t.Errorf("provider x-gibson-subject = %q, want the value of ext-authz", got)
+		for _, h := range []string{"X-Gibson-Subject", "X-Gibson-Tenant", "X-Gibson-Mission", "X-Gibson-Task",
+			"X-Gibson-Route-Tenant", "X-Gibson-Route-Provider"} {
+			if got := r.Header.Get(h); got != "" {
+				t.Errorf("the provider got %s = %q, want it removed", h, got)
+			}
 		}
-		if got := r.Header.Get("X-Gibson-Tenant"); got != "tenant-a" {
-			t.Errorf("provider x-gibson-tenant = %q, want tenant-a", got)
-		}
-		if got := r.Header.Get("X-Gibson-Mission"); got != "" {
-			t.Errorf("provider x-gibson-mission = %q, want it removed", got)
-		}
-		t.Logf("provider x-gibson-task = %q (ext-authz did not set it)", r.Header.Get("X-Gibson-Task"))
 	}
 	if !seen {
 		t.Error("the provider got no /v1/responses request")
