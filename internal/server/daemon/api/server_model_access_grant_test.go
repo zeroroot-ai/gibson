@@ -199,8 +199,8 @@ func TestCheckGrantTarget_RefusesWhatItCannotCheck(t *testing.T) {
 	}
 }
 
-// A provider whose list fails names no model. With no model client, none is
-// named either. A tenant with no chat config names none.
+// A provider whose list fails names no model. A tenant with no chat config names
+// none.
 func TestProviderListsModel_NamesNothingWhenItFails(t *testing.T) {
 	ctx := context.Background()
 	cfg := &providerconfig.ProviderConfig{Name: "broken", Type: llm.ProviderOpenAI, Enabled: true}
@@ -208,11 +208,6 @@ func TestProviderListsModel_NamesNothingWhenItFails(t *testing.T) {
 	t.Run("the list fails", func(t *testing.T) {
 		s, _ := grantServer(t)
 		assert.False(t, s.providerListsModel(ctx, "tenant-a", cfg, "m"))
-	})
-	t.Run("no model client", func(t *testing.T) {
-		s, _ := grantServer(t)
-		s.modelLister = nil
-		assert.False(t, s.providerListsModel(ctx, "tenant-a", &providerconfig.ProviderConfig{Name: "my-openai"}, "gpt-4o-mini"))
 	})
 	t.Run("no config", func(t *testing.T) {
 		s, _ := grantServer(t)

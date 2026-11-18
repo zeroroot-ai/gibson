@@ -488,9 +488,6 @@ func (s *DaemonServer) anyProviderListsModel(
 // the model as a chat model. A model with the embedding feature and no chat
 // feature is not a chat model.
 func (s *DaemonServer) providerListsModel(ctx context.Context, tenantID string, c *providerconfig.ProviderConfig, model string) bool {
-	if s.modelLister == nil {
-		return false
-	}
 	// The list of the gateway is a passthrough and holds the model names. It
 	// holds no feature list, so a listed model counts as a chat model.
 	models, err := s.modelLister.Models(ctx,
