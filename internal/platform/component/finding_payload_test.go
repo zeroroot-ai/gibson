@@ -4,12 +4,16 @@
 package component
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
@@ -28,7 +32,7 @@ func TestDecodeFindingPayload_EvidenceIsTier2(t *testing.T) {
 		"tool_call_ids": ["call-1"]
 	}`
 
-	got, err := decodeFindingPayload([]byte(raw))
+	got, _, err := decodeFindingPayload([]byte(raw))
 
 	require.NoError(t, err)
 	assert.Equal(t, "open redirect", got.Title)
@@ -46,6 +50,86 @@ func TestDecodeFindingPayload_EvidenceIsTier2(t *testing.T) {
 }
 
 func TestDecodeFindingPayload_RejectsBadJSON(t *testing.T) {
-	_, err := decodeFindingPayload([]byte(`{"title":`))
+	_, _, err := decodeFindingPayload([]byte(`{"title":`))
 	require.Error(t, err)
+}
+
+// stubToolCallRecord holds recorded tool calls by mission.
+type stubToolCallRecord struct {
+	calls map[string][]brain.AgentToolCallSnapshot // by mission
+}
+
+func (s *stubToolCallRecord) RecordedToolCalls(
+	_ context.Context, missionID string, ids []string,
+) (found []brain.AgentToolCallSnapshot, missing []string, err error) {
+	for _, id := range ids {
+		var hit *brain.AgentToolCallSnapshot
+		for i := range s.calls[missionID] {
+			if s.calls[missionID][i].ToolCallID == id {
+				hit = &s.calls[missionID][i]
+			}
+		}
+		if hit == nil {
+			missing = append(missing, id)
+			continue
+		}
+		found = append(found, *hit)
+	}
+	return found, missing, nil
+}
+
+func TestDecodeFindingPayload_ReturnsTheToolCallIDs(t *testing.T) {
+	_, ids, err := decodeFindingPayload([]byte(`{"title":"x","tool_call_ids":["a","b"]}`))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b"}, ids)
+}
+
+func TestFindingSubmitter_RecordedEvidence(t *testing.T) {
+	mission := types.NewID()
+	record := &stubToolCallRecord{calls: map[string][]brain.AgentToolCallSnapshot{
+		mission.String():     {{ToolCallID: "call-1", ToolName: "httpx", Result: "recorded"}},
+		"another-mission-id": {{ToolCallID: "call-other", Result: "other"}},
+	}}
+	s := NewGraphRAGFindingSubmitter(nil, nil, nil, testLogger()).WithToolCallRecord(record)
+	ctx := context.Background()
+
+	got, err := s.recordedEvidence(ctx, mission, []string{"call-1"})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, got[0].GetTier())
+	assert.Equal(t, "recorded", got[0].GetContent())
+	assert.Equal(t, "call-1", got[0].GetToolCallId())
+
+	for name, ids := range map[string][]string{
+		"unknown id":              {"nope"},
+		"one known, one unknown":  {"call-1", "nope"},
+		"call of another mission": {"call-other"},
+	} {
+		_, err := s.recordedEvidence(ctx, mission, ids)
+		require.ErrorIs(t, err, ErrToolCallNotRecorded, name)
+	}
+
+	_, err = s.recordedEvidence(ctx, "", []string{"call-1"})
+	require.ErrorIs(t, err, ErrToolCallNotRecorded, "a finding with no mission cannot name a tool call")
+
+	none, err := s.recordedEvidence(ctx, mission, nil)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+
+	_, err = NewGraphRAGFindingSubmitter(nil, nil, nil, testLogger()).recordedEvidence(ctx, mission, []string{"call-1"})
+	require.ErrorIs(t, err, ErrToolCallRecordUnavailable)
+}
+
+// TestFindingSubmitter_NamedToolCallWithNoRecordFailsTheSubmit proves that the
+// whole submit fails and the World sink sees nothing.
+func TestFindingSubmitter_NamedToolCallWithNoRecordFailsTheSubmit(t *testing.T) {
+	var seen finding.EnhancedFinding
+	s := NewGraphRAGFindingSubmitter(recordingSink(&seen), nil, nil, testLogger()).
+		WithToolCallRecord(&stubToolCallRecord{})
+
+	_, err := s.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"), victimTenant, "",
+		`{"title":"x","tool_call_ids":["call-1"]}`, "", "")
+
+	require.ErrorIs(t, err, ErrToolCallNotRecorded)
+	assert.Empty(t, seen.ID)
 }

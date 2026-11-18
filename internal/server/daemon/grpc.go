@@ -1834,6 +1834,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				} else {
 					d.logger.Warn(ctx, "CapabilityGrantService unavailable; findings carry the submitting principal but no registered agent name")
 				}
+				// A finding that names tool calls gets tier 1 evidence from the
+				// same record that a proof reads.
+				graphRAGSubmitter.WithToolCallRecord(newTenantRoutedProofSettlement(d.brainRegistry))
 				findingSubmitter = graphRAGSubmitter
 				d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings → per-tenant store + World projection")
 			} else {

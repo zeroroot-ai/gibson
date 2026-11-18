@@ -2063,49 +2063,27 @@ func (s *HarnessCallbackService) recordedFindingEvidence(
 	return evidence, nil, nil
 }
 
-// recordedEvidence is the one function that reads the record of tool calls for
-// a proof and for a finding. It drops a repeated ID, checks the limit, reads
-// the record of the mission of the caller in the tenant of the caller, and
-// builds the tier 1 evidence with brain.RecordedEvidence. It returns the IDs
-// that name no record, and it returns no evidence if one ID is missing. An
-// empty list of IDs gives no evidence.
+// recordedEvidence reads the record of tool calls for a proof and for a
+// finding. It calls brain.ReadRecordedEvidence, the one function that the
+// component path also calls, and maps its errors to gRPC status errors.
 func (s *HarnessCallbackService) recordedEvidence(
 	ctx context.Context, missionID string, toolCallIDs []string,
 ) (evidence []*typespb.Evidence, missing []string, err error) {
-	ids := uniqueStrings(toolCallIDs)
-	if len(ids) == 0 {
+	if len(toolCallIDs) == 0 {
 		return nil, nil, nil
-	}
-	if len(ids) > brain.MaxProofToolCallIDs {
-		return nil, nil, status.Errorf(codes.InvalidArgument,
-			"tool_call_ids names %d calls, over the limit of %d", len(ids), brain.MaxProofToolCallIDs)
 	}
 	if s.proofSettlement == nil {
 		return nil, nil, status.Error(codes.Unavailable,
 			"the record of tool calls is not wired on this daemon")
 	}
-	calls, missing, err := s.proofSettlement.RecordedToolCalls(ctx, missionID, ids)
-	if err != nil {
-		return nil, nil, status.Errorf(codes.Internal, "read recorded tool calls: %v", err)
+	evidence, missing, err = brain.ReadRecordedEvidence(ctx, s.proofSettlement, missionID, toolCallIDs)
+	switch {
+	case errors.Is(err, brain.ErrTooManyToolCalls):
+		return nil, nil, status.Errorf(codes.InvalidArgument, "tool_call_ids: %v", err)
+	case err != nil:
+		return nil, nil, status.Errorf(codes.Internal, "%v", err)
 	}
-	if len(missing) > 0 {
-		return nil, missing, nil
-	}
-	return brain.RecordedEvidence(calls), nil, nil
-}
-
-// uniqueStrings returns the values in order, without a repeated value.
-func uniqueStrings(in []string) []string {
-	seen := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, v := range in {
-		if _, dup := seen[v]; dup {
-			continue
-		}
-		seen[v] = struct{}{}
-		out = append(out, v)
-	}
-	return out
+	return evidence, missing, nil
 }
 
 // ============================================================================

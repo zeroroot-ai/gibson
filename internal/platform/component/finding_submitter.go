@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
@@ -74,6 +75,10 @@ type GraphRAGFindingSubmitter struct {
 	// capability-grant service, in which case a finding carries the principal
 	// and no name.
 	enrolledAgents EnrolledAgentLookup
+
+	// records reads the tool calls that the daemon recorded. Nil when the daemon
+	// has no brain, and a finding that names a tool call then fails.
+	records brain.ToolCallRecord
 }
 
 // WithEnrolledAgentLookup wires the registry that names the enrolled agent
@@ -113,16 +118,18 @@ func NewGraphRAGFindingSubmitter(
 // the decoder reads the SDK shape.
 type findingPayload struct {
 	agent.Finding
-	Evidence []sdkfinding.Evidence `json:"evidence,omitempty"`
+	Evidence    []sdkfinding.Evidence `json:"evidence,omitempty"`
+	ToolCallIDs []string              `json:"tool_call_ids,omitempty"`
 }
 
 // decodeFindingPayload decodes the JSON of an SDK finding. The agent typed all
 // of its evidence, so each item is tier 2. The payload cannot set a tier or a
-// tool call ID.
-func decodeFindingPayload(raw []byte) (agent.Finding, error) {
+// tool call ID on an item. It returns the tool call IDs that the agent named.
+// The daemon builds tier 1 evidence from the record of those tool calls.
+func decodeFindingPayload(raw []byte) (agent.Finding, []string, error) {
 	var payload findingPayload
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return agent.Finding{}, fmt.Errorf("decode finding payload: %w", err)
+		return agent.Finding{}, nil, fmt.Errorf("decode finding payload: %w", err)
 	}
 	out := payload.Finding
 	out.Evidence = nil
@@ -139,7 +146,51 @@ func decodeFindingPayload(raw []byte) (agent.Finding, error) {
 			Tier:     typespb.EvidenceTier_EVIDENCE_TIER_TYPED,
 		})
 	}
-	return out, nil
+	return out, payload.ToolCallIDs, nil
+}
+
+// Errors of the tool call record. The service maps each one to a gRPC code.
+var (
+	// ErrToolCallNotRecorded reports a tool call ID that names no record of the
+	// mission of the work item in the tenant of the caller.
+	ErrToolCallNotRecorded = errors.New("finding submitter: no record of the named tool call")
+
+	// ErrToolCallRecordUnavailable reports that the daemon has no record of tool
+	// calls to read.
+	ErrToolCallRecordUnavailable = errors.New("finding submitter: the record of tool calls is not wired")
+)
+
+// WithToolCallRecord wires the record of tool calls. The submitter builds tier 1
+// evidence from it with brain.ReadRecordedEvidence, the function that a proof
+// and a harness finding also use.
+func (s *GraphRAGFindingSubmitter) WithToolCallRecord(r brain.ToolCallRecord) *GraphRAGFindingSubmitter {
+	s.records = r
+	return s
+}
+
+// recordedEvidence builds the tier 1 evidence of a finding from the tool calls
+// that it names, with brain.ReadRecordedEvidence. A finding with no mission
+// cannot name a tool call, because a record belongs to a mission.
+func (s *GraphRAGFindingSubmitter) recordedEvidence(
+	ctx context.Context, missionID types.ID, toolCallIDs []string,
+) ([]*typespb.Evidence, error) {
+	if len(toolCallIDs) == 0 {
+		return nil, nil
+	}
+	if s.records == nil {
+		return nil, ErrToolCallRecordUnavailable
+	}
+	if missionID == "" {
+		return nil, fmt.Errorf("%w: %q (the finding has no mission)", ErrToolCallNotRecorded, toolCallIDs[0])
+	}
+	recorded, missing, err := brain.ReadRecordedEvidence(ctx, s.records, missionID.String(), toolCallIDs)
+	if err != nil {
+		return nil, fmt.Errorf("finding submitter: %w", err)
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("%w: %q", ErrToolCallNotRecorded, missing[0])
+	}
+	return recorded, nil
 }
 
 // Submit stores a JSON-encoded agent.Finding in the per-tenant finding store
@@ -172,7 +223,7 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	}
 
 	// Step 2: Parse the finding JSON.
-	baseFinding, err := decodeFindingPayload([]byte(findingJSON))
+	baseFinding, toolCallIDs, err := decodeFindingPayload([]byte(findingJSON))
 	if err != nil {
 		s.logger.WarnContext(ctx, "finding submitter: failed to parse finding JSON; generating stub finding",
 			slog.String("tenant", tenant),
@@ -201,6 +252,15 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	// findings naming a work item this tenant does not own — use an empty
 	// missionID and stay tenant-ambient.
 	missionID := s.resolveMissionID(ctx, tenant, workID)
+
+	// Step 4b: tier 1 evidence. Each tool call that the payload names must have a
+	// record of this mission in this tenant. An ID with no record fails the whole
+	// submit, before the daemon stores anything.
+	recorded, err := s.recordedEvidence(ctx, missionID, toolCallIDs)
+	if err != nil {
+		return "", err
+	}
+	baseFinding.Evidence = append(recorded, baseFinding.Evidence...)
 
 	// Step 5: the one record. The store keeps it and the World folds it, so
 	// the two never disagree about who submitted what under which mission.
