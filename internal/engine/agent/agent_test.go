@@ -13,6 +13,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // mockAgent implements Agent for testing
@@ -274,13 +275,27 @@ func TestFinding(t *testing.T) {
 	})
 
 	t.Run("WithEvidence", func(t *testing.T) {
-		evidence := NewEvidence("http-response", "Response contained script tag", map[string]any{
-			"status": 200,
-		})
+		evidence := &typespb.Evidence{
+			Title:    "Response contained script tag",
+			Type:     typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE,
+			Metadata: map[string]string{"status": "200"},
+		}
 		finding := NewFinding("Test", "Test", SeverityLow).WithEvidence(evidence)
 
 		assert.Len(t, finding.Evidence, 1)
 		assert.Equal(t, evidence, finding.Evidence[0])
+	})
+
+	t.Run("WithoutRecordedEvidence", func(t *testing.T) {
+		recorded := &typespb.Evidence{Title: "recorded", Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED}
+		typed := &typespb.Evidence{Title: "typed", Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED}
+		unset := &typespb.Evidence{Title: "unset"}
+		finding := NewFinding("Test", "Test", SeverityLow).WithEvidence(recorded, typed, unset)
+
+		got := finding.WithoutRecordedEvidence()
+
+		assert.Equal(t, []*typespb.Evidence{typed, unset}, got.Evidence)
+		assert.Len(t, finding.Evidence, 3, "the call leaves the original finding alone")
 	})
 
 	t.Run("WithCWE", func(t *testing.T) {
@@ -302,16 +317,6 @@ func TestSlotValidate(t *testing.T) {
 	cfg := SlotConfig{Provider: "openai", Model: "gpt-4"}
 	err := slot.Validate(cfg)
 	assert.NoError(t, err)
-}
-
-// TestNewEvidence tests evidence creation
-func TestNewEvidence(t *testing.T) {
-	data := map[string]any{"key": "value"}
-	evidence := NewEvidence("test-type", "Test description", data)
-	assert.Equal(t, "test-type", evidence.Type)
-	assert.Equal(t, "Test description", evidence.Description)
-	assert.Equal(t, data, evidence.Data)
-	assert.False(t, evidence.Timestamp.IsZero())
 }
 
 // TestSlotMergeConfig_AllFields tests all merge paths

@@ -164,6 +164,10 @@ func containsCategory(category string, categories []string) bool {
 
 // RedactSensitiveData removes or masks sensitive information from findings.
 // This modifies the findings in place, so pass a copy if you need to preserve originals.
+//
+// It does not touch evidence. The brain redacts a tool call for the tenant when
+// it stores the record, and a reader of a finding gets the evidence as stored.
+// No reader adds a second redaction.
 func RedactSensitiveData(findings []*finding.EnhancedFinding) {
 	for _, f := range findings {
 		// Redact sensitive metadata fields
@@ -177,20 +181,6 @@ func RedactSensitiveData(findings []*finding.EnhancedFinding) {
 
 			for _, key := range sensitiveKeys {
 				delete(f.Metadata, key)
-			}
-		}
-
-		// Redact sensitive evidence data
-		for i := range f.Evidence {
-			if f.Evidence[i].Data != nil {
-				for _, key := range []string{
-					"password", "secret", "token", "api_key",
-					"credential", "auth", "session", "cookie",
-				} {
-					if _, exists := f.Evidence[i].Data[key]; exists {
-						f.Evidence[i].Data[key] = "[REDACTED]"
-					}
-				}
 			}
 		}
 	}

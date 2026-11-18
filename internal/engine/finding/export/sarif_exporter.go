@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
@@ -364,14 +365,15 @@ func buildLocations(f *finding.EnhancedFinding) []Location {
 
 	// Try to extract location info from evidence
 	for _, evidence := range f.Evidence {
-		if evidence.Data == nil {
+		meta := evidence.GetMetadata()
+		if len(meta) == 0 {
 			continue
 		}
 
-		// Look for file/line information in evidence data
+		// Look for file/line information in evidence metadata
 		var location Location
 
-		if file, ok := evidence.Data["file"].(string); ok {
+		if file, ok := meta["file"]; ok {
 			location.PhysicalLocation = &PhysicalLocation{
 				ArtifactLocation: ArtifactLocation{
 					URI: file,
@@ -379,9 +381,9 @@ func buildLocations(f *finding.EnhancedFinding) []Location {
 			}
 
 			// Try to get line numbers
-			if line, ok := evidence.Data["line"].(float64); ok {
+			if line, err := strconv.Atoi(meta["line"]); err == nil {
 				location.PhysicalLocation.Region = &Region{
-					StartLine: int(line),
+					StartLine: line,
 				}
 			}
 
@@ -389,7 +391,7 @@ func buildLocations(f *finding.EnhancedFinding) []Location {
 		}
 
 		// Look for logical location (e.g., function name)
-		if function, ok := evidence.Data["function"].(string); ok {
+		if function, ok := meta["function"]; ok {
 			location.LogicalLocation = &LogicalLocation{
 				Name: function,
 				Kind: "function",

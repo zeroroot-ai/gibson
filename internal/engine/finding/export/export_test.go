@@ -16,6 +16,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	sdkSecurity "github.com/zeroroot-ai/sdk/finding/security"
 )
 
@@ -34,14 +35,13 @@ func createTestFindings() []*finding.EnhancedFinding {
 			Confidence:  0.95,
 			Category:    "injection",
 			TargetID:    &targetID,
-			Evidence: []agent.Evidence{
+			Evidence: []*typespb.Evidence{
 				{
-					Type:        "request",
-					Description: "Malicious SQL payload submitted",
-					Data: map[string]any{
-						"payload": "' OR '1'='1",
-					},
-					Timestamp: now,
+					Type:     typespb.EvidenceType_EVIDENCE_TYPE_REQUEST,
+					Title:    "Malicious SQL payload submitted",
+					Content:  "' OR '1'='1",
+					Tier:     typespb.EvidenceTier_EVIDENCE_TIER_TYPED,
+					Metadata: map[string]string{"payload": "' OR '1'='1"},
 				},
 			},
 			CWE:       []string{"CWE-89"},
@@ -77,14 +77,13 @@ func createTestFindings() []*finding.EnhancedFinding {
 					Confidence:  0.90,
 					Category:    "xss",
 					TargetID:    &targetID,
-					Evidence: []agent.Evidence{
+					Evidence: []*typespb.Evidence{
 						{
-							Type:        "response",
-							Description: "Script executed in browser",
-							Data: map[string]any{
-								"script": "<script>alert('XSS')</script>",
-							},
-							Timestamp: now,
+							Type:     typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE,
+							Title:    "Script executed in browser",
+							Content:  "<script>alert('XSS')</script>",
+							Tier:     typespb.EvidenceTier_EVIDENCE_TIER_RECORDED,
+							Metadata: map[string]string{"script": "<script>alert('XSS')</script>"},
 						},
 					},
 					CWE:       []string{"CWE-79"},
@@ -118,7 +117,7 @@ func createTestFindings() []*finding.EnhancedFinding {
 				Confidence:  1.0,
 				Category:    "information_disclosure",
 				TargetID:    &targetID,
-				Evidence:    []agent.Evidence{},
+				Evidence:    []*typespb.Evidence{},
 				CWE:         []string{"CWE-200"},
 				Metadata:    make(map[string]any),
 				CreatedAt:   now.Add(-2 * time.Hour),
@@ -292,7 +291,7 @@ func TestJSONExporter(t *testing.T) {
 
 		var result struct {
 			Findings []struct {
-				Evidence []agent.Evidence `json:"evidence"`
+				Evidence []*typespb.Evidence `json:"evidence"`
 			} `json:"findings"`
 		}
 		err = json.Unmarshal(data, &result)
@@ -601,7 +600,7 @@ func TestRedactSensitiveData(t *testing.T) {
 		"safe_field": "public-data",
 	}
 
-	findings[0].Evidence[0].Data = map[string]any{
+	findings[0].Evidence[0].Metadata = map[string]string{
 		"password": "pass123",
 		"username": "user",
 	}
@@ -615,9 +614,9 @@ func TestRedactSensitiveData(t *testing.T) {
 	assert.NotContains(t, findings[0].Metadata, "token")
 	assert.Contains(t, findings[0].Metadata, "safe_field")
 
-	// Verify sensitive fields redacted in evidence
-	assert.Equal(t, "[REDACTED]", findings[0].Evidence[0].Data["password"])
-	assert.Equal(t, "user", findings[0].Evidence[0].Data["username"])
+	// Verify evidence stays as stored. No reader adds a second redaction.
+	assert.Equal(t, "pass123", findings[0].Evidence[0].Metadata["password"])
+	assert.Equal(t, "user", findings[0].Evidence[0].Metadata["username"])
 }
 
 // TestEmptyFindings verifies exporters handle empty input correctly
@@ -641,4 +640,25 @@ func TestEmptyFindings(t *testing.T) {
 			assert.NotEmpty(t, data, "should produce output even with no findings")
 		})
 	}
+}
+
+// TestBuildLocations_ReadsEvidenceMetadata verifies that SARIF locations come
+// from the metadata of an evidence item.
+func TestBuildLocations_ReadsEvidenceMetadata(t *testing.T) {
+	f := &finding.EnhancedFinding{Finding: agent.Finding{
+		Evidence: []*typespb.Evidence{
+			{Metadata: map[string]string{"file": "app/main.go", "line": "42", "function": "handler"}},
+			{Title: "no metadata"},
+		},
+	}}
+
+	locations := buildLocations(f)
+
+	require.Len(t, locations, 2)
+	require.NotNil(t, locations[0].PhysicalLocation)
+	assert.Equal(t, "app/main.go", locations[0].PhysicalLocation.ArtifactLocation.URI)
+	require.NotNil(t, locations[0].PhysicalLocation.Region)
+	assert.Equal(t, 42, locations[0].PhysicalLocation.Region.StartLine)
+	require.NotNil(t, locations[1].LogicalLocation)
+	assert.Equal(t, "handler", locations[1].LogicalLocation.Name)
 }

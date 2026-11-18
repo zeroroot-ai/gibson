@@ -2074,7 +2074,11 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 	// rejected whole and never truncated, and rejecting here — ahead of
 	// every write on this path — is what makes "a rejected emit creates no
 	// partial state" a property of the ordering rather than of cleanup.
-	if err := emitbounds.CheckObservation(finding); err != nil {
+	//
+	// The bounds apply to what the agent sent. Tier 1 evidence comes from the
+	// record of the daemon, so the check leaves it out. The store has its own
+	// size limit for each evidence item.
+	if err := emitbounds.CheckObservation(finding.WithoutRecordedEvidence()); err != nil {
 		h.logger.Warn("finding rejected by emit bounds",
 			"finding_id", finding.ID.String(),
 			"error", err)

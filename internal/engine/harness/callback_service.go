@@ -1989,6 +1989,18 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 	// Convert proto Finding to internal Finding
 	finding := protoFindingToFinding(req.Finding)
 
+	// Tier 1 evidence comes from the record of each tool call that the agent
+	// names. An ID that names no record of this mission and tenant fails the
+	// whole submit, before the daemon stores anything.
+	recorded, refusal, err := s.recordedFindingEvidence(ctx, harness.Mission().ID.String(), req.GetToolCallIds())
+	if err != nil {
+		return nil, err
+	}
+	if refusal != nil {
+		return &harnesspb.SubmitFindingResponse{Error: refusal}, nil
+	}
+	finding.Evidence = append(recorded, finding.Evidence...)
+
 	// Submit finding
 	if err := harness.SubmitFinding(ctx, finding); err != nil {
 		// An emit-bounds rejection is the caller's fault, not the daemon's,
@@ -2015,6 +2027,54 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 	}
 
 	return &harnesspb.SubmitFindingResponse{}, nil
+}
+
+// recordedFindingEvidence builds the tier 1 evidence of a finding from the
+// tool calls that the agent names. It returns a HarnessError when an ID names
+// no record of the mission of the caller in the tenant of the caller. It
+// returns a gRPC error when the request is malformed or the daemon cannot read
+// its record. An empty list of IDs gives no evidence and no error.
+func (s *HarnessCallbackService) recordedFindingEvidence(
+	ctx context.Context, missionID string, toolCallIDs []string,
+) ([]*typespb.Evidence, *harnesspb.HarnessError, error) {
+	ids := uniqueStrings(toolCallIDs)
+	if len(ids) == 0 {
+		return nil, nil, nil
+	}
+	if len(ids) > brain.MaxProofToolCallIDs {
+		return nil, nil, status.Errorf(codes.InvalidArgument,
+			"tool_call_ids names %d calls, over the limit of %d", len(ids), brain.MaxProofToolCallIDs)
+	}
+	if s.proofSettlement == nil {
+		return nil, nil, status.Error(codes.Unavailable,
+			"SubmitFinding: the record of tool calls is not wired on this daemon")
+	}
+	calls, missing, err := s.proofSettlement.RecordedToolCalls(ctx, missionID, ids)
+	if err != nil {
+		return nil, nil, status.Errorf(codes.Internal, "SubmitFinding: read recorded tool calls: %v", err)
+	}
+	if len(missing) > 0 {
+		return nil, &harnesspb.HarnessError{
+			Code: commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
+			Message: fmt.Sprintf(
+				"SubmitFinding: the daemon holds no record of tool call %q for this mission", missing[0]),
+		}, nil
+	}
+	return brain.RecordedEvidence(calls), nil, nil
+}
+
+// uniqueStrings returns the values in order, without a repeated value.
+func uniqueStrings(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
 }
 
 // ============================================================================
@@ -3014,29 +3074,17 @@ func protoEvidenceTypeToSDK(evidenceType typespb.EvidenceType) sdkfinding.Eviden
 	case typespb.EvidenceType_EVIDENCE_TYPE_LOG:
 		return sdkfinding.EvidenceLog
 	case typespb.EvidenceType_EVIDENCE_TYPE_CODE:
+		return sdkfinding.EvidenceCodeSnippet
+	case typespb.EvidenceType_EVIDENCE_TYPE_PAYLOAD:
 		return sdkfinding.EvidencePayload
+	case typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION:
+		return sdkfinding.EvidenceConversation
+	case typespb.EvidenceType_EVIDENCE_TYPE_NETWORK_TRACE:
+		return sdkfinding.EvidenceNetworkTrace
+	case typespb.EvidenceType_EVIDENCE_TYPE_OTHER:
+		return sdkfinding.EvidenceOther
 	default:
 		return sdkfinding.EvidenceLog
-	}
-}
-
-// protoEvidenceTypeToString converts a proto EvidenceType to a string.
-func protoEvidenceTypeToString(evidenceType typespb.EvidenceType) string {
-	switch evidenceType {
-	case typespb.EvidenceType_EVIDENCE_TYPE_REQUEST:
-		return "request"
-	case typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
-		return "response"
-	case typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
-		return "screenshot"
-	case typespb.EvidenceType_EVIDENCE_TYPE_LOG:
-		return "log"
-	case typespb.EvidenceType_EVIDENCE_TYPE_CODE:
-		return "code"
-	case typespb.EvidenceType_EVIDENCE_TYPE_OTHER:
-		return "other"
-	default:
-		return "other"
 	}
 }
 
@@ -3074,25 +3122,16 @@ func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 		}
 	}
 
-	// Convert Evidence
+	// Evidence that the agent typed is tier 2. The daemon sets the tier and
+	// the tool call ID itself. A value that the agent sent for either field is
+	// dropped, so an agent cannot claim a tool call that backs an item.
 	if len(pf.Evidence) > 0 {
-		finding.Evidence = make([]agent.Evidence, len(pf.Evidence))
+		finding.Evidence = make([]*typespb.Evidence, len(pf.Evidence))
 		for i, ev := range pf.Evidence {
-			// Convert proto EvidenceType enum to string
-			typeStr := protoEvidenceTypeToString(ev.Type)
-			finding.Evidence[i] = agent.Evidence{
-				Type:        typeStr,
-				Description: ev.Title,
-				Data: map[string]any{
-					"content": ev.Content,
-				},
-			}
-			// Add metadata to Data if present
-			if len(ev.Metadata) > 0 {
-				for k, v := range ev.Metadata {
-					finding.Evidence[i].Data[k] = v
-				}
-			}
+			typed := proto.Clone(ev).(*typespb.Evidence)
+			typed.Tier = typespb.EvidenceTier_EVIDENCE_TIER_TYPED
+			typed.ToolCallId = ""
+			finding.Evidence[i] = typed
 		}
 	}
 

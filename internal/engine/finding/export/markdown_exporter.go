@@ -268,18 +268,14 @@ func (m *MarkdownExporter) writeFinding(buf *bytes.Buffer, f *finding.EnhancedFi
 		buf.WriteString(fmt.Sprintf("#### Evidence (%d)\n\n", len(f.Evidence)))
 
 		for i, e := range f.Evidence {
-			buf.WriteString(fmt.Sprintf("**Evidence %d: %s**\n\n", i+1, e.Type))
-			buf.WriteString(e.Description)
+			buf.WriteString(fmt.Sprintf("**Evidence %d: %s (%s)**\n\n", i+1, e.GetType(), e.GetTier()))
+			buf.WriteString(e.GetTitle())
 			buf.WriteString("\n\n")
 
-			// Include evidence data if present
-			if e.Data != nil && len(e.Data) > 0 {
-				buf.WriteString("```json\n")
-				// Simple JSON representation (could use proper JSON marshaling)
-				for k, v := range e.Data {
-					buf.WriteString(fmt.Sprintf("  %q: %v\n", k, v))
-				}
-				buf.WriteString("```\n\n")
+			if e.GetContent() != "" {
+				buf.WriteString("```\n")
+				buf.WriteString(e.GetContent())
+				buf.WriteString("\n```\n\n")
 			}
 		}
 	}

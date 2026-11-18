@@ -516,8 +516,8 @@ const htmlTemplate = `<!DOCTYPE html>
                         <ul class="evidence-list">
                             {{range .Evidence}}
                             <li class="evidence-item">
-                                <div class="evidence-type">{{.Type}}</div>
-                                <div>{{.Description}}</div>
+                                <div class="evidence-type">{{.Type}} ({{.Tier}})</div>
+                                <div>{{.Title}}</div>
                             </li>
                             {{end}}
                         </ul>
