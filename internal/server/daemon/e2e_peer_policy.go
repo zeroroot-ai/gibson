@@ -58,7 +58,8 @@ var e2eMemberMethods = map[string]bool{
 // authority than the thing under test, a passing assertion says nothing. These
 // are the RPCs tests/e2e/tool_dispatch_test.go,
 // tests/e2e/sandboxed_agent_dispatch_test.go, tests/e2e/bank_test.go,
-// tests/e2e/model_gate_test.go and tests/e2e/secrets actually use. A suite that calls an RPC not listed here is denied at the
+// tests/e2e/model_gate_test.go, the three exit tests of the AAIF epics and
+// tests/e2e/secrets actually use. A suite that calls an RPC not listed here is denied at the
 // daemon with PermissionDenied naming the method, which is how the bank exit
 // test read on every run since it landed (gibson#13, run 35436962740).
 func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
@@ -140,6 +141,24 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.tenant.v1.ModelAccessService/ListAccess":         true,
 			"/gibson.tenant.v1.ModelAccessService/RevokeAccess":       true,
 			"/gibson.tenant.v1.ModelAccessService/GrantAccess":        true,
+			// The exit tests of the AAIF epics (tests/e2e/agent_skills_test.go,
+			// finding_evidence_test.go, aaif_alignment_test.go). The runner
+			// publishes, lists, reads, grants and deletes an Agent Skill as
+			// the tenant admin. It calls a tool and submits a finding as an
+			// outside component, resolves a model and an agent, reads and
+			// exports a finding, and reads the Timeline of a mission.
+			"/gibson.tenant.v1.AgentSkillService/PublishAgentSkill": true,
+			"/gibson.tenant.v1.AgentSkillService/ListAgentSkills":   true,
+			"/gibson.tenant.v1.AgentSkillService/GetAgentSkill":     true,
+			"/gibson.tenant.v1.AgentSkillService/GrantAgentSkill":   true,
+			"/gibson.tenant.v1.AgentSkillService/DeleteAgentSkill":  true,
+			"/gibson.component.v1.ComponentService/CallTool":        true,
+			"/gibson.component.v1.ComponentService/SubmitFinding":   true,
+			"/gibson.component.v1.ComponentService/ResolveModel":    true,
+			"/gibson.component.v1.ComponentService/ResolveAgent":    true,
+			"/gibson.tenant.v1.TenantService/GetFinding":            true,
+			"/gibson.tenant.v1.TenantService/ExportFindings":        true,
+			"/gibson.world.v1.WorldService/GetTimeline":             true,
 		},
 	}
 }

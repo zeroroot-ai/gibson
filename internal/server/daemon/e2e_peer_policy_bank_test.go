@@ -67,3 +67,28 @@ func TestE2EPeerPolicy_CoversThePluginRevocationSuite(t *testing.T) {
 		}
 	}
 }
+
+// The exit tests of the AAIF epics call these RPCs with the runner SVID
+// (tests/e2e/agent_skills_test.go, finding_evidence_test.go,
+// aaif_alignment_test.go, model_gate_test.go).
+func TestE2EPeerPolicy_CoversTheAAIFExitTests(t *testing.T) {
+	policy := e2ePeerMethodPolicies(testTD)[e2eRunnerSVID(testTD)]
+	for _, m := range []string{
+		"/gibson.tenant.v1.AgentSkillService/PublishAgentSkill",
+		"/gibson.tenant.v1.AgentSkillService/ListAgentSkills",
+		"/gibson.tenant.v1.AgentSkillService/GetAgentSkill",
+		"/gibson.tenant.v1.AgentSkillService/GrantAgentSkill",
+		"/gibson.tenant.v1.AgentSkillService/DeleteAgentSkill",
+		"/gibson.component.v1.ComponentService/CallTool",
+		"/gibson.component.v1.ComponentService/SubmitFinding",
+		"/gibson.component.v1.ComponentService/ResolveModel",
+		"/gibson.component.v1.ComponentService/ResolveAgent",
+		"/gibson.tenant.v1.TenantService/GetFinding",
+		"/gibson.tenant.v1.TenantService/ExportFindings",
+		"/gibson.world.v1.WorldService/GetTimeline",
+	} {
+		if !policy[m] {
+			t.Errorf("the runner policy does not allow %s, which an AAIF exit test calls", m)
+		}
+	}
+}
