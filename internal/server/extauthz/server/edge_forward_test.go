@@ -9,17 +9,19 @@ import (
 	"testing"
 	"time"
 
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/grpc/codes"
 
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/headers"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 )
 
 func edge(t *testing.T) context.Context { return peerContext(t, edgeSVID) }
 
-func TestEdgeForward_AGoodGrantPassesWithNoHeaderChange(t *testing.T) {
+func TestEdgeForward_AGoodGrantPassesAndSetsOnlyTheTwoIdentityHeaders(t *testing.T) {
 	t.Parallel()
 	srv, priv, mock := dcServer(t)
 	g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
@@ -30,8 +32,23 @@ func TestEdgeForward_AGoodGrantPassesWithNoHeaderChange(t *testing.T) {
 		t.Fatalf("status = %v, want OK", got)
 	}
 	ok := resp.GetOkResponse()
-	if len(ok.GetHeaders()) != 0 || len(ok.GetHeadersToRemove()) != 0 {
-		t.Errorf("the class changed headers: set %v, remove %v", ok.GetHeaders(), ok.GetHeadersToRemove())
+	if len(ok.GetHeadersToRemove()) != 0 {
+		t.Errorf("the class removed headers: %v", ok.GetHeadersToRemove())
+	}
+	set := map[string]string{}
+	for _, h := range ok.GetHeaders() {
+		if h.GetAppendAction() != corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD {
+			t.Errorf("header %s is not set with overwrite", h.GetHeader().GetKey())
+		}
+		set[h.GetHeader().GetKey()] = h.GetHeader().GetValue()
+	}
+	if len(set) != 2 || set[headers.HeaderTenant] != modelTenant || set[headers.HeaderSubject] == "" {
+		t.Errorf("want exactly the identity tenant and subject from the grant, got %v", set)
+	}
+	for _, trusted := range []string{modelcall.HeaderTenant, modelcall.HeaderSubject, modelcall.HeaderMission, modelcall.HeaderTask} {
+		if _, bad := set[trusted]; bad {
+			t.Errorf("the class set the trusted header %s", trusted)
+		}
 	}
 	if len(mock.questions()) != 0 {
 		t.Errorf("FGA was asked %d times: the class does nothing but the grant check", len(mock.questions()))
@@ -174,5 +191,24 @@ func TestEdgeForward_TheGatewayIdentityDoesNotUseTheClass(t *testing.T) {
 	resp, err := srv.Check(gw(t), modelRequest(modelcall.EdgeModelPrefix+"v1/responses", modelTenant, modelProvider, "", g, nil))
 	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
 		t.Fatalf("status = %v, want PermissionDenied", got)
+	}
+}
+
+// The gateway does not read the identity headers of the Edge rate limit. A value
+// that a caller forges there changes no decision and is not copied to the
+// trusted headers.
+func TestEdgeForward_TheGatewayIgnoresTheIdentityHeaders(t *testing.T) {
+	t.Parallel()
+	srv, priv, _ := dcServer(t)
+	g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
+	forged := map[string]string{headers.HeaderTenant: "other-tenant", headers.HeaderSubject: "forged-admin"}
+	resp, err := srv.Check(gw(t), modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, forged))
+	if got := statusOf(t, resp, err); got != codes.OK {
+		t.Fatalf("status = %v, want OK", got)
+	}
+	for _, h := range resp.GetOkResponse().GetHeaders() {
+		if v := h.GetHeader().GetValue(); v == "other-tenant" || v == "forged-admin" {
+			t.Errorf("the forged identity value reached header %s", h.GetHeader().GetKey())
+		}
 	}
 }

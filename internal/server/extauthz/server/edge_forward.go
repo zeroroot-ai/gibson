@@ -6,11 +6,13 @@ package server
 import (
 	"context"
 
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/headers"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 )
 
@@ -22,7 +24,8 @@ import (
 // prefix. For a call on these prefixes, ext-authz does ONE thing for the Edge
 // identity: it verifies the Capability Grant (the signature, the expiry, the
 // key descriptor) and checks that the tenant of the grant is the tenant of the
-// header x-gibson-route-tenant. It sets no trusted header. The full
+// header x-gibson-route-tenant. It sets no trusted header. It sets the two identity
+// headers that key the Edge rate limit, from the verified grant. The full
 // authorization (FGA, the mission gate, the trusted headers) stays at the
 // gateway, where ext-authz runs again with the gateway identity.
 //
@@ -42,12 +45,12 @@ const (
 )
 
 // edgeForwardResponse decides a call of the Edge identity on a gateway forward
-// prefix. It returns an allow with no header change, or a refusal.
+// prefix. It returns an allow that sets the two identity headers, or a refusal.
 func (s *EnvoyAuthzServer) edgeForwardResponse(ctx context.Context, req *authv3.CheckRequest) *authv3.CheckResponse {
 	path := extractMethod(req)
-	headers := req.GetAttributes().GetRequest().GetHttp().GetHeaders()
+	reqHeaders := req.GetAttributes().GetRequest().GetHttp().GetHeaders()
 
-	token := extractCapabilityGrant(headers)
+	token := extractCapabilityGrant(reqHeaders)
 	switch {
 	case token == "":
 		return s.forwardDeny(ctx, forwardDenyNoGrant, path, denyUnauthenticated())
@@ -62,7 +65,7 @@ func (s *EnvoyAuthzServer) edgeForwardResponse(ctx context.Context, req *authv3.
 	if deny != nil {
 		return s.forwardDeny(ctx, forwardDenyInvalid, path, deny)
 	}
-	tenant, reason := modelcall.ClaimedRouteTenant(headers)
+	tenant, reason := modelcall.ClaimedRouteTenant(reqHeaders)
 	if reason != "" {
 		return s.forwardDeny(ctx, reason, path, denyForbidden())
 	}
@@ -72,9 +75,26 @@ func (s *EnvoyAuthzServer) edgeForwardResponse(ctx context.Context, req *authv3.
 		return s.forwardDeny(ctx, forwardDenyTenant, path, denyForbidden())
 	}
 	extauthzEdgeForwardAllowedTotal.Inc()
+	// The Edge rate limit of these routes is keyed by the two identity headers
+	// of the other Edge routes. The class sets exactly these two from the
+	// verified grant, with overwrite, so a caller value never reaches the key.
+	// They are not the trusted headers of the gateway call. The gateway never
+	// reads them.
 	return &authv3.CheckResponse{
-		Status:       &rpcstatus.Status{Code: int32(codes.OK)},
-		HttpResponse: &authv3.CheckResponse_OkResponse{OkResponse: &authv3.OkHttpResponse{}},
+		Status: &rpcstatus.Status{Code: int32(codes.OK)},
+		HttpResponse: &authv3.CheckResponse_OkResponse{OkResponse: &authv3.OkHttpResponse{
+			Headers: []*corev3.HeaderValueOption{
+				overwriteHeader(headers.HeaderTenant, claims.Tenant.String()),
+				overwriteHeader(headers.HeaderSubject, claims.Subject),
+			},
+		}},
+	}
+}
+
+func overwriteHeader(name, value string) *corev3.HeaderValueOption {
+	return &corev3.HeaderValueOption{
+		Header:       &corev3.HeaderValue{Key: name, Value: value},
+		AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
 	}
 }
 
