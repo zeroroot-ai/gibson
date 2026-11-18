@@ -175,23 +175,39 @@ func TestRegisterOutsideAgent_RefusalNamesNoLLMSetting(t *testing.T) {
 	assert.Contains(t, err.Error(), outsideAgentAddressHint)
 }
 
-func TestOutsideAgentGrants(t *testing.T) {
+func registeredOutside(t *testing.T) *outsideFixture {
+	t.Helper()
 	f := newOutsideFixture(t)
 	_, err := f.svc.RegisterOutsideAgent(f.ctx, &tenantv1.RegisterOutsideAgentRequest{Name: "scout", A2AUrl: outsideURL})
 	require.NoError(t, err)
-	obj := "outside_agent:acme/scout"
+	return f
+}
+
+const scoutObject = "outside_agent:acme/scout"
+
+func TestGrantOutsideAgent(t *testing.T) {
+	f := registeredOutside(t)
+	f.fga.allow("tenant:acme", "belongs_to", "mission:m1")
+	_, err := f.svc.GrantOutsideAgent(f.ctx, &tenantv1.GrantOutsideAgentRequest{Name: "scout", MissionId: "m1"})
+	require.NoError(t, err)
+	assert.Contains(t, f.fga.writtenTuples(),
+		authz.Tuple{User: "mission:m1", Relation: "granted_mission", Object: scoutObject})
+}
+
+func TestGrantOutsideAgent_Refusals(t *testing.T) {
+	f := registeredOutside(t)
+	ownerOnly := len(f.fga.writtenTuples())
+
+	_, err := f.svc.GrantOutsideAgent(context.Background(),
+		&tenantv1.GrantOutsideAgentRequest{Name: "scout", MissionId: "m1"})
+	assert.Equal(t, codes.PermissionDenied, code(err), "no tenant")
 
 	// A mission of another tenant is refused.
 	_, err = f.svc.GrantOutsideAgent(f.ctx, &tenantv1.GrantOutsideAgentRequest{Name: "scout", MissionId: "m-other"})
 	assert.Equal(t, codes.NotFound, code(err))
-	assert.Empty(t, f.fga.writtenTuples()[1:], "no grant tuple for a mission of another tenant")
-
-	f.fga.allow("tenant:acme", "belongs_to", "mission:m1")
-	_, err = f.svc.GrantOutsideAgent(f.ctx, &tenantv1.GrantOutsideAgentRequest{Name: "scout", MissionId: "m1"})
-	require.NoError(t, err)
-	assert.Contains(t, f.fga.writtenTuples(), authz.Tuple{User: "mission:m1", Relation: "granted_mission", Object: obj})
 
 	// A grant on an unknown name is refused.
+	f.fga.allow("tenant:acme", "belongs_to", "mission:m1")
 	_, err = f.svc.GrantOutsideAgent(f.ctx, &tenantv1.GrantOutsideAgentRequest{Name: "ghost", MissionId: "m1"})
 	assert.Equal(t, codes.NotFound, code(err))
 
@@ -200,15 +216,42 @@ func TestOutsideAgentGrants(t *testing.T) {
 		_, err = f.svc.GrantOutsideAgent(f.ctx, &tenantv1.GrantOutsideAgentRequest{Name: "scout", MissionId: bad})
 		assert.Equal(t, codes.InvalidArgument, code(err), bad)
 	}
+	assert.Len(t, f.fga.writtenTuples(), ownerOnly, "no grant tuple for a refused call")
+}
 
-	f.fga.users["outside_agent|"+obj+"|granted_mission"] = []string{"mission:m1"}
+func TestRevokeOutsideAgent(t *testing.T) {
+	f := registeredOutside(t)
+	_, err := f.svc.RevokeOutsideAgent(f.ctx, &tenantv1.RevokeOutsideAgentRequest{Name: "scout", MissionId: "m1"})
+	require.NoError(t, err)
+	assert.Contains(t, f.fga.deleted, authz.Tuple{User: "mission:m1", Relation: "granted_mission", Object: scoutObject})
+}
+
+func TestRevokeOutsideAgent_Refusals(t *testing.T) {
+	f := registeredOutside(t)
+	_, err := f.svc.RevokeOutsideAgent(context.Background(),
+		&tenantv1.RevokeOutsideAgentRequest{Name: "scout", MissionId: "m1"})
+	assert.Equal(t, codes.PermissionDenied, code(err), "no tenant")
+	_, err = f.svc.RevokeOutsideAgent(f.ctx, &tenantv1.RevokeOutsideAgentRequest{Name: "scout", MissionId: "mission:m1"})
+	assert.Equal(t, codes.InvalidArgument, code(err), "a mission id with a prefix")
+	_, err = f.svc.RevokeOutsideAgent(f.ctx, &tenantv1.RevokeOutsideAgentRequest{Name: "Bad_Name", MissionId: "m1"})
+	assert.Equal(t, codes.InvalidArgument, code(err), "a bad name")
+	assert.Empty(t, f.fga.deleted)
+}
+
+func TestListOutsideAgentGrants(t *testing.T) {
+	f := registeredOutside(t)
+	f.fga.users["outside_agent|"+scoutObject+"|granted_mission"] = []string{"mission:m1"}
 	got, err := f.svc.ListOutsideAgentGrants(f.ctx, &tenantv1.ListOutsideAgentGrantsRequest{Name: "scout"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"m1"}, got.GetMissionIds())
+}
 
-	_, err = f.svc.RevokeOutsideAgent(f.ctx, &tenantv1.RevokeOutsideAgentRequest{Name: "scout", MissionId: "m1"})
-	require.NoError(t, err)
-	assert.Contains(t, f.fga.deleted, authz.Tuple{User: "mission:m1", Relation: "granted_mission", Object: obj})
+func TestListOutsideAgentGrants_Refusals(t *testing.T) {
+	f := registeredOutside(t)
+	_, err := f.svc.ListOutsideAgentGrants(context.Background(), &tenantv1.ListOutsideAgentGrantsRequest{Name: "scout"})
+	assert.Equal(t, codes.PermissionDenied, code(err), "no tenant")
+	_, err = f.svc.ListOutsideAgentGrants(f.ctx, &tenantv1.ListOutsideAgentGrantsRequest{Name: "ghost"})
+	assert.Equal(t, codes.NotFound, code(err))
 }
 
 func TestDeleteOutsideAgent_RemovesTheRecordAndEachTuple(t *testing.T) {
@@ -231,19 +274,31 @@ func TestDeleteOutsideAgent_RemovesTheRecordAndEachTuple(t *testing.T) {
 	assert.Equal(t, codes.NotFound, code(err))
 }
 
-func TestOutsideAgentListAndGet(t *testing.T) {
-	f := newOutsideFixture(t)
-	_, err := f.svc.RegisterOutsideAgent(f.ctx, &tenantv1.RegisterOutsideAgentRequest{Name: "scout", A2AUrl: outsideURL})
-	require.NoError(t, err)
+func TestListOutsideAgents(t *testing.T) {
+	f := registeredOutside(t)
 	l, err := f.svc.ListOutsideAgents(f.ctx, &tenantv1.ListOutsideAgentsRequest{})
 	require.NoError(t, err)
 	assert.Len(t, l.GetEntries(), 1)
+}
+
+func TestListOutsideAgents_Refusals(t *testing.T) {
+	f := newOutsideFixture(t)
+	_, err := f.svc.ListOutsideAgents(context.Background(), &tenantv1.ListOutsideAgentsRequest{})
+	assert.Equal(t, codes.PermissionDenied, code(err))
+}
+
+func TestGetOutsideAgent(t *testing.T) {
+	f := registeredOutside(t)
 	g, err := f.svc.GetOutsideAgent(f.ctx, &tenantv1.GetOutsideAgentRequest{Name: "scout"})
 	require.NoError(t, err)
 	assert.Equal(t, "scout", g.GetEntry().GetName())
-	_, err = f.svc.GetOutsideAgent(f.ctx, &tenantv1.GetOutsideAgentRequest{Name: "ghost"})
+}
+
+func TestGetOutsideAgent_Refusals(t *testing.T) {
+	f := registeredOutside(t)
+	_, err := f.svc.GetOutsideAgent(f.ctx, &tenantv1.GetOutsideAgentRequest{Name: "ghost"})
 	assert.Equal(t, codes.NotFound, code(err))
-	_, err = f.svc.ListOutsideAgents(context.Background(), &tenantv1.ListOutsideAgentsRequest{})
+	_, err = f.svc.GetOutsideAgent(context.Background(), &tenantv1.GetOutsideAgentRequest{Name: "scout"})
 	assert.Equal(t, codes.PermissionDenied, code(err))
 }
 
