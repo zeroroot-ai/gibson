@@ -14,8 +14,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -198,22 +200,76 @@ func TestCsvEscape(t *testing.T) {
 	}
 }
 
-// TestRecordToRow verifies FindingRecord → findingExportRow conversion.
-func TestRecordToRow(t *testing.T) {
+// TestFindingToRow verifies the conversion of a stored finding to an export
+// row, and that the evidence has its tier only when the export asks for it.
+func TestFindingToRow(t *testing.T) {
 	t.Parallel()
-	r := graph.FindingRecord{
-		ID:         "f99",
-		Name:       "Test Finding",
-		Severity:   "high",
-		MissionID:  "m1",
-		Properties: map[string]string{"cve": "CVE-1234"},
+	f := finding.EnhancedFinding{
+		Finding: agent.Finding{
+			ID: "5b4b8e9e-8e8e-4c8e-9e8e-8e8e8e8e8e8e", Title: "Test Finding", Severity: agent.SeverityHigh,
+			Metadata: map[string]any{"cve": "CVE-1234"},
+			Evidence: []*typespb.Evidence{
+				{Title: "t", Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Content: "recorded",
+					Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, ToolCallId: "call-1"},
+				{Title: "u", Type: typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION, Content: "typed",
+					Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED},
+			},
+		},
+		MissionID: "6c5c9f0f-9f9f-4d9f-8f9f-9f9f9f9f9f9f",
 	}
-	row := recordToRow(r)
-	if row.ID != "f99" {
-		t.Errorf("ID = %q, want f99", row.ID)
+
+	row := findingToRow(f, false)
+	if row.ID != f.ID.String() || row.CVE != "CVE-1234" || row.Severity != "high" || row.MissionID != f.MissionID.String() {
+		t.Errorf("row = %+v", row)
 	}
-	if row.CVE != "CVE-1234" {
-		t.Errorf("CVE = %q, want CVE-1234", row.CVE)
+	if row.Evidence != nil {
+		t.Errorf("evidence is in the row of an export that did not ask for it: %+v", row.Evidence)
+	}
+
+	row = findingToRow(f, true)
+	if len(row.Evidence) != 2 {
+		t.Fatalf("want 2 evidence items, got %d", len(row.Evidence))
+	}
+	if row.Evidence[0].Tier != 1 || row.Evidence[0].ToolCallID != "call-1" || row.Evidence[0].Content != "recorded" {
+		t.Errorf("item 0 = %+v", row.Evidence[0])
+	}
+	if row.Evidence[1].Tier != 2 || row.Evidence[1].Type != "conversation" {
+		t.Errorf("item 1 = %+v", row.Evidence[1])
+	}
+}
+
+// TestExportFindings_JSONAndSARIFHoldTheTier proves that the JSON and SARIF
+// exports show the tier of each evidence item, and that the CSV has no
+// evidence column.
+func TestExportFindings_JSONAndSARIFHoldTheTier(t *testing.T) {
+	t.Parallel()
+	rows := []findingExportRow{{
+		ID: "f1", Title: "x", Severity: "high",
+		Evidence: []exportEvidence{{Type: "log", Content: "c", Tier: 1, ToolCallID: "call-1"}},
+	}}
+
+	data, err := serializeJSON(rows, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"tier":1`) || !strings.Contains(string(data), `"toolCallId":"call-1"`) {
+		t.Errorf("json export has no tier: %s", data)
+	}
+
+	data, err = serializeSARIF(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"tier": 1`) {
+		t.Errorf("sarif export has no tier: %s", data)
+	}
+
+	data, err = serializeCSV(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "call-1") {
+		t.Errorf("csv export holds evidence: %s", data)
 	}
 }
 

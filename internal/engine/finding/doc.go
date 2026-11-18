@@ -27,6 +27,6 @@
 //
 // # Export
 //
-// The export sub-package renders findings as JSON, SARIF 2.1.0, CSV, HTML and
-// Markdown.
+// The export of findings is in internal/server/daemon/api/export_findings.go. It
+// reads the findings and their evidence from pgstore.
 package finding
