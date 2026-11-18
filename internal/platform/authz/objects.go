@@ -129,6 +129,14 @@ func ProviderObject(tenant, name string) (string, error) {
 	return modelAccessObject("provider", tenant, name)
 }
 
+// AgentSkillObject returns the FGA object of one Agent Skill of one tenant:
+// "agent_skill:<tenant>/<name>". The name follows the Agent Skills format, so
+// it never holds a separator. The tenant segment MUST come from the
+// authenticated context or from the mission, never from a request.
+func AgentSkillObject(tenant, name string) (string, error) {
+	return modelAccessObject("agent_skill", tenant, name)
+}
+
 // ModelObject is the model counterpart of ProviderObject.
 func ModelObject(tenant, name string) (string, error) {
 	return modelAccessObject("model", tenant, name)
