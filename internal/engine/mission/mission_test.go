@@ -29,7 +29,7 @@ func TestMissionStatus_String(t *testing.T) {
 		{"paused", MissionStatusPaused, "paused"},
 		{"completed", MissionStatusCompleted, "completed"},
 		{"failed", MissionStatusFailed, "failed"},
-		{"cancelled", MissionStatusCancelled, "cancelled"},
+		{"canceled", MissionStatusCanceled, "canceled"},
 	}
 
 	for _, tt := range tests {
@@ -51,7 +51,7 @@ func TestMissionStatus_IsTerminal(t *testing.T) {
 		{"paused not terminal", MissionStatusPaused, false},
 		{"completed is terminal", MissionStatusCompleted, true},
 		{"failed is terminal", MissionStatusFailed, true},
-		{"cancelled is terminal", MissionStatusCancelled, true},
+		{"cancelled is terminal", MissionStatusCanceled, true},
 	}
 
 	for _, tt := range tests {
@@ -71,7 +71,7 @@ func TestMissionStatus_CanTransitionTo(t *testing.T) {
 	}{
 		// Pending transitions
 		{"pending to running", MissionStatusSubmitted, MissionStatusWorking, true},
-		{"pending to cancelled", MissionStatusSubmitted, MissionStatusCancelled, true},
+		{"pending to cancelled", MissionStatusSubmitted, MissionStatusCanceled, true},
 		{"pending to completed", MissionStatusSubmitted, MissionStatusCompleted, false},
 		{"pending to paused", MissionStatusSubmitted, MissionStatusPaused, false},
 		{"pending to failed", MissionStatusSubmitted, MissionStatusFailed, false},
@@ -80,20 +80,20 @@ func TestMissionStatus_CanTransitionTo(t *testing.T) {
 		{"running to paused", MissionStatusWorking, MissionStatusPaused, true},
 		{"running to completed", MissionStatusWorking, MissionStatusCompleted, true},
 		{"running to failed", MissionStatusWorking, MissionStatusFailed, true},
-		{"running to cancelled", MissionStatusWorking, MissionStatusCancelled, true},
+		{"running to cancelled", MissionStatusWorking, MissionStatusCanceled, true},
 		{"running to pending", MissionStatusWorking, MissionStatusSubmitted, false},
 
 		// Paused transitions
 		{"paused to running", MissionStatusPaused, MissionStatusWorking, true},
 		{"paused to failed", MissionStatusPaused, MissionStatusFailed, true},
-		{"paused to cancelled", MissionStatusPaused, MissionStatusCancelled, true},
+		{"paused to cancelled", MissionStatusPaused, MissionStatusCanceled, true},
 		{"paused to completed", MissionStatusPaused, MissionStatusCompleted, false},
 		{"paused to pending", MissionStatusPaused, MissionStatusSubmitted, false},
 
 		// Terminal states cannot transition
 		{"completed to any", MissionStatusCompleted, MissionStatusWorking, false},
 		{"failed to any", MissionStatusFailed, MissionStatusWorking, false},
-		{"cancelled to any", MissionStatusCancelled, MissionStatusWorking, false},
+		{"cancelled to any", MissionStatusCanceled, MissionStatusWorking, false},
 	}
 
 	for _, tt := range tests {

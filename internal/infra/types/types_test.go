@@ -116,7 +116,7 @@ func TestStatusEnumIntegration(t *testing.T) {
 				MissionStatusWorking,
 				MissionStatusCompleted,
 				MissionStatusFailed,
-				MissionStatusCancelled,
+				MissionStatusCanceled,
 			},
 			invalidVal: "bad_mission_status",
 		},

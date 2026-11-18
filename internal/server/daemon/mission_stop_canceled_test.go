@@ -40,8 +40,8 @@ func TestStop_EndsTheMissionAsCanceled(t *testing.T) {
 
 	// The awaiter of the run reports the cancel and not a failure.
 	status, _ := mm.awaitBrainMission(ctx, eng, id, runIDOf(run))
-	if status != mission.MissionStatusCancelled {
-		t.Errorf("awaited status = %q, want %q", status, mission.MissionStatusCancelled)
+	if status != mission.MissionStatusCanceled {
+		t.Errorf("awaited status = %q, want %q", status, mission.MissionStatusCanceled)
 	}
 	if !mm.runEnded(tenant, run) {
 		t.Error("a canceled run must count as ended")

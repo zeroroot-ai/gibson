@@ -3471,7 +3471,7 @@ func missionStatusToProto(status MissionStatus) harnesspb.MissionStatus {
 		return harnesspb.MissionStatus_MISSION_STATUS_COMPLETED
 	case MissionStatusFailed:
 		return harnesspb.MissionStatus_MISSION_STATUS_FAILED
-	case MissionStatusCancelled:
+	case MissionStatusCanceled:
 		return harnesspb.MissionStatus_MISSION_STATUS_CANCELLED
 	default:
 		return harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED
@@ -3492,7 +3492,7 @@ func missionStatusFromProto(status harnesspb.MissionStatus) MissionStatus {
 	case harnesspb.MissionStatus_MISSION_STATUS_FAILED:
 		return MissionStatusFailed
 	case harnesspb.MissionStatus_MISSION_STATUS_CANCELLED:
-		return MissionStatusCancelled
+		return MissionStatusCanceled
 	default:
 		return ""
 	}

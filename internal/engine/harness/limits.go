@@ -159,8 +159,8 @@ const (
 	MissionStatusCompleted MissionStatus = "completed"
 	// MissionStatusFailed indicates the mission finished with an error.
 	MissionStatusFailed MissionStatus = "failed"
-	// MissionStatusCancelled indicates the mission was cancelled before completion.
-	MissionStatusCancelled MissionStatus = "cancelled"
+	// MissionStatusCanceled indicates the mission was canceled before completion.
+	MissionStatusCanceled MissionStatus = "canceled"
 )
 
 // MissionRecord represents minimal mission information needed for spawn limits.

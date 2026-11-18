@@ -216,13 +216,13 @@ func (m *mockMissionOperator) Cancel(ctx context.Context, missionID types.ID) er
 
 	// Update mission status to cancelled
 	if info, ok := m.missions[missionID.String()]; ok {
-		info.Status = "cancelled"
+		info.Status = "canceled"
 	}
 
 	// Update records
 	for _, r := range m.records {
 		if r.ID == missionID {
-			r.Status = "cancelled"
+			r.Status = "canceled"
 			break
 		}
 	}

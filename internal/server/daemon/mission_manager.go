@@ -1650,7 +1650,7 @@ func (m *missionManager) awaitBrainMission(
 	for {
 		select {
 		case <-ctx.Done():
-			return mission.MissionStatusCancelled, "mission cancelled"
+			return mission.MissionStatusCanceled, "mission canceled"
 		case <-ticker.C:
 			for _, ms := range eng.Missions() {
 				if ms.ID != missionID || ms.RunID != runID {
@@ -1666,7 +1666,7 @@ func (m *missionManager) awaitBrainMission(
 					}
 					return mission.MissionStatusFailed, reason
 				case brain.MissionCanceled:
-					return mission.MissionStatusCancelled, "mission canceled"
+					return mission.MissionStatusCanceled, "mission canceled"
 				}
 			}
 		}

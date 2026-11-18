@@ -109,7 +109,7 @@ const (
 	MissionStatusWorking   MissionStatus = "working"
 	MissionStatusCompleted MissionStatus = "completed"
 	MissionStatusFailed    MissionStatus = "failed"
-	MissionStatusCancelled MissionStatus = "cancelled"
+	MissionStatusCanceled  MissionStatus = "canceled"
 )
 
 // String returns the string representation of MissionStatus
@@ -121,7 +121,7 @@ func (s MissionStatus) String() string {
 func (s MissionStatus) IsValid() bool {
 	switch s {
 	case MissionStatusSubmitted, MissionStatusWorking, MissionStatusCompleted,
-		MissionStatusFailed, MissionStatusCancelled:
+		MissionStatusFailed, MissionStatusCanceled:
 		return true
 	default:
 		return false

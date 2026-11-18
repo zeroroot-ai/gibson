@@ -200,7 +200,7 @@ func (s *ConnBoundRunStore) UpdateStatus(ctx context.Context, id types.ID, statu
 		if run.StartedAt == nil {
 			pipe.Do(ctx, "JSON.SET", connRunKey(id), "$.started_at", string(nowJSON))
 		}
-	case MissionRunStatusCompleted, MissionRunStatusFailed, MissionRunStatusCancelled:
+	case MissionRunStatusCompleted, MissionRunStatusFailed, MissionRunStatusCanceled:
 		if run.CompletedAt == nil {
 			pipe.Do(ctx, "JSON.SET", connRunKey(id), "$.completed_at", string(nowJSON))
 		}

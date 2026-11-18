@@ -130,8 +130,8 @@ const (
 	// MissionStatusFailed indicates the mission execution has failed.
 	MissionStatusFailed MissionStatus = "failed"
 
-	// MissionStatusCancelled indicates the mission was cancelled during execution.
-	MissionStatusCancelled MissionStatus = "cancelled"
+	// MissionStatusCanceled indicates the mission was canceled during execution.
+	MissionStatusCanceled MissionStatus = "canceled"
 )
 
 // Memory continuity modes define how agent memory is shared across mission runs.
@@ -158,7 +158,7 @@ func (s MissionStatus) String() string {
 // (completed, failed, or cancelled). Terminal states cannot transition to other states.
 func (s MissionStatus) IsTerminal() bool {
 	switch s {
-	case MissionStatusCompleted, MissionStatusFailed, MissionStatusCancelled:
+	case MissionStatusCompleted, MissionStatusFailed, MissionStatusCanceled:
 		return true
 	default:
 		return false
@@ -176,16 +176,16 @@ func (s MissionStatus) CanTransitionTo(target MissionStatus) bool {
 	// Valid transitions based on mission lifecycle
 	switch s {
 	case MissionStatusSubmitted:
-		return target == MissionStatusWorking || target == MissionStatusCancelled
+		return target == MissionStatusWorking || target == MissionStatusCanceled
 	case MissionStatusWorking:
 		return target == MissionStatusPaused ||
 			target == MissionStatusCompleted ||
 			target == MissionStatusFailed ||
-			target == MissionStatusCancelled
+			target == MissionStatusCanceled
 	case MissionStatusPaused:
 		return target == MissionStatusWorking ||
 			target == MissionStatusFailed ||
-			target == MissionStatusCancelled
+			target == MissionStatusCanceled
 	default:
 		return false
 	}

@@ -281,7 +281,7 @@ func (a *missionHarnessAdapter) Cancel(ctx context.Context, missionID types.ID) 
 			return status.Errorf(codes.NotFound, "mission %s not found", missionID)
 		}
 		if !m.Status.IsTerminal() {
-			m.Status = mission.MissionStatusCancelled
+			m.Status = mission.MissionStatusCanceled
 			_ = store.Update(ctx, m)
 		}
 		return nil
@@ -300,7 +300,7 @@ func (a *missionHarnessAdapter) Cancel(ctx context.Context, missionID types.ID) 
 			return status.Errorf(codes.NotFound, "mission %s not found", missionID)
 		}
 		if !m.Status.IsTerminal() {
-			m.Status = mission.MissionStatusCancelled
+			m.Status = mission.MissionStatusCanceled
 			_ = store.Update(ctx, m)
 		}
 	}

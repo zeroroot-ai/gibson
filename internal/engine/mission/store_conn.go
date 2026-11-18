@@ -260,7 +260,7 @@ func (s *ConnBoundMissionStore) Delete(ctx context.Context, id types.ID) error {
 		return err
 	}
 	if !mission.Status.IsTerminal() {
-		return NewInvalidStateError(mission.Status, MissionStatusCancelled)
+		return NewInvalidStateError(mission.Status, MissionStatusCanceled)
 	}
 
 	pipe := s.rdb.Pipeline()
