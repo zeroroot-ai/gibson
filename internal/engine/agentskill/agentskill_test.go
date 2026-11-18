@@ -235,3 +235,24 @@ func TestPackage_RefusesAnInvalidFolder(t *testing.T) {
 		t.Errorf("Package of no files: error = %v, want ErrInvalidFolder", err)
 	}
 }
+
+// TestPackage_GoldenDigest pins the digest of one fixed folder. The adk CLI
+// pins the same digest. If this digest changes, change both repos together.
+func TestPackage_GoldenDigest(t *testing.T) {
+	skill := "---\nname: web-recon\ndescription: Map a web target before a scan.\n" +
+		"license: Apache-2.0\ncompatibility: Needs httpx.\nmetadata:\n  author: acme\n" +
+		"allowed-tools: native:httpx native:nmap\n---\n# Steps\nRun httpx first.\n"
+	files := []agentskill.File{
+		{Path: "scripts/run.sh", Content: []byte("#!/bin/sh\necho recon\n")},
+		{Path: "SKILL.md", Content: []byte(skill)},
+		{Path: "references/guide.md", Content: []byte("# Guide\nUse the flags in the order shown.\n")},
+	}
+	a, err := agentskill.Package("web-recon", files)
+	if err != nil {
+		t.Fatalf("package the golden folder: %v", err)
+	}
+	const want = "sha256:d585fe5073f5a1078419e2ab03f1ee00ca8e9256063459a47ee205d054a61e97"
+	if a.Digest.String() != want {
+		t.Fatalf("digest = %s, want %s", a.Digest, want)
+	}
+}
