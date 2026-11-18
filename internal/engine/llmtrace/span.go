@@ -191,7 +191,7 @@ func (o Observation) Events(recordedAt time.Time) []brain.Event {
 		Cost:               cost,
 	}}
 	if o.Mission != "" {
-		events = append(events, brain.TokenUsed{MissionID: o.Mission, Tokens: o.InputTokens + o.OutputTokens})
+		events = append(events, brain.TokenUsed{MissionID: o.Mission, Tokens: o.InputTokens + o.OutputTokens, CallID: o.CallID})
 	}
 	return events
 }

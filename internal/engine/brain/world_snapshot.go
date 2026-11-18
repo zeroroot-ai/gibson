@@ -13,6 +13,11 @@ import (
 // It captures all entity stores as stable snapshot slices plus the
 // monotonic ID counters needed to reproduce replay-deterministic IDs.
 type worldSnapshotData struct {
+	// CountedTokenCalls holds, for each mission that still runs, the IDs of the
+	// calls that the budget counted. Without it, a call delivered again after a
+	// restore would count a second time.
+	CountedTokenCalls map[string][]string `json:"counted_token_calls,omitempty"`
+
 	Hosts        []HostSnapshot        `json:"hosts"`
 	Missions     []MissionSnapshot     `json:"missions"`
 	Work         []WorkSnapshot        `json:"work"`
@@ -100,6 +105,7 @@ type worldSnapshotData struct {
 // atSeq is the Timeline sequence ID of the last event folded into the snapshot.
 func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 	data := worldSnapshotData{
+		CountedTokenCalls:  w.countedTokenCallsSnapshot(),
 		Hosts:              w.Snapshot(),
 		Missions:           w.MissionSnapshot(),
 		Work:               w.WorkSnapshot(),
@@ -199,6 +205,11 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			CreatedBy:   m.CreatedBy,
 		}
 		Reduce(w, startEv)
+		// The spend of the run is part of the folded state. A replay of the
+		// token events is not available here, so restore the total.
+		if m.TokensUsed > 0 {
+			Reduce(w, TokenUsed{MissionID: m.ID, Tokens: m.TokensUsed})
+		}
 		switch m.Status {
 		case MissionPaused:
 			Reduce(w, MissionPauseRequested{ID: m.ID})
@@ -209,6 +220,15 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		case MissionCanceled:
 			Reduce(w, MissionDone{ID: m.ID, Reason: m.Reason, Outcome: MissionCanceled})
 		}
+	}
+
+	// Restore the counted call IDs. Each set is dropped when its mission ends.
+	for id, calls := range data.CountedTokenCalls {
+		set := make(map[string]struct{}, len(calls))
+		for _, c := range calls {
+			set[c] = struct{}{}
+		}
+		w.countedTokenCalls[id] = set
 	}
 
 	// Replay work items. WorkDispatched creates them as running with Attempts=1.

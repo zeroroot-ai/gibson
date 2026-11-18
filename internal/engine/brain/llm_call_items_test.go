@@ -94,3 +94,53 @@ func TestLlmCallObserved_OldShapeDecodes(t *testing.T) {
 		t.Errorf("event = %+v", got)
 	}
 }
+
+// The tokens of one call count one time, however often the event arrives. An
+// event with no CallID counts every time, as the old path does.
+func TestTokenUsed_ACallCountsOnce(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, MissionStarted{ID: "m1", RunID: "r1"})
+	tokens := func() int64 { return w.MissionSnapshot()[0].TokensUsed }
+
+	Reduce(w, TokenUsed{MissionID: "m1", Tokens: 100, CallID: "gw-1"})
+	Reduce(w, TokenUsed{MissionID: "m1", Tokens: 100, CallID: "gw-1"})
+	if got := tokens(); got != 100 {
+		t.Fatalf("tokens after a repeated call = %d, want 100", got)
+	}
+	Reduce(w, TokenUsed{MissionID: "m1", Tokens: 50, CallID: "gw-2"})
+	Reduce(w, TokenUsed{MissionID: "m1", Tokens: 7})
+	Reduce(w, TokenUsed{MissionID: "m1", Tokens: 7})
+	if got := tokens(); got != 164 {
+		t.Fatalf("tokens = %d, want 164 (150 from two calls, 14 from two events with no CallID)", got)
+	}
+}
+
+// A restore keeps the spend and the counted calls, so a call delivered again
+// after a restart still counts once.
+func TestTokenUsed_ASnapshotKeepsTheSpendAndTheCalls(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, MissionStarted{ID: "m1", RunID: "r1"})
+	Reduce(w, TokenUsed{MissionID: "m1", Tokens: 100, CallID: "gw-1"})
+
+	restored, err := RestoreWorld(SnapshotWorld(w, "seq-1"), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := restored.MissionSnapshot()[0].TokensUsed; got != 100 {
+		t.Fatalf("restored spend = %d, want 100", got)
+	}
+	Reduce(restored, TokenUsed{MissionID: "m1", Tokens: 100, CallID: "gw-1"})
+	if got := restored.MissionSnapshot()[0].TokensUsed; got != 100 {
+		t.Errorf("a call delivered again after a restore counted: spend = %d, want 100", got)
+	}
+}
+
+func TestTokenUsed_TheSetEndsWithTheMission(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, MissionStarted{ID: "m1", RunID: "r1"})
+	Reduce(w, TokenUsed{MissionID: "m1", Tokens: 1, CallID: "gw-1"})
+	Reduce(w, MissionDone{ID: "m1", RunID: "r1", Outcome: MissionCompleted})
+	if len(w.countedTokenCalls) != 0 {
+		t.Errorf("counted calls = %v, want none after the mission ended", w.countedTokenCalls)
+	}
+}

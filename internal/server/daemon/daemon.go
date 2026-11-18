@@ -776,7 +776,8 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 	// the daemon directly over mTLS. Each one is allowed at the TLS layer here,
 	// and spiffePeerMethodPolicies gives it only its own methods.
 	peers, err := withConnectionPointPeers(d.config.Auth.SPIFFE.AllowedPeerIDs, configuredTD,
-		os.Getenv(api.EnvSignupStepCompleterSVID), os.Getenv(api.EnvTenantActivationSVID))
+		os.Getenv(api.EnvSignupStepCompleterSVID), os.Getenv(api.EnvTenantActivationSVID),
+		os.Getenv(api.EnvTraceCollectorSVID))
 	if err != nil {
 		_ = source.Close()
 		return err

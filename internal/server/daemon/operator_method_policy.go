@@ -307,6 +307,7 @@ func spiffePeerMethodPolicies(td spiffeid.TrustDomain, callers api.ConnectionPoi
 		platformOperatorSVID(td):  platformOperatorAllowedMethods(),
 	}
 	policies = mergePeerPolicies(policies, connectionPointPeerPolicies(callers))
+	policies = mergePeerPolicies(policies, traceCollectorPeerPolicies(traceCollectorSVIDFromEnv()))
 	// The exit-test runner is a direct-dial peer that exists ONLY in binaries
 	// built with -tags=test_fixtures. In a production build the function below
 	// is the no-op stub and this loop adds nothing, so the broad method access
@@ -339,6 +340,27 @@ func connectionPointPeerPolicies(callers api.ConnectionPointCallers) map[string]
 		connectionv1.ConnectionPointService_SetTenantActivation_FullMethodName,
 		connectionv1.ConnectionPointService_ListTenantUsage_FullMethodName)
 	return out
+}
+
+// traceExportMethod is the full name of the OTLP export method. The OTLP
+// package generates no constant for it.
+const traceExportMethod = "/" + "opentelemetry.proto.collector.trace.v1.TraceService" + "/Export"
+
+// traceCollectorPeerPolicies gives the trace collector exactly one method: the
+// export of spans to the OTLP trace service (gibson#1390). An empty identity
+// gets no entry, so the daemon accepts no spans.
+func traceCollectorPeerPolicies(svid string) map[string]map[string]bool {
+	if svid == "" {
+		return map[string]map[string]bool{}
+	}
+	return map[string]map[string]bool{
+		svid: {traceExportMethod: true},
+	}
+}
+
+// traceCollectorSVIDFromEnv reads the SPIFFE ID of the trace collector.
+func traceCollectorSVIDFromEnv() string {
+	return strings.TrimSpace(os.Getenv(api.EnvTraceCollectorSVID))
 }
 
 // connectionPointCallersFromEnv reads the two caller identities of the

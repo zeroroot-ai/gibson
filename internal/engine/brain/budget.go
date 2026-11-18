@@ -3,7 +3,10 @@
 
 package brain
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // budget.go is the per-mission resource ceiling — both the cumulative-cost cap and
 // the runaway-Decider guard (CONTEXT.md, replacing the legacy spawn_cycle_guard).
@@ -18,14 +21,33 @@ import "fmt"
 type TokenUsed struct {
 	MissionID string
 	Tokens    int64
+	// CallID names the model call that the tokens belong to. When it is set, the
+	// reducer counts the tokens of one call one time: a second event with the
+	// same CallID for the same mission changes nothing. The gateway trace path
+	// sets it, because the collector can deliver a span again. An event with no
+	// CallID counts every time, as before.
+	CallID string `json:",omitempty"`
 }
 
 func (TokenUsed) Kind() string { return "token.used" }
 
 func applyTokenUsed(w *World, e TokenUsed) {
-	if ent, ok := findMission(w, e.MissionID); ok {
-		w.missions.Get(ent).TokensUsed += e.Tokens
+	ent, ok := findMission(w, e.MissionID)
+	if !ok {
+		return
 	}
+	if e.CallID != "" {
+		counted := w.countedTokenCalls[e.MissionID]
+		if _, seen := counted[e.CallID]; seen {
+			return
+		}
+		if counted == nil {
+			counted = make(map[string]struct{})
+			w.countedTokenCalls[e.MissionID] = counted
+		}
+		counted[e.CallID] = struct{}{}
+	}
+	w.missions.Get(ent).TokensUsed += e.Tokens
 }
 
 // BudgetSystem aborts any running mission that has exceeded its Budget. It runs
@@ -59,6 +81,23 @@ func BudgetSystem(w *World) []Event {
 				Reason:  fmt.Sprintf("budget exceeded: %d tokens > max %d", m.TokensUsed, m.Budget.MaxTokens),
 			})
 		}
+	}
+	return out
+}
+
+// countedTokenCallsSnapshot returns the counted call IDs of each mission, sorted.
+func (w *World) countedTokenCallsSnapshot() map[string][]string {
+	if len(w.countedTokenCalls) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(w.countedTokenCalls))
+	for id, set := range w.countedTokenCalls {
+		calls := make([]string, 0, len(set))
+		for c := range set {
+			calls = append(calls, c)
+		}
+		sort.Strings(calls)
+		out[id] = calls
 	}
 	return out
 }

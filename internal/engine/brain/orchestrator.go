@@ -290,6 +290,9 @@ func applyMissionDone(w *World, e MissionDone) {
 		}
 		m.Status = outcome
 		m.Reason = e.Reason
+		// A call that arrives after the end of the mission is not counted
+		// against a budget that no longer runs, so the set is not kept.
+		delete(w.countedTokenCalls, e.ID)
 	}
 	// A Decider decision that ends the mission carries the completion reason as its
 	// rationale (gibson#1062). The worker emits MissionDone before DecisionCompleted,
