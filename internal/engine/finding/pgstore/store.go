@@ -271,6 +271,77 @@ func (s *Store) Get(ctx context.Context, tenantID string, id types.ID) (*finding
 	return decodeFinding(doc)
 }
 
+// GetWithEvidence returns the finding with the ID and all of its evidence, as
+// stored, in the order that the items had when the finding was stored. Each
+// item shows its tier and, on a tier 1 item, its tool call ID. It is the one
+// read function that reads the finding_evidence table. It returns
+// finding.ErrNotFound if the database holds no such finding.
+func (s *Store) GetWithEvidence(ctx context.Context, tenantID string, id types.ID) (*finding.EnhancedFinding, error) {
+	if err := id.Validate(); err != nil {
+		return nil, fmt.Errorf("finding store: finding ID: %w", err)
+	}
+	c, err := s.conns.For(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Release()
+	sql := c.SQL()
+
+	var doc []byte
+	if err := sql.QueryRow(ctx, `SELECT document FROM findings WHERE id = $1`, id.String()).Scan(&doc); err != nil {
+		if errors.Is(err, datapool.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", finding.ErrNotFound, id)
+		}
+		return nil, fmt.Errorf("finding store: read finding %s: %w", id, err)
+	}
+	f, err := decodeFinding(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := sql.Query(ctx, `
+SELECT tier, tool_call_id, type, title, content, metadata
+FROM finding_evidence WHERE finding_id = $1 ORDER BY position`, id.String())
+	if err != nil {
+		return nil, fmt.Errorf("finding store: read evidence of finding %s: %w", id, err)
+	}
+	defer rows.Close()
+	f.Evidence = nil
+	for rows.Next() {
+		var (
+			tier       int16
+			toolCallID *string
+			typeName   string
+			title      string
+			content    string
+			metadata   []byte
+		)
+		if err := rows.Scan(&tier, &toolCallID, &typeName, &title, &content, &metadata); err != nil {
+			return nil, fmt.Errorf("finding store: scan evidence of finding %s: %w", id, err)
+		}
+		item := &typespb.Evidence{
+			Title:   title,
+			Type:    typespb.EvidenceType(typespb.EvidenceType_value[typeName]),
+			Content: content,
+			Tier:    typespb.EvidenceTier(tier),
+		}
+		if toolCallID != nil {
+			item.ToolCallId = *toolCallID
+		}
+		if err := json.Unmarshal(metadata, &item.Metadata); err != nil {
+			return nil, fmt.Errorf("finding store: decode metadata of finding %s: %w", id, err)
+		}
+		if len(item.Metadata) == 0 {
+			item.Metadata = nil
+		}
+		f.Evidence = append(f.Evidence, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("finding store: read evidence of finding %s: %w", id, err)
+	}
+	return f, nil
+}
+
 // List returns the findings of a mission that match the filter. A nil filter
 // matches each finding. The result has no evidence, because a list does not
 // read the finding_evidence table.

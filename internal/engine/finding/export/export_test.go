@@ -662,3 +662,52 @@ func TestBuildLocations_ReadsEvidenceMetadata(t *testing.T) {
 	require.NotNil(t, locations[1].LogicalLocation)
 	assert.Equal(t, "handler", locations[1].LogicalLocation.Name)
 }
+
+// TestExportsHoldEachEvidenceItemWithItsTier proves that the JSON, Markdown and
+// HTML exports show the content, the tier and the tool call ID of an item.
+func TestExportsHoldEachEvidenceItemWithItsTier(t *testing.T) {
+	ctx := context.Background()
+	f := &finding.EnhancedFinding{Finding: agent.Finding{
+		ID: types.NewID(), Title: "open redirect", Severity: agent.SeverityMedium,
+		Evidence: []*typespb.Evidence{
+			{
+				Title: "tool call httpx (call-1)", Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG,
+				Content: "recorded result", Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, ToolCallId: "call-1",
+			},
+			{
+				Title: "dialogue", Type: typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION,
+				Content: "typed text", Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED,
+			},
+		},
+	}}
+	opts := DefaultExportOptions()
+
+	data, err := NewJSONExporter(true).Export(ctx, []*finding.EnhancedFinding{f}, opts)
+	require.NoError(t, err)
+	var decoded struct {
+		Findings []struct {
+			Evidence []struct {
+				Content    string `json:"content"`
+				Tier       int    `json:"tier"`
+				ToolCallID string `json:"tool_call_id"`
+			} `json:"evidence"`
+		} `json:"findings"`
+	}
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Len(t, decoded.Findings, 1)
+	require.Len(t, decoded.Findings[0].Evidence, 2)
+	assert.Equal(t, 1, decoded.Findings[0].Evidence[0].Tier)
+	assert.Equal(t, "call-1", decoded.Findings[0].Evidence[0].ToolCallID)
+	assert.Equal(t, "recorded result", decoded.Findings[0].Evidence[0].Content)
+	assert.Equal(t, 2, decoded.Findings[0].Evidence[1].Tier)
+
+	md, err := NewMarkdownExporter().Export(ctx, []*finding.EnhancedFinding{f}, opts)
+	require.NoError(t, err)
+	assert.Contains(t, string(md), "EVIDENCE_TIER_RECORDED")
+	assert.Contains(t, string(md), "recorded result")
+	assert.Contains(t, string(md), "EVIDENCE_TIER_TYPED")
+
+	page, err := NewHTMLExporter().Export(ctx, []*finding.EnhancedFinding{f}, opts)
+	require.NoError(t, err)
+	assert.Contains(t, string(page), "EVIDENCE_TIER_RECORDED")
+}

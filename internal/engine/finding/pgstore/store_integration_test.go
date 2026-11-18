@@ -121,6 +121,14 @@ func TestStore_Integration_EvidenceRowsAndCascade(t *testing.T) {
 	}
 	require.NoError(t, s.Store(ctx, "acme", f))
 
+	got, err := s.GetWithEvidence(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Evidence, 2)
+	assert.Equal(t, typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, got.Evidence[0].GetTier())
+	assert.Equal(t, "call-1", got.Evidence[0].GetToolCallId())
+	assert.Equal(t, "recorded", got.Evidence[0].GetContent())
+	assert.Equal(t, typespb.EvidenceTier_EVIDENCE_TIER_TYPED, got.Evidence[1].GetTier())
+
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM finding_evidence WHERE finding_id = $1`, f.ID.String()).Scan(&n))
@@ -133,7 +141,7 @@ func TestStore_Integration_EvidenceRowsAndCascade(t *testing.T) {
 	assert.True(t, digestOK, "the hash is the SHA-256 of the content")
 
 	// A tier 1 item with no tool call breaks the CHECK of the table.
-	_, err := pool.Exec(ctx, `INSERT INTO finding_evidence
+	_, err = pool.Exec(ctx, `INSERT INTO finding_evidence
 		(finding_id, position, tier, tool_call_id, type, content, content_sha256)
 		VALUES ($1, 9, 1, NULL, 'EVIDENCE_TYPE_LOG', 'x', sha256('x'))`, f.ID.String())
 	require.Error(t, err)

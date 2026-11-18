@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
@@ -144,13 +146,26 @@ func (d *fakeDB) QueryRow(_ context.Context, sql string, args ...any) datapool.R
 }
 
 type fakeRows struct {
-	docs [][]byte
+	rows [][]any
 	pos  int
 }
 
-func (r *fakeRows) Next() bool { r.pos++; return r.pos <= len(r.docs) }
+func (r *fakeRows) Next() bool { r.pos++; return r.pos <= len(r.rows) }
 func (r *fakeRows) Scan(dest ...any) error {
-	*(dest[0].(*[]byte)) = r.docs[r.pos-1]
+	for i, v := range r.rows[r.pos-1] {
+		switch d := dest[i].(type) {
+		case *[]byte:
+			*d = v.([]byte)
+		case *int16:
+			*d = v.(int16)
+		case **string:
+			*d = v.(*string)
+		case *string:
+			*d = v.(string)
+		default:
+			return fmt.Errorf("fakeRows: no case for %T", dest[i])
+		}
+	}
 	return nil
 }
 func (r *fakeRows) Err() error { return nil }
@@ -162,6 +177,13 @@ func (d *fakeDB) Query(_ context.Context, sql string, args ...any) (datapool.Row
 		d.readEvidence++
 	}
 	want := args[0].(string)
+	if contains(sql, "FROM finding_evidence") {
+		out := &fakeRows{}
+		for _, e := range d.evidence[want] {
+			out.rows = append(out.rows, []any{e.tier, e.toolCallID, e.typeName, e.title, e.content, e.metadata})
+		}
+		return out, nil
+	}
 	var ids []string
 	for id, row := range d.rows {
 		switch {
@@ -184,7 +206,7 @@ func (d *fakeDB) Query(_ context.Context, sql string, args ...any) (datapool.Row
 	})
 	out := &fakeRows{}
 	for _, id := range ids {
-		out.docs = append(out.docs, d.rows[id].document)
+		out.rows = append(out.rows, []any{d.rows[id].document})
 	}
 	return out, nil
 }
@@ -474,4 +496,46 @@ func TestStore_RefusesAnInvalidTierAndToolCallPair(t *testing.T) {
 			assert.Empty(t, db.rows)
 		})
 	}
+}
+
+func TestStore_GetWithEvidenceReturnsEveryItemAsStored(t *testing.T) {
+	db := newFakeDB()
+	s := newTestStore(db)
+	ctx := context.Background()
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+	recorded := tier1("call-1", `{"status_code":200}`)
+	typed := tier2("dialogue", "hello")
+	empty := tier2("empty", "")
+	f.Evidence = []*typespb.Evidence{typed, recorded, empty}
+	require.NoError(t, s.Store(ctx, "acme", f))
+
+	got, err := s.GetWithEvidence(ctx, "acme", f.ID)
+
+	require.NoError(t, err)
+	assert.Equal(t, "open port", got.Title)
+	require.Len(t, got.Evidence, 3)
+	for i, want := range f.Evidence {
+		assert.True(t, proto.Equal(want, got.Evidence[i]), "item %d: want %v, got %v", i, want, got.Evidence[i])
+	}
+	assert.Equal(t, typespb.EvidenceTier_EVIDENCE_TIER_TYPED, got.Evidence[0].GetTier())
+	assert.Equal(t, typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, got.Evidence[1].GetTier())
+	assert.Equal(t, "call-1", got.Evidence[1].GetToolCallId())
+	assert.Equal(t, 1, db.readEvidence, "one read of the evidence table")
+}
+
+func TestStore_GetWithEvidenceOfAFindingWithNoEvidence(t *testing.T) {
+	db := newFakeDB()
+	s := newTestStore(db)
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+	require.NoError(t, s.Store(context.Background(), "acme", f))
+
+	got, err := s.GetWithEvidence(context.Background(), "acme", f.ID)
+
+	require.NoError(t, err)
+	assert.Empty(t, got.Evidence)
+}
+
+func TestStore_GetWithEvidenceNotFound(t *testing.T) {
+	_, err := newTestStore(newFakeDB()).GetWithEvidence(context.Background(), "acme", types.NewID())
+	require.ErrorIs(t, err, finding.ErrNotFound)
 }
