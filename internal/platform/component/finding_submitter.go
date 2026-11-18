@@ -21,7 +21,9 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 // WorldFindingSink routes a submitted finding into the per-tenant ECS brain World
@@ -106,6 +108,65 @@ func NewGraphRAGFindingSubmitter(
 	}
 }
 
+// findingPayload is the JSON that an SDK agent sends. Its evidence has the shape
+// of the SDK. The field shadows the evidence of the embedded agent.Finding, so
+// the decoder reads the SDK shape.
+type findingPayload struct {
+	agent.Finding
+	Evidence []sdkfinding.Evidence `json:"evidence,omitempty"`
+}
+
+// decodeFindingPayload decodes the JSON of an SDK finding. The agent typed all
+// of its evidence, so each item is tier 2. The payload cannot set a tier or a
+// tool call ID.
+func decodeFindingPayload(raw []byte) (agent.Finding, error) {
+	var payload findingPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return agent.Finding{}, fmt.Errorf("decode finding payload: %w", err)
+	}
+	out := payload.Finding
+	out.Evidence = nil
+	for _, e := range payload.Evidence {
+		metadata := make(map[string]string, len(e.Metadata))
+		for k, v := range e.Metadata {
+			metadata[k] = fmt.Sprint(v)
+		}
+		out.Evidence = append(out.Evidence, &typespb.Evidence{
+			Title:    e.Title,
+			Type:     evidenceTypeFromSDK(e.Type),
+			Content:  e.Content,
+			Metadata: metadata,
+			Tier:     typespb.EvidenceTier_EVIDENCE_TIER_TYPED,
+		})
+	}
+	return out, nil
+}
+
+// evidenceTypeFromSDK maps the evidence type of the SDK finding to the type in
+// the one evidence type list.
+func evidenceTypeFromSDK(t sdkfinding.EvidenceType) typespb.EvidenceType {
+	switch t {
+	case sdkfinding.EvidenceHTTPRequest:
+		return typespb.EvidenceType_EVIDENCE_TYPE_REQUEST
+	case sdkfinding.EvidenceHTTPResponse:
+		return typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE
+	case sdkfinding.EvidenceScreenshot:
+		return typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT
+	case sdkfinding.EvidenceCodeSnippet:
+		return typespb.EvidenceType_EVIDENCE_TYPE_CODE
+	case sdkfinding.EvidenceLog:
+		return typespb.EvidenceType_EVIDENCE_TYPE_LOG
+	case sdkfinding.EvidencePayload:
+		return typespb.EvidenceType_EVIDENCE_TYPE_PAYLOAD
+	case sdkfinding.EvidenceConversation:
+		return typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION
+	case sdkfinding.EvidenceNetworkTrace:
+		return typespb.EvidenceType_EVIDENCE_TYPE_NETWORK_TRACE
+	default:
+		return typespb.EvidenceType_EVIDENCE_TYPE_OTHER
+	}
+}
+
 // Submit stores a JSON-encoded agent.Finding in the per-tenant finding store
 // (via the data-plane Pool) and routes it into the tenant World, from which the
 // graph projector materializes it.
@@ -136,8 +197,8 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	}
 
 	// Step 2: Parse the finding JSON.
-	var baseFinding agent.Finding
-	if err := json.Unmarshal([]byte(findingJSON), &baseFinding); err != nil {
+	baseFinding, err := decodeFindingPayload([]byte(findingJSON))
+	if err != nil {
 		s.logger.WarnContext(ctx, "finding submitter: failed to parse finding JSON; generating stub finding",
 			slog.String("tenant", tenant),
 			slog.String("work_id", workID),
