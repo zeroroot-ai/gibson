@@ -61,6 +61,36 @@ type TraceReceiver struct {
 	registry      *brain.Registry
 	logger        *slog.Logger
 	now           func() time.Time
+	usage         UsageRecorder
+}
+
+// ModelCallUsage is the usage of one model call, for the platform budget. It
+// reads from the span that the gateway sent.
+type ModelCallUsage struct {
+	Tenant string
+	// CallID is stable for the span. A recorder counts one call once.
+	CallID string
+	// Mission names the mission of the call, or is empty.
+	Mission string
+	Tokens  int64
+	// CostKnown is false for a model with no price.
+	CostKnown bool
+	// CostUSD is the cost in US dollars as a decimal string, for example "0.0123".
+	CostUSD string
+}
+
+// UsageRecorder adds the usage of a model call to the platform budget (tenant,
+// user and team scopes). The trace receiver is the one place that sees each
+// model call, because the gateway sends each call to the model provider.
+type UsageRecorder interface {
+	RecordModelCall(ctx context.Context, u ModelCallUsage) error
+}
+
+// WithUsage wires the platform budget. The receiver then records the usage of
+// each model call in it. It returns the receiver.
+func (r *TraceReceiver) WithUsage(u UsageRecorder) *TraceReceiver {
+	r.usage = u
+	return r
 }
 
 // NewTraceReceiver returns the receiver. With an empty collectorSVID, no caller
@@ -99,6 +129,8 @@ func (r *TraceReceiver) Export(
 				case err == nil, errors.Is(err, llmtrace.ErrNotAModelCall):
 				case errors.Is(err, errEngineUnavailable):
 					return nil, status.Error(codes.Unavailable, "the World of the tenant is not available; try again later")
+				case errors.Is(err, errUsageUnavailable):
+					return nil, status.Error(codes.Unavailable, "the platform budget is not available; try again later")
 				default:
 					rejected++
 				}
@@ -116,6 +148,9 @@ func (r *TraceReceiver) Export(
 }
 
 var errEngineUnavailable = errors.New("the tenant engine is not available")
+
+// errUsageUnavailable marks a span whose usage the budget could not record.
+var errUsageUnavailable = errors.New("the platform budget is not available")
 
 // errDropped marks a span that was counted as a drop.
 var errDropped = errors.New("the span was dropped")
@@ -150,6 +185,18 @@ func (r *TraceReceiver) deliver(attrs []*commonpb.KeyValue) error {
 	}
 	for _, ev := range obs.Events(r.now()) {
 		eng.Submit(ev)
+	}
+	if r.usage != nil {
+		err := r.usage.RecordModelCall(context.Background(), ModelCallUsage{
+			Tenant: tenant.String(), CallID: obs.CallID, Mission: obs.Mission,
+			Tokens: obs.InputTokens + obs.OutputTokens, CostKnown: obs.Cost.Known, CostUSD: obs.Cost.Total,
+		})
+		if err != nil {
+			// The collector sends the span again. The fold of the events and the
+			// count of the usage are both idempotent on the call id.
+			r.logger.Warn("the usage of a model call was not recorded", "call_id", obs.CallID, "error", err)
+			return errUsageUnavailable
+		}
 	}
 	gatewayLLMDeliveredTotal.Inc()
 	return nil

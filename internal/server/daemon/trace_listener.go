@@ -89,8 +89,14 @@ func (d *daemonImpl) buildTraceServer(ctx context.Context) (*grpcSubsystem, erro
 	tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(collector))
 	opts := append(traceServerOptions(unaryRecovery), grpc.Creds(credentials.NewTLS(tlsCfg)))
 	srv := grpc.NewServer(opts...)
+	// The platform budget counts the usage of each model call. The trace receiver
+	// is its one feed, so the listener does not start without the budget.
+	if d.budgetEnforcer == nil || d.stateClient == nil {
+		return nil, fmt.Errorf("trace listener: the platform budget is not wired, and no usage could be recorded")
+	}
 	coltrace.RegisterTraceServiceServer(srv, api.NewTraceReceiver(
-		svid, d.brainRegistry, d.logger.WithComponent("trace-receiver").Slog()))
+		svid, d.brainRegistry, d.logger.WithComponent("trace-receiver").Slog()).
+		WithUsage(newBudgetUsage(d.budgetEnforcer, d.stateClient.Client(), d.brainRegistry)))
 
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
