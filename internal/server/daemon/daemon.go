@@ -1124,6 +1124,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// before any engine is created (engines fault in lazily on the first event).
 	if d.brainRegistry != nil {
 		d.brainExecutor = newBrainExecutor(d.registryAdapter, d.logger.WithComponent("brain-executor").Slog())
+		models, mcErr := d.newModelClient()
+		if mcErr != nil {
+			return fmt.Errorf("brain executor: %w", mcErr)
+		}
+		d.brainExecutor.models = models
 		// A job node's jobs live in the tenant's data plane, which is built
 		// later in Start, so the store is read per dispatch (gibson#1713).
 		d.brainExecutor.jobClosed = newJobGraphLink(d.brainRegistry, d.logger.WithComponent("job-graph-link").Slog())

@@ -115,6 +115,21 @@ type StructuredCompletionResult struct {
 // A group with no members on this side is simply absent: there is no WorldReader
 // (no WorldView), no Planner and no MissionManager here.
 
+// SlotModel is a slot that is resolved to one provider and one exact model name.
+type SlotModel struct {
+	Provider string
+	Model    string
+}
+
+// SlotModelResolver resolves a slot to the provider and the one exact model name
+// that the slot uses, with no model call. A caller that sends its own call to
+// the model gateway uses it (gibson#1392). The gateway never sees a slot. The
+// resolution honors the node pin and the model access gate, as a call through
+// the harness does. The default harness and its middleware wrapper implement it.
+type SlotModelResolver interface {
+	ResolveSlotModel(ctx context.Context, slot string) (SlotModel, error)
+}
+
 // LLMCaller is the model-facing surface.
 type LLMCaller interface {
 	// ────────────────────────────────────────────────────────────────────────────

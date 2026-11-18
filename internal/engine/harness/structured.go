@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
@@ -1276,4 +1277,66 @@ func mapToJSONSchema(m map[string]any) *types.JSONSchema {
 	}
 
 	return result
+}
+
+// ResolveSlotModel resolves a slot to the provider and the exact model name
+// that the slot uses. It honors the per-node binding (gibson#539), and the slot
+// manager applies the model access gate.
+func (h *DefaultAgentHarness) ResolveSlotModel(ctx context.Context, slot string) (SlotModel, error) {
+	slotDef := agent.NewSlotDefinition(slot, "LLM slot for a gateway call", true)
+	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
+	if err != nil {
+		return SlotModel{}, fmt.Errorf("failed to resolve slot %s: %w", slot, err)
+	}
+	return SlotModel{Provider: provider.Name(), Model: modelInfo.Name}, nil
+}
+
+// StructuredSchema returns the name and the JSON Schema of a Go type, for a
+// call that asks the model for structured output. Each object lists all of its
+// properties as required and refuses other properties, as strict structured
+// output needs.
+func StructuredSchema(schemaType any) (string, json.RawMessage, error) {
+	t := reflect.TypeOf(schemaType)
+	if t == nil {
+		return "", nil, fmt.Errorf("schema type cannot be nil")
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	name := t.Name()
+	if name == "" {
+		name = "AnonymousType"
+	}
+	sdk := convertToSDKSchema(schemaFromReflectType(t))
+	if sdk == nil {
+		return "", nil, fmt.Errorf("type %s has no object schema", name)
+	}
+	strictSchema(sdk)
+	raw, err := json.Marshal(sdk)
+	if err != nil {
+		return "", nil, fmt.Errorf("encode the schema of %s: %w", name, err)
+	}
+	return name, raw, nil
+}
+
+// strictSchema marks each object as closed and lists each property as required.
+func strictSchema(s *types.JSONSchema) {
+	if s == nil {
+		return
+	}
+	if s.Type == "object" {
+		closed := false
+		s.AdditionalProperties = &closed
+		s.Required = s.Required[:0]
+		names := make([]string, 0, len(s.Properties))
+		for n := range s.Properties {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		s.Required = names
+	}
+	for _, p := range s.Properties {
+		strictSchema(p)
+	}
+	strictSchema(s.Items)
 }

@@ -11,97 +11,46 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
 
-// deciderLLMHarness is an AgentHarness that only answers
-// CompleteStructuredAnyWithUsage — the in-process call brainExecutor.Decide
-// makes. Embedding the interface keeps the fake to the one method under test.
-type deciderLLMHarness struct {
+// slotModelHarness is an AgentHarness that only resolves a slot to a model. The
+// Decider resolves its slot and then calls the gateway. Embedding the interface
+// keeps the fake to the one method under test.
+type slotModelHarness struct {
 	gibsonharness.AgentHarness
-
-	gotMessages []llm.Message
-	result      *gibsonharness.StructuredCompletionResult
-	err         error
+	picked gibsonharness.SlotModel
+	err    error
 }
 
-func (h *deciderLLMHarness) CompleteStructuredAnyWithUsage(_ context.Context, _ string, messages []llm.Message, _ any, _ ...gibsonharness.CompletionOption) (*gibsonharness.StructuredCompletionResult, error) {
-	h.gotMessages = messages
-	if h.err != nil {
-		return nil, h.err
-	}
-	return h.result, nil
+func (h *slotModelHarness) ResolveSlotModel(context.Context, string) (gibsonharness.SlotModel, error) {
+	return h.picked, h.err
 }
 
-// TestDecide_CapturesLLMCallOntoTimeline is the gibson#271 flight-recorder
-// unit: the Decider's own reasoning turn — the brain's own LLM call, made
-// in-process rather than over the callback RPCs captureLLMCall instruments —
-// must land on the mission's Timeline as an LlmCallObserved, the same as
-// every other fleet-agent LLM call. Before this fix it never did.
-func TestDecide_CapturesLLMCallOntoTimeline(t *testing.T) {
-	h := &deciderLLMHarness{
-		result: &gibsonharness.StructuredCompletionResult{
-			Result:           &deciderDecision{Action: "wait"},
-			Model:            "claude-haiku-4-5",
-			RawJSON:          `{"action":"wait"}`,
-			PromptTokens:     123,
-			CompletionTokens: 17,
-		},
-	}
+// The Decider emits no llm_call.observed event of its own (gibson#1392). The
+// gateway trace is the one source of that event and of token.used, so a second
+// emit here would count the call twice.
+func TestDecide_EmitsNoLLMCallEvent(t *testing.T) {
+	h := &slotModelHarness{picked: gibsonharness.SlotModel{Provider: "p", Model: "claude-haiku-4-5"}}
 	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	b := newBrainExecutor(nil, slog.Default())
-	b.register("m1", &missionBinding{ctx: context.Background(), eng: eng, harness: h})
+	b.models = &modelRecorder{}
+	b.register("m1", &missionBinding{ctx: context.Background(), tenant: "tenant-a", eng: eng, harness: h})
 
-	_, err := b.Decide(context.Background(), brain.MissionContext{MissionID: "m1", Goal: "find things"})
-	if err != nil {
+	if _, err := b.Decide(context.Background(), brain.MissionContext{MissionID: "m1", Goal: "find things"}); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
 	eng.Tick() // Submit only enqueues; Tick drains the intake queue into the World.
-
-	calls := eng.LlmCalls()
-	if len(calls) != 1 {
-		t.Fatalf("want 1 captured LLM call, got %d: %+v", len(calls), calls)
-	}
-	c := calls[0]
-	if c.Model != "claude-haiku-4-5" {
-		t.Errorf("Model = %q, want claude-haiku-4-5", c.Model)
-	}
-	if c.PromptTokens != 123 || c.CompletionTokens != 17 {
-		t.Errorf("tokens = %d/%d, want 123/17", c.PromptTokens, c.CompletionTokens)
-	}
-	if c.Completion != `{"action":"wait"}` {
-		t.Errorf("Completion = %q, want the raw decision JSON", c.Completion)
-	}
-	if c.RunID != "" {
-		t.Errorf("RunID = %q, want empty (a mission-level Decider call owns no AgentRun)", c.RunID)
-	}
-	if len(c.Messages) == 0 {
-		t.Error("the Decider's own prompt must be captured, got no messages")
-	}
-	if c.RecordedAtUnixNano == 0 {
-		t.Error("RecordedAtUnixNano must be stamped for retention sweeps")
-	}
-
-	// The mission-scoped frame must surface the Decider's own call too — same
-	// mission-evidence edge as every other LLM call (mission_scope.go).
-	if got := eng.MissionFrameAt("m1", eng.Timeline.Len()).LlmCallSnapshot(); len(got) != 1 {
-		t.Errorf("mission m1 frame llm calls = %+v, want 1", got)
+	if got := eng.LlmCalls(); len(got) != 0 {
+		t.Errorf("Decide emitted %d llm_call.observed events, want 0: %+v", len(got), got)
 	}
 }
 
-// TestDecide_LLMErrorNeverCaptured proves the success-only rule, same as the
-// callback LLM RPCs: a failed Decide call is not folded into the Timeline.
-func TestDecide_LLMErrorNeverCaptured(t *testing.T) {
-	h := &deciderLLMHarness{err: context.DeadlineExceeded}
-	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
+// A Decider with no model client fails loud. It never falls back to a provider.
+func TestDecide_NoModelClientIsAnError(t *testing.T) {
+	h := &slotModelHarness{picked: gibsonharness.SlotModel{Provider: "p", Model: "m"}}
 	b := newBrainExecutor(nil, slog.Default())
-	b.register("m1", &missionBinding{ctx: context.Background(), eng: eng, harness: h})
-
+	b.register("m1", &missionBinding{ctx: context.Background(), tenant: "tenant-a", harness: h})
 	if _, err := b.Decide(context.Background(), brain.MissionContext{MissionID: "m1"}); err == nil {
-		t.Fatal("expected the harness error to surface")
-	}
-	eng.Tick()
-	if got := eng.LlmCalls(); len(got) != 0 {
-		t.Errorf("a failed Decide must not be captured, got %+v", got)
+		t.Fatal("Decide with no model client gave no error")
 	}
 }

@@ -375,3 +375,19 @@ func toMiddlewareMessages(messages []llm.Message) []middleware.Message {
 	}
 	return result
 }
+
+// ResolveSlotModel resolves a slot with no call, so no middleware wraps it. An
+// inner harness that cannot resolve a slot gives an error.
+func (h *MiddlewareHarness) ResolveSlotModel(ctx context.Context, slot string) (SlotModel, error) {
+	r, ok := h.inner.(SlotModelResolver)
+	if !ok {
+		return SlotModel{}, fmt.Errorf("the harness %T cannot resolve a slot to a model", h.inner)
+	}
+	//nolint:wrapcheck // a decorator returns the inner error, which callers match by code
+	return r.ResolveSlotModel(ctx, slot)
+}
+
+var (
+	_ SlotModelResolver = (*MiddlewareHarness)(nil)
+	_ SlotModelResolver = (*DefaultAgentHarness)(nil)
+)
