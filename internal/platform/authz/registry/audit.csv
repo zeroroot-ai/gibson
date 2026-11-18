@@ -1,7 +1,4 @@
 rpc,relation,object_type,deriver,identities,source_proto_file,mode
-/gibson.agent.v1.AgentService/Execute,member,tenant,tenant_from_identity,COMPONENT,gibson/agent/v1/agent.proto,rule
-/gibson.agent.v1.AgentService/GetDescriptor,member,tenant,tenant_from_identity,COMPONENT,gibson/agent/v1/agent.proto,rule
-/gibson.agent.v1.AgentService/Health,member,tenant,tenant_from_identity,COMPONENT,gibson/agent/v1/agent.proto,rule
 /gibson.agentidentity.v1.AgentIdentityService/CreateAgentIdentity,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/agentidentity/v1/agent_identity.proto,rule
 /gibson.agentidentity.v1.AgentIdentityService/ListAgentIdentities,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/agentidentity/v1/agent_identity.proto,rule
 /gibson.agentidentity.v1.AgentIdentityService/RevokeAgentIdentity,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/agentidentity/v1/agent_identity.proto,rule
@@ -18,12 +15,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.component.v1.ComponentService/CallTool,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/CallToolStream,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/CancelMission,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/Complete,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/CompleteStream,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/CompleteStructured,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/CompleteWithTools,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/CreateMission,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/DelegateToAgent,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/DisablePlugin,can_configure,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/EnablePlugin,can_configure,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/EnrollComponent,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
@@ -40,7 +32,6 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.component.v1.ComponentService/GetRunFindings,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/GetTaxonomySchema,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/Heartbeat,can_poll_work,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/ListAgents,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/ListAvailablePlugins,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/ListMissions,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/ListTenantPlugins,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
@@ -51,6 +42,8 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.component.v1.ComponentService/QueueToolWork,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/RegisterComponent,can_poll_work,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/ReportStepHints,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
+/gibson.component.v1.ComponentService/ResolveAgent,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
+/gibson.component.v1.ComponentService/ResolveModel,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/RunMission,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/SubmitFinding,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/SubmitResult,can_poll_work,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
@@ -167,7 +160,6 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/ClaimFork,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/CloseJob,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/CreateMission,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
-/gibson.harness.v1.HarnessCallbackService/DelegateToAgent,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/DeleteSessionContext,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/DevboxExec,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/FindSimilarAttacks,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
@@ -184,11 +176,6 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/GetRunFindings,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/GetSessionContext,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
-/gibson.harness.v1.HarnessCallbackService/LLMComplete,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
-/gibson.harness.v1.HarnessCallbackService/LLMCompleteStructured,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
-/gibson.harness.v1.HarnessCallbackService/LLMCompleteWithTools,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
-/gibson.harness.v1.HarnessCallbackService/LLMStream,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
-/gibson.harness.v1.HarnessCallbackService/ListAgents,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/ListMissions,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/ListPlugins,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/ListTools,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
@@ -207,6 +194,8 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/ReportJobState,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/ReportStepHints,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/RequestDestructiveAuthorization,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
+/gibson.harness.v1.HarnessCallbackService/ResolveAgent,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
+/gibson.harness.v1.HarnessCallbackService/ResolveModel,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/RunMission,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/SearchTools,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/SendInput,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
