@@ -14,10 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
@@ -63,42 +61,6 @@ func (s *stubProviderConfigStore) Resolve(ctx context.Context, tenantID, name st
 		return s.resolveFunc(ctx, tenantID, name)
 	}
 	return nil, providerconfig.ErrNotFound
-}
-
-// stubMockProvider is a minimal llm.LLMProvider that returns canned responses.
-type stubMockProvider struct {
-	completeFunc func(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error)
-	streamFunc   func(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error)
-}
-
-func (p *stubMockProvider) Name() string { return "stub" }
-func (p *stubMockProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
-	return nil, nil
-}
-func (p *stubMockProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	if p.completeFunc != nil {
-		return p.completeFunc(ctx, req)
-	}
-	return &llm.CompletionResponse{
-		Message: llm.Message{Role: llm.RoleAssistant, Content: "stub response"},
-	}, nil
-}
-func (p *stubMockProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
-	return p.Complete(ctx, req)
-}
-func (p *stubMockProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	if p.streamFunc != nil {
-		return p.streamFunc(ctx, req)
-	}
-	ch := make(chan llm.StreamChunk, 2)
-	ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: "hello"}}
-	ch <- llm.StreamChunk{FinishReason: llm.FinishReasonStop}
-	close(ch)
-	return ch, nil
-}
-
-func (p *stubMockProvider) Health(_ context.Context) types.HealthStatus {
-	return types.NewHealthStatus(types.HealthStateHealthy, "")
 }
 
 // stubExecLimiter is a controllable execLimiterIface.
@@ -176,7 +138,7 @@ func knownDecryptedConfig() *providerconfig.DecryptedConfig {
 
 // newExecServer builds a minimal DaemonServer with a stubbed provider store and
 // factory. Callers may further customise fields (e.g. WithExecLimiter).
-func newExecServer(store providerConfigStoreIface, _ func(llm.ProviderConfig) (llm.LLMProvider, error)) *DaemonServer {
+func newExecServer(store providerConfigStoreIface) *DaemonServer {
 	s := &DaemonServer{
 		logger:         slog.Default(),
 		providerConfig: store,
@@ -414,11 +376,11 @@ func TestProtoMessagesToLLM_ToolResults(t *testing.T) {
 		},
 	})
 
-	require.Len(t, msgs, 2, "each tool result becomes a separate llm.Message")
-	assert.Equal(t, llm.RoleTool, msgs[0].Role)
+	require.Len(t, msgs, 2, "each tool result becomes a separate message")
+	assert.Equal(t, roleTool, msgs[0].Role)
 	assert.Equal(t, "call-1", msgs[0].ToolCallID)
 	assert.Equal(t, "result-A", msgs[0].Content)
-	assert.Equal(t, llm.RoleTool, msgs[1].Role)
+	assert.Equal(t, roleTool, msgs[1].Role)
 	assert.Equal(t, "call-2", msgs[1].ToolCallID)
 }
 

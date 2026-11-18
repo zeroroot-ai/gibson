@@ -7,37 +7,26 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"testing"
 )
 
-// TestLLMAdapterHasTenantResolverWired asserts, in source, that the
-// ComponentService LLM adapter is constructed WITH a per-tenant resolver.
-//
-// NewLLMRegistryAdapter alone leaves resolveTenant nil, and the adapter then
-// fails every completion closed with "per-tenant LLM provider resolution is
-// not configured" (llm_adapter.go) — the adapter is wired into
-// ComponentService but inert, so an enrolled agent's completion never reaches
-// a provider. The bug is invisible to a unit test of the construction site
-// (it compiles and runs); it only shows at runtime on a real completion. This
-// pins the wiring: delete the WithTenantResolver call and this fails.
-//
-// Source-level because the construction lives inside buildGRPCServer, which
-// needs the whole infrastructure stack to invoke.
-func TestLLMAdapterHasTenantResolverWired(t *testing.T) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "grpc.go", nil, 0)
+// slotResolverWired reports whether the source holds a call to
+// WithSlotModelResolver whose argument uses newSlotManagerForTenant.
+func slotResolverWired(t *testing.T, name string, src any) bool {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
 	if err != nil {
-		t.Fatalf("parse grpc.go: %v", err)
+		t.Fatalf("parse %s: %v", name, err)
 	}
-
 	var wired bool
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
-		if !ok || !callTargets(call, "WithTenantResolver") {
+		if !ok || !callTargets(call, "WithSlotModelResolver") {
 			return true
 		}
-		// The resolver must be the daemon's shared per-tenant builder, the
-		// same one the mission path uses — not some inert stub.
+		// The resolver must be the shared per-tenant builder of the daemon,
+		// the same one that the mission path uses. A stub is not enough.
 		for _, arg := range call.Args {
 			if subtreeMentions(arg, "newSlotManagerForTenant") {
 				wired = true
@@ -45,10 +34,50 @@ func TestLLMAdapterHasTenantResolverWired(t *testing.T) {
 		}
 		return true
 	})
+	return wired
+}
 
-	if !wired {
-		t.Fatal("the ComponentService LLM adapter is not constructed with " +
-			".WithTenantResolver(d.newSlotManagerForTenant()) — every enrolled-component " +
-			"completion will fail closed with \"per-tenant LLM provider resolution is not configured\"")
+// TestComponentServiceHasSlotResolverWired asserts, in source, that the
+// ComponentService is built with a slot resolver over the per-tenant slot
+// manager.
+//
+// Without it, ResolveModel answers Unavailable ("the model gateway is not
+// configured on this server") for each agent in pull mode. The bug is invisible
+// to a unit test of the construction site, because it compiles and runs. It
+// shows only on a real call. This test pins the wiring.
+//
+// The check reads the source because the construction is inside
+// buildGRPCServer, which needs the whole infrastructure stack to run.
+func TestComponentServiceHasSlotResolverWired(t *testing.T) {
+	src, err := os.ReadFile("grpc.go")
+	if err != nil {
+		t.Fatalf("read grpc.go: %v", err)
+	}
+	if !slotResolverWired(t, "grpc.go", src) {
+		t.Fatal("the ComponentService is not built with " +
+			".WithSlotModelResolver(&componentSlotModels{forTenant: d.newSlotManagerForTenant()}): " +
+			"ResolveModel answers Unavailable for each agent in pull mode")
+	}
+}
+
+// TestSlotResolverWiringGuard_FailsOnAnUnwiredSource is the failing fixture of
+// the guard above. A source with no resolver, or with a resolver that is not
+// the per-tenant slot manager, must not pass.
+func TestSlotResolverWiringGuard_FailsOnAnUnwiredSource(t *testing.T) {
+	cases := map[string]string{
+		"no call": `package p
+func f(s *S) { s.WithGateways() }`,
+		"a stub resolver": `package p
+func f(s *S) { s.WithSlotModelResolver(&stub{}) }`,
+	}
+	for name, src := range cases {
+		if slotResolverWired(t, "fixture.go", src) {
+			t.Errorf("%s: the guard accepted a source with no per-tenant slot resolver", name)
+		}
+	}
+	good := `package p
+func f(s *S) { s.WithSlotModelResolver(&componentSlotModels{forTenant: d.newSlotManagerForTenant()}) }`
+	if !slotResolverWired(t, "fixture.go", good) {
+		t.Error("the guard rejected the wired source")
 	}
 }

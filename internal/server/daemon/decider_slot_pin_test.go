@@ -15,7 +15,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -23,13 +22,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
-
-// deciderProvider is a provider that the slot manager can resolve. The Decider
-// calls no provider: its call goes to the model gateway, and a test gateway
-// records the target of each call.
-type deciderProvider struct {
-	*servingProvider
-}
 
 // modelRecorder is the test gateway of the Decider. It answers every call with
 // "wait" and records the target and the request of each call.
@@ -89,21 +81,19 @@ func (noTargets) Get(context.Context, types.ID) (*types.Target, error) {
 // "fast-p". A non-nil filter is the model gate.
 func decideWith(t *testing.T, def *missionpb.MissionDefinition, filter modelgate.Filter) (defaultP, fastP *servedModels, out brain.DeciderOutput, err error) {
 	t.Helper()
-	defaultReg := &deciderProvider{&servingProvider{name: "default-p", models: []string{"d-1"}}}
-	fastReg := &deciderProvider{&servingProvider{name: "fast-p", models: []string{"f-small", "f-large"}}}
-	registry := llm.NewLLMRegistry()
-	require.NoError(t, registry.RegisterProvider(defaultReg))
-	require.NoError(t, registry.RegisterProvider(fastReg))
+	providers := []SlotProvider{
+		{Name: "default-p", DefaultModel: "d-1"},
+		{Name: "fast-p", DefaultModel: "f-small"},
+	}
 	gateway := &modelRecorder{}
 	defaultP, fastP = gateway.servedBy("default-p"), gateway.servedBy("fast-p")
 	logger := slog.New(slog.DiscardHandler)
-	manager := NewDaemonSlotManager(registry, logger).WithDefaultProvider("default-p")
+	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("default-p")
 	if filter != nil {
 		manager.WithModelFilter(filter)
 	}
 
 	factory, ferr := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
-		LLMRegistry: registry,
 		SlotManager: manager,
 		Logger:      logger,
 		// The Decider dispatches no tool, so it reads no target.
@@ -279,13 +269,11 @@ func TestExecuteMission_TheMissionHarnessCarriesTheDeciderPin(t *testing.T) {
 // emits no event of its own: the gateway trace is the one source.
 func TestDecide_SendsOneGatewayCallWithTheIdentityOfTheMission(t *testing.T) {
 	gateway := &modelRecorder{}
-	registry := llm.NewLLMRegistry()
-	p := &deciderProvider{&servingProvider{name: "default-p", models: []string{"d-1"}}}
-	require.NoError(t, registry.RegisterProvider(p))
+	providers := []SlotProvider{{Name: "default-p", DefaultModel: "d-1"}}
 	logger := slog.New(slog.DiscardHandler)
-	manager := NewDaemonSlotManager(registry, logger).WithDefaultProvider("default-p")
+	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("default-p")
 	factory, err := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
-		LLMRegistry: registry, SlotManager: manager, Logger: logger,
+		SlotManager: manager, Logger: logger,
 		TargetFacts: func() gibsonharness.TargetFactsLookup { return noTargets{} },
 	})
 	require.NoError(t, err)
@@ -321,13 +309,11 @@ func TestDecide_SendsOneGatewayCallWithTheIdentityOfTheMission(t *testing.T) {
 // A gateway refusal of a pinned Decider ends the mission with the reason, as a
 // refusal by the slot gate did.
 func TestDecide_AGatewayRefusalOfAPinnedDeciderFailsTheMission(t *testing.T) {
-	registry := llm.NewLLMRegistry()
-	p := &deciderProvider{&servingProvider{name: "fast-p", models: []string{"f-large"}}}
-	require.NoError(t, registry.RegisterProvider(p))
+	providers := []SlotProvider{{Name: "fast-p", DefaultModel: "f-large"}}
 	logger := slog.New(slog.DiscardHandler)
-	manager := NewDaemonSlotManager(registry, logger).WithDefaultProvider("fast-p")
+	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("fast-p")
 	factory, err := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
-		LLMRegistry: registry, SlotManager: manager, Logger: logger,
+		SlotManager: manager, Logger: logger,
 		TargetFacts: func() gibsonharness.TargetFactsLookup { return noTargets{} },
 	})
 	require.NoError(t, err)
@@ -355,13 +341,11 @@ func TestDecide_AGatewayRefusalOfAPinnedDeciderFailsTheMission(t *testing.T) {
 // An error of the gateway that is not a refusal goes back to the brain, which
 // retries on the next evidence change.
 func TestDecide_AGatewayOutageKeepsTheRetry(t *testing.T) {
-	registry := llm.NewLLMRegistry()
-	p := &deciderProvider{&servingProvider{name: "default-p", models: []string{"d-1"}}}
-	require.NoError(t, registry.RegisterProvider(p))
+	providers := []SlotProvider{{Name: "default-p", DefaultModel: "d-1"}}
 	logger := slog.New(slog.DiscardHandler)
-	manager := NewDaemonSlotManager(registry, logger).WithDefaultProvider("default-p")
+	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("default-p")
 	factory, err := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
-		LLMRegistry: registry, SlotManager: manager, Logger: logger,
+		SlotManager: manager, Logger: logger,
 		TargetFacts: func() gibsonharness.TargetFactsLookup { return noTargets{} },
 	})
 	require.NoError(t, err)

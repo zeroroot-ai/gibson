@@ -6,8 +6,9 @@
 //
 // It exercises the real resolution seam end-to-end:
 //
-//	TenantProviderResolver → per-tenant DaemonSlotManager → ResolveSlot with
-//	per-node overrides supplied directly (as they arrive from the orchestrator).
+//	provider records → slot providers → per-tenant DaemonSlotManager →
+//	ResolveSlot with per-node overrides supplied directly (as they arrive from
+//	the orchestrator).
 //
 // The four guarantees locked in here:
 //
@@ -24,15 +25,13 @@
 // (no map-iteration dependence, per gibson#531).
 //
 // Prior art:
-//   - internal/server/daemon/per_tenant_resolution_int_test.go (TenantProviderResolver seam)
+//   - internal/server/daemon/per_tenant_resolution_int_test.go (provider record seam)
 //   - internal/server/daemon/slot_manager_gate_test.go (modelgate.Filter wiring pattern)
 //   - internal/server/daemon/slot_manager_node_override_test.go (unit-level override guarantees)
 package daemon
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"strings"
 	"testing"
 
@@ -40,15 +39,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
-	"github.com/zeroroot-ai/gibson/internal/platform/tenantprovider"
 )
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-// e2eStore backs the per-tenant resolver for e2e tests.
+// e2eStore holds the provider records of each tenant for the e2e tests.
 type e2eStore struct {
 	configs map[string][]*providerconfig.ProviderConfig
 }
@@ -57,36 +54,17 @@ func (s *e2eStore) List(_ context.Context, tenant string) ([]*providerconfig.Pro
 	return s.configs[tenant], nil
 }
 
-func (s *e2eStore) Resolve(_ context.Context, tenant, name string) (*providerconfig.DecryptedConfig, error) {
-	for _, c := range s.configs[tenant] {
-		if c.Name == name {
-			return &providerconfig.DecryptedConfig{
-				ProviderConfig: *c,
-				Credentials:    map[string]string{"api_key": "test-key"},
-			}, nil
-		}
-	}
-	return nil, providerconfig.ErrNotFound
-}
-
-// e2eProviderFactory builds a deterministic fake provider for a given config.
-// The provider exposes a single model named "<providerType>-model" with a
-// 200k context window — enough to satisfy all default slot constraints.
-func e2eProviderFactory(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
-	modelName := string(cfg.Type) + "-model"
-	return provWithModel(string(cfg.Type), modelName), nil
-}
-
-// e2eManager builds a DaemonSlotManager wired from a real TenantProviderResolver
-// for the given tenantID, optionally with a modelgate.Filter.
-func e2eManager(t *testing.T, store tenantprovider.Store, tenantID string, filter modelgate.Filter) *DaemonSlotManager {
+// e2eManager builds a DaemonSlotManager from the provider records of the given
+// tenant, optionally with a modelgate.Filter. Each provider has one saved model
+// named "<provider>-model" with a 200k context window. That window satisfies
+// every default slot constraint.
+func e2eManager(t *testing.T, store *e2eStore, tenantID string, filter modelgate.Filter) *DaemonSlotManager {
 	t.Helper()
-	resolver := tenantprovider.NewResolver(store, e2eProviderFactory, false, nil)
-	set, err := resolver.Resolve(context.Background(), tenantID)
-	require.NoError(t, err, "resolver must build the tenant provider set without error")
+	recs, err := store.List(context.Background(), tenantID)
+	require.NoError(t, err)
+	providers, defaultName := SlotProvidersFromRecords(recs)
 
-	mgr := NewDaemonSlotManager(set.Registry, slog.New(slog.NewTextHandler(io.Discard, nil))).
-		WithDefaultProvider(set.DefaultName)
+	mgr := NewDaemonSlotManager(providers, slotTestLogger()).WithDefaultProvider(defaultName)
 	if filter != nil {
 		mgr.WithModelFilter(filter)
 	}
@@ -126,16 +104,16 @@ func (f *allowProviderFilter) InvalidateCache() {}
 // ── test store setup ──────────────────────────────────────────────────────────
 
 // newE2ETwoProviderStore returns a store with a tenant that has two providers:
-// "anthropic" (default) and "openai". The provider name in the registry is
-// derived from cfg.Type by the factory (string(cfg.Type)), so Name must match
-// the provider's type string for the overrides to resolve. This mirrors a real
-// tenant with two configured providers where one is set as the org default.
+// "anthropic" (default) and "openai". This mirrors a real tenant with two
+// configured providers where one is set as the org default.
 func newE2ETwoProviderStore() *e2eStore {
 	return &e2eStore{
 		configs: map[string][]*providerconfig.ProviderConfig{
 			"tenant-e2e": {
-				{Name: "anthropic", Type: providerconfig.ProviderAnthropic, Enabled: true, IsDefault: true},
-				{Name: "openai", Type: providerconfig.ProviderOpenAI, Enabled: true, IsDefault: false},
+				{Name: "anthropic", Type: providerconfig.ProviderAnthropic, Enabled: true, IsDefault: true,
+					DefaultModel: "anthropic-model", DefaultModelContextWindow: 200000},
+				{Name: "openai", Type: providerconfig.ProviderOpenAI, Enabled: true, IsDefault: false,
+					DefaultModel: "openai-model", DefaultModelContextWindow: 200000},
 			},
 		},
 	}
@@ -160,11 +138,11 @@ func TestMultiSlotOverrideE2E(t *testing.T) {
 		// Pin "primary" to "openai" — the non-default provider.
 		override := &agent.SlotConfig{Provider: "openai", Model: "openai-model"}
 
-		provider, model, err := mgr.ResolveSlot(ctx, primarySlot, override)
+		picked, err := mgr.ResolveSlot(ctx, primarySlot, override)
 		require.NoError(t, err)
-		assert.Equal(t, "openai", provider.Name(),
+		assert.Equal(t, "openai", picked.Provider,
 			"per-node override must win over the tenant default provider")
-		assert.Equal(t, "openai-model", model.Name)
+		assert.Equal(t, "openai-model", picked.Model)
 	})
 
 	// AC2: Two slots pinned to different providers on one node resolve
@@ -179,18 +157,18 @@ func TestMultiSlotOverrideE2E(t *testing.T) {
 		primaryOverride := &agent.SlotConfig{Provider: "openai", Model: "openai-model"}
 		fastOverride := &agent.SlotConfig{Provider: "anthropic", Model: "anthropic-model"}
 
-		pPrimary, mPrimary, err := mgr.ResolveSlot(ctx, primarySlot, primaryOverride)
+		primary, err := mgr.ResolveSlot(ctx, primarySlot, primaryOverride)
 		require.NoError(t, err, "primary slot with override must resolve")
-		assert.Equal(t, "openai", pPrimary.Name(), "primary slot must resolve to the pinned 'openai' provider")
-		assert.Equal(t, "openai-model", mPrimary.Name)
+		assert.Equal(t, "openai", primary.Provider, "primary slot must resolve to the pinned 'openai' provider")
+		assert.Equal(t, "openai-model", primary.Model)
 
-		pFast, mFast, err := mgr.ResolveSlot(ctx, fastSlot, fastOverride)
+		fast, err := mgr.ResolveSlot(ctx, fastSlot, fastOverride)
 		require.NoError(t, err, "fast slot with override must resolve")
-		assert.Equal(t, "anthropic", pFast.Name(), "fast slot must resolve to the pinned 'anthropic' provider")
-		assert.Equal(t, "anthropic-model", mFast.Name)
+		assert.Equal(t, "anthropic", fast.Provider, "fast slot must resolve to the pinned 'anthropic' provider")
+		assert.Equal(t, "anthropic-model", fast.Model)
 
 		// Verify independence: providers are distinct.
-		assert.NotEqual(t, pPrimary.Name(), pFast.Name(),
+		assert.NotEqual(t, primary.Provider, fast.Provider,
 			"two independently-pinned slots must not resolve to the same provider")
 	})
 
@@ -200,9 +178,9 @@ func TestMultiSlotOverrideE2E(t *testing.T) {
 
 		primarySlot := agent.NewSlotDefinition("primary", "primary slot", true)
 
-		provider, _, err := mgr.ResolveSlot(ctx, primarySlot, nil)
+		picked, err := mgr.ResolveSlot(ctx, primarySlot, nil)
 		require.NoError(t, err, "unpinned slot must resolve via the tenant default")
-		assert.Equal(t, "anthropic", provider.Name(),
+		assert.Equal(t, "anthropic", picked.Provider,
 			"nil override must fall through to the tenant default provider 'anthropic'")
 	})
 
@@ -219,7 +197,7 @@ func TestMultiSlotOverrideE2E(t *testing.T) {
 		// Override pins to the UNGRANTED provider.
 		override := &agent.SlotConfig{Provider: "openai", Model: "openai-model"}
 
-		_, _, err := mgr.ResolveSlot(ctx, primarySlot, override)
+		_, err := mgr.ResolveSlot(ctx, primarySlot, override)
 		require.Error(t, err, "pinning to an ungranted provider must be denied")
 		assert.True(t,
 			strings.Contains(err.Error(), "model_access_denied"),
@@ -236,10 +214,10 @@ func TestMultiSlotOverrideE2E(t *testing.T) {
 		primarySlot := agent.NewSlotDefinition("primary", "primary slot", true)
 		override := &agent.SlotConfig{Provider: "anthropic", Model: "anthropic-model"}
 
-		provider, model, err := mgr.ResolveSlot(ctx, primarySlot, override)
+		picked, err := mgr.ResolveSlot(ctx, primarySlot, override)
 		require.NoError(t, err, "pinning to a granted provider must succeed")
-		assert.Equal(t, "anthropic", provider.Name())
-		assert.Equal(t, "anthropic-model", model.Name)
+		assert.Equal(t, "anthropic", picked.Provider)
+		assert.Equal(t, "anthropic-model", picked.Model)
 	})
 }
 
@@ -260,11 +238,11 @@ func TestMultiSlotOverrideE2E_Determinism(t *testing.T) {
 		// benefit from any state sharing between calls.
 		mgr := e2eManager(t, store, "tenant-e2e", nil)
 
-		provider, model, err := mgr.ResolveSlot(ctx, primarySlot, override)
+		picked, err := mgr.ResolveSlot(ctx, primarySlot, override)
 		require.NoError(t, err, "iteration %d: unexpected error", i)
-		assert.Equal(t, "openai", provider.Name(),
+		assert.Equal(t, "openai", picked.Provider,
 			"iteration %d: provider must be deterministically 'openai'", i)
-		assert.Equal(t, "openai-model", model.Name,
+		assert.Equal(t, "openai-model", picked.Model,
 			"iteration %d: model must be deterministically 'openai-model'", i)
 	}
 }

@@ -1,104 +1,92 @@
-// SPDX-License-Identifier: Elastic-2.0
-// Copyright 2026 Zero Root AI
-
 //go:build llm_integration
 
-// Real-LLM validation for the brain Decider (gibson#851). Excluded from the
-// default build; run with a live key:
+// Real-model validation for the brain Decider (gibson#851). Excluded from the
+// default build. Run it against a live model gateway:
 //
-//	ANTHROPIC_API_KEY=$(cat ~/.claude/zero-day.claude.tok) \
+//	GIBSON_LIVE_GATEWAY_URL=https://gateway.example \
+//	GIBSON_LIVE_GATEWAY_GRANT=<daemon call grant> \
+//	GIBSON_LIVE_PROVIDER=claude GIBSON_LIVE_MODEL=claude-haiku-4-5 \
 //	  go test -tags=llm_integration -run TestDeciderLLM ./internal/server/daemon/ -v
 //
-// It proves the Decider's prompt (buildDeciderPrompt) + structured schema
-// (deciderDecision) + parser (parseDecision) produce an actionable decision when
-// run against the real model — the one piece unit tests with a stub LLM cannot
-// cover.
+// It proves that the prompt of the Decider (buildDeciderPrompt), the structured
+// schema (deciderDecision) and the parser (parseDecision) give an actionable
+// decision from a real model. A unit test with a stub model cannot show this.
+// The call goes through the same modelclient that brainExecutor.Decide uses.
 package daemon
 
 import (
 	"context"
 	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
-	gibsontypes "github.com/zeroroot-ai/gibson/internal/infra/types"
+	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 )
 
-const integrationModel = "claude-haiku-4-5-20251001"
+// staticGrant is a grant source that gives one fixed token.
+type staticGrant string
 
-func newAnthropicForTest(t *testing.T) *providers.AnthropicProvider {
+func (g staticGrant) Grant(context.Context, modelclient.Caller) (string, error) {
+	return string(g), nil
+}
+
+// liveEnv returns the value of a required environment variable. The test fails
+// when it is not set, because a skipped live test proves nothing.
+func liveEnv(t *testing.T, name string) string {
 	t.Helper()
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	if key == "" {
-		t.Skip("ANTHROPIC_API_KEY not set")
+	v := os.Getenv(name)
+	if v == "" {
+		t.Fatalf("%s is not set: this test needs a live model gateway", name)
 	}
-	p, err := providers.NewAnthropicProvider(llm.ProviderConfig{
-		Type:         "anthropic",
-		APIKey:       key,
-		DefaultModel: integrationModel,
+	return v
+}
+
+// decideWithRealLLM mirrors brainExecutor.Decide: build the prompt, ask for
+// structured output through the gateway client, parse the decision.
+func decideWithRealLLM(t *testing.T, mc brain.MissionContext) brain.DeciderOutput {
+	t.Helper()
+	client, err := modelclient.New(modelclient.Config{
+		BaseURL: liveEnv(t, "GIBSON_LIVE_GATEWAY_URL"),
+		Grants:  staticGrant(liveEnv(t, "GIBSON_LIVE_GATEWAY_GRANT")),
 	})
 	if err != nil {
-		t.Fatalf("construct anthropic provider: %v", err)
+		t.Fatalf("construct the model client: %v", err)
 	}
-	return p
-}
-
-// deciderResponseFormat is the structured-output schema for deciderDecision —
-// the same provider-native structured path brainExecutor.Decide uses (via the
-// harness CompleteStructuredAny), which forces schema-conforming JSON.
-func deciderResponseFormat() *gibsontypes.ResponseFormat {
-	str := func() *gibsontypes.JSONSchema { return &gibsontypes.JSONSchema{Type: "string"} }
-	return &gibsontypes.ResponseFormat{
-		Type: gibsontypes.ResponseFormatJSONSchema,
-		Name: "decider_decision",
-		Schema: &gibsontypes.JSONSchema{
-			Type: "object",
-			Properties: map[string]*gibsontypes.JSONSchema{
-				"action": {Type: "string", Description: "dispatch, complete, or wait"},
-				"kind":   {Type: "string", Description: "agent, tool, or plugin (when dispatch)"},
-				"target": str(), "input": str(), "outcome": str(), "reason": str(),
-			},
-			Required: []string{"action"},
-		},
-		Strict: true,
+	target := modelclient.Target{
+		Tenant: "live", Provider: liveEnv(t, "GIBSON_LIVE_PROVIDER"), Model: liveEnv(t, "GIBSON_LIVE_MODEL"),
 	}
-}
-
-// decideWithRealLLM mirrors brainExecutor.Decide: build the prompt, request
-// provider-native structured output, parse.
-func decideWithRealLLM(t *testing.T, p *providers.AnthropicProvider, mc brain.MissionContext) brain.DeciderOutput {
-	t.Helper()
+	name, schema, err := gibsonharness.StructuredSchema(deciderDecision{})
+	if err != nil {
+		t.Fatalf("schema of the decision: %v", err)
+	}
 	msgs := buildDeciderPrompt(mc)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	resp, err := p.CompleteStructured(ctx, llm.CompletionRequest{
-		Model:          integrationModel,
-		SystemPrompt:   msgs[0].Content,
-		Messages:       []llm.Message{{Role: llm.RoleUser, Content: msgs[1].Content}},
-		MaxTokens:      1024,
-		ResponseFormat: deciderResponseFormat(),
-	})
+	resp, err := client.Respond(ctx,
+		modelclient.Caller{Tenant: "live", Mission: mc.MissionID, Task: "decide-live", Purpose: "brain-decider"},
+		target,
+		modelclient.Request{
+			MaxOutputTokens: 1024,
+			Input:           deciderInput(msgs),
+			Text:            modelclient.JSONSchemaFormat(name, schema),
+		})
 	if err != nil {
-		t.Fatalf("llm structured complete: %v", err)
+		t.Fatalf("structured call of the gateway: %v", err)
 	}
-	raw := strings.TrimSpace(resp.Message.Content)
 	var d deciderDecision
-	if err := json.Unmarshal([]byte(raw), &d); err != nil {
-		t.Fatalf("structured decision not parseable JSON: %v\n---\n%s", err, raw)
+	if err := json.Unmarshal([]byte(resp.OutputText()), &d); err != nil {
+		t.Fatalf("structured decision is not JSON: %v\n---\n%s", err, resp.OutputText())
 	}
 	t.Logf("LLM decision: %+v", d)
 	return parseDecision(&d)
 }
 
 func TestDeciderLLM_DispatchesAgentTowardGoal(t *testing.T) {
-	p := newAnthropicForTest(t)
-	out := decideWithRealLLM(t, p, brain.MissionContext{
+	out := decideWithRealLLM(t, brain.MissionContext{
 		MissionID: "m1",
 		Goal:      "Get a shell on the web host 10.0.0.5 (it runs OpenSSH 8.9 on 22 and nginx on 80).",
 		Work: []brain.WorkSnapshot{
@@ -116,8 +104,7 @@ func TestDeciderLLM_DispatchesAgentTowardGoal(t *testing.T) {
 }
 
 func TestDeciderLLM_CompletesWhenGoalMet(t *testing.T) {
-	p := newAnthropicForTest(t)
-	out := decideWithRealLLM(t, p, brain.MissionContext{
+	out := decideWithRealLLM(t, brain.MissionContext{
 		MissionID: "m1",
 		Goal:      "Get a shell on 10.0.0.5.",
 		Work: []brain.WorkSnapshot{
