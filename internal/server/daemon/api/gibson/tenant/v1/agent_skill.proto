@@ -47,6 +47,29 @@ service AgentSkillService {
     };
   }
 
+  // ListSharedAgentSkills returns the Shared Agent Skills that the operator
+  // offers. A tenant has none of them until a tenant admin enables one.
+  rpc ListSharedAgentSkills(ListSharedAgentSkillsRequest) returns (ListSharedAgentSkillsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // EnableSharedAgentSkill copies one Shared Agent Skill into the tenant and
+  // makes it the current version. It grants nothing. A tenant admin still
+  // grants it to an agent or a mission with GrantAgentSkill before a load.
+  rpc EnableSharedAgentSkill(EnableSharedAgentSkillRequest) returns (EnableSharedAgentSkillResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
   // GetAgentSkill returns one version with its body and its file list. An empty
   // digest means the current version.
   rpc GetAgentSkill(GetAgentSkillRequest) returns (GetAgentSkillResponse) {
@@ -190,3 +213,27 @@ message RevokeAgentSkillRequest {
 }
 
 message RevokeAgentSkillResponse {}
+
+// SharedAgentSkillEntry is one Agent Skill that the operator offers.
+message SharedAgentSkillEntry {
+  string name = 1;
+  string description = 2;
+  // digest is the digest of the OCI image that the operator configured.
+  string digest = 3;
+  // enabled is true when the tenant holds this digest.
+  bool enabled = 4;
+}
+
+message ListSharedAgentSkillsRequest {}
+
+message ListSharedAgentSkillsResponse {
+  repeated SharedAgentSkillEntry entries = 1;
+}
+
+message EnableSharedAgentSkillRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+}
+
+message EnableSharedAgentSkillResponse {
+  AgentSkillEntry entry = 1;
+}

@@ -2590,6 +2590,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.AgentSkillService/EnableSharedAgentSkill": {
+    method: "/gibson.tenant.v1.AgentSkillService/EnableSharedAgentSkill",
+    service: "gibson.tenant.v1.AgentSkillService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.AgentSkillService/GetAgentSkill": {
     method: "/gibson.tenant.v1.AgentSkillService/GetAgentSkill",
     service: "gibson.tenant.v1.AgentSkillService",
@@ -2612,6 +2622,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.tenant.v1.AgentSkillService/ListAgentSkills": {
     method: "/gibson.tenant.v1.AgentSkillService/ListAgentSkills",
+    service: "gibson.tenant.v1.AgentSkillService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.tenant.v1.AgentSkillService/ListSharedAgentSkills": {
+    method: "/gibson.tenant.v1.AgentSkillService/ListSharedAgentSkills",
     service: "gibson.tenant.v1.AgentSkillService",
     relation: "admin",
     objectType: "tenant",

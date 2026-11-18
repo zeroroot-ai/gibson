@@ -129,6 +129,21 @@ func (f *fakeSkillSecrets) Resolve(_ context.Context, name string) ([]byte, erro
 	return v, nil
 }
 
+type fakeSharedSkills struct{ entries map[string]SharedAgentSkill }
+
+func (f *fakeSharedSkills) Names() []string {
+	var out []string
+	for n := range f.entries {
+		out = append(out, n)
+	}
+	return out
+}
+
+func (f *fakeSharedSkills) Get(name string) (SharedAgentSkill, bool) {
+	e, ok := f.entries[name]
+	return e, ok
+}
+
 type skillFixture struct {
 	svc   *AgentSkillService
 	store *memSkillStore
@@ -138,6 +153,7 @@ type skillFixture struct {
 	// keychains holds the keychain of each pull.
 	keychains []authn.Keychain
 	secrets   *fakeSkillSecrets
+	shared    *fakeSharedSkills
 }
 
 func newSkillFixture(t *testing.T, pullErr error) *skillFixture {
@@ -154,7 +170,8 @@ func newSkillFixture(t *testing.T, pullErr error) *skillFixture {
 		}, nil
 	}
 	f.secrets = &fakeSkillSecrets{values: map[string][]byte{}}
-	svc, err := NewAgentSkillService(f.store, pull, f.fga, f.secrets)
+	f.shared = &fakeSharedSkills{}
+	svc, err := NewAgentSkillService(f.store, pull, f.fga, f.secrets, f.shared)
 	require.NoError(t, err)
 	f.svc = svc
 	f.ctx = auth.WithIdentity(context.Background(),
@@ -323,4 +340,65 @@ func TestPublishAgentSkill_RegistrySecret(t *testing.T) {
 		Name: "web-recon", Reference: skillRef, RegistrySecret: "missing"})
 	assert.Equal(t, codes.FailedPrecondition, code(err))
 	assert.Len(t, f.pulls, pulls, "no pull after a failed secret read")
+}
+
+func offerShared(f *skillFixture) {
+	f.shared.entries = map[string]SharedAgentSkill{"web-recon": {
+		Reference: "ops.example/skills/web-recon@sha256:bb",
+		Pulled: &agentskill.Pulled{
+			Manifest: &agentskill.Manifest{Name: "web-recon", Description: "shared method"}, Digest: "sha256:bb",
+		},
+	}}
+}
+
+func TestListSharedAgentSkills_ShowsWhetherTheTenantHoldsTheDigest(t *testing.T) {
+	f := newSkillFixture(t, nil)
+	offerShared(f)
+	resp, err := f.svc.ListSharedAgentSkills(f.ctx, &tenantv1.ListSharedAgentSkillsRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetEntries(), 1)
+	assert.Equal(t, "sha256:bb", resp.GetEntries()[0].GetDigest())
+	assert.False(t, resp.GetEntries()[0].GetEnabled())
+
+	f.store.entries = []agentskillstore.Entry{{Name: "web-recon", Digest: "sha256:bb", Current: true}}
+	resp, err = f.svc.ListSharedAgentSkills(f.ctx, &tenantv1.ListSharedAgentSkillsRequest{})
+	require.NoError(t, err)
+	assert.True(t, resp.GetEntries()[0].GetEnabled())
+
+	_, err = f.svc.ListSharedAgentSkills(context.Background(), &tenantv1.ListSharedAgentSkillsRequest{})
+	assert.Equal(t, codes.PermissionDenied, code(err))
+}
+
+// Enabling copies the content into the tenant and writes the owner tuple. It
+// writes no grant, so the tenant admin still grants before a load.
+func TestEnableSharedAgentSkill_CopiesTheContentAndGrantsNothing(t *testing.T) {
+	f := newSkillFixture(t, nil)
+	offerShared(f)
+	f.fga.allow("system_tenant:_system", "platform_enabled", "agent_skill:_shared/web-recon")
+
+	resp, err := f.svc.EnableSharedAgentSkill(f.ctx, &tenantv1.EnableSharedAgentSkillRequest{Name: "web-recon"})
+	require.NoError(t, err)
+	assert.Equal(t, "sha256:bb", resp.GetEntry().GetDigest())
+	assert.Equal(t, []authz.Tuple{{User: "tenant:acme", Relation: "owner", Object: "agent_skill:acme/web-recon"}},
+		f.fga.writtenTuples(), "the owner tuple only, no grant")
+	assert.Empty(t, f.pulls, "the daemon does not pull again at enable")
+}
+
+func TestEnableSharedAgentSkill_Refusals(t *testing.T) {
+	f := newSkillFixture(t, nil)
+	offerShared(f)
+
+	// The gate does not offer it: no platform_enabled tuple.
+	_, err := f.svc.EnableSharedAgentSkill(f.ctx, &tenantv1.EnableSharedAgentSkillRequest{Name: "web-recon"})
+	assert.Equal(t, codes.NotFound, code(err), "no platform gate")
+
+	// The gate offers a name that the daemon did not pull.
+	f.fga.allow("system_tenant:_system", "platform_enabled", "agent_skill:_shared/ghost")
+	_, err = f.svc.EnableSharedAgentSkill(f.ctx, &tenantv1.EnableSharedAgentSkillRequest{Name: "ghost"})
+	assert.Equal(t, codes.NotFound, code(err), "not pulled")
+
+	_, err = f.svc.EnableSharedAgentSkill(f.ctx, &tenantv1.EnableSharedAgentSkillRequest{Name: "Bad--"})
+	assert.Equal(t, codes.InvalidArgument, code(err))
+	assert.Empty(t, f.store.entries)
+	assert.Empty(t, f.fga.writtenTuples())
 }

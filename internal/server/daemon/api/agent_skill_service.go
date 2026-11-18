@@ -44,6 +44,19 @@ type AgentSkillFGA interface {
 	ListUsersOfType(ctx context.Context, objectType, object, relation, userType string) ([]string, error)
 }
 
+// SharedAgentSkill is one Shared Agent Skill that the operator offers. The
+// daemon pulled and validated it at start.
+type SharedAgentSkill struct {
+	Reference string
+	Pulled    *agentskill.Pulled
+}
+
+// SharedAgentSkillSource lists the Shared Agent Skills of the operator source.
+type SharedAgentSkillSource interface {
+	Names() []string
+	Get(name string) (SharedAgentSkill, bool)
+}
+
 // AgentSkillService serves gibson.tenant.v1.AgentSkillService (epic
 // gibson#1364). The daemon has no write path to a registry. The publisher
 // pushes the image, and this service pulls it by digest.
@@ -56,16 +69,19 @@ type AgentSkillService struct {
 	// secrets reads the registry credential of a publish. The service never
 	// stores the value.
 	secrets AgentSkillSecrets
+	// shared is the operator source of Shared Agent Skills.
+	shared SharedAgentSkillSource
 }
 
 // NewAgentSkillService returns the service. Each argument is required.
 func NewAgentSkillService(
 	store agentskillstore.Store, pull AgentSkillPuller, fga AgentSkillFGA, secrets AgentSkillSecrets,
+	shared SharedAgentSkillSource,
 ) (*AgentSkillService, error) {
-	if store == nil || pull == nil || fga == nil || secrets == nil {
-		return nil, errors.New("api: AgentSkillService needs a store, a puller, the authorizer and the secrets")
+	if store == nil || pull == nil || fga == nil || secrets == nil || shared == nil {
+		return nil, errors.New("api: AgentSkillService needs a store, a puller, the authorizer, the secrets and the shared source")
 	}
-	return &AgentSkillService{store: store, pull: pull, fga: fga, secrets: secrets}, nil
+	return &AgentSkillService{store: store, pull: pull, fga: fga, secrets: secrets, shared: shared}, nil
 }
 
 // agentSkillTenant returns the tenant of the caller.
@@ -188,6 +204,74 @@ func (s *AgentSkillService) ListAgentSkills(
 		out.Entries = append(out.Entries, agentSkillEntryProto(e))
 	}
 	return out, nil
+}
+
+// ListSharedAgentSkills returns the Shared Agent Skills that the operator offers
+// and whether the tenant holds each digest.
+func (s *AgentSkillService) ListSharedAgentSkills(
+	ctx context.Context, _ *tenantv1.ListSharedAgentSkillsRequest,
+) (*tenantv1.ListSharedAgentSkillsResponse, error) {
+	const rpc = "ListSharedAgentSkills"
+	tenant, err := agentSkillTenant(ctx, rpc)
+	if err != nil {
+		return nil, err
+	}
+	out := &tenantv1.ListSharedAgentSkillsResponse{}
+	for _, name := range s.shared.Names() {
+		e, ok := s.shared.Get(name)
+		if !ok {
+			continue
+		}
+		_, gerr := s.store.Get(ctx, tenant, name, e.Pulled.Digest)
+		if gerr != nil && !errors.Is(gerr, agentskillstore.ErrNotFound) {
+			return nil, agentSkillStatus(rpc, gerr)
+		}
+		out.Entries = append(out.Entries, &tenantv1.SharedAgentSkillEntry{
+			Name: name, Description: e.Pulled.Manifest.Description, Digest: e.Pulled.Digest, Enabled: gerr == nil,
+		})
+	}
+	return out, nil
+}
+
+// EnableSharedAgentSkill copies one Shared Agent Skill into the tenant. The
+// platform gate must offer it: the system tenant holds platform_enabled on its
+// shared object. The call writes the owner tuple and no grant, so a tenant admin
+// still grants the Agent Skill before a load.
+func (s *AgentSkillService) EnableSharedAgentSkill(
+	ctx context.Context, req *tenantv1.EnableSharedAgentSkillRequest,
+) (*tenantv1.EnableSharedAgentSkillResponse, error) {
+	const rpc = "EnableSharedAgentSkill"
+	tenant, err := agentSkillTenant(ctx, rpc)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireSkillName(rpc, req.GetName()); err != nil {
+		return nil, err
+	}
+	sharedObject, err := authz.SharedAgentSkillObject(req.GetName())
+	if err != nil {
+		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
+	}
+	offered, err := s.fga.Check(ctx, "system_tenant:_system", "platform_enabled", sharedObject)
+	if err != nil {
+		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: check the platform gate: %v", rpc, err))
+	}
+	shared, found := s.shared.Get(req.GetName())
+	if !offered || !found {
+		return nil, status_grpc.Errorf(codes.NotFound, "%s: the operator offers no Agent Skill %q", rpc, req.GetName())
+	}
+	object, err := authz.AgentSkillObject(tenant, req.GetName())
+	if err != nil {
+		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
+	}
+	entry, err := s.store.Publish(ctx, tenant, shared.Reference, shared.Pulled)
+	if err != nil {
+		return nil, agentSkillStatus(rpc, err)
+	}
+	if err := s.fga.Write(ctx, []authz.Tuple{{User: "tenant:" + tenant, Relation: "owner", Object: object}}); err != nil {
+		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the owner tuple: %v", rpc, err))
+	}
+	return &tenantv1.EnableSharedAgentSkillResponse{Entry: agentSkillEntryProto(*entry)}, nil
 }
 
 // GetAgentSkill returns one version with its body and its file list.

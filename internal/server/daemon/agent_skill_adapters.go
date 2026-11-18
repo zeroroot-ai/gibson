@@ -12,7 +12,9 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agentskill"
+	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
+	"github.com/zeroroot-ai/gibson/internal/platform/supplychain"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -37,7 +39,20 @@ func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server) e
 	}
 	secretReader := daemonSecretReader{d: d}
 	d.agentSkills = agentskillstore.NewPostgresStore(d.pool)
-	svc, err := api.NewAgentSkillService(d.agentSkills, pull, d.authorizer, secretReader)
+
+	// The operator source. A reference that does not pull is not offered, and the
+	// daemon still starts, as for a component image that does not verify.
+	var refs []config.SharedAgentSkillConfig
+	if d.config != nil {
+		refs = d.config.SharedAgentSkills
+	}
+	shared, loadErr := loadSharedAgentSkills(ctx, refs,
+		operatorSkillPuller(registryAuthDir(), supplychain.NewKeychain), d.logger.Slog())
+	if loadErr != nil {
+		d.logger.Warn(ctx, "shared Agent Skills not offered (non-fatal)", "error", loadErr)
+	}
+	d.sharedAgentSkills = shared
+	svc, err := api.NewAgentSkillService(d.agentSkills, pull, d.authorizer, secretReader, shared)
 	if err != nil {
 		return fmt.Errorf("daemon: AgentSkillService: %w", err)
 	}

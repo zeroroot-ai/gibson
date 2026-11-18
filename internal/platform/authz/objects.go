@@ -147,6 +147,17 @@ func AgentSkillObject(tenant, name string) (string, error) {
 	return "agent_skill:" + tenant + TenantQualifiedSep + name, nil
 }
 
+// SharedAgentSkillTenant is the tenant segment of the object of a Shared Agent
+// Skill. A tenant slug has no underscore, so no tenant can have this segment.
+const SharedAgentSkillTenant = "_shared"
+
+// SharedAgentSkillObject returns the FGA object of a Shared Agent Skill that the
+// operator offers: "agent_skill:_shared/<name>". The platform_enabled tuple of
+// the system tenant sits on it.
+func SharedAgentSkillObject(name string) (string, error) {
+	return AgentSkillObject(SharedAgentSkillTenant, name)
+}
+
 // ModelObject is the model counterpart of ProviderObject.
 func ModelObject(tenant, name string) (string, error) {
 	return modelAccessObject("model", tenant, name)

@@ -31,6 +31,10 @@ func TestAgentSkillModel_NoDefaultGrant(t *testing.T) {
 		{"granted_agent", "user", false, "[agent_principal]"},
 		{"granted_mission", "mission", true, "[mission]"},
 		{"granted_mission", "tenant", false, "[mission]"},
+		// The operator offer of a Shared Agent Skill. It grants no load.
+		{"platform_enabled", "system_tenant", true, "[system_tenant]"},
+		{"platform_enabled", "tenant", false, "[system_tenant]"},
+		{"platform_enabled", "user", false, "[system_tenant]"},
 		{"owner", "tenant", true, "[tenant]"},
 		{"owner", "user", false, "[tenant]"},
 		// can_manage is a tenant admin through the owner tuple.
@@ -114,5 +118,15 @@ func TestAgentSkillObject(t *testing.T) {
 		if got, err := AgentSkillObject(tc[0], tc[1]); !errors.Is(err, ErrInvalidAgentSkillObject) {
 			t.Errorf("%s: AgentSkillObject = %q, %v; want ErrInvalidAgentSkillObject", name, got, err)
 		}
+	}
+}
+
+func TestSharedAgentSkillObject(t *testing.T) {
+	got, err := SharedAgentSkillObject("web-recon")
+	if err != nil || got != "agent_skill:_shared/web-recon" {
+		t.Errorf("SharedAgentSkillObject = %q, %v", got, err)
+	}
+	if _, err := SharedAgentSkillObject(""); !errors.Is(err, ErrInvalidAgentSkillObject) {
+		t.Errorf("an empty name: error = %v, want ErrInvalidAgentSkillObject", err)
 	}
 }

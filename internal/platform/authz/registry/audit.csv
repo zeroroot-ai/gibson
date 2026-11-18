@@ -256,9 +256,11 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.AdminTenantService/AdminRejectRegistration,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminUpdateTenant,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.AgentSkillService/DeleteAgentSkill,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
+/gibson.tenant.v1.AgentSkillService/EnableSharedAgentSkill,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.AgentSkillService/GetAgentSkill,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.AgentSkillService/GrantAgentSkill,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.AgentSkillService/ListAgentSkills,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
+/gibson.tenant.v1.AgentSkillService/ListSharedAgentSkills,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.AgentSkillService/PublishAgentSkill,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.AgentSkillService/RevokeAgentSkill,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.BudgetService/GetBudget,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/budget.proto,rule

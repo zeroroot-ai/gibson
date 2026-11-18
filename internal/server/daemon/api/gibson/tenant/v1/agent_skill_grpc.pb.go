@@ -36,12 +36,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentSkillService_PublishAgentSkill_FullMethodName = "/gibson.tenant.v1.AgentSkillService/PublishAgentSkill"
-	AgentSkillService_ListAgentSkills_FullMethodName   = "/gibson.tenant.v1.AgentSkillService/ListAgentSkills"
-	AgentSkillService_GetAgentSkill_FullMethodName     = "/gibson.tenant.v1.AgentSkillService/GetAgentSkill"
-	AgentSkillService_DeleteAgentSkill_FullMethodName  = "/gibson.tenant.v1.AgentSkillService/DeleteAgentSkill"
-	AgentSkillService_GrantAgentSkill_FullMethodName   = "/gibson.tenant.v1.AgentSkillService/GrantAgentSkill"
-	AgentSkillService_RevokeAgentSkill_FullMethodName  = "/gibson.tenant.v1.AgentSkillService/RevokeAgentSkill"
+	AgentSkillService_PublishAgentSkill_FullMethodName      = "/gibson.tenant.v1.AgentSkillService/PublishAgentSkill"
+	AgentSkillService_ListAgentSkills_FullMethodName        = "/gibson.tenant.v1.AgentSkillService/ListAgentSkills"
+	AgentSkillService_ListSharedAgentSkills_FullMethodName  = "/gibson.tenant.v1.AgentSkillService/ListSharedAgentSkills"
+	AgentSkillService_EnableSharedAgentSkill_FullMethodName = "/gibson.tenant.v1.AgentSkillService/EnableSharedAgentSkill"
+	AgentSkillService_GetAgentSkill_FullMethodName          = "/gibson.tenant.v1.AgentSkillService/GetAgentSkill"
+	AgentSkillService_DeleteAgentSkill_FullMethodName       = "/gibson.tenant.v1.AgentSkillService/DeleteAgentSkill"
+	AgentSkillService_GrantAgentSkill_FullMethodName        = "/gibson.tenant.v1.AgentSkillService/GrantAgentSkill"
+	AgentSkillService_RevokeAgentSkill_FullMethodName       = "/gibson.tenant.v1.AgentSkillService/RevokeAgentSkill"
 )
 
 // AgentSkillServiceClient is the client API for AgentSkillService service.
@@ -54,6 +56,13 @@ type AgentSkillServiceClient interface {
 	// ListAgentSkills returns the current version of each Agent Skill of the
 	// tenant. With all_versions it returns each version.
 	ListAgentSkills(ctx context.Context, in *ListAgentSkillsRequest, opts ...grpc.CallOption) (*ListAgentSkillsResponse, error)
+	// ListSharedAgentSkills returns the Shared Agent Skills that the operator
+	// offers. A tenant has none of them until a tenant admin enables one.
+	ListSharedAgentSkills(ctx context.Context, in *ListSharedAgentSkillsRequest, opts ...grpc.CallOption) (*ListSharedAgentSkillsResponse, error)
+	// EnableSharedAgentSkill copies one Shared Agent Skill into the tenant and
+	// makes it the current version. It grants nothing. A tenant admin still
+	// grants it to an agent or a mission with GrantAgentSkill before a load.
+	EnableSharedAgentSkill(ctx context.Context, in *EnableSharedAgentSkillRequest, opts ...grpc.CallOption) (*EnableSharedAgentSkillResponse, error)
 	// GetAgentSkill returns one version with its body and its file list. An empty
 	// digest means the current version.
 	GetAgentSkill(ctx context.Context, in *GetAgentSkillRequest, opts ...grpc.CallOption) (*GetAgentSkillResponse, error)
@@ -88,6 +97,26 @@ func (c *agentSkillServiceClient) ListAgentSkills(ctx context.Context, in *ListA
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListAgentSkillsResponse)
 	err := c.cc.Invoke(ctx, AgentSkillService_ListAgentSkills_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentSkillServiceClient) ListSharedAgentSkills(ctx context.Context, in *ListSharedAgentSkillsRequest, opts ...grpc.CallOption) (*ListSharedAgentSkillsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSharedAgentSkillsResponse)
+	err := c.cc.Invoke(ctx, AgentSkillService_ListSharedAgentSkills_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentSkillServiceClient) EnableSharedAgentSkill(ctx context.Context, in *EnableSharedAgentSkillRequest, opts ...grpc.CallOption) (*EnableSharedAgentSkillResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnableSharedAgentSkillResponse)
+	err := c.cc.Invoke(ctx, AgentSkillService_EnableSharedAgentSkill_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +173,13 @@ type AgentSkillServiceServer interface {
 	// ListAgentSkills returns the current version of each Agent Skill of the
 	// tenant. With all_versions it returns each version.
 	ListAgentSkills(context.Context, *ListAgentSkillsRequest) (*ListAgentSkillsResponse, error)
+	// ListSharedAgentSkills returns the Shared Agent Skills that the operator
+	// offers. A tenant has none of them until a tenant admin enables one.
+	ListSharedAgentSkills(context.Context, *ListSharedAgentSkillsRequest) (*ListSharedAgentSkillsResponse, error)
+	// EnableSharedAgentSkill copies one Shared Agent Skill into the tenant and
+	// makes it the current version. It grants nothing. A tenant admin still
+	// grants it to an agent or a mission with GrantAgentSkill before a load.
+	EnableSharedAgentSkill(context.Context, *EnableSharedAgentSkillRequest) (*EnableSharedAgentSkillResponse, error)
 	// GetAgentSkill returns one version with its body and its file list. An empty
 	// digest means the current version.
 	GetAgentSkill(context.Context, *GetAgentSkillRequest) (*GetAgentSkillResponse, error)
@@ -169,6 +205,12 @@ func (UnimplementedAgentSkillServiceServer) PublishAgentSkill(context.Context, *
 }
 func (UnimplementedAgentSkillServiceServer) ListAgentSkills(context.Context, *ListAgentSkillsRequest) (*ListAgentSkillsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAgentSkills not implemented")
+}
+func (UnimplementedAgentSkillServiceServer) ListSharedAgentSkills(context.Context, *ListSharedAgentSkillsRequest) (*ListSharedAgentSkillsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSharedAgentSkills not implemented")
+}
+func (UnimplementedAgentSkillServiceServer) EnableSharedAgentSkill(context.Context, *EnableSharedAgentSkillRequest) (*EnableSharedAgentSkillResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EnableSharedAgentSkill not implemented")
 }
 func (UnimplementedAgentSkillServiceServer) GetAgentSkill(context.Context, *GetAgentSkillRequest) (*GetAgentSkillResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAgentSkill not implemented")
@@ -235,6 +277,42 @@ func _AgentSkillService_ListAgentSkills_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentSkillServiceServer).ListAgentSkills(ctx, req.(*ListAgentSkillsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentSkillService_ListSharedAgentSkills_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSharedAgentSkillsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentSkillServiceServer).ListSharedAgentSkills(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentSkillService_ListSharedAgentSkills_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentSkillServiceServer).ListSharedAgentSkills(ctx, req.(*ListSharedAgentSkillsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentSkillService_EnableSharedAgentSkill_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnableSharedAgentSkillRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentSkillServiceServer).EnableSharedAgentSkill(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentSkillService_EnableSharedAgentSkill_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentSkillServiceServer).EnableSharedAgentSkill(ctx, req.(*EnableSharedAgentSkillRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -325,6 +403,14 @@ var AgentSkillService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAgentSkills",
 			Handler:    _AgentSkillService_ListAgentSkills_Handler,
+		},
+		{
+			MethodName: "ListSharedAgentSkills",
+			Handler:    _AgentSkillService_ListSharedAgentSkills_Handler,
+		},
+		{
+			MethodName: "EnableSharedAgentSkill",
+			Handler:    _AgentSkillService_EnableSharedAgentSkill_Handler,
 		},
 		{
 			MethodName: "GetAgentSkill",
