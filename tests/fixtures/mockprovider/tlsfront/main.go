@@ -6,7 +6,7 @@
 // pod. This command takes the TLS connection and sends each request to the mock
 // provider on the loopback address of the pod.
 //
-// The exit tests of the AAIF epics use it (exit-test-aaif-alignment.yml).
+// The exit tests that use the mock provider deploy it with deploy.sh.
 package main
 
 import (

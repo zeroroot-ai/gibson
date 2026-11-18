@@ -74,7 +74,6 @@ env:
   NODE: gibson-control-plane
   E2E_OUT: ${{ github.workspace }}/e2e-out
   MOCK_NS: gibson-e2e-mock
-  MOCK_HOST: mock-provider.gibson-e2e-mock.svc.cluster.local
 
 jobs:
   aaif-alignment:
@@ -135,34 +134,13 @@ jobs:
           with-kvm: "false"
           image-tag: aaif-gateway
 
-      # The mock provider of the exit test. The image holds the mock and its TLS
-      # front. The certificate names the Service of the mock. The CA is kept in
-      # the file mock-ca.crt of the run, for the diagnostics.
+      # The mock provider of the exit test. The script of the mock builds the
+      # image, makes the certificate for the Service name and writes the two URLs
+      # to the env file. It keeps the CA in the file mock-ca.crt of the run, for
+      # the diagnostics. The model gate exit test uses the same script.
       - name: Start the mock model provider
         working-directory: gibson
-        run: |
-          set -euo pipefail
-          IMG=ghcr.io/zeroroot-ai/gibson-fixture-mockprovider:e2e
-          docker build -f tests/fixtures/mockprovider/Dockerfile -t "$IMG" .
-          kind load docker-image "$IMG" --name "$CLUSTER"
-          kubectl apply -f tests/fixtures/mockprovider/mockprovider.yaml
-          dir=$(mktemp -d)
-          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=mock-provider-ca" \
-            -keyout "$dir/ca.key" -out "$dir/ca.crt"
-          openssl req -newkey rsa:2048 -nodes -subj "/CN=${MOCK_HOST}" \
-            -keyout "$dir/tls.key" -out "$dir/tls.csr"
-          printf 'subjectAltName=DNS:%s\n' "$MOCK_HOST" > "$dir/san.ext"
-          openssl x509 -req -in "$dir/tls.csr" -CA "$dir/ca.crt" -CAkey "$dir/ca.key" -CAcreateserial \
-            -days 1 -extfile "$dir/san.ext" -out "$dir/tls.crt"
-          kubectl -n "$MOCK_NS" create secret generic mock-provider-tls \
-            --from-file=tls.crt="$dir/tls.crt" --from-file=tls.key="$dir/tls.key" --from-file=ca.crt="$dir/ca.crt"
-          mkdir -p "$E2E_OUT"
-          cp "$dir/ca.crt" "$E2E_OUT/mock-ca.crt"
-          kubectl -n "$MOCK_NS" rollout status deployment/mock-provider --timeout=5m
-          {
-            echo "GIBSON_E2E_MOCK_PROVIDER_URL=https://${MOCK_HOST}"
-            echo "GIBSON_E2E_MOCK_RECORDED_URL=http://${MOCK_HOST}"
-          } > /tmp/e2e-runner.env
+        run: bash tests/fixtures/mockprovider/deploy.sh /tmp/e2e-runner.env
 
       # The gateway, ext-authz and the trace collector must run before the test
       # sends a call. A missing part fails here with its name, not as a timeout.

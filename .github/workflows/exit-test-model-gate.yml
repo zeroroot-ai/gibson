@@ -220,21 +220,12 @@ jobs:
           kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
 
       # The mock model provider. The test points the provider of the tenant at
-      # it. The run builds the image from tests/fixtures/mockprovider and loads
-      # it into kind, as the tool dispatch test does for its MCP fixture. The
-      # URL goes to the test through the env file of run-e2e-job.sh.
+      # it. The script of the mock builds the image, loads it into kind and
+      # writes the URL of the mock to the env file of run-e2e-job.sh. The AAIF
+      # alignment exit test uses the same script.
       - name: Start the mock model provider
         working-directory: gibson
-        run: |
-          set -euo pipefail
-          IMG=ghcr.io/zeroroot-ai/gibson-fixture-mockprovider:e2e
-          docker build -f tests/fixtures/mockprovider/Dockerfile -t "$IMG" .
-          kind load docker-image "$IMG" --name "$CLUSTER"
-          kubectl apply -f tests/fixtures/mockprovider/deployment.yaml
-          kubectl -n "$NS" rollout status deployment/fixture-mockprovider --timeout=3m
-          mkdir -p "$E2E_OUT"
-          echo "GIBSON_E2E_MOCK_PROVIDER_URL=http://fixture-mockprovider.${NS}.svc.cluster.local:8080" \
-            > "$E2E_OUT/e2e-env"
+        run: bash tests/fixtures/mockprovider/deploy.sh "$E2E_OUT/e2e-env"
 
       - name: Build the e2e suite into an image
         working-directory: gibson

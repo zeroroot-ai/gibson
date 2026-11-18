@@ -1,6 +1,6 @@
-# The mock model provider of the exit tests of the AAIF epics. The workflow
-# applies this file after it makes the Secret mock-provider-tls (a certificate
-# for the Service name) and loads the image into kind.
+# The mock model provider of the exit tests that use the mock. The script
+# deploy.sh applies this file after it loads the image into kind. It also makes
+# the Secret mock-provider-tls (a certificate for the Service name).
 #
 # The provider record of the tenant names https://mock-provider.gibson-e2e-mock.svc.cluster.local.
 # The gateway reaches the TLS front on port 443. The suite reads the requests that
