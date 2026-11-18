@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -46,9 +47,15 @@ func push(t *testing.T, img v1.Image) string {
 	return host + "/acme/web-recon@" + digest.String()
 }
 
+// testPuller reaches the in-process registry. It is the explicit test-only option
+// of the Puller.
+func testPuller() *agentskill.Puller {
+	return agentskill.NewPuller(agentskill.WithTransportForTest(http.DefaultTransport))
+}
+
 func pull(t *testing.T, ref string) (*agentskill.Pulled, error) {
 	t.Helper()
-	return agentskill.Pull(context.Background(), ref, "web-recon", authn.DefaultKeychain)
+	return testPuller().Pull(context.Background(), ref, "web-recon", authn.DefaultKeychain)
 }
 
 func rawImage(t *testing.T, cfg, layer types.MediaType, tarBytes []byte, layers int) v1.Image {
@@ -165,7 +172,7 @@ func TestPull_Refusals(t *testing.T) {
 		t.Errorf("two layers: error = %v, want ErrInvalidFolder", err)
 	}
 	// The folder name in the request must match the name in the file.
-	_, err = agentskill.Pull(context.Background(), good, "other-name", authn.DefaultKeychain)
+	_, err = testPuller().Pull(context.Background(), good, "other-name", authn.DefaultKeychain)
 	if !errors.Is(err, agentskill.ErrInvalidFolder) {
 		t.Errorf("name mismatch: error = %v, want ErrInvalidFolder", err)
 	}

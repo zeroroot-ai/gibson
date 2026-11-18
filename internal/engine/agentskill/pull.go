@@ -9,11 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+
+	"github.com/zeroroot-ai/gibson/internal/infra/netguard"
 )
 
 // tarOverhead is the room that tar headers and padding need on top of the
@@ -28,21 +31,71 @@ type Pulled struct {
 	Files  []File
 }
 
+// Puller pulls Agent Skill images from a registry by digest.
+//
+// The reference comes from a tenant, so the Puller limits where it can connect.
+// It speaks HTTPS only, and its dialer refuses loopback, private, link-local,
+// carrier-grade NAT, multicast and unspecified addresses after name
+// resolution, for each connection and each redirect (internal/infra/netguard).
+type Puller struct {
+	transport http.RoundTripper
+}
+
+// PullerOption changes a Puller.
+type PullerOption func(*Puller)
+
+// AllowPrivateAddresses removes the address limit and keeps HTTPS only. Only the
+// operator path uses it, because the operator config names the registry and a
+// tenant does not.
+func AllowPrivateAddresses() PullerOption {
+	return func(p *Puller) { p.transport = httpsOnly{inner: netguard.Transport(true)} }
+}
+
+// WithTransportForTest replaces the transport, with no HTTPS check and no
+// address limit. It exists only so a test can reach an in-process registry.
+func WithTransportForTest(rt http.RoundTripper) PullerOption {
+	return func(p *Puller) { p.transport = rt }
+}
+
+// NewPuller returns a Puller with the HTTPS check and the address limit.
+func NewPuller(opts ...PullerOption) *Puller {
+	p := &Puller{transport: httpsOnly{inner: netguard.Transport(false)}}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
+}
+
+// httpsOnly refuses a request that is not HTTPS, whatever the reference says.
+// The registry client picks http for a name such as localhost, so the check
+// must be in the transport.
+type httpsOnly struct{ inner http.RoundTripper }
+
+func (h httpsOnly) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme != "https" {
+		return nil, fmt.Errorf("agentskill: refusing a %q request to %s: HTTPS only", req.URL.Scheme, req.URL.Host)
+	}
+	return h.inner.RoundTrip(req)
+}
+
 // Pull reads the image that reference names, and validates the folder in it.
 //
 // The reference must hold a digest. A tag is refused. Pull checks that the
 // registry returns the manifest with that digest, checks the media types, and
 // reads one layer with a size limit. The registry client checks the digest of
 // each blob. Pull then unpacks the tar archive and calls Validate with
-// folderName. Pull never keeps a file that is over a limit.
-func Pull(
-	ctx context.Context, reference, folderName string, keychain authn.Keychain, opts ...remote.Option,
+// folderName. Pull never keeps a file that is over a limit. keychain gives the
+// credential for the registry of the reference.
+func (p *Puller) Pull(
+	ctx context.Context, reference, folderName string, keychain authn.Keychain,
 ) (*Pulled, error) {
 	ref, err := name.NewDigest(reference, name.StrictValidation)
 	if err != nil {
 		return nil, invalidf("the reference %q is not a digest reference: %v", reference, err)
 	}
-	all := append([]remote.Option{remote.WithContext(ctx), remote.WithAuthFromKeychain(keychain)}, opts...)
+	all := []remote.Option{
+		remote.WithContext(ctx), remote.WithAuthFromKeychain(keychain), remote.WithTransport(p.transport),
+	}
 	desc, err := remote.Get(ref, all...)
 	if err != nil {
 		return nil, fmt.Errorf("agentskill: pull %s: %w", ref.Name(), err)
