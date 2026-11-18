@@ -81,7 +81,7 @@ func componentCtx(subject string) context.Context {
 }
 
 func discoveryServer(reg ComponentRegistry, az authz.Authorizer) *ComponentServiceServer {
-	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil)
+	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil)
 	if az != nil {
 		svc.WithAuthorizer(az)
 	}

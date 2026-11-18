@@ -76,8 +76,8 @@ func newAuthzServer(az authz.Authorizer) *ComponentServiceServer {
 		&noopRegistry{},
 		&noopWorkQueue{},
 		testLogger(),
-		nil, nil, nil, nil,
-	)
+		nil, nil, nil)
+
 	if az != nil {
 		svc.WithAuthorizer(az)
 	}

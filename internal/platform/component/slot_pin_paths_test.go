@@ -42,7 +42,7 @@ func TestCompletionRPCs_AWorkIDWithNoRegistryIsRefused(t *testing.T) {
 	prov := &mockLLMProvider{name: "default-p", models: []llm.ModelInfo{{Name: "d-1"}}, completeResp: reply, toolCompleteResp: reply}
 	base := newWorkIDEnv(t)
 	adapter := newTestAdapter(prov)
-	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), adapter, nil, nil, nil).
+	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil).
 		WithLLMToolCompleter(adapter)
 	ctx := auth.ContextWithTenantString(context.Background(), adapterTestTenant)
 	msgs := []*componentpb.LLMMessage{{Role: "user", Content: "hello"}}
@@ -189,7 +189,7 @@ func TestWorkSlotPins_BindAndLookupPaths(t *testing.T) {
 func TestClaimedWorkOwner_AnOwnerReadFailureRefuses(t *testing.T) {
 	sc := brokenStateClient(t)
 	base := newWorkIDEnv(t)
-	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil, nil).
+	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil).
 		WithWorkContextRegistry(NewRedisWorkContextRegistry(sc))
 	owner, err := svc.claimedWorkOwner(withSubject(ctxForTenant(adapterTestTenant), testClaimant), adapterTestTenant, "w")
 	require.Error(t, err)
@@ -213,7 +213,7 @@ func (failingPinRegistry) WorkSlotPin(context.Context, string, string) (*agent.S
 // A failed pin read refuses the completion.
 func TestNodeSlotPin_APinReadFailureRefuses(t *testing.T) {
 	base := newWorkIDEnv(t)
-	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil, nil).
+	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil).
 		WithWorkContextRegistry(failingPinRegistry{ownEveryWorkItem{tenant: adapterTestTenant}})
 	pin, err := svc.nodeSlotPin(context.Background(), adapterTestTenant, adapterTestTenant, "w", "fast")
 	assert.Equal(t, codes.Unavailable, status.Code(err))

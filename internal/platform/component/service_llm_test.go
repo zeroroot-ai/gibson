@@ -33,7 +33,7 @@ import (
 // llmSeamServer wires the real adapter into a ComponentServiceServer, so a
 // test exercises the same path a component's RPC takes.
 func llmSeamServer(provider *mockLLMProvider) *ComponentServiceServer {
-	return NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil).
+	return NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil).
 		WithLLMToolCompleter(newTestAdapter(provider))
 }
 
@@ -113,7 +113,7 @@ func TestCompleteStructured_EnforcesTheCallersSchema(t *testing.T) {
 		},
 	}
 
-	svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil).
+	svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil).
 		WithLLMToolCompleter(newTestAdapterForProvider("p", provider))
 
 	out, err := svc.CompleteStructured(llmSeamContext(), &componentpb.CompleteStructuredRequest{
@@ -161,7 +161,7 @@ func TestCompleteStructured_MissingOrMalformedSchema_IsInvalidArgument(t *testin
 		mockLLMProvider: mockLLMProvider{name: "p", models: []llm.ModelInfo{{Name: "m"}}},
 		structuredResp:  &llm.CompletionResponse{Message: llm.Message{Content: "{}"}},
 	}
-	svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil).
+	svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil).
 		WithLLMToolCompleter(newTestAdapterForProvider("p", provider))
 
 	// The RPC's own guard rejects an absent schema before the seam sees it;
@@ -197,7 +197,7 @@ func TestCompleteStructured_MissingOrMalformedSchema_IsInvalidArgument(t *testin
 func TestCompleteWithTools_KeepsTheSeamsOwnCode(t *testing.T) {
 	// The tenant has no usable provider — a configuration answer the component
 	// can act on, so Unavailable must not arrive as Internal.
-	svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil).
+	svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil).
 		WithLLMToolCompleter(newEmptyTenantAdapter())
 
 	_, err := svc.CompleteWithTools(llmSeamContext(), &componentpb.CompleteWithToolsRequest{

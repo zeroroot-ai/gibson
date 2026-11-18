@@ -1800,8 +1800,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// The registry uses a 30-second TTL: components that stop heartbeating within
 	// that window are automatically deregistered by Redis key expiry.
 	//
-	// Harness proxy dependencies (llmCompleter, memStore) are wired as nil until
-	// task 5.4 connects those subsystems. findingSubmitter is wired here using
+	// findingSubmitter is wired here using
 	// GraphRAGFindingSubmitter when infrastructure is available.
 	if d.stateClient != nil {
 		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
@@ -1841,54 +1840,22 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				d.logger.Warn(ctx, "brain registry not ready; finding submitter not wired (findings will be logged only)")
 			}
 
-			// Build LLM adapter when the infrastructure (registry + slot manager) is ready.
-			// The adapter bridges the narrow LLMCompleter/LLMToolCompleter interfaces to
-			// the full provider resolution chain.
-			var llmAdapter *component.LLMRegistryAdapter
-			if d.infrastructure != nil &&
-				d.infrastructure.llmRegistry != nil &&
-				d.infrastructure.slotManager != nil {
-				llmAdapter = component.NewLLMRegistryAdapter(
-					d.infrastructure.llmRegistry,
-					d.infrastructure.slotManager,
-					d.logger.WithComponent("llm-adapter").Slog(),
-				// Install the per-tenant resolver — the SAME one the mission
-				// path uses (harness_init) — or every component completion
-				// fails closed with "per-tenant LLM provider resolution is not
-				// configured". Without this the adapter was wired but inert:
-				// an enrolled agent's completion never reached a provider.
-				).WithTenantResolver(d.newSlotManagerForTenant())
-				d.logger.Info(ctx, "LLM adapter wired into ComponentService with per-tenant resolver")
-			} else {
-				d.logger.Warn(ctx, "LLM adapter not wired: infrastructure or LLM registry not ready; LLM completion RPCs will return Unimplemented")
-			}
-
-			var llmCompleterIface component.LLMCompleter
-			var llmToolCompleterIface component.LLMToolCompleter
-			if llmAdapter != nil {
-				llmCompleterIface = llmAdapter
-				llmToolCompleterIface = llmAdapter
-			}
-
 			compSvc := component.NewComponentServiceServer(
 				compRegistry,
 				compQueue,
 				d.logger.Slog(),
-				llmCompleterIface,      // LLMRegistryAdapter or nil
-				findingSubmitter,       // GraphRAGFindingSubmitter or nil
-				d.componentAccessStore, // nil when no KeyProvider configured
-				auditLogger,
-			)
 
-			// Wire LLMToolCompleter for tool-calling and structured output support.
+				findingSubmitter,
+				d.componentAccessStore,
+				auditLogger)
+
 			// A bank member heartbeats with its status (ADR-0119, gibson#1716).
 			compSvc.WithMemberStatusSink(&memberEvents{daemon: d})
+			compSvc.WithGateways(
+				component.GatewayInfo{URL: d.publicGateways.model.URL, CAPEM: d.publicGateways.model.CAPEM},
+				component.GatewayInfo{URL: d.publicGateways.agent.URL, CAPEM: d.publicGateways.agent.CAPEM})
 			compSvc.WithEventHub(componentEventHub)
 			d.logger.Info(ctx, "WatchComponentEvents wired into ComponentService (gibson#154)")
-			if llmToolCompleterIface != nil {
-				compSvc.WithLLMToolCompleter(llmToolCompleterIface)
-				d.logger.Info(ctx, "LLMToolCompleter wired into ComponentService")
-			}
 
 			// Wire the DiscoveryResult ingest path so a component's SubmitResult
 			// carrying proto field 100 folds the discovered entities into the

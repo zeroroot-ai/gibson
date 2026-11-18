@@ -45,7 +45,7 @@ func newSlotPinEnv(t *testing.T) *slotPinEnv {
 	adapter := NewLLMRegistryAdapter(nil, nil, adapterTestLogger).
 		WithTenantResolver(tenantResolverFor(map[string]*tenantSet{adapterTestTenant: set, auth.SystemTenantString: set}))
 
-	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), adapter, nil, nil, nil).
+	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil).
 		WithWorkContextRegistry(NewRedisWorkContextRegistry(base.state))
 	return &slotPinEnv{svc: svc, queue: base.queue, state: base.state, defaultProv: defaultProv, pinnedProv: pinnedProv}
 }
@@ -155,7 +155,7 @@ func TestComplete_AWorkIDWithNoRegistryIsRefused(t *testing.T) {
 	reply := &llm.CompletionResponse{Message: llm.Message{Role: llm.RoleAssistant, Content: "ok"}}
 	prov := &mockLLMProvider{name: "default-p", models: []llm.ModelInfo{{Name: "d-1"}}, completeResp: reply}
 	base := newWorkIDEnv(t)
-	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), newTestAdapter(prov), nil, nil, nil)
+	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), adapterTestTenant)
 	_, err := svc.Complete(ctx, &componentpb.CompleteRequest{

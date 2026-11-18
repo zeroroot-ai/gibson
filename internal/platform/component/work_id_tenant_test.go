@@ -64,7 +64,7 @@ func newWorkIDEnv(t *testing.T) *workIDEnv {
 	t.Cleanup(func() { _ = sc.Close() })
 
 	queue := NewRedisWorkQueue(client)
-	svc := NewComponentServiceServer(&noopRegistry{}, queue, testLogger(), nil, nil, nil, nil).
+	svc := NewComponentServiceServer(&noopRegistry{}, queue, testLogger(), nil, nil, nil).
 		WithWorkContextStore(sc, testLogger())
 
 	return &workIDEnv{svc: svc, queue: queue, state: sc, mr: mr}
@@ -203,7 +203,7 @@ func TestSubmitResult_AcceptsSharedComponentIdentity(t *testing.T) {
 // default: with no work-context registry there is no way to tell whose work an
 // id names, and an unanswerable question must not resolve to "allowed".
 func TestSubmitResult_RefusedWhenOwnershipCannotBeEstablished(t *testing.T) {
-	svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil)
+	svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), attackerTenant)
 	_, err := svc.SubmitResult(ctx, &componentpb.SubmitResultRequest{

@@ -15,6 +15,8 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/agentwire"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -28,7 +30,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
-	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -888,22 +889,20 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	task agent.Task,
 	info component.ComponentInfo,
 ) (agent.Result, error) {
-	req := &agentpb.ExecuteRequest{
-		Task:      agent.TaskToProto(task),
-		TimeoutMs: task.Timeout.Milliseconds(),
-		// The run travels in the request, so an agent that serves the work
+	run := agentwire.Run{
+		// The run travels in the message, so an agent that serves the work
 		// item sends it on every callback (gibson#1235).
-		MissionRunId: h.missionCtx.MissionRunID,
-		AgentRunId:   h.missionCtx.AgentRunID,
+		MissionRunID: h.missionCtx.MissionRunID,
+		AgentRunID:   h.missionCtx.AgentRunID,
 	}
 	if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
-		req.TraceId = spanCtx.TraceID().String()
-		req.ParentSpanId = spanCtx.SpanID().String()
+		run.TraceID = spanCtx.TraceID().String()
+		run.ParentSpanID = spanCtx.SpanID().String()
 	}
-	payload, err := protojson.Marshal(req)
+	payload, err := agentwire.BuildMessage(task, run)
 	if err != nil {
 		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
-			"failed to marshal agent request for work queue: "+name, err)
+			"failed to build the a2a message for work queue: "+name, err)
 	}
 
 	// The remote agent calls back over HarnessCallbackService with
@@ -940,7 +939,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	// heartbeat does (gibson#1602).
 	// The LLM slot pins of the node go on the work item, so an agent served
 	// with sdk.ServeAgent gets them on its completions (gibson#1203).
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, component.WorkTypeAgentExecute, payload, nil,
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, agentwire.WorkType, payload, nil,
 		WorkSlotPins(task.SlotOverrides), info, waitPolicy{bound: task.Timeout, livenessBounded: true}, task.ID.String())
 	if err != nil {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
@@ -950,22 +949,24 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 			"agent work queue call failed: "+name, err)
 	}
 
-	resp := &agentpb.ExecuteResponse{}
-	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(resultBytes, resp); err != nil {
+	outcome, err := agentwire.ParseTask(resultBytes)
+	if err != nil {
 		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
-			"failed to unmarshal agent work result: "+name, err)
+			"failed to read the a2a task of the agent work result: "+name, err)
 	}
-	if e := resp.GetError(); e != nil && (e.GetMessage() != "" || e.GetCode() != "") {
+	// The agent run takes its state from the work item (decision 16). The one
+	// mapping from the Task state is brain.WorkStateFromTask.
+	if brain.WorkStateFromTask(outcome.State) == brain.WorkFailed {
 		// A remote agent that reports a failure fails the node with its own
-		// reason; swallowing it would leave the mission looking successful.
+		// reason. Swallowing it would leave the mission looking successful.
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 			"agent": name, "status": "failed", "transport": "work_queue",
 		})
 		return agent.Result{}, types.NewError(ErrHarnessDelegationFailed,
-			fmt.Sprintf("remote agent %q returned error [%s]: %s", name, e.GetCode(), e.GetMessage()))
+			fmt.Sprintf("remote agent %q ended in state %s: %s", name, outcome.State, outcome.Result.Error.Message))
 	}
 
-	result := agent.ProtoToResult(resp.GetResult())
+	result := outcome.Result
 	result.TaskID = task.ID
 
 	h.metrics.RecordCounter("agents.delegations", 1, map[string]string{

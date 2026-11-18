@@ -154,7 +154,7 @@ func newChainEnv(t *testing.T, filter modelgate.Filter) *chainEnv {
 		})
 	queue := component.NewRedisWorkQueue(client)
 	claims := component.NewRedisWorkContextRegistry(sc)
-	svc := component.NewComponentServiceServer(component.NewRedisComponentRegistry(client, time.Minute), queue, logger, adapter, nil, nil, nil).
+	svc := component.NewComponentServiceServer(component.NewRedisComponentRegistry(client, time.Minute), queue, logger, nil, nil, nil).
 		WithWorkContextRegistry(claims)
 	return &chainEnv{svc: svc, queue: queue, def: def, pinned: pinned, manager: manager, claims: claims}
 }

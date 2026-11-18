@@ -5,14 +5,12 @@ package component
 
 import (
 	"context"
-	"sort"
 	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
-	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -97,77 +95,6 @@ func (s *ComponentServiceServer) ListTools(
 	s.logger.DebugContext(ctx, "list tools: completed",
 		"tenant", tenant, "count", len(tools))
 	return &componentpb.ListToolsResponse{Tools: tools}, nil
-}
-
-// ListAgents returns the agents registered in this tenant.
-//
-// Agents are not tools, so they are not in the catalog engine (CatalogToolLister
-// skips kind=="agent" by design). They come straight from the registry, with the
-// same per-component FGA gate applied so discovery cannot reveal an agent the
-// caller may not execute.
-func (s *ComponentServiceServer) ListAgents(
-	ctx context.Context,
-	_ *componentpb.ListAgentsRequest,
-) (*componentpb.ListAgentsResponse, error) {
-	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" {
-		return nil, status.Errorf(codes.Unauthenticated, "missing tenant in context")
-	}
-	caller, err := s.catalogCaller(ctx, tenant)
-	if err != nil {
-		return nil, err
-	}
-	if s.authorizer == nil {
-		return nil, status.Errorf(codes.Unimplemented, "authorizer not configured")
-	}
-
-	instances, err := s.registry.DiscoverAll(ctx, tenant, "agent")
-	if err != nil {
-		s.logger.ErrorContext(ctx, "list agents: registry discovery failed",
-			"tenant", tenant, "error", err)
-		return nil, status.Errorf(codes.Internal, "list agents: %v", err)
-	}
-
-	// One registry entry per live instance; an agent running three replicas must
-	// still appear once.
-	seen := make(map[string]struct{}, len(instances))
-	agents := make([]*componentpb.AgentDescriptorProto, 0, len(instances))
-	for _, inst := range instances {
-		if inst.Name == systemComponentName {
-			continue // the synthetic client backplane is not a fleet agent
-		}
-		if _, dup := seen[inst.Name]; dup {
-			continue
-		}
-
-		allowed, checkErr := s.authorizer.Check(ctx, caller.Subject, "can_execute", authz.ComponentObject(authz.KindAgent, inst.Name))
-		if checkErr != nil {
-			// A failed check must not leak the agent. Log and skip.
-			s.logger.WarnContext(ctx, "list agents: authz check failed; omitting agent",
-				"tenant", tenant, "agent", inst.Name, "error", checkErr)
-			continue
-		}
-		if !allowed {
-			continue
-		}
-
-		seen[inst.Name] = struct{}{}
-		agents = append(agents, &componentpb.AgentDescriptorProto{
-			Name:        inst.Name,
-			Version:     inst.Version,
-			Description: inst.Description,
-			// Capabilities and target types are carried in registration metadata;
-			// absent keys yield empty slices rather than nil surprises.
-			Capabilities: metadataList(inst.Metadata, "capabilities"),
-			TargetTypes:  metadataList(inst.Metadata, "target_types"),
-		})
-	}
-
-	sort.Slice(agents, func(i, j int) bool { return agents[i].Name < agents[j].Name })
-
-	s.logger.DebugContext(ctx, "list agents: completed",
-		"tenant", tenant, "count", len(agents))
-	return &componentpb.ListAgentsResponse{Agents: agents}, nil
 }
 
 // maxDiscoveryResults bounds a single discovery response. The catalog engine

@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
@@ -53,21 +52,6 @@ import (
 // Both interfaces will be replaced by direct harness delegation once the
 // mission-context lookup layer (task 5.3+) is in place.
 // ---------------------------------------------------------------------------
-
-// LLMCompleter routes a completion request for a given mission slot to the
-// appropriate LLM provider. The missionID is used to resolve per-mission
-// slot configuration overrides before falling back to tenant-level defaults.
-type LLMCompleter interface {
-	// Complete executes a blocking completion using the named slot.
-	// messagesJSON is a JSON-encoded []llm.Message.
-	// Returns the response content, finish reason, token usage, and resolved model.
-	Complete(ctx context.Context, tenant, missionID, slot, messagesJSON string, maxTokens int32, temperature float32) (content, finishReason, modelUsed string, promptTokens, completionTokens int32, err error)
-
-	// Stream executes a streaming completion using the named slot and sends
-	// chunks to the provided send function until completion or error.
-	// messagesJSON is a JSON-encoded []llm.Message.
-	Stream(ctx context.Context, tenant, missionID, slot, messagesJSON string, maxTokens int32, temperature float32, send func(delta, finishReason string) error) error
-}
 
 // FindingSubmitter persists a serialized finding produced by a remote agent.
 // The JSON payload must conform to the agent.Finding schema. The submitter also
@@ -168,11 +152,11 @@ type ComponentServiceServer struct {
 	// a connector call.
 	toolCallRecorder metatool.FlightRecorder
 
-	// Harness proxy dependencies.
-	//
-	// llmCompleter routes LLM completions back to Gibson's provider system.
-	// May be nil; Complete and CompleteStream return codes.Unimplemented when nil.
-	llmCompleter LLMCompleter
+	// slotModels resolves a slot to a model for ResolveModel. modelGateway and
+	// agentGateway are the public gateways that the Resolve RPCs return.
+	slotModels   SlotModelResolver
+	modelGateway GatewayInfo
+	agentGateway GatewayInfo
 
 	// workContext records the work-item→mission/tenant mapping (gibson#756; the
 	// memory tiers were retired). May be nil.
@@ -202,10 +186,6 @@ type ComponentServiceServer struct {
 	// quotaManager enforces per-tenant agent quotas during RegisterComponent.
 	// May be nil; when nil, quota checks are skipped entirely.
 	quotaManager *QuotaManager
-
-	// llmToolCompleter extends LLM completions with tool-calling and structured output.
-	// May be nil; CompleteWithTools and CompleteStructured return codes.Unimplemented when nil.
-	llmToolCompleter LLMToolCompleter
 
 	// toolExecutor dispatches tool execution for streaming and queued operations.
 	// May be nil; tool streaming and queue RPCs return codes.Unimplemented when nil.
@@ -309,7 +289,7 @@ func (s *ComponentServiceServer) emitCounter() *emitbounds.TaskCounter {
 // NewComponentServiceServer constructs a ComponentServiceServer with the core
 // lifecycle dependencies. Both registry and queue must be non-nil.
 //
-// Harness proxy dependencies (llmCompleter, memStore, findingSubmitter,
+// Harness proxy dependencies (memStore, findingSubmitter,
 // componentAccess) are optional at this stage: pass nil to leave the
 // corresponding RPCs returning codes.Unimplemented until the subsystems are
 // wired (tasks 5.3–5.5).
@@ -320,7 +300,6 @@ func NewComponentServiceServer(
 	registry ComponentRegistry,
 	queue WorkQueue,
 	logger *slog.Logger,
-	llmCompleter LLMCompleter,
 	findingSubmitter FindingSubmitter,
 	componentAccess ComponentAccessStore,
 	auditLog *audit.AuditLogger,
@@ -338,7 +317,6 @@ func NewComponentServiceServer(
 		registry:         registry,
 		queue:            queue,
 		logger:           logger,
-		llmCompleter:     llmCompleter,
 		findingSubmitter: findingSubmitter,
 		componentAccess:  componentAccess,
 		auditLog:         auditLog,
@@ -395,13 +373,6 @@ func (s *ComponentServiceServer) WithQuotaManager(qm *QuotaManager) *ComponentSe
 // May be nil; tool streaming and queue RPCs return codes.Unimplemented when nil.
 func (s *ComponentServiceServer) WithToolExecutor(te ToolExecutor) *ComponentServiceServer {
 	s.toolExecutor = te
-	return s
-}
-
-// WithLLMToolCompleter attaches an LLMToolCompleter for tool-calling and structured completions.
-// May be nil; CompleteWithTools and CompleteStructured return codes.Unimplemented when nil.
-func (s *ComponentServiceServer) WithLLMToolCompleter(tc LLMToolCompleter) *ComponentServiceServer {
-	s.llmToolCompleter = tc
 	return s
 }
 
@@ -1356,215 +1327,6 @@ func extractDiscoveryField100(raw []byte) *graphragpb.DiscoveryResult {
 // above. Nil dependencies cause the method to return codes.Unimplemented so
 // that operators can incrementally wire subsystems without breaking the server.
 // ---------------------------------------------------------------------------
-
-// Complete proxies an LLM completion request from a remote agent to Gibson's
-// LLM provider system.
-//
-// Flow:
-//  1. Extract tenant; reject unauthenticated callers.
-//  2. Validate required fields (slot, messages).
-//  3. Marshal req.Messages to JSON for the LLMCompleter interface.
-//  4. Resolve mission context so that slot resolution uses per-mission model
-//     configuration rather than tenant-level defaults.
-//  5. Delegate to llmCompleter.Complete which resolves the slot to a provider
-//     and model, forwards the messages, and returns usage metrics.
-//  6. Return the assistant content and token usage to the caller.
-func (s *ComponentServiceServer) Complete(
-	ctx context.Context,
-	req *componentpb.CompleteRequest,
-) (*componentpb.CompleteResponse, error) {
-	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" {
-		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
-	}
-
-	if s.llmCompleter == nil {
-		return nil, status.Error(codes.Unimplemented, "LLM completion not yet wired on this server")
-	}
-
-	if req.Slot == "" {
-		return nil, status.Error(codes.InvalidArgument, "slot is required")
-	}
-	if len(req.Messages) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "messages is required")
-	}
-
-	messagesJSON, err := json.Marshal(req.Messages)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to marshal messages: %v", err)
-	}
-
-	s.logger.DebugContext(ctx, "complete: routing LLM request",
-		slog.String("tenant", tenant),
-		slog.String("work_id", req.WorkId),
-		slog.String("slot", req.Slot),
-	)
-
-	// The mission of the work item, for attribution. Missing context is not
-	// an error: the completion then carries no mission id.
-	// The work id selects the mission of the usage record and the slot pin, so
-	// the caller must have claimed the work item.
-	owner, claimErr := s.claimedWorkOwner(ctx, tenant, req.WorkId)
-	if claimErr != nil {
-		return nil, claimErr
-	}
-	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
-	if resolveErr != nil {
-		// Log and continue; the lookup is best-effort.
-		s.logger.WarnContext(ctx, "complete: mission context lookup failed; using tenant defaults",
-			slog.String("tenant", tenant),
-			slog.String("work_id", req.WorkId),
-			slog.String("slot", req.Slot),
-			slog.String("error", resolveErr.Error()),
-		)
-	}
-
-	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	pin, pinErr := s.nodeSlotPin(ctx, tenant, owner, req.WorkId, req.Slot)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	ctx = withSlotPin(ctx, pin)
-
-	content, finishReason, modelUsed, promptTokens, completionTokens, err := s.llmCompleter.Complete(
-		ctx,
-		tenant,
-		missionID,
-		req.Slot,
-		string(messagesJSON),
-		0, // max tokens: the provider default
-		0, // temperature: the provider default
-	)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "complete: LLM completion failed",
-			slog.String("tenant", tenant),
-			slog.String("work_id", req.WorkId),
-			slog.String("slot", req.Slot),
-			slog.String("error", err.Error()),
-		)
-		return nil, completionStatus(err)
-	}
-
-	s.logger.InfoContext(ctx, "complete: LLM completion succeeded",
-		slog.String("tenant", tenant),
-		slog.String("work_id", req.WorkId),
-		slog.String("slot", req.Slot),
-		slog.String("model_used", modelUsed),
-		slog.Int("prompt_tokens", int(promptTokens)),
-		slog.Int("completion_tokens", int(completionTokens)),
-	)
-
-	_ = finishReason // captured in response via Done on stream; not surfaced in unary response
-
-	return &componentpb.CompleteResponse{
-		Response: &componentpb.LLMMessage{
-			Role:    "assistant",
-			Content: content,
-		},
-		Usage: &componentpb.TokenUsage{
-			InputTokens:  promptTokens,
-			OutputTokens: completionTokens,
-		},
-	}, nil
-}
-
-// CompleteStream is the server-streaming variant of Complete. It invokes the
-// LLM and sends incremental content deltas to the client as they arrive.
-// Mission context is resolved from the work_id so that slot resolution uses
-// per-mission model configuration rather than tenant-level defaults.
-//
-// The final chunk carries Done=true to signal stream termination. On error
-// mid-stream, the gRPC error status is returned after a best-effort final chunk.
-func (s *ComponentServiceServer) CompleteStream(
-	req *componentpb.CompleteStreamRequest,
-	stream grpc.ServerStreamingServer[componentpb.CompleteStreamResponse],
-) error {
-	ctx := stream.Context()
-
-	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" {
-		return status.Error(codes.Unauthenticated, "missing tenant in context")
-	}
-
-	if s.llmCompleter == nil {
-		return status.Error(codes.Unimplemented, "LLM streaming not yet wired on this server")
-	}
-
-	if req.Slot == "" {
-		return status.Error(codes.InvalidArgument, "slot is required")
-	}
-	if len(req.Messages) == 0 {
-		return status.Error(codes.InvalidArgument, "messages is required")
-	}
-
-	messagesJSON, err := json.Marshal(req.Messages)
-	if err != nil {
-		return status.Errorf(codes.InvalidArgument, "failed to marshal messages: %v", err)
-	}
-
-	s.logger.DebugContext(ctx, "complete stream: starting streaming LLM request",
-		slog.String("tenant", tenant),
-		slog.String("work_id", req.WorkId),
-		slog.String("slot", req.Slot),
-	)
-
-	// The mission of the work item, for attribution. Missing context is not
-	// an error: the completion then carries no mission id.
-	// The work id selects the mission of the usage record and the slot pin, so
-	// the caller must have claimed the work item.
-	owner, claimErr := s.claimedWorkOwner(ctx, tenant, req.WorkId)
-	if claimErr != nil {
-		return claimErr
-	}
-	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
-	if resolveErr != nil {
-		s.logger.WarnContext(ctx, "complete stream: mission context lookup failed; using tenant defaults",
-			slog.String("tenant", tenant),
-			slog.String("work_id", req.WorkId),
-			slog.String("slot", req.Slot),
-			slog.String("error", resolveErr.Error()),
-		)
-	}
-
-	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	pin, pinErr := s.nodeSlotPin(ctx, tenant, owner, req.WorkId, req.Slot)
-	if pinErr != nil {
-		return pinErr
-	}
-	ctx = withSlotPin(ctx, pin)
-
-	err = s.llmCompleter.Stream(
-		ctx,
-		tenant,
-		missionID,
-		req.Slot,
-		string(messagesJSON),
-		0, // max tokens: the provider default
-		0, // temperature: the provider default
-		func(delta, finishReason string) error {
-			done := finishReason != ""
-			return stream.Send(&componentpb.CompleteStreamResponse{
-				Content: delta,
-				Done:    done,
-			})
-		},
-	)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "complete stream: streaming LLM request failed",
-			slog.String("tenant", tenant),
-			slog.String("work_id", req.WorkId),
-			slog.String("slot", req.Slot),
-			slog.String("error", err.Error()),
-		)
-		// Best-effort: send a done chunk before returning the gRPC error so
-		// that clients that do not inspect the trailing status still see the
-		// stream terminated.
-		_ = stream.Send(&componentpb.CompleteStreamResponse{Done: true})
-		return completionStatus(err)
-	}
-
-	return nil
-}
 
 // CallTool dispatches a tool invocation on behalf of a remote agent.
 //

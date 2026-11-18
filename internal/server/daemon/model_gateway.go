@@ -142,3 +142,11 @@ func modelGatewayInfoFromEnv() (harness.GatewayInfo, error) {
 func agentGatewayInfoFromEnv() (harness.GatewayInfo, error) {
 	return publicGatewayInfo(EnvAgentGatewayPublicURL)
 }
+
+// publicGateways holds the public gateways that an agent calls, and the error
+// of reading them. Start stops when the error is set.
+type publicGateways struct {
+	model harness.GatewayInfo
+	agent harness.GatewayInfo
+	err   error
+}

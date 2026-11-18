@@ -101,6 +101,9 @@ type AgentRuntimeState struct {
 //   - Callback manager (harness callback server for agents)
 //   - Redis daemon registration for client discovery
 type daemonImpl struct {
+	// publicGateways are the gateways that ResolveModel and ResolveAgent return.
+	publicGateways publicGateways
+
 	// config is the loaded Gibson configuration
 	config *config.Config
 
@@ -623,6 +626,12 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	d.eventBus = NewEventBus(d.logger.Slog(), WithEventBufferSize(100))
 	callbackOpts := make([]harness.CallbackServiceOption, 0, 10)
 	callbackOpts = append(callbackOpts, harness.WithEventBus(NewEventBusAdapter(d.eventBus)))
+	// The public gateways that ResolveModel and ResolveAgent return. Start
+	// refuses to run when one is missing (gatewaysErr).
+	modelGW, modelGWErr := modelGatewayInfoFromEnv()
+	agentGW, agentGWErr := agentGatewayInfoFromEnv()
+	d.publicGateways = publicGateways{model: modelGW, agent: agentGW, err: errors.Join(modelGWErr, agentGWErr)}
+	callbackOpts = append(callbackOpts, harness.WithModelGateway(modelGW), harness.WithAgentGateway(agentGW))
 	sessionClient, sessErr := NewSetecSessionClient(cfg.Sandbox, daemonSVIDSource{d: d})
 	if sessErr != nil {
 		slogLogger.Warn("session sandboxes unavailable; DevboxExec will report Unavailable",
@@ -1127,6 +1136,9 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// concrete Dispatcher + DeciderLLM bindings over the component registry, and
 	// install them onto every per-tenant engine via WireExecutor. Registered
 	// before any engine is created (engines fault in lazily on the first event).
+	if d.publicGateways.err != nil {
+		return fmt.Errorf("public gateways: %w", d.publicGateways.err)
+	}
 	models, mcErr := d.newModelClient()
 	if mcErr != nil {
 		return fmt.Errorf("model client: %w", mcErr)

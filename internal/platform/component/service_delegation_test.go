@@ -146,7 +146,7 @@ func TestDelegateToAgent_MissingTaskJSON(t *testing.T) {
 // project_gibson_guards_that_cannot_fail).
 func TestDelegateToAgent_NilCapabilityChecker_FailsClosed(t *testing.T) {
 	reg := &countingRegistry{}
-	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil)
+	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil)
 	// capabilityChecker deliberately left nil.
 
 	_, err := svc.DelegateToAgent(componentCtx("agent_principal:acct-1"), &componentpb.DelegateToAgentRequest{
@@ -162,7 +162,7 @@ func TestDelegateToAgent_NilCapabilityChecker_FailsClosed(t *testing.T) {
 func TestDelegateToAgent_CapabilityNotGranted_Denies(t *testing.T) {
 	reg := &countingRegistry{}
 	checker := &mockCapabilityChecker{granted: map[string]bool{}} // explicitly empty
-	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil).
+	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil).
 		WithCapabilityChecker(checker)
 
 	_, err := svc.DelegateToAgent(componentCtx("agent_principal:acct-1"), &componentpb.DelegateToAgentRequest{
@@ -241,8 +241,8 @@ func (r *erroringRegistry) Discover(_ context.Context, _, _, _ string) ([]Compon
 func TestDelegateToAgent_DiscoveryError(t *testing.T) {
 	svc := NewComponentServiceServer(
 		&erroringRegistry{err: errors.New("redis: connection refused")},
-		&noopWorkQueue{}, testLogger(), nil, nil, nil, nil,
-	).WithCapabilityChecker(grantedChecker())
+		&noopWorkQueue{}, testLogger(), nil, nil, nil).
+		WithCapabilityChecker(grantedChecker())
 
 	_, err := svc.DelegateToAgent(componentCtx("agent_principal:acct-1"), &componentpb.DelegateToAgentRequest{
 		AgentName: "recon-agent",
@@ -268,8 +268,8 @@ func TestDelegateToAgent_EnqueueError(t *testing.T) {
 	svc := NewComponentServiceServer(
 		&dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}},
 		&erroringQueue{err: errors.New("redis: connection refused")},
-		testLogger(), nil, nil, nil, nil,
-	).WithCapabilityChecker(grantedChecker())
+		testLogger(), nil, nil, nil).
+		WithCapabilityChecker(grantedChecker())
 
 	_, err := svc.DelegateToAgent(componentCtx("agent_principal:acct-1"), &componentpb.DelegateToAgentRequest{
 		AgentName: "recon-agent",
@@ -323,8 +323,8 @@ func newDelegationEnv(t *testing.T, granted bool) (*ComponentServiceServer, Work
 	checker := &mockCapabilityChecker{granted: map[string]bool{capname.MissionDelegate: granted}}
 	svc := NewComponentServiceServer(
 		&dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}},
-		queue, testLogger(), nil, nil, nil, nil,
-	).WithCapabilityChecker(checker)
+		queue, testLogger(), nil, nil, nil).
+		WithCapabilityChecker(checker)
 
 	return svc, queue
 }

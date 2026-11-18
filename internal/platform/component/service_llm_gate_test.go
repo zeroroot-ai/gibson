@@ -46,7 +46,7 @@ func TestCompletionRPCs_ModelGateCodes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			adapter := gateAdapter(tc.err)
-			svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), adapter, nil, nil, nil).
+			svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil).
 				WithLLMToolCompleter(adapter)
 			ctx := llmSeamContext()
 
