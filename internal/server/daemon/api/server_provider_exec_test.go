@@ -16,7 +16,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
-	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
@@ -354,16 +353,6 @@ func TestExecuteLLM_RecordsNoTokensOfItsOwn(t *testing.T) {
 		ProviderName: "p", Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}}})
 	require.NoError(t, err)
 	assert.Zero(t, be.recordCalls)
-}
-
-func TestExecuteLLM_PerCallCapClampsMaxTokens(t *testing.T) {
-	gw := &fakeChatModels{resp: textResponse("ok")}
-	ctx := contextkeys.WithPerCallTokenCap(userChatCtx("t"), 100)
-	mt := int32(5000)
-	_, err := chatServer(chatStore(), gw).ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p", MaxTokens: &mt, Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}}})
-	require.NoError(t, err)
-	assert.Equal(t, 100, gw.reqs[0].MaxOutputTokens)
 }
 
 func TestProtoMessagesToLLM_ToolResults(t *testing.T) {

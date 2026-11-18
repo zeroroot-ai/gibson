@@ -15,7 +15,6 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
-	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
@@ -130,30 +129,9 @@ func budgetScopeToProto(s budget.Scope) budgetstatuspb.BudgetScope {
 	return budgetstatuspb.BudgetScope_BUDGET_SCOPE_UNSPECIFIED
 }
 
-// applyContextPerCallCap clamps req.MaxTokens to the effective per-call cap
-// stored in context (if any). The cap is injected by harness / orchestrator
-// code that has already resolved EffectivePerCallCap(node, constraints) for
-// the executing mission node.
-//
-// When no cap is present in context, or when the cap is 0, req.MaxTokens is
-// left unchanged. When the caller already requested fewer tokens than the cap,
-// the lower value is preserved (the cap is a ceiling, not a floor).
-//
-// Spec: mission-author-experience M4 (gibson#133).
-func applyContextPerCallCap(ctx context.Context, req *execRequest) {
-	cap, ok := contextkeys.GetPerCallTokenCap(ctx)
-	if !ok || cap <= 0 {
-		return
-	}
-	capInt := int(cap)
-	if req.MaxTokens == 0 || req.MaxTokens > capInt {
-		req.MaxTokens = capInt
-	}
-}
-
 // defaultMaxOutputTokens is the max_tokens floor applied when a caller omits
 // it. max_tokens is REQUIRED by Anthropic and several other providers; sending
-// 0 (the zero value when the request and any per-call cap leave it unset) makes
+// 0 (the zero value when the request leaves it unset) makes
 // the provider return an empty completion with finishReason "length", which
 // surfaces to the user as a blank chat reply. The dashboard chat client does
 // not set maxOutputTokens (it is optional in the AI SDK), so the daemon must
@@ -269,7 +247,6 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	if req.MaxTokens != nil {
 		cr.MaxTokens = int(req.GetMaxTokens())
 	}
-	applyContextPerCallCap(ctx, &cr)
 	applyDefaultMaxTokens(&cr)
 	mreq, err := toGatewayRequest(req, cr)
 	if err != nil {
