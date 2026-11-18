@@ -166,3 +166,28 @@ func TestLoadAndResolve_NeedTheirKeys(t *testing.T) {
 		t.Errorf("Resolve of an unknown name: error = %v, want ErrNotFound", err)
 	}
 }
+
+type listStore struct {
+	Store
+	entries []Entry
+	err     error
+}
+
+func (l listStore) List(context.Context, string, string, bool) ([]Entry, error) {
+	return l.entries, l.err
+}
+
+func TestToolLister_ListsTheCurrentAgentSkillsAsCatalogEntries(t *testing.T) {
+	got, err := ToolLister{Store: listStore{entries: []Entry{{Name: "web-recon", Description: "d"}}}}.
+		ListTools(context.Background(), "acme")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ListTools = %+v, %v", got, err)
+	}
+	if got[0].Source != "skill" || got[0].Tool != "web-recon" || got[0].Description != "d" {
+		t.Errorf("entry = %+v", got[0])
+	}
+	boom := errors.New("db down")
+	if _, err := (ToolLister{Store: listStore{err: boom}}).ListTools(context.Background(), "acme"); !errors.Is(err, boom) {
+		t.Errorf("error = %v, want the store error", err)
+	}
+}

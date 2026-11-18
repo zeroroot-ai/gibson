@@ -245,6 +245,9 @@ type HarnessCallbackService struct {
 	// definition. Nil refuses a connector call.
 	missionBlockedTools MissionBlockedToolsSource
 
+	// agentSkills returns the Agent Skill store. It is nil when no store is wired.
+	agentSkills AgentSkillStoreSource
+
 	// componentAuthorizer is the FGA-backed authorizer for component authz decisions.
 	// One-code-path slice deploy#195: required for any callback service that
 	// will actually serve Authorize calls. The daemon wires this in setup

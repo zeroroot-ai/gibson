@@ -42,3 +42,13 @@ func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server) e
 	d.logger.Info(ctx, "AgentSkillService registered (epic gibson#1364)")
 	return nil
 }
+
+// agentSkillStore returns the Agent Skill store over the per-tenant data pool,
+// or nil while the pool is not built. The harness callback service reads it for
+// each call, because the pool is built after its options are assembled.
+func (d *daemonImpl) agentSkillStore() agentskillstore.Store {
+	if d.pool == nil {
+		return nil
+	}
+	return agentskillstore.NewPostgresStore(d.pool)
+}

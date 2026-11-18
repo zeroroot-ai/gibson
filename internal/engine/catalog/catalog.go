@@ -31,14 +31,21 @@ const DefaultLimit = 20
 type Caller struct {
 	Subject string
 	Tenant  string
+	// Agent is the typed FGA principal of the calling agent, for example
+	// "agent_principal:<id>". It is empty when the caller is not an agent
+	// principal. An Agent Skill grant to an agent reads it.
+	Agent string
+	// Mission is the id of the mission of the call. An Agent Skill grant to a
+	// mission reads it.
+	Mission string
 }
 
 // ToolEntry is a raw tool as enumerated from a backing store, before id
 // assignment and authorization.
 type ToolEntry struct {
 	Source      toolid.Source
-	Connector   string // connector/plugin name; empty for native primitives
-	Tool        string // tool / method name
+	Connector   string // connector/plugin name; empty for native primitives and Agent Skills
+	Tool        string // tool / method name, or the name of an Agent Skill
 	Description string
 	InputSchema []byte
 }
@@ -47,6 +54,26 @@ type ToolEntry struct {
 // component registry plus the harness tool expansion; tests fake it.
 type ToolLister interface {
 	ListTools(ctx context.Context, tenant string) ([]ToolEntry, error)
+}
+
+// CombineListers returns a ToolLister that lists the entries of each lister in
+// order. The first error stops the listing.
+func CombineListers(listers ...ToolLister) ToolLister {
+	return combinedLister(listers)
+}
+
+type combinedLister []ToolLister
+
+func (c combinedLister) ListTools(ctx context.Context, tenant string) ([]ToolEntry, error) {
+	var out []ToolEntry
+	for _, l := range c {
+		entries, err := l.ListTools(ctx, tenant)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, entries...)
+	}
+	return out, nil
 }
 
 // Authorizer reports whether a caller may execute a tool. In production it is
@@ -151,6 +178,8 @@ func idFor(en ToolEntry) (toolid.ID, error) {
 		return toolid.ForMCP(en.Connector, en.Tool)
 	case toolid.SourceNative:
 		return toolid.ForNative(en.Tool)
+	case toolid.SourceSkill:
+		return toolid.ForSkill(en.Tool)
 	default:
 		return toolid.ID{}, fmt.Errorf("catalog: unknown source %q", en.Source)
 	}

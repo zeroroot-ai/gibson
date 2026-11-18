@@ -48,10 +48,10 @@ func (s *HarnessCallbackService) SearchTools(ctx context.Context, req *harnesspb
 	}
 
 	engine := catalog.NewEngine(
-		component.NewCatalogToolLister(s.componentRegistry, s.connectors),
+		s.toolLister(component.NewCatalogToolLister(s.componentRegistry, s.connectors)),
 		catalog.NewFGAAuthorizer(s.componentAuthorizer),
 	)
-	caller := catalog.Caller{Subject: "user:" + state.UserID, Tenant: state.TenantID}
+	caller := catalogCaller(ctx, state)
 
 	candidates, err := engine.Search(ctx, caller, catalog.Query{
 		Text:      req.GetQuery(),
@@ -78,7 +78,7 @@ func (s *HarnessCallbackService) SearchTools(ctx context.Context, req *harnesspb
 	return &harnesspb.SearchToolsResponse{Candidates: out}, nil
 }
 
-// toToolSources maps wire source strings ("mcp", "native") to toolid.Source,
+// toToolSources maps wire source strings ("mcp", "native", "skill") to toolid.Source,
 // dropping unrecognized values (the engine treats an empty filter as "all").
 func toToolSources(ss []string) []toolid.Source {
 	if len(ss) == 0 {
@@ -91,6 +91,8 @@ func toToolSources(ss []string) []toolid.Source {
 			out = append(out, toolid.SourceMCP)
 		case toolid.SourceNative:
 			out = append(out, toolid.SourceNative)
+		case toolid.SourceSkill:
+			out = append(out, toolid.SourceSkill)
 		}
 	}
 	return out

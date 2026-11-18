@@ -37,10 +37,11 @@ func metaToolDescriptors() []ToolDescriptor {
 			Description: "Search the connector tool catalog for tools relevant to a task and " +
 				"return a small, authorized, ranked set of candidates. Use this to discover " +
 				"which tools exist before calling invoke_tool. Returns each candidate's " +
-				"canonical id, description, and input schema.",
+				"canonical id, description, and input schema. A result can also be an Agent Skill, " +
+				"a method that you load with invoke_tool. Its id has the form skill:<name>.",
 			InputSchema: schema.Object(map[string]schema.JSON{
 				"query":     schema.StringWithDesc("Free-text description of the capability you need (e.g. \"open a gitlab issue\")."),
-				"sources":   schema.Array(schema.StringWithDesc("Restrict to a source: \"mcp\" or \"native\".")),
+				"sources":   schema.Array(schema.StringWithDesc("Restrict to a source: \"mcp\", \"native\" or \"skill\".")),
 				"connector": schema.StringWithDesc("Restrict to a single connector/plugin name. Optional."),
 				"limit":     schema.Int(),
 			}),
@@ -48,7 +49,8 @@ func metaToolDescriptors() []ToolDescriptor {
 		{
 			Name: metatool.InvokeToolName,
 			Description: "Invoke a catalog tool by its canonical id (from search_tools), passing the " +
-				"tool's arguments. The id has the form mcp:<connector>:<tool> or native:<tool>. Authorization is " +
+				"tool's arguments. The id has the form mcp:<connector>:<tool>, native:<tool> or skill:<name>. " +
+				"Authorization is " +
 				"enforced; only ids returned by search_tools are invocable.",
 			InputSchema: schema.Object(map[string]schema.JSON{
 				"id":   schema.StringWithDesc("Canonical tool id, e.g. mcp:gitlab:create_issue."),
@@ -104,11 +106,11 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 
 	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
 	handler := metatool.NewHandler(
-		catalog.NewEngine(component.NewCatalogToolLister(s.componentRegistry, s.connectors), authorizer),
+		catalog.NewEngine(s.toolLister(component.NewCatalogToolLister(s.componentRegistry, s.connectors)), authorizer),
 		authorizer,
 		s.connectors,
 	)
-	caller := catalog.Caller{Subject: "user:" + state.UserID, Tenant: state.TenantID}
+	caller := catalogCaller(ctx, state)
 
 	switch req.GetName() {
 	case metatool.SearchToolsName:
