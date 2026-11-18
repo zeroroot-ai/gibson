@@ -86,3 +86,28 @@ func TestMissionDefinitionToProjected_AParallelSubNodeKeepsItsPins(t *testing.T)
 	}
 	assert.True(t, found, "the parallel sub-node is projected")
 }
+
+// The projection puts the effective token cap of one model call on each node:
+// the value of the node when it has one, else the value of the mission.
+func TestMissionDefinitionToProjected_EachNodeCarriesItsEffectiveTokenCap(t *testing.T) {
+	own := makeAgentNodeProto("recon", nil)
+	own.Id = "own"
+	nodeCap := int32(500)
+	own.GetAgentConfig().MaxTokensPerCall = &nodeCap
+	inherit := makeAgentNodeProto("recon", nil)
+	inherit.Id = "inherit"
+	def := &missionpb.MissionDefinition{
+		Id:          "m1",
+		Constraints: &missionpb.MissionConstraints{MaxTokensPerCall: 2000},
+		Nodes:       map[string]*missionpb.MissionNode{"own": own, "inherit": inherit},
+	}
+	proj, _, err := missionDefinitionToProjected(def, "", nil)
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	got := map[string]int32{}
+	for _, n := range proj.Nodes {
+		got[n.ID] = n.MaxTokensPerCall
+	}
+	assert.Equal(t, map[string]int32{"own": 500, "inherit": 2000}, got)
+}

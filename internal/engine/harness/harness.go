@@ -99,6 +99,10 @@ type SlotModel struct {
 	// ContextWindow is the context window of the model in tokens, or zero when
 	// the provider does not report one.
 	ContextWindow int
+	// MaxOutputTokens is the limit of output tokens of one call, or zero when
+	// it is unknown. The harness sets it to the smaller of the limit of the
+	// model and the cap of the node (see agent.MinLimit).
+	MaxOutputTokens int32
 }
 
 // SlotModelResolver resolves a slot to the provider and the one exact model name

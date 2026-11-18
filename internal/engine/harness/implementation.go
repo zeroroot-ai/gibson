@@ -31,7 +31,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
-	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
@@ -248,20 +247,11 @@ type DefaultAgentHarness struct {
 	inFlightTasksMu sync.Mutex
 	inFlightTasks   map[string]int
 
-	// currentNode is the mission node being executed by this harness instance.
-	// When set, EffectivePerCallCap reads per-noun max_tokens_per_call from
-	// the node config and uses it to clamp LLM requests. nil disables the
-	// per-node override (mission-level cap still applies if missionConstraints
-	// is set).
-	// Spec: mission-author-experience M4 (gibson#133).
-	currentNode *missionv1.MissionNode
-
-	// missionConstraints carries the mission-level token budget constraints
-	// for this execution. EffectivePerCallCap falls back to
-	// missionConstraints.MaxTokensPerCall when no per-node override is
-	// present. nil means no mission-level cap from this mechanism.
-	// Spec: mission-author-experience M4 (gibson#133).
-	missionConstraints *missionv1.MissionConstraints
+	// maxTokensPerCall is the effective token cap of one model call of the
+	// agent node that runs through this harness. Zero means no cap.
+	// ResolveSlotModel puts it in the answer, so the agent applies it. The
+	// model gateway does not enforce it.
+	maxTokensPerCall int32
 
 	// nodeSlotOverrides carries per-slot LLM provider/model bindings for the
 	// agent node executing through this harness instance. Keyed by slot name;
@@ -301,25 +291,6 @@ func (h *DefaultAgentHarness) slotOverride(slot string) *agent.SlotConfig {
 		return nil
 	}
 	return h.nodeSlotOverrides[slot]
-}
-
-// WithPerCallCapContext wires the per-call token cap into the harness.
-//
-// node is the mission node being executed by this harness (may be nil when
-// no per-node override applies). constraints carries the mission-level
-// MissionConstraints (may be nil when no mission-level cap is configured).
-//
-// When both are set, EffectivePerCallCap applies the cascade documented in
-// per_call_cap.go: per-noun MaxTokensPerCall → mission-level MaxTokensPerCall
-// → 0 (no cap). The effective cap is applied before every LLM provider call
-// in Complete, CompleteWithTools, and Stream.
-//
-// This method returns the receiver so it can be chained at construction time.
-// Spec: mission-author-experience M4 (gibson#133).
-func (h *DefaultAgentHarness) WithPerCallCapContext(node *missionv1.MissionNode, constraints *missionv1.MissionConstraints) *DefaultAgentHarness {
-	h.currentNode = node
-	h.missionConstraints = constraints
-	return h
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -511,6 +482,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 		childMissionCtx.CurrentAgent = name
 		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
+		childMissionCtx.NodeMaxTokensPerCall = task.MaxTokensPerCall
 		childMissionCtx.NodeNetwork = task.Network
 		childMissionCtx.NodeID = task.NodeID
 		childMissionCtx.TaskID = task.ID.String()
@@ -536,7 +508,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	// The LLM slot pins of the node go on the work item, so an agent served
 	// with sdk.ServeAgent gets them on its completions (gibson#1203).
 	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, agentwire.WorkType, payload, nil,
-		WorkSlotPins(task.SlotOverrides), info, waitPolicy{bound: task.Timeout, livenessBounded: true}, task.ID.String())
+		WorkSlotPins(task.SlotOverrides), task.MaxTokensPerCall, info, waitPolicy{bound: task.Timeout, livenessBounded: true}, task.ID.String())
 	if err != nil {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 			"agent": name, "status": "failed", "transport": "work_queue",
@@ -687,7 +659,7 @@ func (h *DefaultAgentHarness) callToolViaWorkQueue(
 	// (workCtx, AuthzContext, task CG-JWT, _system config injection, enqueue,
 	// wait) are shared across agent/tool/plugin via dispatchWorkAndWait; this
 	// wrapper only owns the tool-specific proto marshal/unmarshal + metrics.
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "tool", name, "execute_proto", inputJSON, nil, nil, info, waitPolicy{}, "")
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "tool", name, "execute_proto", inputJSON, nil, nil, 0, info, waitPolicy{}, "")
 	if err != nil {
 		h.logger.Error("tool work queue dispatch failed",
 			"tool", name, "tenant", tenant, "instance_id", info.InstanceID, "error", err)
@@ -767,7 +739,7 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 	// Kind-uniform work-queue dispatch (gibson#663). The "method" goes in the
 	// work context; everything else (CG-JWT, AuthzContext, _system config
 	// injection, enqueue, wait) is shared via dispatchWorkAndWait.
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "plugin", name, "query_plugin", payload, map[string]string{"method": method}, nil, info, waitPolicy{}, "")
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "plugin", name, "query_plugin", payload, map[string]string{"method": method}, nil, 0, info, waitPolicy{}, "")
 	if err != nil {
 		h.logger.Error("plugin work queue dispatch failed",
 			"plugin", name, "method", method, "tenant", tenant, "instance_id", info.InstanceID, "error", err)
@@ -824,6 +796,7 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 	payload []byte,
 	extraCtx map[string]string,
 	slotPins map[string]agent.SlotConfig,
+	maxTokensPerCall int32,
 	info component.ComponentInfo,
 	wait waitPolicy,
 	grantTask string,
@@ -891,6 +864,9 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 		Payload:  payload,
 		Context:  workCtx,
 		SlotPins: slotPins,
+		// The token cap of one model call of the node binds to the work id,
+		// as the slot pins do.
+		MaxTokensPerCall: maxTokensPerCall,
 	}
 
 	if _, err := h.workQueue.Enqueue(ctx, tenant, kind, name, workItem); err != nil {

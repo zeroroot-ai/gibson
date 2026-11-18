@@ -58,6 +58,10 @@ func (ownEveryWorkItem) WorkSlotPin(context.Context, string, string) (*agent.Slo
 	return nil, nil
 }
 
+func (ownEveryWorkItem) WorkMaxTokensPerCall(context.Context, string) (int32, error) {
+	return 0, nil
+}
+
 func boundedComponentServer(submitter FindingSubmitter) *ComponentServiceServer {
 	return &ComponentServiceServer{
 		logger:           slog.New(slog.NewTextHandler(discardWriter{}, nil)),

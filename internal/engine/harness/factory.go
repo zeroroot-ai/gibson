@@ -263,6 +263,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		// from their own MissionContext — they do NOT inherit these.
 		// Spec: per-node-slot-override (gibson#539).
 		nodeSlotOverrides: missionCtx.NodeSlotOverrides,
+		maxTokensPerCall:  missionCtx.NodeMaxTokensPerCall,
 	}
 
 	// Apply middleware if configured.

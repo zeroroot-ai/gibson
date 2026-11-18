@@ -46,6 +46,10 @@ type DispatchRequest struct {
 	// SlotPins are the LLM slot pins of an agent node (gibson#1203). The
 	// Dispatcher copies them into agent.Task.SlotOverrides.
 	SlotPins map[string]agent.SlotConfig
+	// MaxTokensPerCall is the effective token cap of one model call of the node
+	// (the node value, else the mission value). Zero means no cap. It travels
+	// with SlotPins to the dispatch.
+	MaxTokensPerCall int32
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -90,20 +94,21 @@ func (h *DispatchHandler) Tap(ev Event) {
 	}
 	h.mu.Lock()
 	h.pending = append(h.pending, DispatchRequest{
-		WorkID:       d.ID,
-		MissionID:    d.MissionID,
-		RunID:        d.RunID,
-		Kind:         d.ItemKind,
-		Target:       d.Target,
-		Input:        d.Input,
-		ParentID:     d.ParentID,
-		Timeout:      d.Timeout,
-		Network:      d.Network,
-		SlotPins:     d.SlotPins,
-		StartsFrom:   d.StartsFrom,
-		Forkable:     d.Forkable,
-		Checkpoint:   d.Checkpoint,
-		FromSnapshot: d.FromSnapshot,
+		WorkID:           d.ID,
+		MissionID:        d.MissionID,
+		RunID:            d.RunID,
+		Kind:             d.ItemKind,
+		Target:           d.Target,
+		Input:            d.Input,
+		ParentID:         d.ParentID,
+		Timeout:          d.Timeout,
+		Network:          d.Network,
+		SlotPins:         d.SlotPins,
+		MaxTokensPerCall: d.MaxTokensPerCall,
+		StartsFrom:       d.StartsFrom,
+		Forkable:         d.Forkable,
+		Checkpoint:       d.Checkpoint,
+		FromSnapshot:     d.FromSnapshot,
 	})
 	h.mu.Unlock()
 }

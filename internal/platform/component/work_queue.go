@@ -32,6 +32,10 @@ type WorkItem struct {
 	// (the harness dispatch), and Enqueue binds them to the work id
 	// (gibson#1203). A component request never sets this field.
 	SlotPins map[string]agent.SlotConfig `json:"slot_pins,omitempty"`
+	// MaxTokensPerCall is the effective token cap of one model call of the
+	// mission node that dispatched agent work. Zero means no cap. Only the
+	// daemon sets it, and Enqueue binds it to the work id.
+	MaxTokensPerCall int32 `json:"max_tokens_per_call,omitempty"`
 }
 
 // WorkResult carries the outcome of a completed WorkItem back to the caller.
@@ -206,6 +210,9 @@ func (q *redisWorkQueue) Enqueue(ctx context.Context, tenant, kind, name string,
 	// Bind the LLM slot pins of the mission node the same way, so a
 	// completion for this work resolves the node's slot pins (gibson#1203).
 	if err := bindWorkSlotPins(ctx, q.client, item); err != nil {
+		return "", fmt.Errorf("work queue enqueue: %w", err)
+	}
+	if err := bindWorkMaxTokens(ctx, q.client, item); err != nil {
 		return "", fmt.Errorf("work queue enqueue: %w", err)
 	}
 

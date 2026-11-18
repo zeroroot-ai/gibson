@@ -19,5 +19,6 @@ func (h *DefaultAgentHarness) ResolveSlotModel(ctx context.Context, slot string)
 	if err != nil {
 		return SlotModel{}, fmt.Errorf("failed to resolve slot %s: %w", slot, err)
 	}
+	picked.MaxOutputTokens = agent.MinLimit(picked.MaxOutputTokens, h.maxTokensPerCall)
 	return picked, nil
 }

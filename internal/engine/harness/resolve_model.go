@@ -91,6 +91,6 @@ func ResolveModel(
 	return &ModelResolution{
 		Model: picked.Model, Provider: picked.Provider, GatewayURL: strings.TrimRight(gw.URL, "/"),
 		RouteHeaders: headers, ContextWindow: int32(picked.ContextWindow), //nolint:gosec // bounded by maxContextWindow at save
-		GatewayCAPEM: gw.CAPEM,
+		GatewayCAPEM: gw.CAPEM, MaxOutputTokens: picked.MaxOutputTokens,
 	}, nil
 }

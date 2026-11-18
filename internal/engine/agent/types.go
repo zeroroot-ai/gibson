@@ -36,6 +36,12 @@ type Task struct {
 	// Spec: per-node-slot-override (gibson#539).
 	SlotOverrides map[string]*SlotConfig `json:"slot_overrides,omitempty"`
 
+	// MaxTokensPerCall is the effective token cap of one model call of the
+	// mission node that this task runs (the node value, else the mission
+	// value). Zero means no cap. The daemon gives it to the agent in the
+	// ResolveModel reply. The model gateway does not enforce it.
+	MaxTokensPerCall int32 `json:"max_tokens_per_call,omitempty"`
+
 	// Network is the network scope of the mission node that this task runs
 	// (owner decision S6, gibson#865). The sandbox of the node, and each tool
 	// sandbox that the node starts, get this scope. Nil keeps the egress of

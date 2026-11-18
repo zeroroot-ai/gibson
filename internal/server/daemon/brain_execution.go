@@ -190,6 +190,8 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 				Network: req.Network,
 				// The LLM slot pins of the node (gibson#539, gibson#1203).
 				SlotOverrides: taskSlotOverrides(req.SlotPins),
+				// The token cap of one model call of the node.
+				MaxTokensPerCall: req.MaxTokensPerCall,
 				// The fork fields of the node (ADR-0169, gibson#802).
 				NodeID:     nodeIDOf(req.WorkID, req.MissionID),
 				StartsFrom: req.StartsFrom,

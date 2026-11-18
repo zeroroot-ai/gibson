@@ -73,3 +73,45 @@ func TestResolveModel_Refusals(t *testing.T) {
 		t.Error("a harness that cannot resolve a slot was accepted")
 	}
 }
+
+// The reply carries the output limit that the harness put on the pick.
+func TestResolveModel_CarriesTheOutputLimit(t *testing.T) {
+	h := &resolverHarness{picked: SlotModel{Provider: "p", Model: "m", MaxOutputTokens: 777}}
+	res, err := ResolveModel(context.Background(), h, "acme", "s", GatewayInfo{URL: "https://gw"})
+	if err != nil {
+		t.Fatalf("ResolveModel: %v", err)
+	}
+	if res.MaxOutputTokens != 777 {
+		t.Errorf("MaxOutputTokens = %d, want 777", res.MaxOutputTokens)
+	}
+}
+
+// The harness of an agent node puts the smaller of the model limit and the
+// token cap of the node on the pick.
+func TestDefaultAgentHarness_ResolveSlotModelAppliesTheNodeCap(t *testing.T) {
+	cases := []struct {
+		name       string
+		modelLimit int32
+		nodeCap    int32
+		want       int32
+	}{
+		{"cap smaller", 4096, 500, 500},
+		{"model smaller", 300, 500, 300},
+		{"no cap", 4096, 0, 4096},
+		{"nothing known", 0, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := newStubSlotManager()
+			sm.picked.MaxOutputTokens = tc.modelLimit
+			h := &DefaultAgentHarness{slotManager: sm, maxTokensPerCall: tc.nodeCap}
+			got, err := h.ResolveSlotModel(context.Background(), "primary")
+			if err != nil {
+				t.Fatalf("ResolveSlotModel: %v", err)
+			}
+			if got.MaxOutputTokens != tc.want {
+				t.Errorf("MaxOutputTokens = %d, want %d", got.MaxOutputTokens, tc.want)
+			}
+		})
+	}
+}

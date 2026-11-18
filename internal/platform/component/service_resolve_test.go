@@ -104,6 +104,43 @@ func TestResolveModel_ReplyHoldsTheModelTheUrlTheRouteHeadersAndTheCA(t *testing
 	assert.Nil(t, slots.pin, "a call with no work id has no pin")
 }
 
+// The reply carries the smaller of the model limit and the token cap of the
+// node. A zero is an unknown limit and never wins over a known one.
+func TestResolveModel_TheReplyCarriesTheSmallerOutputLimit(t *testing.T) {
+	cases := []struct {
+		name       string
+		modelLimit int32
+		nodeCap    int32
+		want       int32
+	}{
+		{"the node cap is smaller", 8192, 1000, 1000},
+		{"the model limit is smaller", 800, 1000, 800},
+		{"only the node cap is known", 0, 1000, 1000},
+		{"only the model limit is known", 8192, 0, 8192},
+		{"no limit is known", 0, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			slots := &fakeSlotModels{picked: ResolvedSlot{
+				Provider: "claude", Model: "m", MaxOutputTokens: tc.modelLimit,
+			}}
+			env := newResolveEnv(t, slots)
+			_, err := env.queue.Enqueue(context.Background(), victimTenant, "agent", "recon", WorkItem{
+				WorkID: "work-cap", WorkType: "execute", MaxTokensPerCall: tc.nodeCap,
+			})
+			require.NoError(t, err)
+			ctx := env.claimedBy(auth.ContextWithTenantString(context.Background(), victimTenant),
+				t, "work-cap", "component-1")
+
+			resp, err := env.svc.ResolveModel(ctx, &componentpb.ResolveModelRequest{
+				Slot: "primary", WorkId: "work-cap",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, resp.GetMaxOutputTokens())
+		})
+	}
+}
+
 func TestResolveModel_TheSlotPinOfTheNodeIsHonored(t *testing.T) {
 	slots := &fakeSlotModels{picked: ResolvedSlot{Provider: "p2", Model: "m2"}}
 	env := newResolveEnv(t, slots)

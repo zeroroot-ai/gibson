@@ -106,6 +106,10 @@ type WorkItem struct {
 	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
 	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
 	SlotPins map[string]agent.SlotConfig
+	// MaxTokensPerCall is the effective token cap of one model call of the node
+	// (the node value, else the mission value). Zero means no cap. It travels
+	// with SlotPins to the dispatch.
+	MaxTokensPerCall int32
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -155,6 +159,10 @@ type WorkDispatched struct {
 	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
 	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
 	SlotPins map[string]agent.SlotConfig
+	// MaxTokensPerCall is the effective token cap of one model call of the node
+	// (the node value, else the mission value). Zero means no cap. It travels
+	// with SlotPins to the dispatch.
+	MaxTokensPerCall int32
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -238,6 +246,9 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		if e.SlotPins != nil {
 			wi.SlotPins = e.SlotPins
 		}
+		if e.MaxTokensPerCall > 0 {
+			wi.MaxTokensPerCall = e.MaxTokensPerCall
+		}
 		if e.StartsFrom != "" {
 			wi.StartsFrom = e.StartsFrom
 		}
@@ -253,24 +264,25 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		return
 	}
 	w.work.NewEntity(&WorkItem{
-		ID:           e.ID,
-		MissionID:    e.MissionID,
-		RunID:        e.RunID,
-		Kind:         e.ItemKind,
-		Target:       e.Target,
-		Input:        e.Input,
-		ParentID:     e.ParentID,
-		State:        WorkRunning,
-		Attempts:     1,
-		Timeout:      e.Timeout,
-		Group:        e.Group,
-		Limit:        e.Limit,
-		Network:      e.Network,
-		SlotPins:     e.SlotPins,
-		StartsFrom:   e.StartsFrom,
-		Forkable:     e.Forkable,
-		Checkpoint:   e.Checkpoint,
-		FromSnapshot: e.FromSnapshot,
+		ID:               e.ID,
+		MissionID:        e.MissionID,
+		RunID:            e.RunID,
+		Kind:             e.ItemKind,
+		Target:           e.Target,
+		Input:            e.Input,
+		ParentID:         e.ParentID,
+		State:            WorkRunning,
+		Attempts:         1,
+		Timeout:          e.Timeout,
+		Group:            e.Group,
+		Limit:            e.Limit,
+		Network:          e.Network,
+		SlotPins:         e.SlotPins,
+		MaxTokensPerCall: e.MaxTokensPerCall,
+		StartsFrom:       e.StartsFrom,
+		Forkable:         e.Forkable,
+		Checkpoint:       e.Checkpoint,
+		FromSnapshot:     e.FromSnapshot,
 	})
 	// A fresh dispatch under an open Decider decision is one of that decision's
 	// chosen actions (gibson#1062). Only first dispatches link — a retry re-arms an
@@ -355,6 +367,10 @@ type WorkSnapshot struct {
 	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
 	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
 	SlotPins map[string]agent.SlotConfig
+	// MaxTokensPerCall is the effective token cap of one model call of the node
+	// (the node value, else the mission value). Zero means no cap. It travels
+	// with SlotPins to the dispatch.
+	MaxTokensPerCall int32
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -397,6 +413,7 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 			Limit:                  wi.Limit,
 			Network:                wi.Network,
 			SlotPins:               wi.SlotPins,
+			MaxTokensPerCall:       wi.MaxTokensPerCall,
 			StartsFrom:             wi.StartsFrom,
 			Forkable:               wi.Forkable,
 			Checkpoint:             wi.Checkpoint,

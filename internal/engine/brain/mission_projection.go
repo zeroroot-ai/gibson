@@ -68,6 +68,10 @@ type WorkNode struct {
 	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
 	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
 	SlotPins map[string]agent.SlotConfig
+	// MaxTokensPerCall is the effective token cap of one model call of the node
+	// (the node value, else the mission value). Zero means no cap. It travels
+	// with SlotPins to the dispatch.
+	MaxTokensPerCall int32
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -183,6 +187,7 @@ func projectWork(w *World, e MissionProjected) {
 			Limit:                  n.Limit,
 			Network:                n.Network,
 			SlotPins:               n.SlotPins,
+			MaxTokensPerCall:       n.MaxTokensPerCall,
 			StartsFrom:             n.StartsFrom,
 			Forkable:               n.Forkable,
 			Checkpoint:             n.Checkpoint,

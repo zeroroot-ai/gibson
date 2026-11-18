@@ -30,6 +30,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -158,6 +159,7 @@ func missionDefinitionToProjected(
 	for i := range nodes {
 		nodes[i].Network = nodeNetwork(allNodes[nodes[i].ID], boundTargets(nodes[i].ID, targets, origins))
 		nodes[i].SlotPins = nodeSlotPins(allNodes[nodes[i].ID])
+		nodes[i].MaxTokensPerCall = gibsonharness.EffectivePerCallCap(allNodes[nodes[i].ID], def.GetConstraints())
 	}
 
 	// 7. The fork fields of each node (ADR-0169, gibson#802). A node starts

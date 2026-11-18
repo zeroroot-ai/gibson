@@ -26,6 +26,9 @@ type ResolvedSlot struct {
 	Model    string
 	// ContextWindow is in tokens. Zero means unknown.
 	ContextWindow int
+	// MaxOutputTokens is the output limit of the model in tokens. Zero means
+	// unknown.
+	MaxOutputTokens int32
 }
 
 // SlotModelResolver resolves a slot to a provider and one exact model name in
@@ -92,6 +95,12 @@ func (s *ComponentServiceServer) ResolveModel(
 	if picked.Model == "" || picked.Provider == "" {
 		return nil, status.Errorf(codes.NotFound, "slot %q has no model", slot)
 	}
+	nodeCap, err := s.workContext.WorkMaxTokensPerCall(ctx, req.GetWorkId())
+	if err != nil {
+		s.logger.WarnContext(ctx, "resolve model: the token cap of the work item could not be read",
+			"work_id", req.GetWorkId(), "error", err.Error())
+		return nil, status.Error(codes.Unavailable, "the token cap of the work item could not be read, try again")
+	}
 	headers := map[string]string{}
 	for _, h := range modelcall.RouteHeaders(tenant, picked.Provider) {
 		headers[h.Name] = h.Value
@@ -99,7 +108,7 @@ func (s *ComponentServiceServer) ResolveModel(
 	return &componentpb.ResolveModelResponse{
 		Model: picked.Model, Provider: picked.Provider, GatewayUrl: strings.TrimRight(s.modelGateway.URL, "/"),
 		RouteHeaders: headers, ContextWindow: int32(picked.ContextWindow), //nolint:gosec // bounded at save
-		GatewayCaPem: s.modelGateway.CAPEM,
+		GatewayCaPem: s.modelGateway.CAPEM, MaxOutputTokens: agent.MinLimit(picked.MaxOutputTokens, nodeCap),
 	}, nil
 }
 

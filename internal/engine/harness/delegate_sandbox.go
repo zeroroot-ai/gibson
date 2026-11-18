@@ -143,6 +143,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		childMissionCtx.CurrentAgent = name
 		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
+		childMissionCtx.NodeMaxTokensPerCall = task.MaxTokensPerCall
 		childMissionCtx.NodeNetwork = task.Network
 		childMissionCtx.NodeID = task.NodeID
 		childMissionCtx.TaskID = task.ID.String()
