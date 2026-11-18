@@ -5,10 +5,11 @@ package providerconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // ProviderConfigStore is the daemon's single source of truth for
@@ -24,7 +25,7 @@ type ProviderConfigStore interface {
 
 	// Create persists a new provider config. Returns ErrAlreadyExists if a config
 	// with the same name already exists for this tenant. Returns ErrUnsupportedType
-	// if the provider type is not in llm.SupportedProviderTypes().
+	// if the provider type is not in SupportedProviderTypes().
 	Create(ctx context.Context, tenantID string, input *ProviderConfigInput) (*ProviderConfig, error)
 
 	// Update replaces the named provider config. Returns ErrNotFound if no config
@@ -49,13 +50,27 @@ type ProviderConfigStore interface {
 	Resolve(ctx context.Context, tenantID string, name string) (*DecryptedConfig, error)
 }
 
-func validateType(t llm.ProviderType) error {
-	for _, supported := range llm.AcceptedProviderTypes() {
+// ErrInvalidName is returned when the name of a provider record is not a valid
+// Kubernetes name. The tenant operator uses the name in the name of a
+// ModelProvider and of the objects that it renders, and in labels.
+var ErrInvalidName = errors.New("invalid provider name")
+
+// validateName refuses a name that is not a DNS-1123 label: lower case letters,
+// digits and '-', start and end with a letter or digit, 63 characters at most.
+func validateName(name string) error {
+	if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
+		return fmt.Errorf("%w: %q must be a valid Kubernetes name (%s)", ErrInvalidName, name, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func validateType(t ProviderType) error {
+	for _, supported := range SupportedProviderTypes() {
 		if t == supported {
 			return nil
 		}
 	}
-	return fmt.Errorf("%w: %q (supported: %s)", ErrUnsupportedType, t, joinTypes(llm.SupportedProviderTypes()))
+	return fmt.Errorf("%w: %q (supported: %s)", ErrUnsupportedType, t, joinTypes(SupportedProviderTypes()))
 }
 
 // checkCredentials validates the credential fields that carry more than a
@@ -64,14 +79,14 @@ func validateType(t llm.ProviderType) error {
 // value in its canonical form, so the store and the sandbox that reads it hold
 // a checked value and nothing else.
 func checkCredentials(input *ProviderConfigInput) (*ProviderConfigInput, error) {
-	raw, present := input.Credentials[llm.CustomHeadersKey]
+	raw, present := input.Credentials[CustomHeadersKey]
 	if !present {
 		return input, nil
 	}
-	if input.Type != llm.ProviderAnthropic {
-		return nil, fmt.Errorf("%w: the field %s is for the anthropic type only", ErrInvalidCredentials, llm.CustomHeadersKey)
+	if input.Type != ProviderAnthropic {
+		return nil, fmt.Errorf("%w: the field %s is for the anthropic type only", ErrInvalidCredentials, CustomHeadersKey)
 	}
-	canonical, err := llm.CanonicalCustomHeaders(raw)
+	canonical, err := CanonicalCustomHeaders(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidCredentials, err)
 	}
@@ -81,14 +96,14 @@ func checkCredentials(input *ProviderConfigInput) (*ProviderConfigInput, error) 
 		out.Credentials[k] = v
 	}
 	if canonical == "" {
-		delete(out.Credentials, llm.CustomHeadersKey)
+		delete(out.Credentials, CustomHeadersKey)
 	} else {
-		out.Credentials[llm.CustomHeadersKey] = canonical
+		out.Credentials[CustomHeadersKey] = canonical
 	}
 	return &out, nil
 }
 
-func joinTypes(types []llm.ProviderType) string {
+func joinTypes(types []ProviderType) string {
 	ss := make([]string, len(types))
 	for i, t := range types {
 		ss[i] = string(t)

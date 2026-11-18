@@ -15,11 +15,11 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
+	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -216,7 +216,7 @@ func textResponse(text string) *modelclient.Response {
 
 func chatStore() *stubProviderConfigStore {
 	return &stubProviderConfigStore{getFunc: func(_ context.Context, _, name string) (*providerconfig.ProviderConfig, error) {
-		return &providerconfig.ProviderConfig{Name: name, Type: llm.ProviderOpenAI, DefaultModel: "gpt-default", Enabled: true}, nil
+		return &providerconfig.ProviderConfig{Name: name, Type: providerconfig.ProviderOpenAI, DefaultModel: "gpt-default", Enabled: true}, nil
 	}}
 }
 

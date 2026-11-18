@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
@@ -19,17 +18,11 @@ import (
 )
 
 // Infrastructure holds the daemon's infrastructure components that are shared
-// across different operations (DAG executor, finding store, LLM registry).
+// across different operations (DAG executor, finding store).
 //
 // This struct is embedded in daemonImpl to provide access to these components
 // during mission execution, attack operations, and event streaming.
 type Infrastructure struct {
-	// llmRegistry manages LLM provider registration and discovery
-	llmRegistry llm.LLMRegistry
-
-	// slotManager resolves slot names to provider configurations
-	slotManager llm.SlotManager
-
 	// harnessFactory creates configured AgentHarness instances
 	harnessFactory harness.HarnessFactoryInterface
 
@@ -66,20 +59,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		return nil, fmt.Errorf("StateClient not initialized - cannot initialize infrastructure")
 	}
 	d.logger.Info(ctx, "finding store: per-tenant path via Pool (no global Redis store)")
-
-	// Create LLM registry
-	llmRegistry := llm.NewLLMRegistry()
-
-	// Register LLM providers from configuration
-	if err := d.registerLLMProviders(ctx, llmRegistry); err != nil {
-		return nil, fmt.Errorf("failed to register LLM providers: %w", err)
-	}
-	d.logger.Info(ctx, "initialized LLM registry")
-
-	// Create slot manager with the LLM registry
-	slotManager := NewDaemonSlotManager(llmRegistry, d.logger.WithComponent("slot-manager").Slog())
-
-	d.logger.Info(ctx, "initialized slot manager")
 
 	// Initialize TaxonomyRegistry with core taxonomy
 	// This provides the canonical node/relationship types and parent relationship rules
@@ -132,8 +111,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 
 	// Store infrastructure components temporarily so newHarnessFactory can access them.
 	infra := &Infrastructure{
-		llmRegistry:      llmRegistry,
-		slotManager:      slotManager,
 		otelStack:        otelStack,
 		taxonomyRegistry: taxonomyRegistry,
 		redisClient:      redisClient,
@@ -152,30 +129,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	infra.harnessFactory = harnessFactory
 
 	return infra, nil
-}
-
-// registerLLMProviders fills the daemon-wide LLM registry. In production it
-// stays EMPTY on purpose: the platform holds no LLM credential of its own.
-// A tenant's providers and their keys live in that tenant's provider
-// configuration and reach missions through the per-tenant registry the
-// tenantprovider resolver builds from the secrets broker. The daemon-wide
-// registry exists for one caller only, the e2e mock LLM provider, which is
-// compiled in with -tags=test_fixtures and enabled at runtime with
-// GIBSON_TEST_FIXTURES_ENABLED=true; production builds register nothing here.
-//
-// The config-driven (llm.providers in gibson.yaml) and environment-driven
-// (ANTHROPIC_API_KEY and friends) registration this function used to do are
-// gone with the platform LLM path (2026-09-10).
-func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMRegistry) error {
-	maybeRegisterMockLLMProvider(ctx, registry)
-
-	if n := len(registry.ListProviders()); n > 0 {
-		d.logger.Info(ctx, "daemon-wide LLM registry carries test fixture providers", "count", n)
-	} else {
-		d.logger.Info(ctx, "daemon-wide LLM registry is empty by design: LLM providers are per tenant")
-	}
-
-	return nil
 }
 
 // initOTelObservability initializes the OpenTelemetry observability stack if enabled.

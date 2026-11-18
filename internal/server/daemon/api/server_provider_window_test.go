@@ -114,7 +114,7 @@ func updateReq(model string, window int32) *tenantv1.UpdateProviderRequest {
 
 func storedProvider(model string, window int) *providerconfig.ProviderConfig {
 	rec := fakeProviderRecord("anthropic-prod")
-	rec.Type = llm.ProviderAnthropic
+	rec.Type = providerconfig.ProviderAnthropic
 	rec.DefaultModel = model
 	rec.DefaultModelContextWindow = window
 	return rec

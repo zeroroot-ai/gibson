@@ -42,7 +42,7 @@ func (s *intStore) Resolve(_ context.Context, tenant, name string) (*providercon
 // its primary slot; a tenant with none fails fast with the actionable message.
 func TestPerTenantResolution_EndToEnd(t *testing.T) {
 	store := &intStore{configs: map[string][]*providerconfig.ProviderConfig{
-		"tenant-with": {{Name: "anthropic", Type: llm.ProviderAnthropic, Enabled: true, IsDefault: true}},
+		"tenant-with": {{Name: "anthropic", Type: providerconfig.ProviderAnthropic, Enabled: true, IsDefault: true}},
 		// "tenant-none" intentionally absent — no configured providers.
 	}}
 	factory := func(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
@@ -60,7 +60,7 @@ func TestPerTenantResolution_EndToEnd(t *testing.T) {
 
 		provider, _, err := sm.ResolveSlot(ctx, slot, nil)
 		require.NoError(t, err, "a tenant with a configured provider must resolve its primary slot")
-		assert.Equal(t, string(llm.ProviderAnthropic), provider.Name())
+		assert.Equal(t, string(providerconfig.ProviderAnthropic), provider.Name())
 	})
 
 	t.Run("tenant with no provider fails fast with an actionable message", func(t *testing.T) {

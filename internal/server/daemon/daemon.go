@@ -1545,20 +1545,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.callback.SetWorldViewSource(worldViewSource(d.brainRegistry, minter))
 		d.logger.Info(ctx, "wired callback WorldView RPC to the ECS brain")
 
-		// Wire the LLM completion RPCs to the per-tenant World's LlmCall capture
-		// (gibson#1083): mission/agent LLM calls reach the model through this
-		// callback path (slot → local provider), never through ExecuteLLM, so
-		// without this they never become LlmCallObserved events and a
-		// mission-scoped frame's LLM panel stays empty. Reuses the #1078 ingest
-		// sink (the sole LlmCallObserved producer) — no parallel capture, no
-		// double-capture. The harness record carries the mission context already
-		// on the callback request; we map it onto the daemon's api record.
-		llmSink := ingestLLMCall(d.brainRegistry)
-		d.callback.SetLLMCallSink(func(ctx context.Context, tenant string, call harness.LLMCallRecord) {
-			llmSink(ctx, tenant, harnessLLMCallToAPI(call))
-		})
-		d.logger.Info(ctx, "wired callback LLM completion RPCs to the ECS brain World")
-
 		// Wire CallToolProto to the per-tenant World's AgentToolCall capture —
 		// the flight recorder's tool-I/O half (ADR-0120, gibson#271). Before
 		// this, a fleet agent's tool calls reached the daemon only as bare

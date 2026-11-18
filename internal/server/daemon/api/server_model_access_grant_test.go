@@ -55,12 +55,12 @@ func grantServer(t *testing.T) (*DaemonServer, *fakeAuthorizer) {
 	t.Helper()
 	az := newFakeAuthorizer().allow("user:user-test", "admin", "tenant:tenant-a")
 	store := &listingProviderStore{configs: []*providerconfig.ProviderConfig{
-		{Name: "my-openai", Type: llm.ProviderOpenAI, DefaultModel: "gpt-4o", Enabled: true},
-		{Name: "off", Type: llm.ProviderGoogle, DefaultModel: "gemini-x", Enabled: false},
-		{Name: "embed-only-type", Type: llm.ProviderVoyage, DefaultModel: "voyage-3", Enabled: true},
-		{Name: "embed-capability", Type: llm.ProviderMistral, DefaultModel: "mistral-embed", Enabled: true,
+		{Name: "my-openai", Type: providerconfig.ProviderOpenAI, DefaultModel: "gpt-4o", Enabled: true},
+		{Name: "off", Type: providerconfig.ProviderGoogle, DefaultModel: "gemini-x", Enabled: false},
+		{Name: "embed-only-type", Type: providerconfig.ProviderVoyage, DefaultModel: "voyage-3", Enabled: true},
+		{Name: "embed-capability", Type: providerconfig.ProviderMistral, DefaultModel: "mistral-embed", Enabled: true,
 			Capabilities: []string{providerconfig.CapabilityEmbedding}},
-		{Name: "broken", Type: llm.ProviderCohere, DefaultModel: "command", Enabled: true},
+		{Name: "broken", Type: providerconfig.ProviderCohere, DefaultModel: "command", Enabled: true},
 	}}
 	s := newExecServer(store, nil)
 	s.logger = slog.Default()
@@ -144,9 +144,9 @@ func TestGrantAccess_ModelListsAreAskedAtOnceUnderOneDeadline(t *testing.T) {
 	t.Cleanup(func() { grantListTimeout = old })
 
 	configs := []*providerconfig.ProviderConfig{
-		{Name: "slow-1", Type: llm.ProviderOpenAI, Enabled: true},
-		{Name: "slow-2", Type: llm.ProviderMistral, Enabled: true},
-		{Name: "quick", Type: llm.ProviderCohere, Enabled: true},
+		{Name: "slow-1", Type: providerconfig.ProviderOpenAI, Enabled: true},
+		{Name: "slow-2", Type: providerconfig.ProviderMistral, Enabled: true},
+		{Name: "quick", Type: providerconfig.ProviderCohere, Enabled: true},
 	}
 	build := func(withQuick bool) *DaemonServer {
 		s := newExecServer(&listingProviderStore{configs: configs}, nil)
@@ -203,7 +203,7 @@ func TestCheckGrantTarget_RefusesWhatItCannotCheck(t *testing.T) {
 // none.
 func TestProviderListsModel_NamesNothingWhenItFails(t *testing.T) {
 	ctx := context.Background()
-	cfg := &providerconfig.ProviderConfig{Name: "broken", Type: llm.ProviderOpenAI, Enabled: true}
+	cfg := &providerconfig.ProviderConfig{Name: "broken", Type: providerconfig.ProviderOpenAI, Enabled: true}
 
 	t.Run("the list fails", func(t *testing.T) {
 		s, _ := grantServer(t)

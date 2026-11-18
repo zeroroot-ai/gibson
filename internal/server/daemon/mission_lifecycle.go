@@ -38,13 +38,6 @@ func (d *daemonImpl) ensureMissionManager() error {
 			return
 		}
 
-		// Get LLM registry from infrastructure
-		llmReg := d.infrastructure.llmRegistry
-		if llmReg == nil {
-			missionManagerInstance.initErr = fmt.Errorf("LLM registry not initialized in infrastructure")
-			return
-		}
-
 		// Get harness factory from infrastructure
 		harnessFactory := d.infrastructure.harnessFactory
 		if harnessFactory == nil {
@@ -59,7 +52,6 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.logger.Slog(),
 			d.registryAdapter,
 			d.pool,
-			llmReg,
 			d.callback,
 			harnessFactory,
 			d.targetStore,

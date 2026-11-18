@@ -180,6 +180,9 @@ func (s *brokerBackedStore) Get(ctx context.Context, tenantID, name string) (*Pr
 }
 
 func (s *brokerBackedStore) Create(ctx context.Context, tenantID string, input *ProviderConfigInput) (*ProviderConfig, error) {
+	if err := validateName(input.Name); err != nil {
+		return nil, err
+	}
 	if err := validateType(input.Type); err != nil {
 		return nil, err
 	}

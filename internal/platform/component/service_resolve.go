@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
+	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"

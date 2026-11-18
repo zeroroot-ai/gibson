@@ -6,10 +6,10 @@ package harness
 import (
 	"context"
 	"fmt"
-	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"log/slog"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
+
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
@@ -151,10 +151,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 	updatedMissionCtx := missionCtx
 	updatedMissionCtx.CurrentAgent = agentName
 
-	// Create token usage tracker for this agent
-	tokenTrackerPtr := llm.NewTokenTracker(nil)
-	var tokenTracker llm.TokenTracker = tokenTrackerPtr
-
 	// Create logger with agent context
 	logger := f.config.Logger.With(
 		slog.String("agent", agentName),
@@ -221,9 +217,8 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 	// The f.config.SlotManager fallback below exists only as a unit-test seam
 	// (tests inject a slot manager directly without tenant resolution).
 	slotManager := f.config.SlotManager
-	llmRegistry := f.config.LLMRegistry
 	if f.config.SlotManagerForTenant != nil {
-		sm, reg, err := f.config.SlotManagerForTenant(context.Background(), missionCtx.TenantID)
+		sm, err := f.config.SlotManagerForTenant(context.Background(), missionCtx.TenantID)
 		if err != nil {
 			return nil, types.NewError(
 				ErrHarnessInvalidConfig,
@@ -231,13 +226,11 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 			)
 		}
 		slotManager = sm
-		llmRegistry = reg
 	}
 
 	// Create and return DefaultAgentHarness
 	var harness AgentHarness = &DefaultAgentHarness{
 		slotManager:             withMissionInitiator(slotManager, missionCtx.CreatedBy),
-		llmRegistry:             llmRegistry,
 		registryAdapter:         f.config.RegistryAdapter,
 		findingStore:            f.config.FindingStore,
 		factory:                 selfFactory,
@@ -246,7 +239,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		tracer:                  f.config.Tracer,
 		logger:                  logger,
 		metrics:                 f.config.Metrics,
-		tokenUsage:              tokenTracker,
 		delegationSink:          f.config.DelegationSink,
 		findingSink:             f.config.FindingSink,
 		missionClient:           f.config.MissionClient,

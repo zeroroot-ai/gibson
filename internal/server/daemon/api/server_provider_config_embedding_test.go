@@ -48,7 +48,7 @@ func TestFromProtoInput_CarriesEmbeddingFields(t *testing.T) {
 func TestToProtoProviderRecord_CarriesEmbeddingFields(t *testing.T) {
 	cfg := &providerconfig.ProviderConfig{
 		Name:                  "openai",
-		Type:                  llm.ProviderOpenAI,
+		Type:                  providerconfig.ProviderOpenAI,
 		Capabilities:          []string{"chat", "embedding"},
 		DefaultEmbeddingModel: "text-embedding-3-small",
 	}
@@ -66,7 +66,7 @@ func TestToProtoProviderRecord_CarriesEmbeddingFields(t *testing.T) {
 func TestCreateProvider_RoundTripsEmbeddingFields(t *testing.T) {
 	cfg := &providerconfig.ProviderConfig{
 		Name:                  "openai-embed",
-		Type:                  llm.ProviderOpenAI,
+		Type:                  providerconfig.ProviderOpenAI,
 		Enabled:               true,
 		Capabilities:          []string{"chat", "embedding"},
 		DefaultEmbeddingModel: "text-embedding-3-small",

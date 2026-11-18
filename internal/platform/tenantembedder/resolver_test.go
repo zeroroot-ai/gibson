@@ -39,7 +39,7 @@ func (f *fakeStore) List(_ context.Context, _ string) ([]*providerconfig.Provide
 func embeddingProvider(name, model string, isDefault, enabled bool) *providerconfig.ProviderConfig {
 	return &providerconfig.ProviderConfig{
 		Name:                  name,
-		Type:                  llm.ProviderOpenAI,
+		Type:                  providerconfig.ProviderOpenAI,
 		Enabled:               enabled,
 		IsDefault:             isDefault,
 		Capabilities:          []string{providerconfig.CapabilityChat, providerconfig.CapabilityEmbedding},
@@ -50,7 +50,7 @@ func embeddingProvider(name, model string, isDefault, enabled bool) *providercon
 func chatOnlyProvider(name string) *providerconfig.ProviderConfig {
 	return &providerconfig.ProviderConfig{
 		Name:         name,
-		Type:         llm.ProviderAnthropic,
+		Type:         providerconfig.ProviderAnthropic,
 		Enabled:      true,
 		Capabilities: []string{providerconfig.CapabilityChat},
 	}

@@ -18,7 +18,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -36,21 +35,21 @@ const (
 
 // gatewayProviderType maps the type of a provider record to the type of a
 // ModelProvider. It returns a reason when the gateway has no route for the type.
-func gatewayProviderType(t llm.ProviderType) (gwType, skip string) {
+func gatewayProviderType(t providerconfig.ProviderType) (gwType, skip string) {
 	switch t {
-	case llm.ProviderAnthropic:
+	case providerconfig.ProviderAnthropic:
 		return gatewayTypeAnthropic, ""
-	case llm.ProviderOpenAI:
+	case providerconfig.ProviderOpenAI:
 		return gatewayTypeOpenAI, ""
-	case llm.ProviderOpenAICompatible:
+	case providerconfig.ProviderOpenAICompatible:
 		return gatewayTypeOpenAICompatible, ""
-	case llm.ProviderBedrock:
+	case providerconfig.ProviderBedrock:
 		return gatewayTypeBedrock, ""
-	case llm.ProviderGoogle:
+	case providerconfig.ProviderGoogle:
 		return gatewayTypeGemini, ""
-	case llm.ProviderVertex:
+	case providerconfig.ProviderVertex:
 		return gatewayTypeVertexAI, ""
-	case llm.ProviderVoyage:
+	case providerconfig.ProviderVoyage:
 		return "", "voyage is not a provider type: the model gateway does not accept its reply"
 	}
 	return "", fmt.Sprintf("the model gateway has no route for the provider type %q", t)

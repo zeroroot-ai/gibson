@@ -19,8 +19,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/infra/queue"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -127,12 +125,6 @@ type HarnessCallbackService struct {
 	// it to the per-tenant brain. nil means the WorldView read is disabled and
 	// returns an empty slice, symmetric to observationSink's no-op default.
 	worldViewSource WorldViewSource
-
-	// llmCallSink receives completed mission/agent LLM calls observed on the
-	// callback completion path (gibson#1083); the daemon wires it to the
-	// per-tenant World's LlmCall capture (gibson#755/#1078) so a mission-scoped
-	// frame surfaces the mission's LLM activity. nil means capture is disabled.
-	llmCallSink LLMCallSink
 
 	// modelGateway and agentGateway are the public gateways that ResolveModel
 	// and ResolveAgent return.
@@ -470,85 +462,11 @@ func WithOntologyDiscovery(engine brain.OntologyDiscoveryEngine) CallbackService
 	}
 }
 
-// LLMCallRecord captures a completed mission/agent LLM call observed on the
-// callback completion path (gibson#1083). It mirrors the daemon's
-// api.LLMCallRecord but lives here so the harness package stays decoupled from
-// the brain/api packages — the daemon supplies a closure that maps it onto the
-// per-tenant World's LlmCall capture sink (gibson#755/#1078).
-type LLMCallRecord struct {
-	// CallID is a fresh per-call identity giving the call a stable World/graph node.
-	CallID string
-	// MissionID attributes the call to its mission's frame (gibson#1075/#1078);
-	// it is the mission_id carried on the callback request context.
-	MissionID string
-	// RunID is the mission run (or agent run) the call ran under, for provenance.
-	RunID string
-	// MissionRunID is the mission run that issued the call, and only that. RunID
-	// falls back to the agent run, so it cannot tell one run of a mission from
-	// the next (gibson#1217). Empty when the context carries no mission run.
-	MissionRunID string
-	// Model is the resolved model that produced the completion.
-	Model            string
-	PromptTokens     int
-	CompletionTokens int
-	// Messages + Completion are the full transcript (ADR-0120 flight recorder,
-	// gibson#271: capture is ALWAYS ON, never optional). The folded frame
-	// metadata uses model + token counts; the transcript backs the dashboard
-	// conversation view and the flight recorder replay.
-	Messages   []LLMCallMessage
-	Completion string
-	// CompletionToolCalls carries the tool calls the model made as part of
-	// THIS completion — distinct from Completion, which is the assistant's
-	// text content and is often empty on a tool-calling turn. Without this a
-	// tool-calling turn's transcript was silently incomplete (gibson#271).
-	CompletionToolCalls []LLMCallToolCall
-	// RecordedAtUnixNano stamps when the daemon observed this call, so a
-	// tenant's retention policy can be swept deterministically later
-	// (gibson#271).
-	RecordedAtUnixNano int64
-}
-
-// LLMCallMessage is one prompt message in an LLMCallRecord transcript. Role +
-// Content cover a plain turn; ToolCalls carries any tool calls an assistant
-// message in the prompt history made, and ToolCallID/Name identify a
-// tool-result message (role "tool") replaying that call's result back to the
-// model — full-fidelity capture of a tool-calling conversation (gibson#271).
-type LLMCallMessage struct {
-	Role       string
-	Content    string
-	Name       string
-	ToolCalls  []LLMCallToolCall
-	ToolCallID string
-}
-
-// LLMCallToolCall is one tool call an LLM made as part of a completion.
-// Mirrors internal/engine/llm.ToolCall.
-type LLMCallToolCall struct {
-	ID        string
-	Type      string
-	Name      string
-	Arguments string
-}
-
-// LLMCallSink consumes a completed LLM call observed on the callback completion
-// path. The daemon wires this to the per-tenant World; tenant is the call's
-// tenant (already validated equal to the mission tenant by getHarness). When
-// unset, callback LLM-call capture is a no-op.
-type LLMCallSink func(ctx context.Context, tenant string, call LLMCallRecord)
-
-// WithLLMCallSink sets the sink the LLM completion RPCs forward completed calls
-// to for World capture (gibson#1083). When unset, capture is disabled.
-func WithLLMCallSink(sink LLMCallSink) CallbackServiceOption {
-	return func(s *HarnessCallbackService) {
-		s.llmCallSink = sink
-	}
-}
-
 // ToolCallRecord captures a completed tool call observed on the callback
 // CallToolProto path — the tool-I/O half of the flight recorder (ADR-0120,
-// gibson#271), alongside LLMCallRecord's transcript half. It mirrors the
+// gibson#271), It mirrors the
 // daemon's brain.AgentToolCallObserved but lives here so the harness package
-// stays decoupled from the brain package, same as LLMCallRecord.
+// stays decoupled from the brain package,
 type ToolCallRecord struct {
 	// ToolCallID is the call's stable World/graph identity — the
 	// ContextInfo.ToolExecutionId the calling agent's SDK already stamps for
@@ -556,7 +474,7 @@ type ToolCallRecord struct {
 	// a tool call and the graph nodes it produced share one key.
 	ToolCallID string
 	// MissionID attributes the call to its mission's frame, mirroring
-	// LLMCallRecord.MissionID.
+	// the mission frame.
 	MissionID string
 	// RunID is the mission run (or agent run) that made this call.
 	RunID string
@@ -838,72 +756,6 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 // LLM Operations
 // ============================================================================
 
-// captureLLMCall folds a completed callback LLM completion into the per-tenant
-// World via the wired llmCallSink (gibson#1083), stamped with the mission
-// context already carried on the callback request. This is the mission/agent
-// counterpart to the daemon's ExecuteLLM World capture (gibson#1078): mission
-// agents reach the LLM through this callback path (slot → local provider), never
-// through ExecuteLLM, so without this they never become LlmCallObserved events.
-//
-// Best-effort and metadata-first: a fresh CallID gives each call a stable World
-// identity; mission_id attaches it to the mission frame; model + token counts
-// back the LlmCallView. The tenant is read from the request context, which
-// getHarness has already validated equal to the mission's tenant — so there is
-// no cross-tenant or cross-mission bleed. No double-capture: this path and
-// ExecuteLLM are disjoint (mission vs. dashboard chat), and ingestLLMCall is the
-// sole producer of LlmCallObserved.
-func (s *HarnessCallbackService) captureLLMCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, promptMsgs []llm.Message, resp *llm.CompletionResponse) {
-	if s.llmCallSink == nil || resp == nil || contextInfo == nil {
-		return
-	}
-	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" {
-		return
-	}
-	runID := contextInfo.GetMissionRunId()
-	if runID == "" {
-		runID = contextInfo.GetAgentRunId()
-	}
-	msgs := make([]LLMCallMessage, 0, len(promptMsgs))
-	for _, m := range promptMsgs {
-		msgs = append(msgs, LLMCallMessage{
-			Role:       string(m.Role),
-			Content:    m.Content,
-			Name:       m.Name,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  toLLMCallToolCalls(m.ToolCalls),
-		})
-	}
-	s.llmCallSink(ctx, tenant, LLMCallRecord{
-		CallID:              uuid.NewString(),
-		MissionID:           contextInfo.GetMissionId(),
-		MissionRunID:        contextInfo.GetMissionRunId(),
-		RunID:               runID,
-		Model:               resp.Model,
-		PromptTokens:        resp.Usage.PromptTokens,
-		CompletionTokens:    resp.Usage.CompletionTokens,
-		Messages:            msgs,
-		Completion:          resp.Message.Content,
-		CompletionToolCalls: toLLMCallToolCalls(resp.Message.ToolCalls),
-		RecordedAtUnixNano:  time.Now().UnixNano(),
-	})
-}
-
-// toLLMCallToolCalls converts llm.ToolCall values (internal/engine/llm) to the
-// capture-record shape, preserving full fidelity (id, type, name, arguments) —
-// the gibson#271 fix for a tool-calling turn's transcript silently dropping
-// its tool calls.
-func toLLMCallToolCalls(calls []llm.ToolCall) []LLMCallToolCall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]LLMCallToolCall, 0, len(calls))
-	for _, c := range calls {
-		out = append(out, LLMCallToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
-	}
-	return out
-}
-
 // validator is the discovery-compliance validator, built once.
 //
 // Lazily rather than in the constructor: HarnessCallbackService has several
@@ -952,33 +804,6 @@ func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInf
 		Err:                callErr,
 		RecordedAtUnixNano: time.Now().UnixNano(),
 	})
-}
-
-// llmErrorCode maps the error of an LLM call to the code that the agent sees.
-// A refusal of the model gate is a policy answer and a retry cannot change it,
-// so it is PERMISSION_DENIED. A gate that could not decide is UNAVAILABLE,
-// because a retry can succeed. Every other error stays INTERNAL (gibson#1221).
-func llmErrorCode(err error) commonpb.ErrorCode {
-	switch {
-	case errors.Is(err, modelgate.ErrUnavailable):
-		return commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE
-	case errors.Is(err, modelgate.ErrDenied):
-		return commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED
-	default:
-		return commonpb.ErrorCode_ERROR_CODE_INTERNAL
-	}
-}
-
-// llmStatusCode is llmErrorCode for an RPC that answers with a gRPC status.
-func llmStatusCode(err error) codes.Code {
-	switch {
-	case errors.Is(err, modelgate.ErrUnavailable):
-		return codes.Unavailable
-	case errors.Is(err, modelgate.ErrDenied):
-		return codes.PermissionDenied
-	default:
-		return codes.Internal
-	}
 }
 
 // ============================================================================

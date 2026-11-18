@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/tests/testhelpers"
@@ -183,7 +182,7 @@ func newBrokerStore(t *testing.T) (providerconfig.ProviderConfigStore, *fakeSecr
 func sampleInput(name string) *providerconfig.ProviderConfigInput {
 	return &providerconfig.ProviderConfigInput{
 		Name:         name,
-		Type:         llm.ProviderOpenAI,
+		Type:         providerconfig.ProviderOpenAI,
 		DefaultModel: "gpt-4o",
 		Credentials:  map[string]string{"api_key": "sk-supersecret-abcd1234"},
 		Enabled:      true,
@@ -202,7 +201,7 @@ func TestBrokerStore_CRUDLifecycle(t *testing.T) {
 	created, err := store.Create(ctx, intTenant, sampleInput("prod-openai"))
 	require.NoError(t, err)
 	assert.Equal(t, "prod-openai", created.Name)
-	assert.Equal(t, llm.ProviderOpenAI, created.Type)
+	assert.Equal(t, providerconfig.ProviderOpenAI, created.Type)
 
 	// Duplicate create → ErrAlreadyExists
 	_, err = store.Create(ctx, intTenant, sampleInput("prod-openai"))
@@ -282,7 +281,7 @@ func TestBrokerStore_UnsupportedType(t *testing.T) {
 	ctx := context.Background()
 
 	in := sampleInput("weird")
-	in.Type = llm.ProviderType("not-a-real-provider")
+	in.Type = providerconfig.ProviderType("not-a-real-provider")
 	_, err := store.Create(ctx, intTenant, in)
 	assert.ErrorIs(t, err, providerconfig.ErrUnsupportedType)
 }

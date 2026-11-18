@@ -8,19 +8,17 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"sync"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
-	"github.com/zeroroot-ai/gibson/internal/platform/tenantprovider"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -69,9 +67,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 
 	// Build HarnessConfig with all required dependencies
 	config := harness.HarnessConfig{
-		// LLM components
-		LLMRegistry:          d.infrastructure.llmRegistry,
-		SlotManager:          d.infrastructure.slotManager,
+		// Slot resolution reads the provider records of the tenant.
 		SlotManagerForTenant: slotManagerForTenant,
 
 		// Component registries
@@ -257,63 +253,65 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 	return factory, nil
 }
 
-// newSlotManagerForTenant builds the per-tenant slot-manager + registry
-// resolver (gibson#526). It is the single source of per-tenant LLM
-// resolution: the harness config (mission path) and the ComponentService LLM
-// adapter (enrolled-component completions, grpc.go) both use it, so an
-// enrolled agent's completion resolves the tenant's providers exactly as a
-// mission does. Each call carries its own lazy once — the resolver + broker
-// store are built on first use so the broker stack is guaranteed wired by
-// then.
-func (d *daemonImpl) newSlotManagerForTenant() func(context.Context, string) (llm.SlotManager, llm.LLMRegistry, error) {
+// newSlotManagerForTenant builds the per-tenant slot manager resolver
+// (gibson#526). It is the single source of per-tenant slot resolution: the
+// harness config (mission path), the agent model floor and ResolveModel on both
+// services use it. It reads the provider records of the tenant from the
+// provider record store and calls no provider and no secret store. The record
+// store is built on first use, so the broker stack is wired by then.
+func (d *daemonImpl) newSlotManagerForTenant() func(context.Context, string) (harness.SlotManager, error) {
 	var (
-		tpOnce     sync.Once
-		tpResolver *tenantprovider.Resolver
-		tpInitErr  error
+		storeOnce sync.Once
+		store     providerconfig.ProviderConfigStore
+		storeErr  error
 	)
-	return func(rctx context.Context, tenantID string) (llm.SlotManager, llm.LLMRegistry, error) {
-		tpOnce.Do(func() {
+	return func(rctx context.Context, tenantID string) (harness.SlotManager, error) {
+		storeOnce.Do(func() {
 			if d.pool == nil || d.secretsService == nil {
-				tpInitErr = errors.New("per-tenant provider store unavailable (pool/secretsService nil)")
+				storeErr = errors.New("per-tenant provider store unavailable (pool/secretsService nil)")
 				return
 			}
-			store := providerconfig.NewBrokerBackedStore(d.pool, d.secretsService)
-			tpResolver = tenantprovider.NewResolver(store, providers.NewProvider,
-				d.config.Security.AllowPrivateLLMEndpoints,
-				d.logger.WithComponent("tenantprovider").Slog())
+			store = providerconfig.NewBrokerBackedStore(d.pool, d.secretsService)
 		})
-		if tpInitErr != nil {
-			return nil, nil, tpInitErr
+		if storeErr != nil {
+			return nil, storeErr
 		}
-		set, err := tpResolver.Resolve(rctx, tenantID)
+		recs, err := store.List(rctx, tenantID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("resolve per-tenant providers for %q: %w", tenantID, err)
+			return nil, fmt.Errorf("list provider records for %q: %w", tenantID, err)
 		}
-		sm, err := d.buildSlotManagerForSet(rctx, tenantID, set)
+		sm, err := d.buildSlotManagerForRecords(rctx, tenantID, recs)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return sm, set.Registry, nil
+		return sm, nil
 	}
 }
 
-// buildSlotManagerForSet turns a resolved per-tenant provider Set into a slot
-// manager: it wraps the set's registry, prefers the tenant's default provider
-// for unpinned slots (gibson#531), gives the tenant's members the default
-// grant on each provider of the set (hosted#358), and installs the FGA
-// model-access gate on every resolution (gibson#527). Split out of
-// newSlotManagerForTenant's closure so this tail is unit-testable with a
-// hand-built Set (no live broker/Postgres).
+// buildSlotManagerForRecords turns the provider records of a tenant into a slot
+// manager: it prefers the default provider of the tenant for unpinned slots
+// (gibson#531), gives the members of the tenant the default grant on each
+// provider (hosted#358), and installs the FGA model access gate on every
+// resolution (gibson#527). It is split out so a test can pass hand built
+// records.
 //
 // The gate is always installed. A daemon with no authorizer gets a gate that
 // denies every model, never a slot manager with no gate.
-func (d *daemonImpl) buildSlotManagerForSet(ctx context.Context, tenantID string, set *tenantprovider.Set) (*DaemonSlotManager, error) {
-	if err := d.ensureDefaultModelGrants(ctx, tenantID, set.Registry.ListProviders()); err != nil {
+func (d *daemonImpl) buildSlotManagerForRecords(ctx context.Context, tenantID string, recs []*providerconfig.ProviderConfig) (*DaemonSlotManager, error) {
+	providers, defaultName := SlotProvidersFromRecords(recs)
+	names := make([]string, 0, len(providers))
+	for _, p := range providers {
+		names = append(names, p.Name)
+	}
+	if err := d.ensureDefaultModelGrants(ctx, tenantID, names); err != nil {
 		return nil, err
 	}
-	sm := NewDaemonSlotManager(set.Registry, d.logger.WithComponent("slot-manager").Slog())
-	sm.WithDefaultProvider(set.DefaultName)
+	sm := NewDaemonSlotManager(providers, d.logger.WithComponent("slot-manager").Slog())
+	sm.WithDefaultProvider(defaultName)
 	sm.WithModelFilter(modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0))
+	if cb := d.modelResolvedCallback(); cb != nil {
+		sm.WithResolveCallback(cb)
+	}
 	return sm, nil
 }
 

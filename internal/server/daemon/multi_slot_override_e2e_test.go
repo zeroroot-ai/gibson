@@ -41,7 +41,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantprovider"
 )
@@ -134,8 +134,8 @@ func newE2ETwoProviderStore() *e2eStore {
 	return &e2eStore{
 		configs: map[string][]*providerconfig.ProviderConfig{
 			"tenant-e2e": {
-				{Name: "anthropic", Type: llm.ProviderAnthropic, Enabled: true, IsDefault: true},
-				{Name: "openai", Type: llm.ProviderOpenAI, Enabled: true, IsDefault: false},
+				{Name: "anthropic", Type: providerconfig.ProviderAnthropic, Enabled: true, IsDefault: true},
+				{Name: "openai", Type: providerconfig.ProviderOpenAI, Enabled: true, IsDefault: false},
 			},
 		},
 	}

@@ -141,13 +141,13 @@ func TestGetTenantModelProviders(t *testing.T) {
 	}}
 	srv := modelCredServer(store)
 	srv.providerConfig = fakeProviders{records: []*providerconfig.ProviderConfig{
-		{Name: "claude", Type: llm.ProviderAnthropic, Enabled: true},
-		{Name: "eu", Type: llm.ProviderBedrock, Enabled: true},
-		{Name: "local", Type: llm.ProviderOpenAICompatible, Enabled: true},
-		{Name: "vx", Type: llm.ProviderVertex, Enabled: true},
-		{Name: "off", Type: llm.ProviderOpenAI, Enabled: false},
-		{Name: "emb", Type: llm.ProviderVoyage, Enabled: true},
-		{Name: "cf", Type: llm.ProviderCloudflare, Enabled: true},
+		{Name: "claude", Type: providerconfig.ProviderAnthropic, Enabled: true},
+		{Name: "eu", Type: providerconfig.ProviderBedrock, Enabled: true},
+		{Name: "local", Type: providerconfig.ProviderOpenAICompatible, Enabled: true},
+		{Name: "vx", Type: providerconfig.ProviderVertex, Enabled: true},
+		{Name: "off", Type: providerconfig.ProviderOpenAI, Enabled: false},
+		{Name: "emb", Type: providerconfig.ProviderVoyage, Enabled: true},
+		{Name: "cf", Type: providerconfig.ProviderCloudflare, Enabled: true},
 	}}
 	resp, err := srv.GetTenantModelProviders(peerCtx(t, testTenantOperatorSVID),
 		&daemonoperatorv1.GetTenantModelProvidersRequest{TenantId: "acme"})

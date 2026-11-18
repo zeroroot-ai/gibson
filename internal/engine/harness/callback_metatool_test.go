@@ -7,13 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"math"
+	"testing"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
-	"log/slog"
-	"math"
-	"testing"
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"

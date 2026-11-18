@@ -7,12 +7,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"log/slog"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 
@@ -22,7 +23,6 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
@@ -956,80 +956,6 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 		reembedTrigger: noopReembedTrigger{},
 	}
 }
-
-// LLMCallRecord is a completed LLM call reported to the World (gibson#755). It
-// carries call metadata only — model + token counts + provenance ids — never the
-// prompt/completion transcript, so the brain Timeline stays lean.
-type LLMCallRecord struct {
-	CallID string
-	Model  string
-	// MissionID is the mission whose work issued the call — the mission-evidence
-	// edge (gibson#1078). A mission-aware caller stamps mission_id on the
-	// ExecuteLLM request; the handler copies it here so the call attaches to its
-	// mission's frame. Empty for non-mission callers (e.g. dashboard chat), which
-	// stay tenant-ambient.
-	MissionID string
-	// MissionRunID is the mission run that issued the call (gibson#1217).
-	MissionRunID     string
-	ScopeID          string
-	RunID            string
-	PromptTokens     int
-	CompletionTokens int
-	// Transcript: prompt messages + the assistant completion, captured in full
-	// every time (ADR-0120 flight recorder, gibson#271 — never optional), so
-	// the World can back the dashboard conversation view without a separate
-	// trace store.
-	Messages   []LLMMessage
-	Completion string
-	// CompletionToolCalls carries the tool calls the model made as part of
-	// THIS completion — distinct from Completion, which is the assistant's
-	// text content and is often empty on a tool-calling turn (gibson#271).
-	CompletionToolCalls []LLMToolCall
-	// RecordedAtUnixNano stamps when the daemon observed this call, so a
-	// tenant's retention policy can be swept deterministically later.
-	RecordedAtUnixNano int64
-}
-
-// LLMMessage is one prompt message in an LLMCallRecord transcript. Role +
-// Content cover a plain turn; ToolCalls carries any tool calls an assistant
-// message in the prompt history made, and ToolCallID/Name identify a
-// tool-result message (role "tool") replaying that call's result back to the
-// model (gibson#271).
-type LLMMessage struct {
-	Role       string
-	Content    string
-	Name       string
-	ToolCalls  []LLMToolCall
-	ToolCallID string
-}
-
-// LLMToolCall is one tool call an LLM made as part of a completion. Mirrors
-// internal/engine/llm.ToolCall.
-type LLMToolCall struct {
-	ID        string
-	Type      string
-	Name      string
-	Arguments string
-}
-
-// toLLMToolCalls converts llm.ToolCall values (internal/engine/llm) to the
-// capture-record shape, preserving full fidelity — the gibson#271 fix for a
-// tool-calling turn's transcript silently dropping its tool calls.
-func toLLMToolCalls(calls []llm.ToolCall) []LLMToolCall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]LLMToolCall, 0, len(calls))
-	for _, c := range calls {
-		out = append(out, LLMToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
-	}
-	return out
-}
-
-// LLMCallSink consumes a completed LLM call for per-tenant World capture. It is
-// brain-agnostic so the api package need not import internal/brain; the daemon
-// supplies a closure that folds the record into the tenant's brain engine.
-type LLMCallSink func(ctx context.Context, tenant string, call LLMCallRecord)
 
 // WithQuotaManager attaches a MissionQuotaChecker to the server so that
 // RunMission enforces per-tenant mission quotas.  Call this immediately

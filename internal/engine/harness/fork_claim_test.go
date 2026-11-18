@@ -6,9 +6,10 @@ package harness
 import (
 	"context"
 	"errors"
-	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"testing"
 	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"

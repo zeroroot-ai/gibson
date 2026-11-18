@@ -110,7 +110,7 @@ func fakeProviderRecord(name string) *providerconfig.ProviderConfig {
 		ID:                types.NewID(),
 		TenantID:          "acme",
 		Name:              name,
-		Type:              llm.ProviderOpenAI,
+		Type:              providerconfig.ProviderOpenAI,
 		DefaultModel:      "gpt-4o-mini",
 		IsDefault:         false,
 		Enabled:           true,
@@ -286,7 +286,7 @@ func TestCreateProvider_Success_ReturnsRecordAndEmitsAudit(t *testing.T) {
 	assert.Equal(t, "openai-new", resp.Provider.Name)
 	// Verify the store was called with the correct type conversion.
 	require.NotNil(t, store.capturedCreateInput)
-	assert.Equal(t, llm.ProviderOpenAI, store.capturedCreateInput.Type)
+	assert.Equal(t, providerconfig.ProviderOpenAI, store.capturedCreateInput.Type)
 }
 
 func TestCreateProvider_CredentialsNotInResponse(t *testing.T) {
@@ -450,7 +450,7 @@ func TestGetProviderHealth_NilStore_FailedPrecondition(t *testing.T) {
 }
 
 func savedProviderStore() *mockProviderStore {
-	return &mockProviderStore{getOut: &providerconfig.ProviderConfig{Name: "p", Type: llm.ProviderOpenAI, DefaultModel: "gpt-x", Enabled: true}}
+	return &mockProviderStore{getOut: &providerconfig.ProviderConfig{Name: "p", Type: providerconfig.ProviderOpenAI, DefaultModel: "gpt-x", Enabled: true}}
 }
 
 func TestGetProviderHealth_NotFound_NotFound(t *testing.T) {
@@ -643,7 +643,7 @@ func TestToProtoProviderRecord_FieldMapping(t *testing.T) {
 func TestFromProtoInput_NilReturnsEmpty(t *testing.T) {
 	out := fromProtoInput(nil)
 	require.NotNil(t, out)
-	assert.Equal(t, llm.ProviderType(""), out.Type)
+	assert.Equal(t, providerconfig.ProviderType(""), out.Type)
 	assert.Empty(t, out.Name)
 }
 
@@ -656,7 +656,7 @@ func TestFromProtoInput_CredentialsCopied(t *testing.T) {
 		SetAsDefault: true,
 	}
 	out := fromProtoInput(in)
-	assert.Equal(t, llm.ProviderAnthropic, out.Type)
+	assert.Equal(t, providerconfig.ProviderAnthropic, out.Type)
 	assert.Equal(t, "sk-ant-test", out.Credentials["api_key"])
 	assert.Equal(t, "us-east-1", out.Credentials["region"])
 	assert.True(t, out.SetAsDefault)
@@ -684,16 +684,16 @@ func TestValidateProviderInput_UnknownType_Error(t *testing.T) {
 }
 
 func TestValidateProviderInput_KnownTypes_NoError(t *testing.T) {
-	for _, typ := range llm.SupportedProviderTypes() {
-		if typ == llm.ProviderCustom {
+	for _, typ := range providerconfig.SupportedProviderTypes() {
+		if typ == providerconfig.ProviderCustom {
 			continue
 		}
 		t.Run(string(typ), func(t *testing.T) {
 			// Embedding-only providers (voyage, openai-compatible, tei) must
 			// declare CAPABILITY_EMBEDDING and a known default_embedding_model.
-			isEmbeddingOnly := typ == llm.ProviderVoyage ||
-				typ == llm.ProviderOpenAICompatible ||
-				typ == llm.ProviderTEI
+			isEmbeddingOnly := typ == providerconfig.ProviderVoyage ||
+				typ == providerconfig.ProviderOpenAICompatible ||
+				typ == providerconfig.ProviderTEI
 			input := &tenantv1.ProviderConfigInput{Type: string(typ)}
 			if isEmbeddingOnly {
 				input.Capabilities = []tenantv1.Capability{tenantv1.Capability_CAPABILITY_EMBEDDING}

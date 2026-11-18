@@ -46,7 +46,7 @@ func (s *floorStore) Resolve(context.Context, string, string) (*providerconfig.D
 func realFloorChain(t *testing.T, model string, window int) *harness.CatalogAgentResolver {
 	t.Helper()
 	store := &floorStore{cfg: &providerconfig.ProviderConfig{
-		Name: "anthropic", Type: llm.ProviderAnthropic, Enabled: true, IsDefault: true,
+		Name: "anthropic", Type: providerconfig.ProviderAnthropic, Enabled: true, IsDefault: true,
 		DefaultModel: model, DefaultModelContextWindow: window,
 	}}
 	tp := tenantprovider.NewResolver(store, providers.NewProvider, false, slog.New(slog.DiscardHandler))
@@ -98,7 +98,7 @@ func TestCVETriageFloor_APinnedModelOtherThanTheSavedOneIsUnproven(t *testing.T)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	model, window, err := (&slotModelResolver{forTenant: func(ctx context.Context, tenant string) (llm.SlotManager, llm.LLMRegistry, error) {
 		tp := tenantprovider.NewResolver(&floorStore{cfg: &providerconfig.ProviderConfig{
-			Name: "anthropic", Type: llm.ProviderAnthropic, Enabled: true, IsDefault: true,
+			Name: "anthropic", Type: providerconfig.ProviderAnthropic, Enabled: true, IsDefault: true,
 			DefaultModel: "claude-saved", DefaultModelContextWindow: 200000,
 		}}, providers.NewProvider, false, slog.New(slog.DiscardHandler))
 		set, err := tp.Resolve(ctx, tenant)

@@ -7,11 +7,12 @@ import (
 	"context"
 
 	"errors"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"

@@ -4,6 +4,7 @@
 package api
 
 import (
+	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,14 +37,14 @@ func TestEveryCredentialFieldHasAType(t *testing.T) {
 // The mapping gives UNSPECIFIED for a kind it does not know, so the test
 // above can fail.
 func TestCredentialFieldTypeToProto(t *testing.T) {
-	for kind, want := range map[llm.CredentialFieldType]tenantv1.CredentialFieldType{
-		llm.FieldText:     tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_TEXT,
-		llm.FieldPassword: tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_PASSWORD,
-		llm.FieldURL:      tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_URL,
-		llm.FieldRegion:   tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_REGION,
-		llm.FieldBool:     tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_BOOL,
-		"":                tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_UNSPECIFIED,
-		"color":           tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_UNSPECIFIED,
+	for kind, want := range map[providerconfig.CredentialFieldType]tenantv1.CredentialFieldType{
+		providerconfig.FieldText:     tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_TEXT,
+		providerconfig.FieldPassword: tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_PASSWORD,
+		providerconfig.FieldURL:      tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_URL,
+		providerconfig.FieldRegion:   tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_REGION,
+		providerconfig.FieldBool:     tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_BOOL,
+		"":                           tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_UNSPECIFIED,
+		"color":                      tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_UNSPECIFIED,
 	} {
 		require.Equal(t, want, credentialFieldTypeToProto(kind), "kind %q", kind)
 	}

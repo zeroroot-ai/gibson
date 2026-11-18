@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -156,7 +155,7 @@ func (d *providerConfigDAO) get(ctx context.Context, tenantID, name string) (*Pr
 		ID:                        parsedID,
 		TenantID:                  tenantID,
 		Name:                      name,
-		Type:                      llm.ProviderType(typ),
+		Type:                      ProviderType(typ),
 		DefaultModel:              defaultModel,
 		DefaultModelContextWindow: window,
 		IsDefault:                 isDefault,
@@ -201,7 +200,7 @@ func (d *providerConfigDAO) list(ctx context.Context, tenantID string) ([]*Provi
 			ID:                        parsedID,
 			TenantID:                  tenantID,
 			Name:                      name,
-			Type:                      llm.ProviderType(typ),
+			Type:                      ProviderType(typ),
 			DefaultModel:              defaultModel,
 			DefaultModelContextWindow: window,
 			IsDefault:                 isDefault,

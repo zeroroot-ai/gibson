@@ -5,11 +5,12 @@ package harness
 
 import (
 	"context"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
-	"github.com/zeroroot-ai/sdk/auth"
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"

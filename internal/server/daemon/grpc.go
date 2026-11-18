@@ -9,7 +9,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/zeroroot-ai/gibson/internal/platform/trainerid"
 	"io"
 	"log/slog"
 	"net"
@@ -19,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/trainerid"
+
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
@@ -27,7 +28,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/reembed"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/infra/idempotency"
@@ -40,6 +40,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/identity"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
+	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
@@ -921,46 +922,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Expose the cache-invalidation hook of the filter so grant/revoke take
 	// effect within milliseconds rather than the filter's 30s TTL.
 	daemonSvc.WithModelGateInvalidator(filter)
-	if d.infrastructure != nil {
-		if dsm, ok := d.infrastructure.slotManager.(*DaemonSlotManager); ok {
-			dsm.WithModelFilter(filter)
-			d.logger.Info(ctx, "modelgate filter wired into slot resolver (spec: llm-user-attribution-governance)")
-			// Emit a model_resolved event for every resolution, allowed or
-			// denied.
-			if d.auditWriter != nil {
-				emitter := d.auditWriter
-				logger := d.logger.Slog()
-				dsm.WithResolveCallback(func(ctx context.Context, picked modelgate.Candidate, allowed bool) {
-					tenantID := auth.TenantStringFromContext(ctx)
-					userID := ""
-					if uid, ok := auth.ActingUserFromContext(ctx); ok {
-						userID = uid
-					} else if uid, ok := auth.InitiatorUserFromContext(ctx); ok {
-						userID = uid
-					}
-					audit.EmitModelResolved(ctx, emitter, logger, audit.ModelResolutionEvent{
-						TenantID:       tenantID,
-						UserID:         userID,
-						ChosenProvider: picked.Provider,
-						ChosenModel:    picked.Model,
-						Considered: []audit.CandidateOutcome{{
-							Provider: picked.Provider,
-							Model:    picked.Model,
-							Allowed:  allowed,
-							Reason: func() string {
-								if allowed {
-									return "allowed"
-								}
-								return "fga_denied"
-							}(),
-						}},
-					})
-				})
-				d.logger.Info(ctx, "model_resolved audit emitter wired into slot resolver")
-			}
-		}
-	}
-
 	// Agent-owner lookup on the callback service so DelegateToAgent
 	// populates ExecutorUser on sub-agent dispatch. Uses Discover to
 	// read the registered-component instance's Metadata map — the
@@ -1851,6 +1812,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 			// A bank member heartbeats with its status (ADR-0119, gibson#1716).
 			compSvc.WithMemberStatusSink(&memberEvents{daemon: d})
+			compSvc.WithSlotModelResolver(&componentSlotModels{forTenant: d.newSlotManagerForTenant()})
 			compSvc.WithGateways(
 				component.GatewayInfo{URL: d.publicGateways.model.URL, CAPEM: d.publicGateways.model.CAPEM},
 				component.GatewayInfo{URL: d.publicGateways.agent.URL, CAPEM: d.publicGateways.agent.CAPEM})

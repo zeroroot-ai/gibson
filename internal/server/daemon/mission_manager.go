@@ -15,7 +15,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
@@ -146,7 +145,6 @@ type missionManager struct {
 	logger          *slog.Logger
 	registry        component.ComponentDiscovery
 	pool            datapool.Pool // per-tenant data-plane pool (replaces missionStore, missionRunStore, findingStore)
-	llmRegistry     llm.LLMRegistry
 	callbackManager *harness.CallbackManager
 	harnessFactory  harness.HarnessFactoryInterface
 	targetStore     targetStoreLookup
@@ -225,7 +223,6 @@ func newMissionManager(
 	logger *slog.Logger,
 	reg component.ComponentDiscovery,
 	pool datapool.Pool,
-	llmRegistry llm.LLMRegistry,
 	callbackMgr *harness.CallbackManager,
 	harnessFactory harness.HarnessFactoryInterface,
 	targetStore targetStoreLookup,
@@ -242,7 +239,6 @@ func newMissionManager(
 		logger:          logger.With("component", "mission-manager"),
 		registry:        reg,
 		pool:            pool,
-		llmRegistry:     llmRegistry,
 		callbackManager: callbackMgr,
 		harnessFactory:  harnessFactory,
 		targetStore:     targetStore,

@@ -22,8 +22,6 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -63,6 +61,8 @@ func toGRPCProviderError(op string, err error) error {
 	case errors.Is(err, providerconfig.ErrAlreadyExists):
 		return status_grpc.Errorf(codes.AlreadyExists, "provider already exists")
 	case errors.Is(err, providerconfig.ErrUnsupportedType):
+		return status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	case errors.Is(err, providerconfig.ErrInvalidName):
 		return status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	case errors.Is(err, providerconfig.ErrInvalidCredentials):
 		return status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
@@ -172,7 +172,7 @@ func fromProtoInput(in *tenantv1.ProviderConfigInput) *providerconfig.ProviderCo
 	}
 	return &providerconfig.ProviderConfigInput{
 		Name:                      in.Name,
-		Type:                      llm.ProviderType(in.Type),
+		Type:                      providerconfig.ProviderType(in.Type),
 		DefaultModel:              in.DefaultModel,
 		DefaultModelContextWindow: int(in.DefaultModelContextWindow),
 		Capabilities:              capabilitiesFromProto(in.Capabilities),
@@ -192,11 +192,11 @@ func validateProviderInput(input *tenantv1.ProviderConfigInput) error {
 	if input == nil {
 		return fmt.Errorf("input is required")
 	}
-	if input.Type == string(llm.ProviderCustom) {
+	if input.Type == string(providerconfig.ProviderCustom) {
 		return fmt.Errorf("provider type %q is operator-only and cannot be configured via the dashboard", input.Type)
 	}
 	supported := false
-	for _, t := range llm.AcceptedProviderTypes() {
+	for _, t := range providerconfig.SupportedProviderTypes() {
 		if string(t) == input.Type {
 			supported = true
 			break
@@ -207,9 +207,9 @@ func validateProviderInput(input *tenantv1.ProviderConfigInput) error {
 	}
 	// Embedding-only provider types cannot serve chat completions. They must
 	// declare CAPABILITY_EMBEDDING (and may not declare CAPABILITY_CHAT).
-	embeddingOnly := input.Type == string(llm.ProviderVoyage) ||
-		input.Type == string(llm.ProviderOpenAICompatible) ||
-		input.Type == string(llm.ProviderTEI)
+	embeddingOnly := input.Type == string(providerconfig.ProviderVoyage) ||
+		input.Type == string(providerconfig.ProviderOpenAICompatible) ||
+		input.Type == string(providerconfig.ProviderTEI)
 	if embeddingOnly {
 		hasEmbedding := false
 		for _, c := range input.Capabilities {
@@ -460,15 +460,15 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteP
 // ---------------------------------------------------------------------------
 
 // isEmbeddingOnlyType reports whether the provider type serves embeddings only.
-func isEmbeddingOnlyType(t llm.ProviderType) bool {
-	return t == llm.ProviderVoyage || t == llm.ProviderOpenAICompatible || t == llm.ProviderTEI
+func isEmbeddingOnlyType(t providerconfig.ProviderType) bool {
+	return t == providerconfig.ProviderVoyage || t == providerconfig.ProviderOpenAICompatible || t == providerconfig.ProviderTEI
 }
 
 // servesChat reports whether a proposed config serves chat: it declares the
 // chat capability, or it declares none (the legacy chat-only default) and is
 // not an embedding-only type.
 func servesChat(input *tenantv1.ProviderConfigInput) bool {
-	if isEmbeddingOnlyType(llm.ProviderType(input.GetType())) {
+	if isEmbeddingOnlyType(providerconfig.ProviderType(input.GetType())) {
 		return false
 	}
 	if len(input.GetCapabilities()) == 0 {
@@ -581,7 +581,7 @@ func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *tenantv1.Set
 // ---------------------------------------------------------------------------
 
 // GetSupportedProviders returns the daemon's static catalogue of LLM provider
-// types in the same deterministic order as llm.SupportedProviderTypes(). No
+// types in the same deterministic order as providerconfig.SupportedProviderTypes(). No
 // tenant context required at the data layer (the catalogue is process-wide),
 // but the auth interceptor still asserts tenant membership so unauthenticated
 // callers can't enumerate the surface.
@@ -589,7 +589,7 @@ func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.Ge
 	if auth.TenantStringFromContext(ctx) == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
-	descriptors := providers.SupportedProviderDescriptors()
+	descriptors := providerconfig.SupportedProviderDescriptors()
 	out := make([]*tenantv1.SupportedProvider, 0, len(descriptors))
 	for _, d := range descriptors {
 		out = append(out, descriptorToProto(d))
@@ -600,17 +600,17 @@ func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.Ge
 // credentialFieldTypeToProto maps the input kind of a credential field to the
 // proto enum (gibson#701). A kind with no mapping gives UNSPECIFIED, and
 // TestEveryCredentialFieldHasAType fails on it.
-func credentialFieldTypeToProto(t llm.CredentialFieldType) tenantv1.CredentialFieldType {
+func credentialFieldTypeToProto(t providerconfig.CredentialFieldType) tenantv1.CredentialFieldType {
 	switch t {
-	case llm.FieldText:
+	case providerconfig.FieldText:
 		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_TEXT
-	case llm.FieldPassword:
+	case providerconfig.FieldPassword:
 		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_PASSWORD
-	case llm.FieldURL:
+	case providerconfig.FieldURL:
 		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_URL
-	case llm.FieldRegion:
+	case providerconfig.FieldRegion:
 		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_REGION
-	case llm.FieldBool:
+	case providerconfig.FieldBool:
 		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_BOOL
 	default:
 		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_UNSPECIFIED
@@ -620,7 +620,7 @@ func credentialFieldTypeToProto(t llm.CredentialFieldType) tenantv1.CredentialFi
 // descriptorToProto translates the in-Go ProviderDescriptor to its proto
 // equivalent. It carries provider metadata only. The model lists come from the
 // provider through TestProvider and ListProviderModels.
-func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvider {
+func descriptorToProto(d providerconfig.ProviderDescriptor) *tenantv1.SupportedProvider {
 	creds := make([]*tenantv1.CredentialField, 0, len(d.Credentials))
 	for _, c := range d.Credentials {
 		creds = append(creds, &tenantv1.CredentialField{

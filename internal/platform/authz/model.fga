@@ -374,7 +374,7 @@ type mission
 # ----------------------------------------------------------------------
 #
 # provider and model types gate slot resolution per user, per team and per
-# tenant (internal/engine/llm/modelgate, hosted#358).
+# tenant (internal/platform/modelgate, hosted#358).
 #
 # Both objects are tenant-qualified: provider:<tenant>/<name> and
 # model:<tenant>/<name> (authz.ProviderObject, authz.ModelObject). A grant in

@@ -32,7 +32,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'internal/engine/llm/modelgate/**'
+      - 'internal/platform/modelgate/**'
       - 'internal/engine/llm/fixture_provider_type*.go'
       - 'internal/engine/llm/providers/fixture_factory*.go'
       - 'internal/server/daemon/slot_manager.go'

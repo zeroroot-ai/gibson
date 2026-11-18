@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 )
 

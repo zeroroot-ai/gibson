@@ -13,7 +13,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
 
 // slotModelResolver backs harness.TenantModelResolver with the SAME per-tenant
@@ -28,7 +28,7 @@ type slotModelResolver struct {
 	// forTenant is the daemon's per-tenant slot-manager factory. It is a
 	// function rather than a resolved manager because the provider store is
 	// built lazily on first use, after the harness factory exists.
-	forTenant func(ctx context.Context, tenantID string) (llm.SlotManager, llm.LLMRegistry, error)
+	forTenant func(ctx context.Context, tenantID string) (harness.SlotManager, error)
 }
 
 var _ harness.TenantModelResolver = (*slotModelResolver)(nil)
@@ -57,7 +57,7 @@ func (r *slotModelResolver) ResolveAgentModel(
 	if r == nil || r.forTenant == nil {
 		return "", 0, errors.New("per-tenant model resolution is not wired")
 	}
-	manager, _, err := r.forTenant(ctx, tenant)
+	manager, err := r.forTenant(ctx, tenant)
 	if err != nil {
 		return "", 0, fmt.Errorf("resolve providers for tenant %q: %w", tenant, err)
 	}
@@ -76,10 +76,34 @@ func (r *slotModelResolver) ResolveAgentModel(
 	// matching provider") does not say what was being resolved, and this is the
 	// only frame that knows it was an agent's declared floor rather than a
 	// mission node's slot. errors.Is still reaches the cause.
-	_, info, err := manager.ResolveSlot(ctx, slot, override)
+	picked, err := manager.ResolveSlot(ctx, slot, override)
 	if err != nil {
 		return "", 0, fmt.Errorf("resolve a model with at least %d tokens of context for tenant %q: %w",
 			minContextWindow, tenant, err)
 	}
-	return info.Name, info.ContextWindow, nil
+	return picked.Model, picked.ContextWindow, nil
+}
+
+// componentSlotModels resolves a slot for ResolveModel on ComponentService. It
+// uses the same per-tenant slot resolution as a mission, so an agent in pull
+// mode and a mission agree on the model of the tenant.
+type componentSlotModels struct {
+	forTenant func(ctx context.Context, tenantID string) (harness.SlotManager, error)
+}
+
+var _ component.SlotModelResolver = (*componentSlotModels)(nil)
+
+// ResolveSlotModel resolves slot to one provider and one exact model name.
+func (r *componentSlotModels) ResolveSlotModel(
+	ctx context.Context, tenant, slot string, pin *agent.SlotConfig,
+) (component.ResolvedSlot, error) {
+	manager, err := r.forTenant(ctx, tenant)
+	if err != nil {
+		return component.ResolvedSlot{}, fmt.Errorf("resolve providers for tenant %q: %w", tenant, err)
+	}
+	picked, err := manager.ResolveSlot(ctx, agent.NewSlotDefinition(slot, "component runtime slot", true), pin)
+	if err != nil {
+		return component.ResolvedSlot{}, fmt.Errorf("resolve slot %q: %w", slot, err)
+	}
+	return component.ResolvedSlot{Provider: picked.Provider, Model: picked.Model, ContextWindow: picked.ContextWindow}, nil
 }

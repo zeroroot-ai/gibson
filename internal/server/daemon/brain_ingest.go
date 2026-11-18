@@ -24,7 +24,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
-	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
@@ -376,104 +375,6 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 		}
 		return nil
 	}
-}
-
-// ingestLLMCall returns the DaemonServer's LLM-call capture sink (gibson#755):
-// it folds a completed ExecuteLLM call into the calling tenant's brain World as
-// an LlmCall entity — the World replacement for the Langfuse trace/cost views.
-// Unlike ingestObservation (single dev tenant), this routes by the tenant the
-// call ran under, so it is multi-tenant correct.
-func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
-	return func(_ context.Context, tenant string, call api.LLMCallRecord) {
-		if reg == nil || call.CallID == "" {
-			return
-		}
-		msgs := make([]brain.LlmMessage, 0, len(call.Messages))
-		for _, m := range call.Messages {
-			msgs = append(msgs, brain.LlmMessage{
-				Role:       m.Role,
-				Content:    m.Content,
-				Name:       m.Name,
-				ToolCallID: m.ToolCallID,
-				ToolCalls:  toBrainToolCalls(m.ToolCalls),
-			})
-		}
-		reg.For(tenant).Submit(brain.LlmCallObserved{
-			CallID:  call.CallID,
-			RunID:   call.RunID,
-			Model:   call.Model,
-			ScopeID: call.ScopeID,
-			// Mission-evidence edge (gibson#1078): a mission-aware ExecuteLLM caller
-			// stamps mission_id on the request; the handler carries it onto the record
-			// so the call attaches to its mission's frame. Empty = tenant-ambient (e.g.
-			// dashboard chat), which never attaches to a mission frame.
-			MissionID:           call.MissionID,
-			MissionRunID:        call.MissionRunID,
-			PromptTokens:        call.PromptTokens,
-			CompletionTokens:    call.CompletionTokens,
-			Messages:            msgs,
-			Completion:          call.Completion,
-			CompletionToolCalls: toBrainToolCalls(call.CompletionToolCalls),
-			RecordedAtUnixNano:  call.RecordedAtUnixNano,
-		})
-	}
-}
-
-// harnessLLMCallToAPI maps a harness.LLMCallRecord (the callback-path capture
-// shape) onto the daemon's api.LLMCallRecord (ADR-0120, gibson#271) — the
-// bridge daemon.go's callback→api LLM-call wiring uses. Extracted as a pure
-// function so the mapping is unit-testable without a live daemon/gRPC server.
-func harnessLLMCallToAPI(call harness.LLMCallRecord) api.LLMCallRecord {
-	msgs := make([]api.LLMMessage, 0, len(call.Messages))
-	for _, m := range call.Messages {
-		msgs = append(msgs, api.LLMMessage{
-			Role:       m.Role,
-			Content:    m.Content,
-			Name:       m.Name,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  toAPIToolCalls(m.ToolCalls),
-		})
-	}
-	return api.LLMCallRecord{
-		CallID:              call.CallID,
-		MissionID:           call.MissionID,
-		MissionRunID:        call.MissionRunID,
-		RunID:               call.RunID,
-		Model:               call.Model,
-		PromptTokens:        call.PromptTokens,
-		CompletionTokens:    call.CompletionTokens,
-		Messages:            msgs,
-		Completion:          call.Completion,
-		CompletionToolCalls: toAPIToolCalls(call.CompletionToolCalls),
-		RecordedAtUnixNano:  call.RecordedAtUnixNano,
-	}
-}
-
-// toAPIToolCalls converts harness.LLMCallToolCall values to the daemon api
-// package's LLMToolCall shape (ADR-0120, gibson#271) — the bridge daemon.go's
-// callback→api LLM-call mapping uses.
-func toAPIToolCalls(calls []harness.LLMCallToolCall) []api.LLMToolCall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]api.LLMToolCall, 0, len(calls))
-	for _, c := range calls {
-		out = append(out, api.LLMToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
-	}
-	return out
-}
-
-// toBrainToolCalls converts api.LLMToolCall values to the brain package's
-// LlmToolCall shape (ADR-0120, gibson#271).
-func toBrainToolCalls(calls []api.LLMToolCall) []brain.LlmToolCall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]brain.LlmToolCall, 0, len(calls))
-	for _, c := range calls {
-		out = append(out, brain.LlmToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
-	}
-	return out
 }
 
 // ingestSkillLoad returns the sink of the loads of Agent Skills (epic
