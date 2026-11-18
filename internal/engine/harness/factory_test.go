@@ -82,8 +82,8 @@ var _ component.ComponentDiscovery = (*MockRegistryAdapter)(nil)
 
 func TestNewHarnessFactory_Success(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -114,8 +114,8 @@ func TestNewHarnessFactory_InvalidConfig_NoSlotManager(t *testing.T) {
 
 func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 		// All other fields nil
 	}
 
@@ -130,7 +130,7 @@ func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 	assert.NotNil(t, storedConfig.FindingStore, "FindingStore should be defaulted")
 	assert.NotNil(t, storedConfig.Metrics, "Metrics should be defaulted")
 	assert.NotNil(t, storedConfig.Tracer, "Tracer should be defaulted")
-	assert.NotNil(t, storedConfig.SlotManager, "SlotManager should remain set")
+	assert.NotNil(t, storedConfig.SlotManagerForTenant, "SlotManagerForTenant should remain set")
 }
 
 func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
@@ -139,10 +139,10 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 	metrics := NewNoOpMetricsRecorder()
 
 	config := HarnessConfig{
-		SlotManager:  slotMgr,
-		TargetFacts:  testTargetFacts,
-		FindingStore: findingStore,
-		Metrics:      metrics,
+		SlotManagerForTenant: fixedSlotManager(slotMgr),
+		TargetFacts:          testTargetFacts,
+		FindingStore:         findingStore,
+		Metrics:              metrics,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -151,7 +151,7 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 	storedConfig := factory.Config()
 
 	// Verify provided values were preserved
-	assert.Equal(t, slotMgr, storedConfig.SlotManager)
+	assert.NotNil(t, storedConfig.SlotManagerForTenant)
 	assert.Equal(t, findingStore, storedConfig.FindingStore)
 	assert.Equal(t, metrics, storedConfig.Metrics)
 }
@@ -159,10 +159,10 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	// Test with all fields specified.
 	config := HarnessConfig{
-		SlotManager:  newStubSlotManager(),
-		TargetFacts:  testTargetFacts,
-		FindingStore: NewInMemoryFindingStore(),
-		Metrics:      NewNoOpMetricsRecorder(),
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		FindingStore:         NewInMemoryFindingStore(),
+		Metrics:              NewNoOpMetricsRecorder(),
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -172,7 +172,7 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	storedConfig := factory.Config()
 
 	// Verify all provided values are preserved
-	assert.NotNil(t, storedConfig.SlotManager)
+	assert.NotNil(t, storedConfig.SlotManagerForTenant)
 	// ComponentInstallRegistry was removed in plugin-runtime Spec 2 Phase 7.
 	assert.NotNil(t, storedConfig.FindingStore)
 	assert.NotNil(t, storedConfig.Metrics)
@@ -188,8 +188,8 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 
 func TestFactory_Create_Success(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -213,8 +213,8 @@ func TestFactory_Create_Success(t *testing.T) {
 
 func TestFactory_Create_UpdatesMissionContext(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -237,8 +237,8 @@ func TestFactory_Create_UpdatesMissionContext(t *testing.T) {
 
 func TestFactory_Create_EmptyAgentName(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -257,8 +257,8 @@ func TestFactory_Create_EmptyAgentName(t *testing.T) {
 
 func TestFactory_Create_MultipleHarnesses(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -295,9 +295,9 @@ func TestFactory_Create_MultipleHarnesses(t *testing.T) {
 func TestFactory_Create_SharedFindingStore(t *testing.T) {
 	findingStore := NewInMemoryFindingStore()
 	config := HarnessConfig{
-		SlotManager:  newStubSlotManager(),
-		TargetFacts:  testTargetFacts,
-		FindingStore: findingStore,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		FindingStore:         findingStore,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -336,8 +336,8 @@ func TestFactory_Create_SharedFindingStore(t *testing.T) {
 // mission harness carries the decider pin, and no child may run on it.
 func TestFactory_CreateChild_DropsTheSlotPinsOfTheParent(t *testing.T) {
 	factory, err := NewHarnessFactory(HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	})
 	require.NoError(t, err)
 
@@ -354,8 +354,8 @@ func TestFactory_CreateChild_DropsTheSlotPinsOfTheParent(t *testing.T) {
 
 func TestFactory_CreateChild_Success(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -389,8 +389,8 @@ func TestFactory_CreateChild_Success(t *testing.T) {
 
 func TestFactory_CreateChild_NilParent(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -405,8 +405,8 @@ func TestFactory_CreateChild_NilParent(t *testing.T) {
 
 func TestFactory_CreateChild_EmptyAgentName(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -430,9 +430,9 @@ func TestFactory_CreateChild_EmptyAgentName(t *testing.T) {
 func TestFactory_CreateChild_SharedFindingStore(t *testing.T) {
 	findingStore := NewInMemoryFindingStore()
 	config := HarnessConfig{
-		SlotManager:  newStubSlotManager(),
-		TargetFacts:  testTargetFacts,
-		FindingStore: findingStore,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		FindingStore:         findingStore,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -474,8 +474,8 @@ func TestFactory_CreateChild_SharedFindingStore(t *testing.T) {
 
 func TestFactory_CreateChild_Hierarchy(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -516,8 +516,8 @@ func TestFactory_Config_ReturnsCorrectConfig(t *testing.T) {
 	slotMgr := newStubSlotManager()
 
 	config := HarnessConfig{
-		SlotManager: slotMgr,
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(slotMgr),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -525,15 +525,15 @@ func TestFactory_Config_ReturnsCorrectConfig(t *testing.T) {
 
 	retrievedConfig := factory.Config()
 
-	assert.Equal(t, slotMgr, retrievedConfig.SlotManager)
+	assert.NotNil(t, retrievedConfig.SlotManagerForTenant)
 }
 
 func TestFactory_Config_IsCopy(t *testing.T) {
 	slotMgr := newStubSlotManager()
 
 	config := HarnessConfig{
-		SlotManager: slotMgr,
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(slotMgr),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -543,8 +543,9 @@ func TestFactory_Config_IsCopy(t *testing.T) {
 	config1 := factory.Config()
 	config2 := factory.Config()
 
-	// Both should have same values (value semantics)
-	assert.Equal(t, config1.SlotManager, config2.SlotManager)
+	// Both should have the same values (value semantics)
+	assert.NotNil(t, config1.SlotManagerForTenant)
+	assert.NotNil(t, config2.SlotManagerForTenant)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -568,8 +569,8 @@ func TestFactory_InterfaceCompliance(t *testing.T) {
 
 func TestFactory_ConcurrentCreation(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -609,8 +610,8 @@ func TestFactory_ConcurrentCreation(t *testing.T) {
 
 func TestFactory_SameMissionDifferentAgents(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -639,8 +640,8 @@ func TestFactory_SameMissionDifferentAgents(t *testing.T) {
 
 func TestFactory_DifferentMissionsSameAgent(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -686,9 +687,9 @@ func TestFactory_Create_WithRegistryAdapter(t *testing.T) {
 
 	// Create config with registry adapter
 	config := HarnessConfig{
-		SlotManager:     newStubSlotManager(),
-		TargetFacts:     testTargetFacts,
-		RegistryAdapter: mockAdapter,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		RegistryAdapter:      mockAdapter,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -716,9 +717,9 @@ func TestFactory_CreateChild_WithRegistryAdapter(t *testing.T) {
 
 	// Create config with registry adapter
 	config := HarnessConfig{
-		SlotManager:     newStubSlotManager(),
-		TargetFacts:     testTargetFacts,
-		RegistryAdapter: mockAdapter,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		RegistryAdapter:      mockAdapter,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -750,8 +751,8 @@ func TestFactory_CreateChild_WithRegistryAdapter(t *testing.T) {
 func TestFactory_Create_WithoutRegistryAdapter(t *testing.T) {
 	// Create config WITHOUT registry adapter
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 		// RegistryAdapter is nil
 	}
 
@@ -790,9 +791,9 @@ func TestHarnessFactory_WithMiddleware(t *testing.T) {
 
 	// Create config with middleware
 	config := HarnessConfig{
-		SlotManager: slotManager,
-		TargetFacts: testTargetFacts,
-		Middleware:  testMiddleware,
+		SlotManagerForTenant: fixedSlotManager(slotManager),
+		TargetFacts:          testTargetFacts,
+		Middleware:           testMiddleware,
 	}
 
 	// Create factory
@@ -827,9 +828,9 @@ func TestHarnessFactory_WithoutMiddleware(t *testing.T) {
 
 	// Create config without middleware
 	config := HarnessConfig{
-		SlotManager: slotManager,
-		TargetFacts: testTargetFacts,
-		Middleware:  nil, // No middleware
+		SlotManagerForTenant: fixedSlotManager(slotManager),
+		TargetFacts:          testTargetFacts,
+		Middleware:           nil, // No middleware
 	}
 
 	// Create factory

@@ -42,3 +42,9 @@ func (s *stubSlotManager) ResolveSlot(
 func (s *stubSlotManager) ValidateSlot(context.Context, agent.SlotDefinition) error {
 	return s.err
 }
+
+// fixedSlotManager returns a per-tenant resolver that gives the same slot
+// manager to each tenant.
+func fixedSlotManager(sm SlotManager) func(context.Context, string) (SlotManager, error) {
+	return func(context.Context, string) (SlotManager, error) { return sm, nil }
+}

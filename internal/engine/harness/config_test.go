@@ -18,8 +18,8 @@ func TestHarnessConfig_Validate(t *testing.T) {
 		{
 			name: "valid config with SlotManager",
 			config: HarnessConfig{
-				SlotManager: newStubSlotManager(),
-				TargetFacts: testTargetFacts,
+				SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+				TargetFacts:          testTargetFacts,
 			},
 			expectErr: false,
 		},
@@ -46,8 +46,8 @@ func TestHarnessConfig_Validate(t *testing.T) {
 // TestHarnessConfig_ApplyDefaults tests that defaults are applied correctly
 func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 		// All other fields are nil
 	}
 
@@ -71,7 +71,7 @@ func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 	}
 
 	// SlotManager should remain unchanged
-	if config.SlotManager == nil {
+	if config.SlotManagerForTenant == nil {
 		t.Error("expected SlotManager to remain set")
 	}
 
@@ -80,8 +80,8 @@ func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 // TestHarnessConfig_ApplyDefaults_Idempotent tests that ApplyDefaults is idempotent
 func TestHarnessConfig_ApplyDefaults_Idempotent(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	// Apply defaults first time
@@ -102,12 +102,12 @@ func TestHarnessConfig_ApplyDefaults_Idempotent(t *testing.T) {
 func TestHarnessFactoryConfig_Alias(t *testing.T) {
 	// Test that HarnessFactoryConfig is an alias for HarnessConfig
 	var factoryConfig HarnessFactoryConfig
-	factoryConfig.SlotManager = newStubSlotManager()
+	factoryConfig.SlotManagerForTenant = fixedSlotManager(newStubSlotManager())
 
 	// Should be assignable to HarnessConfig without conversion
 	var harnessConfig HarnessConfig = factoryConfig
 
-	if harnessConfig.SlotManager == nil {
+	if harnessConfig.SlotManagerForTenant == nil {
 		t.Error("expected SlotManager to be set via alias")
 	}
 }
@@ -115,8 +115,8 @@ func TestHarnessFactoryConfig_Alias(t *testing.T) {
 // TestNewDefaultHarnessFactory_Alias tests that NewDefaultHarnessFactory function alias works
 func TestNewDefaultHarnessFactory_Alias(t *testing.T) {
 	config := HarnessFactoryConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	// Test that NewDefaultHarnessFactory works
@@ -131,7 +131,7 @@ func TestNewDefaultHarnessFactory_Alias(t *testing.T) {
 
 	// Verify factory has correct config
 	factoryConfig := factory.Config()
-	if factoryConfig.SlotManager == nil {
+	if factoryConfig.SlotManagerForTenant == nil {
 		t.Error("expected factory to have SlotManager configured")
 	}
 

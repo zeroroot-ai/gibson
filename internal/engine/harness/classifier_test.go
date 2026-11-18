@@ -33,8 +33,8 @@ func (m *mockClassifier) Classify(ctx context.Context, proposed, description str
 func TestSubmitFinding_ClassifierDisabled(t *testing.T) {
 	// Create a minimal harness config with no classifier
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 	config.ApplyDefaults()
 
@@ -94,8 +94,8 @@ func TestSubmitFinding_ClassifierNormalizes(t *testing.T) {
 
 	// Create harness config with classifier enabled
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
 			Threshold:    0.85,
@@ -156,8 +156,8 @@ func TestSubmitFinding_ClassifierUnchanged(t *testing.T) {
 
 	// Create harness config with classifier enabled
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
 			Threshold:    0.85,
@@ -218,8 +218,8 @@ func TestSubmitFinding_ClassifierGracefulDegradation(t *testing.T) {
 
 	// Create harness config with classifier enabled
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
 			Threshold:    0.85,
@@ -273,8 +273,8 @@ func TestSubmitFinding_ClassifierGracefulDegradation(t *testing.T) {
 func TestSubmitFinding_ClassifierEnabledButNotProvided(t *testing.T) {
 	// Create harness config with classifier enabled but no classifier instance
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
 			Threshold:    0.85,
@@ -337,8 +337,8 @@ func TestDefaultClassifierConfig(t *testing.T) {
 // TestClassifierConfig_ApplyDefaults tests that ApplyDefaults sets classifier config.
 func TestClassifierConfig_ApplyDefaults(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 		// ClassifierConfig not set
 	}
 

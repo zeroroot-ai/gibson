@@ -49,9 +49,9 @@ func TestHarness_GetToolCapabilities_Integration(t *testing.T) {
 
 	// Create factory and harness
 	config := HarnessConfig{
-		SlotManager:     newStubSlotManager(),
-		TargetFacts:     testTargetFacts,
-		RegistryAdapter: mockAdapter,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		RegistryAdapter:      mockAdapter,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -84,8 +84,8 @@ func TestHarness_GetToolCapabilities_Integration(t *testing.T) {
 func TestHarness_GetAllToolCapabilities_EmptyRegistry(t *testing.T) {
 	// Create factory without any tools registered
 	config := HarnessConfig{
-		SlotManager: newStubSlotManager(),
-		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -112,9 +112,9 @@ func TestHarness_GetAllToolCapabilities_EmptyRegistry(t *testing.T) {
 func TestHarness_GetToolCapabilities_NoRegistryAdapter(t *testing.T) {
 	// Create factory without registry adapter
 	config := HarnessConfig{
-		SlotManager:     newStubSlotManager(),
-		TargetFacts:     testTargetFacts,
-		RegistryAdapter: nil,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		RegistryAdapter:      nil,
 	}
 
 	factory, err := NewHarnessFactory(config)

@@ -40,10 +40,10 @@ func TestEventLogging_FindingSubmission(t *testing.T) {
 
 	// Create harness with event logger
 	cfg := HarnessConfig{
-		SlotManager:  newStubSlotManager(),
-		TargetFacts:  testTargetFacts,
-		FindingStore: NewInMemoryFindingStore(),
-		EventLogger:  mockLogger,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		FindingStore:         NewInMemoryFindingStore(),
+		EventLogger:          mockLogger,
 	}
 
 	factory, err := NewHarnessFactory(cfg)
@@ -91,10 +91,10 @@ func TestEventLogging_FindingSubmission(t *testing.T) {
 func TestEventLogging_NoEventLogger(t *testing.T) {
 	// Create harness without event logger
 	cfg := HarnessConfig{
-		SlotManager:  newStubSlotManager(),
-		TargetFacts:  testTargetFacts,
-		FindingStore: NewInMemoryFindingStore(),
-		EventLogger:  nil, // No event logger
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		FindingStore:         NewInMemoryFindingStore(),
+		EventLogger:          nil, // No event logger
 	}
 
 	factory, err := NewHarnessFactory(cfg)

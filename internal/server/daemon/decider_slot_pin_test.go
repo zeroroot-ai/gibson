@@ -94,8 +94,9 @@ func decideWith(t *testing.T, def *missionpb.MissionDefinition, filter modelgate
 	}
 
 	factory, ferr := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
-		SlotManager: manager,
-		Logger:      logger,
+		SlotManagerForTenant: fixedTenantSlots(manager),
+
+		Logger: logger,
 		// The Decider dispatches no tool, so it reads no target.
 		TargetFacts: func() gibsonharness.TargetFactsLookup { return noTargets{} },
 	})
@@ -273,8 +274,9 @@ func TestDecide_SendsOneGatewayCallWithTheIdentityOfTheMission(t *testing.T) {
 	logger := slog.New(slog.DiscardHandler)
 	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("default-p")
 	factory, err := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
-		SlotManager: manager, Logger: logger,
-		TargetFacts: func() gibsonharness.TargetFactsLookup { return noTargets{} },
+		SlotManagerForTenant: fixedTenantSlots(manager),
+		Logger:               logger,
+		TargetFacts:          func() gibsonharness.TargetFactsLookup { return noTargets{} },
 	})
 	require.NoError(t, err)
 	def := &missionpb.MissionDefinition{Id: "m1"}
@@ -313,8 +315,9 @@ func TestDecide_AGatewayRefusalOfAPinnedDeciderFailsTheMission(t *testing.T) {
 	logger := slog.New(slog.DiscardHandler)
 	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("fast-p")
 	factory, err := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
-		SlotManager: manager, Logger: logger,
-		TargetFacts: func() gibsonharness.TargetFactsLookup { return noTargets{} },
+		SlotManagerForTenant: fixedTenantSlots(manager),
+		Logger:               logger,
+		TargetFacts:          func() gibsonharness.TargetFactsLookup { return noTargets{} },
 	})
 	require.NoError(t, err)
 	def := &missionpb.MissionDefinition{
@@ -345,8 +348,9 @@ func TestDecide_AGatewayOutageKeepsTheRetry(t *testing.T) {
 	logger := slog.New(slog.DiscardHandler)
 	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("default-p")
 	factory, err := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
-		SlotManager: manager, Logger: logger,
-		TargetFacts: func() gibsonharness.TargetFactsLookup { return noTargets{} },
+		SlotManagerForTenant: fixedTenantSlots(manager),
+		Logger:               logger,
+		TargetFacts:          func() gibsonharness.TargetFactsLookup { return noTargets{} },
 	})
 	require.NoError(t, err)
 	def := &missionpb.MissionDefinition{Id: "m1"}
@@ -360,4 +364,9 @@ func TestDecide_AGatewayOutageKeepsTheRetry(t *testing.T) {
 	out, err := exec.Decide(context.Background(), brain.MissionContext{MissionID: "m1"})
 	require.Error(t, err)
 	assert.Nil(t, out.Complete)
+}
+
+// fixedTenantSlots gives the same slot manager to each tenant.
+func fixedTenantSlots(sm gibsonharness.SlotManager) func(context.Context, string) (gibsonharness.SlotManager, error) {
+	return func(context.Context, string) (gibsonharness.SlotManager, error) { return sm, nil }
 }

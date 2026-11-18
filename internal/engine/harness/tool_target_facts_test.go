@@ -158,13 +158,13 @@ func testTargetFacts() TargetFactsLookup { return &stubTargetFacts{} }
 func TestHarnessFactory_RequiresTheTargetLookup(t *testing.T) {
 	slots := newStubSlotManager()
 
-	if f, err := NewHarnessFactory(HarnessConfig{SlotManager: slots}); err == nil {
+	if f, err := NewHarnessFactory(HarnessConfig{SlotManagerForTenant: fixedSlotManager(slots)}); err == nil {
 		t.Fatalf("NewHarnessFactory with no TargetFacts = %v, nil; want an error", f)
 	}
 
 	f, err := NewHarnessFactory(HarnessConfig{
-		SlotManager: slots,
-		TargetFacts: func() TargetFactsLookup { return nil },
+		SlotManagerForTenant: fixedSlotManager(slots),
+		TargetFacts:          func() TargetFactsLookup { return nil },
 	})
 	if err != nil {
 		t.Fatalf("NewHarnessFactory: %v", err)
@@ -175,8 +175,8 @@ func TestHarnessFactory_RequiresTheTargetLookup(t *testing.T) {
 
 	stub := &stubTargetFacts{}
 	f, err = NewHarnessFactory(HarnessConfig{
-		SlotManager: slots,
-		TargetFacts: func() TargetFactsLookup { return stub },
+		SlotManagerForTenant: fixedSlotManager(slots),
+		TargetFacts:          func() TargetFactsLookup { return stub },
 	})
 	if err != nil {
 		t.Fatalf("NewHarnessFactory: %v", err)

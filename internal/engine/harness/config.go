@@ -35,7 +35,7 @@ type TargetFactsLookup interface {
 // production deployments.
 //
 // Required fields:
-//   - SlotManager: Required for LLM slot resolution and provider selection
+//   - SlotManagerForTenant: Required for LLM slot resolution and provider selection
 //
 // Optional fields (will use defaults if nil):
 //   - MemoryManager: Uses in-memory implementation if nil
@@ -45,15 +45,10 @@ type TargetFactsLookup interface {
 //   - Metrics: Uses NoOpMetricsRecorder if nil
 //   - GraphRAGBridge: Uses NoopGraphRAGBridge if nil (no knowledge graph storage)
 type HarnessConfig struct {
-	// SlotManager resolves slot names to provider configurations.
-	// Required for translating agent slot definitions into concrete provider/model pairs.
-	// This is the only required field - harness creation will fail if nil.
-	SlotManager SlotManager
-
-	// SlotManagerForTenant, when set, produces a tenant-scoped SlotManager for
-	// the tenant of a mission. The factory calls it on Create with
-	// missionCtx.TenantID, so slot resolution sees only the provider records of
-	// that tenant. When nil, SlotManager above is used.
+	// SlotManagerForTenant produces a tenant-scoped SlotManager for the tenant
+	// of a mission. The factory calls it on Create with missionCtx.TenantID, so
+	// slot resolution sees only the provider records of that tenant. It is the
+	// only slot manager path. Harness creation fails if it is nil.
 	SlotManagerForTenant func(ctx context.Context, tenantID string) (SlotManager, error)
 
 	// ProtoResolver provides dynamic proto type resolution for tool execution.
@@ -300,21 +295,21 @@ type QuotaCounter interface {
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.
-// Only SlotManager is strictly required - all other fields have reasonable defaults.
+// Only SlotManagerForTenant and TargetFacts are required - all other fields have reasonable defaults.
 //
 // Validation rules:
-//   - SlotManager must not be nil (required for LLM operations)
+//   - SlotManagerForTenant must not be nil (required for LLM operations)
 //   - All other fields are optional and can be nil
 //
 // Returns:
 //   - nil if validation passes
-//   - ErrHarnessInvalidConfig if SlotManager is nil
+//   - ErrHarnessInvalidConfig if SlotManagerForTenant is nil
 func (c *HarnessConfig) Validate() error {
-	// SlotManager is required for LLM slot resolution
-	if c.SlotManager == nil {
+	// SlotManagerForTenant is required for LLM slot resolution
+	if c.SlotManagerForTenant == nil {
 		return types.NewError(
 			ErrHarnessInvalidConfig,
-			"SlotManager is required (cannot be nil)",
+			"SlotManagerForTenant is required (cannot be nil)",
 		)
 	}
 
@@ -342,7 +337,7 @@ func (c *HarnessConfig) Validate() error {
 //   - Metrics: NewNoOpMetricsRecorder()
 //
 // Note: MemoryManager is not defaulted as it requires mission-specific configuration.
-// Note: SlotManager is not defaulted as it is a required field.
+// Note: SlotManagerForTenant is not defaulted as it is a required field.
 // Note: RegistryAdapter is not defaulted as it requires external configuration (if nil, agent delegation will not be available).
 func (c *HarnessConfig) ApplyDefaults() {
 	if c.ProtoResolver == nil {

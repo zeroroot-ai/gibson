@@ -210,22 +210,14 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		}
 	}
 
-	// Per-tenant LLM provider scoping (gibson#528): mission/agent execution
-	// resolves slots against the calling tenant's configured providers via
-	// SlotManagerForTenant. The production daemon ALWAYS wires this hook, so the
-	// legacy global config/env registry is never an execution source in prod.
-	// The f.config.SlotManager fallback below exists only as a unit-test seam
-	// (tests inject a slot manager directly without tenant resolution).
-	slotManager := f.config.SlotManager
-	if f.config.SlotManagerForTenant != nil {
-		sm, err := f.config.SlotManagerForTenant(context.Background(), missionCtx.TenantID)
-		if err != nil {
-			return nil, types.NewError(
-				ErrHarnessInvalidConfig,
-				fmt.Sprintf("failed to resolve providers for tenant %q: %v", missionCtx.TenantID, err),
-			)
-		}
-		slotManager = sm
+	// Per-tenant LLM provider scoping (gibson#528): mission and agent execution
+	// resolve slots against the provider records of the calling tenant.
+	slotManager, err := f.config.SlotManagerForTenant(context.Background(), missionCtx.TenantID)
+	if err != nil {
+		return nil, types.NewError(
+			ErrHarnessInvalidConfig,
+			fmt.Sprintf("failed to resolve providers for tenant %q: %v", missionCtx.TenantID, err),
+		)
 	}
 
 	// Create and return DefaultAgentHarness
