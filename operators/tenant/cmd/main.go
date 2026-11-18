@@ -646,6 +646,7 @@ func main() {
 	var tenantStatusReporter controller.TenantStatusReporter
 	var orgMappingSeeder controller.TenantOrgSeeder
 	var agentLimits flows.AgentLimitsReporter
+	var modelCredentials controller.ModelCredentialSource
 	// The audit record of each saga step and of the last backup goes to the
 	// daemon before the change (gibson#583). Required: no emitter, no start.
 	var sagaAudit *audit.SagaEmitter
@@ -661,6 +662,7 @@ func main() {
 		tenantStatusReporter = grpcClient
 		orgMappingSeeder = grpcClient
 		agentLimits = grpcClient
+		modelCredentials = grpcClient
 		if sagaAudit, gerr = audit.NewSagaEmitter(grpcClient); gerr != nil {
 			setupLog.Error(gerr, "saga audit emitter init failed")
 			os.Exit(1)
@@ -865,9 +867,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.ModelProviderReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Render: modelGatewayConfig,
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Render:      modelGatewayConfig,
+		Credentials: modelCredentials,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "ModelProvider")
 		os.Exit(1)

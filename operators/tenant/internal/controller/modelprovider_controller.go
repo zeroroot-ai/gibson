@@ -4,7 +4,9 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -25,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/modelprovider"
 )
 
@@ -47,9 +50,12 @@ var (
 // the gateway, and the ModelProvider lives in the namespace of the tenant. An
 // owner reference cannot cross a namespace, so a finalizer removes the objects.
 //
-// The controller never reads a credential. It checks that the Kubernetes Secret
-// that the backend names exists in the namespace of the gateway, and it reports
-// the phase WaitingForCredential until it does.
+// The controller writes the credential Secret that the backend names, in the
+// namespace of the gateway. It gets the content from the daemon, which holds the
+// tenant secret store (the mechanism of the connector-cred Secret, gibson#663).
+// The controller keeps no copy of the value. It reports the phase
+// WaitingForCredential until the tenant secret exists. A finalizer deletes the
+// Secret with the provider.
 type ModelProviderReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -58,11 +64,26 @@ type ModelProviderReconciler struct {
 	// Render is the install-side configuration: the namespace of the gateway,
 	// its name and the ext-authz service.
 	Render modelprovider.Config
+
+	// Credentials reads the content of the credential Secret from the daemon.
+	Credentials ModelCredentialSource
+}
+
+// ModelCredentialSource returns the content of the credential Secret of a model
+// provider, by the key names that the gateway reads. The daemon implements it.
+// It returns clients.ErrNotFound when the tenant secret does not exist.
+type ModelCredentialSource interface {
+	ModelProviderCredential(
+		ctx context.Context, tenantID, credentialSecret, providerType string,
+	) (map[string][]byte, error)
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=modelproviders,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=modelproviders/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=modelproviders/finalizers,verbs=update
+// The operator also writes the credential Secret in the namespace of the
+// gateway. A cluster-wide grant on secrets is forbidden, so the chart gives
+// that access with a Role in the gateway namespace, and no marker is here.
 // +kubebuilder:rbac:groups=agentgateway.dev,resources=agentgatewaybackends,verbs=get;list;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;create;update;patch;delete
 
@@ -104,19 +125,93 @@ func (r *ModelProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	secretName := modelprovider.CredentialSecretName(mp.Spec.TenantID, mp.Name)
-	var secret corev1.Secret
-	err = r.Get(ctx, types.NamespacedName{Namespace: r.Render.Namespace, Name: secretName}, &secret)
+	waiting, err := r.syncCredential(ctx, &mp, secretName)
 	switch {
-	case apierrors.IsNotFound(err):
+	case waiting != "":
 		r.setStatus(ctx, &mp, gibsonv1alpha1.ModelProviderPhaseWaitingForCredential, secretName, metav1.ConditionFalse,
-			"WaitingForCredential", "the credential Secret "+secretName+" does not exist in the gateway namespace", "")
+			"WaitingForCredential", waiting, "")
 		return ctrl.Result{RequeueAfter: modelProviderCredentialRetry}, nil
 	case err != nil:
-		return r.fail(ctx, &mp, fmt.Errorf("read the credential Secret: %w", err))
+		return r.fail(ctx, &mp, err)
 	}
 	r.setStatus(ctx, &mp, gibsonv1alpha1.ModelProviderPhaseReady, secretName, metav1.ConditionTrue,
-		"Rendered", "the gateway objects exist and the credential Secret exists", "")
+		"Rendered", "the gateway objects exist and the credential Secret is written", "")
 	return ctrl.Result{RequeueAfter: modelProviderResync}, nil
+}
+
+// syncCredential writes the credential Secret of the provider from the content
+// that the daemon returns. The content replaces the data of the Secret, so a
+// rotated tenant secret reaches the gateway on the next resync. When the tenant
+// secret does not exist, it returns a waiting message and no error. The error
+// text never holds a value.
+func (r *ModelProviderReconciler) syncCredential(
+	ctx context.Context, mp *gibsonv1alpha1.ModelProvider, secretName string,
+) (waiting string, err error) {
+	data, err := r.Credentials.ModelProviderCredential(
+		ctx, mp.Spec.TenantID, mp.Spec.CredentialSecret, string(mp.Spec.Type))
+	if err != nil {
+		if errors.Is(err, clients.ErrNotFound) {
+			return "the tenant secret " + mp.Spec.CredentialSecret + " does not exist", nil
+		}
+		return "", fmt.Errorf("read the credential of the provider from the daemon: %w", err)
+	}
+	if len(data) == 0 {
+		return "", errors.New("the daemon returned an empty credential")
+	}
+	key := types.NamespacedName{Namespace: r.Render.Namespace, Name: secretName}
+	var live corev1.Secret
+	getErr := r.Get(ctx, key, &live)
+	if apierrors.IsNotFound(getErr) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: key.Namespace, Name: key.Name,
+				Labels:      r.credentialLabels(mp),
+				Annotations: map[string]string{modelprovider.AnnotationCredentialSecret: mp.Spec.CredentialSecret},
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: data,
+		}
+		if cerr := r.Create(ctx, secret); cerr != nil {
+			return "", fmt.Errorf("create the credential Secret %s: %w", key.Name, cerr)
+		}
+		return "", nil
+	}
+	if getErr != nil {
+		return "", fmt.Errorf("read the credential Secret %s: %w", key.Name, getErr)
+	}
+	if secretDataEqual(live.Data, data) && labelsContain(live.Labels, r.credentialLabels(mp)) {
+		return "", nil
+	}
+	live.Data = data
+	if live.Labels == nil {
+		live.Labels = map[string]string{}
+	}
+	for k, v := range r.credentialLabels(mp) {
+		live.Labels[k] = v
+	}
+	if uerr := r.Update(ctx, &live); uerr != nil {
+		return "", fmt.Errorf("update the credential Secret %s: %w", key.Name, uerr)
+	}
+	return "", nil
+}
+
+// credentialLabels are the labels of the credential Secret. They are the labels
+// of the gateway objects of the provider, so one selector finds them all.
+func (r *ModelProviderReconciler) credentialLabels(mp *gibsonv1alpha1.ModelProvider) map[string]string {
+	return map[string]string(r.ownedSelector(mp))
+}
+
+func secretDataEqual(a, b map[string][]byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		w, ok := b[k]
+		if !ok || !bytes.Equal(v, w) {
+			return false
+		}
+	}
+	return true
 }
 
 // apply creates the object, or updates it when its spec or labels differ.
@@ -225,6 +320,16 @@ func (r *ModelProviderReconciler) reconcileDelete(ctx context.Context, mp *gibso
 			return ctrl.Result{}, fmt.Errorf("delete %s %s: %w", owned[i].GetKind(), owned[i].GetName(), err)
 		}
 	}
+	// The credential Secret goes first. The finalizer stays until it is gone, so
+	// a provider that is deleted never leaves a credential in the gateway
+	// namespace.
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Namespace: r.Render.Namespace,
+		Name:      modelprovider.CredentialSecretName(mp.Spec.TenantID, mp.Name),
+	}}
+	if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("delete the credential Secret %s: %w", secret.Name, err)
+	}
 	patch := client.MergeFrom(mp.DeepCopy())
 	controllerutil.RemoveFinalizer(mp, gibsonv1alpha1.ModelProviderFinalizer)
 	if err := r.Patch(ctx, mp, patch); err != nil {
@@ -281,6 +386,9 @@ func (r *ModelProviderReconciler) setStatus(
 func (r *ModelProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := r.Render.Validate(); err != nil {
 		return fmt.Errorf("model provider reconciler: %w", err)
+	}
+	if r.Credentials == nil {
+		return errors.New("model provider reconciler: the credential source is required")
 	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("modelprovider-controller")

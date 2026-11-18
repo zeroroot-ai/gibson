@@ -920,6 +920,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.daemon.operator.v1.DaemonOperatorService/GetModelProviderCredential": {
+    method: "/gibson.daemon.operator.v1.DaemonOperatorService/GetModelProviderCredential",
+    service: "gibson.daemon.operator.v1.DaemonOperatorService",
+    relation: "platform_operator",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredCatalogPlugins": {
     method: "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredCatalogPlugins",
     service: "gibson.daemon.operator.v1.DaemonOperatorService",

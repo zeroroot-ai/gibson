@@ -1548,6 +1548,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// handler serves the direct-dial connector operator SVID only.
 	if d.secretsService != nil {
 		daemonSvc.WithConnectorCredentialSource(d.secretsService, connectorOperatorSVID(d.spiffeTrustDomain()))
+		// The tenant operator reads the credential of a model provider the
+		// same way and writes it in the namespace of the model gateway
+		// (gibson#1387).
+		daemonSvc.WithModelProviderCredentialSource(d.secretsService, tenantOperatorSVID(d.spiffeTrustDomain()))
 	}
 
 	// Register ConnectorService — the connector lifecycle (catalog, enable,

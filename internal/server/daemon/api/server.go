@@ -130,6 +130,12 @@ type DaemonServer struct {
 	connectorCredPeer  string
 	connectorCredNow   func() time.Time
 
+	// modelCredStore and modelCredPeer back GetModelProviderCredential
+	// (gibson#1387): the tenant secret store, and the one SPIFFE ID that may
+	// call the RPC (the tenant operator).
+	modelCredStore ConnectorSecretResolver
+	modelCredPeer  string
+
 	// cgMinter / cgVerifier back the RenewCapabilityGrant RPC.
 	// liveMissions gates CG renewal on the mission run still executing
 	// (gibson#1602). Wired via WithLiveMissionLookup; nil refuses renewal

@@ -493,3 +493,27 @@ func (c *EntitlementsGRPCClient) ReportCatalogPluginStatus(ctx context.Context, 
 	}
 	return nil
 }
+
+// ModelProviderCredential reads the content of the credential Secret of a model
+// provider via DaemonOperatorService.GetModelProviderCredential (gibson#1387).
+// A tenant secret that does not exist gives clients.ErrNotFound. The error text
+// never holds a value.
+func (c *EntitlementsGRPCClient) ModelProviderCredential(
+	ctx context.Context, tenantID, credentialSecret, providerType string,
+) (map[string][]byte, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.GetModelProviderCredential(authedCtx, &operatorv1.GetModelProviderCredentialRequest{
+		TenantId: tenantID, CredentialSecret: credentialSecret, ProviderType: providerType,
+	})
+	if grpcstatus.Code(err) == codes.NotFound {
+		metrics.ObserveDaemonCallError("get-model-provider-credential", err)
+		return nil, fmt.Errorf("entitlements: get-model-provider-credential: %w", clients.ErrNotFound)
+	}
+	if err := translateGRPCError("get-model-provider-credential", err); err != nil {
+		return nil, err
+	}
+	return resp.GetData(), nil
+}

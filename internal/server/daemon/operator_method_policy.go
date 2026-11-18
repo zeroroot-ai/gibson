@@ -153,6 +153,11 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 		reason:  "operator records each saga step and the last backup before the change (gibson#583)",
 	},
 
+	daemonoperatorv1.DaemonOperatorService_GetModelProviderCredential_FullMethodName: {
+		allowed: true,
+		reason:  "the ModelProvider controller writes the credential Secret of the gateway (gibson#1387); the handler also checks the TLS peer",
+	},
+
 	// --- operator-denied: least privilege, no caller wired ---
 	daemonoperatorv1.DaemonOperatorService_UpsertTenantQuota_FullMethodName: {
 		allowed: false,

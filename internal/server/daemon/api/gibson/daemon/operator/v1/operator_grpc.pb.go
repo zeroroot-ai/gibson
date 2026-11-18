@@ -41,6 +41,7 @@ const (
 	DaemonOperatorService_ReportConnectorStatus_FullMethodName         = "/gibson.daemon.operator.v1.DaemonOperatorService/ReportConnectorStatus"
 	DaemonOperatorService_AdoptConnector_FullMethodName                = "/gibson.daemon.operator.v1.DaemonOperatorService/AdoptConnector"
 	DaemonOperatorService_GetConnectorCredential_FullMethodName        = "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorCredential"
+	DaemonOperatorService_GetModelProviderCredential_FullMethodName    = "/gibson.daemon.operator.v1.DaemonOperatorService/GetModelProviderCredential"
 	DaemonOperatorService_ListDesiredCatalogPlugins_FullMethodName     = "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredCatalogPlugins"
 	DaemonOperatorService_ReportCatalogPluginStatus_FullMethodName     = "/gibson.daemon.operator.v1.DaemonOperatorService/ReportCatalogPluginStatus"
 )
@@ -205,6 +206,13 @@ type DaemonOperatorServiceClient interface {
 	// connector operator, and refuses each other caller, also a caller with a
 	// platform_operator token through the edge.
 	GetConnectorCredential(ctx context.Context, in *GetConnectorCredentialRequest, opts ...grpc.CallOption) (*GetConnectorCredentialResponse, error)
+	// GetModelProviderCredential returns the content of the credential Secret of
+	// one model provider (gibson#1387). The tenant operator writes the Secret in
+	// the namespace of the model gateway, with the key names that the gateway
+	// reads. The daemon holds no copy of the value after the call, and it never
+	// calls a provider with it. The handler serves only the direct-dial SPIFFE
+	// peer of the tenant operator.
+	GetModelProviderCredential(ctx context.Context, in *GetModelProviderCredentialRequest, opts ...grpc.CallOption) (*GetModelProviderCredentialResponse, error)
 	// ListDesiredCatalogPlugins returns every (tenant, catalog plugin) pair a
 	// tenant enabled (gibson#815). The tenant-operator pulls it and runs one
 	// instance of the plugin for each pair. The daemon holds the desired state
@@ -434,6 +442,16 @@ func (c *daemonOperatorServiceClient) GetConnectorCredential(ctx context.Context
 	return out, nil
 }
 
+func (c *daemonOperatorServiceClient) GetModelProviderCredential(ctx context.Context, in *GetModelProviderCredentialRequest, opts ...grpc.CallOption) (*GetModelProviderCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetModelProviderCredentialResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_GetModelProviderCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonOperatorServiceClient) ListDesiredCatalogPlugins(ctx context.Context, in *ListDesiredCatalogPluginsRequest, opts ...grpc.CallOption) (*ListDesiredCatalogPluginsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListDesiredCatalogPluginsResponse)
@@ -614,6 +632,13 @@ type DaemonOperatorServiceServer interface {
 	// connector operator, and refuses each other caller, also a caller with a
 	// platform_operator token through the edge.
 	GetConnectorCredential(context.Context, *GetConnectorCredentialRequest) (*GetConnectorCredentialResponse, error)
+	// GetModelProviderCredential returns the content of the credential Secret of
+	// one model provider (gibson#1387). The tenant operator writes the Secret in
+	// the namespace of the model gateway, with the key names that the gateway
+	// reads. The daemon holds no copy of the value after the call, and it never
+	// calls a provider with it. The handler serves only the direct-dial SPIFFE
+	// peer of the tenant operator.
+	GetModelProviderCredential(context.Context, *GetModelProviderCredentialRequest) (*GetModelProviderCredentialResponse, error)
 	// ListDesiredCatalogPlugins returns every (tenant, catalog plugin) pair a
 	// tenant enabled (gibson#815). The tenant-operator pulls it and runs one
 	// instance of the plugin for each pair. The daemon holds the desired state
@@ -695,6 +720,9 @@ func (UnimplementedDaemonOperatorServiceServer) AdoptConnector(context.Context, 
 }
 func (UnimplementedDaemonOperatorServiceServer) GetConnectorCredential(context.Context, *GetConnectorCredentialRequest) (*GetConnectorCredentialResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConnectorCredential not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) GetModelProviderCredential(context.Context, *GetModelProviderCredentialRequest) (*GetModelProviderCredentialResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetModelProviderCredential not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) ListDesiredCatalogPlugins(context.Context, *ListDesiredCatalogPluginsRequest) (*ListDesiredCatalogPluginsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListDesiredCatalogPlugins not implemented")
@@ -1101,6 +1129,24 @@ func _DaemonOperatorService_GetConnectorCredential_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonOperatorService_GetModelProviderCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetModelProviderCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).GetModelProviderCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_GetModelProviderCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).GetModelProviderCredential(ctx, req.(*GetModelProviderCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonOperatorService_ListDesiredCatalogPlugins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListDesiredCatalogPluginsRequest)
 	if err := dec(in); err != nil {
@@ -1227,6 +1273,10 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetConnectorCredential",
 			Handler:    _DaemonOperatorService_GetConnectorCredential_Handler,
+		},
+		{
+			MethodName: "GetModelProviderCredential",
+			Handler:    _DaemonOperatorService_GetModelProviderCredential_Handler,
 		},
 		{
 			MethodName: "ListDesiredCatalogPlugins",

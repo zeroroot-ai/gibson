@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -17,8 +18,37 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/modelprovider"
 )
+
+// fakeModelCredentials is the daemon side of the credential read. A tenant secret
+// that is not in data gives clients.ErrNotFound.
+type fakeModelCredentials struct {
+	data  map[string]map[string][]byte
+	err   error
+	calls []string
+}
+
+func (f *fakeModelCredentials) ModelProviderCredential(
+	_ context.Context, tenantID, credentialSecret, providerType string,
+) (map[string][]byte, error) {
+	f.calls = append(f.calls, tenantID+"/"+credentialSecret+"/"+providerType)
+	if f.err != nil {
+		return nil, f.err
+	}
+	d, ok := f.data[credentialSecret]
+	if !ok {
+		return nil, fmt.Errorf("get: %w", clients.ErrNotFound)
+	}
+	return d, nil
+}
+
+func anthropicCredentials() *fakeModelCredentials {
+	return &fakeModelCredentials{data: map[string]map[string][]byte{
+		"anthropic-key": {"Authorization": []byte("sk-ant-1")},
+	}}
+}
 
 func modelProviderTestRig(t *testing.T, mp *gibsonv1alpha1.ModelProvider, extra ...client.Object) (*ModelProviderReconciler, client.Client) {
 	t.Helper()
@@ -38,6 +68,7 @@ func modelProviderTestRig(t *testing.T, mp *gibsonv1alpha1.ModelProvider, extra 
 			Namespace: "gibson-gateway", GatewayName: "model-gateway",
 			ExtAuthzName: "gibson-ext-authz", ExtAuthzNamespace: "gibson", ExtAuthzPort: 9001,
 		},
+		Credentials: &fakeModelCredentials{data: map[string]map[string][]byte{}},
 	}
 	return r, c
 }
@@ -106,12 +137,68 @@ func TestModelProvider_RendersAndWaitsForTheCredential(t *testing.T) {
 	}
 }
 
-func TestModelProvider_ReadyWhenTheCredentialSecretExists(t *testing.T) {
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "gibson-gateway", Name: "mp-acme-claude-credential"}}
-	r, c := modelProviderTestRig(t, newModelProvider(), secret)
+// The controller writes the credential Secret from the content of the daemon,
+// with the key name that the gateway reads, and the provider is Ready.
+func TestModelProvider_WritesTheCredentialSecret(t *testing.T) {
+	r, c := modelProviderTestRig(t, newModelProvider())
+	src := anthropicCredentials()
+	r.Credentials = src
 	reconcileTwice(t, r)
+
+	var secret corev1.Secret
+	key := types.NamespacedName{Namespace: "gibson-gateway", Name: "mp-acme-claude-credential"}
+	if err := c.Get(context.Background(), key, &secret); err != nil {
+		t.Fatalf("the credential Secret was not written: %v", err)
+	}
+	if got := string(secret.Data["Authorization"]); got != "sk-ant-1" {
+		t.Errorf("Authorization = %q", got)
+	}
+	if secret.Labels[modelprovider.LabelTenant] != "acme" || secret.Labels[modelprovider.LabelModelProvider] != "claude" {
+		t.Errorf("labels = %v", secret.Labels)
+	}
 	if got := getModelProvider(t, c); got.Status.Phase != gibsonv1alpha1.ModelProviderPhaseReady || !got.Status.Ready {
 		t.Errorf("status = %+v, want Ready", got.Status)
+	}
+	if len(src.calls) == 0 || src.calls[0] != "acme/anthropic-key/anthropic" {
+		t.Errorf("daemon calls = %v", src.calls)
+	}
+}
+
+// A rotated tenant secret reaches the Secret on the next reconcile.
+func TestModelProvider_RotationUpdatesTheSecret(t *testing.T) {
+	r, c := modelProviderTestRig(t, newModelProvider())
+	src := anthropicCredentials()
+	r.Credentials = src
+	reconcileTwice(t, r)
+	src.data["anthropic-key"] = map[string][]byte{"Authorization": []byte("sk-ant-2")}
+	reconcileTwice(t, r)
+	var secret corev1.Secret
+	key := types.NamespacedName{Namespace: "gibson-gateway", Name: "mp-acme-claude-credential"}
+	if err := c.Get(context.Background(), key, &secret); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(secret.Data["Authorization"]); got != "sk-ant-2" {
+		t.Errorf("Authorization = %q, want the rotated value", got)
+	}
+}
+
+// A daemon error other than NotFound fails the reconcile, and the status text
+// holds no credential.
+func TestModelProvider_ADaemonErrorFails(t *testing.T) {
+	r, c := modelProviderTestRig(t, newModelProvider())
+	r.Credentials = &fakeModelCredentials{err: fmt.Errorf("dial: %w", clients.ErrUnreachable)}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "tenant-acme", Name: "claude"}}
+	_, _ = r.Reconcile(context.Background(), req)
+	if _, err := r.Reconcile(context.Background(), req); err == nil {
+		t.Fatal("a daemon error gave no error")
+	}
+	if got := getModelProvider(t, c); got.Status.Phase != gibsonv1alpha1.ModelProviderPhaseFailed {
+		t.Errorf("phase = %q, want Failed", got.Status.Phase)
+	}
+	var secret corev1.Secret
+	key := types.NamespacedName{Namespace: "gibson-gateway", Name: "mp-acme-claude-credential"}
+	if err := c.Get(context.Background(), key, &secret); err == nil {
+		t.Error("a Secret exists after a failed read")
 	}
 }
 
@@ -164,6 +251,7 @@ func TestModelProvider_DeletesAStaleObjectOnly(t *testing.T) {
 // A delete removes the gateway objects, then the finalizer.
 func TestModelProvider_DeleteRemovesTheGatewayObjects(t *testing.T) {
 	r, c := modelProviderTestRig(t, newModelProvider())
+	r.Credentials = anthropicCredentials()
 	reconcileTwice(t, r)
 	if err := c.Delete(context.Background(), getModelProvider(t, c)); err != nil {
 		t.Fatal(err)
@@ -177,6 +265,11 @@ func TestModelProvider_DeleteRemovesTheGatewayObjects(t *testing.T) {
 	}
 	if _, ok := getObject(t, c, "HTTPRoute", "gateway.networking.k8s.io/v1", "mp-acme-claude"); ok {
 		t.Error("the route is still there")
+	}
+	var gone corev1.Secret
+	secretKey := types.NamespacedName{Namespace: "gibson-gateway", Name: "mp-acme-claude-credential"}
+	if err := c.Get(context.Background(), secretKey, &gone); err == nil {
+		t.Error("the credential Secret is still there")
 	}
 	var mp gibsonv1alpha1.ModelProvider
 	if err := c.Get(context.Background(), req.NamespacedName, &mp); err == nil {
