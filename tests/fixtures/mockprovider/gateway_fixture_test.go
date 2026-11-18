@@ -263,7 +263,9 @@ type gateway struct {
 	base string
 }
 
-func startGateway(t *testing.T, bin string, data map[string]any) *gateway {
+// startGateway renders the config template with data, starts the binary and
+// waits until it is ready.
+func startGateway(t *testing.T, bin, configTpl string, data map[string]any) *gateway {
 	t.Helper()
 	dir := t.TempDir()
 	data["Port"] = freePort(t)
@@ -271,7 +273,7 @@ func startGateway(t *testing.T, bin string, data map[string]any) *gateway {
 	data["Stats"] = freeAddr(t)
 	data["Admin"] = freeAddr(t)
 	var cfg bytes.Buffer
-	tpl, err := template.New("config").Parse(configTemplate)
+	tpl, err := template.New("config").Parse(configTpl)
 	if err != nil {
 		t.Fatalf("parse config template: %v", err)
 	}
@@ -402,7 +404,7 @@ func TestGatewayFixture(t *testing.T) {
 	otlpSrv := httptest.NewServer(otlp)
 	defer otlpSrv.Close()
 
-	gw := startGateway(t, bin, map[string]any{
+	gw := startGateway(t, bin, configTemplate, map[string]any{
 		"Routes":   routes,
 		"Provider": hostOf(providerSrv),
 		"Authz":    hostOf(authzSrv),
