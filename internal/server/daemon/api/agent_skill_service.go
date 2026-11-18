@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"google.golang.org/grpc/codes"
@@ -114,6 +115,17 @@ func agentSkillStatus(rpc string, err error) error {
 	}
 }
 
+func agentSkillSourceProto(source string) tenantv1.AgentSkillSource {
+	switch source {
+	case agentskillstore.SourceTenant:
+		return tenantv1.AgentSkillSource_AGENT_SKILL_SOURCE_TENANT
+	case agentskillstore.SourceShared:
+		return tenantv1.AgentSkillSource_AGENT_SKILL_SOURCE_SHARED
+	default:
+		return tenantv1.AgentSkillSource_AGENT_SKILL_SOURCE_UNSPECIFIED
+	}
+}
+
 func agentSkillEntryProto(e agentskillstore.Entry) *tenantv1.AgentSkillEntry {
 	return &tenantv1.AgentSkillEntry{
 		Name:          e.Name,
@@ -126,6 +138,7 @@ func agentSkillEntryProto(e agentskillstore.Entry) *tenantv1.AgentSkillEntry {
 		AllowedTools:  e.AllowedTools,
 		PublishedAt:   timestamppb.New(e.PublishedAt),
 		Current:       e.Current,
+		Source:        agentSkillSourceProto(e.Source),
 	}
 }
 
@@ -155,7 +168,7 @@ func (s *AgentSkillService) PublishAgentSkill(
 	if err != nil {
 		return nil, agentSkillStatus(rpc, err)
 	}
-	entry, err := s.store.Publish(ctx, tenant, req.GetReference(), pulled)
+	entry, err := s.store.Publish(ctx, tenant, req.GetReference(), agentskillstore.SourceTenant, pulled)
 	if err != nil {
 		return nil, agentSkillStatus(rpc, err)
 	}
@@ -202,6 +215,51 @@ func (s *AgentSkillService) ListAgentSkills(
 	out := &tenantv1.ListAgentSkillsResponse{Entries: make([]*tenantv1.AgentSkillEntry, 0, len(entries))}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, agentSkillEntryProto(e))
+	}
+	return out, nil
+}
+
+// grantRelations are the relations that hold a grant of an Agent Skill, with the
+// FGA subject type and the subject kind of each.
+var grantRelations = []struct {
+	relation, userType string
+	kind               tenantv1.AgentSkillSubjectKind
+}{
+	{"granted_agent", "agent_principal", tenantv1.AgentSkillSubjectKind_AGENT_SKILL_SUBJECT_KIND_AGENT},
+	{"granted_mission", "mission", tenantv1.AgentSkillSubjectKind_AGENT_SKILL_SUBJECT_KIND_MISSION},
+}
+
+// ListAgentSkillGrants returns the agents and the missions that hold a grant of
+// the Agent Skill. It reads the same tuples as DeleteAgentSkill.
+func (s *AgentSkillService) ListAgentSkillGrants(
+	ctx context.Context, req *tenantv1.ListAgentSkillGrantsRequest,
+) (*tenantv1.ListAgentSkillGrantsResponse, error) {
+	const rpc = "ListAgentSkillGrants"
+	tenant, err := agentSkillTenant(ctx, rpc)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireSkillName(rpc, req.GetName()); err != nil {
+		return nil, err
+	}
+	object, err := authz.AgentSkillObject(tenant, req.GetName())
+	if err != nil {
+		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
+	}
+	if _, err := s.store.Get(ctx, tenant, req.GetName(), ""); err != nil {
+		return nil, agentSkillStatus(rpc, err)
+	}
+	out := &tenantv1.ListAgentSkillGrantsResponse{}
+	for _, g := range grantRelations {
+		users, lerr := s.fga.ListUsersOfType(ctx, "agent_skill", object, g.relation, g.userType)
+		if lerr != nil {
+			return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: list the grants: %v", rpc, lerr))
+		}
+		for _, u := range users {
+			out.Grants = append(out.Grants, &tenantv1.AgentSkillGrant{
+				SubjectKind: g.kind, SubjectId: strings.TrimPrefix(u, g.userType+":"),
+			})
+		}
 	}
 	return out, nil
 }
@@ -264,7 +322,7 @@ func (s *AgentSkillService) EnableSharedAgentSkill(
 	if err != nil {
 		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
 	}
-	entry, err := s.store.Publish(ctx, tenant, shared.Reference, shared.Pulled)
+	entry, err := s.store.Publish(ctx, tenant, shared.Reference, agentskillstore.SourceShared, shared.Pulled)
 	if err != nil {
 		return nil, agentSkillStatus(rpc, err)
 	}

@@ -32,6 +32,14 @@ var (
 	ErrCorrupt = errors.New("agentskillstore: the stored content does not match its sha256")
 )
 
+// The sources of a version.
+const (
+	// SourceTenant is a version that the tenant published.
+	SourceTenant = "tenant"
+	// SourceShared is a copy of a Shared Agent Skill of the operator.
+	SourceShared = "shared"
+)
+
 // Entry is one published version of an Agent Skill.
 type Entry struct {
 	Name          string
@@ -45,6 +53,8 @@ type Entry struct {
 	PublishedAt   time.Time
 	// Current is true for the newest publish of the name.
 	Current bool
+	// Source is SourceTenant or SourceShared.
+	Source string
 }
 
 // FileInfo names one file of a version.
@@ -64,8 +74,9 @@ type Loaded struct {
 // Store reads and writes Agent Skills of one tenant.
 type Store interface {
 	// Publish stores a pulled version and makes it the current version of its
-	// name. It is idempotent for a digest that the tenant already has.
-	Publish(ctx context.Context, tenant, reference string, p *agentskill.Pulled) (*Entry, error)
+	// name. source is SourceTenant or SourceShared. It is idempotent for a digest
+	// that the tenant already has.
+	Publish(ctx context.Context, tenant, reference, source string, p *agentskill.Pulled) (*Entry, error)
 	// List returns the current version of each name. With allVersions it
 	// returns each version. A non-empty name restricts the list to that name.
 	List(ctx context.Context, tenant, name string, allVersions bool) ([]Entry, error)
@@ -123,7 +134,7 @@ func NewPostgresStore(pool datapool.Pool) Store {
 var _ Store = (*postgresStore)(nil)
 
 const entryColumns = `name, digest, reference, description, license, compatibility,
-	metadata_json, allowed_tools, published_at, is_current`
+	metadata_json, allowed_tools, published_at, is_current, source`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -135,7 +146,7 @@ func scanEntry(row scanner) (*Entry, error) {
 		metadata string
 	)
 	if err := row.Scan(&e.Name, &e.Digest, &e.Reference, &e.Description, &e.License,
-		&e.Compatibility, &metadata, &e.AllowedTools, &e.PublishedAt, &e.Current); err != nil {
+		&e.Compatibility, &metadata, &e.AllowedTools, &e.PublishedAt, &e.Current, &e.Source); err != nil {
 		return nil, fmt.Errorf("scan Agent Skill row: %w", err)
 	}
 	if metadata != "" && metadata != "{}" {
@@ -148,10 +159,13 @@ func scanEntry(row scanner) (*Entry, error) {
 }
 
 func (s *postgresStore) Publish(
-	ctx context.Context, tenant, reference string, p *agentskill.Pulled,
+	ctx context.Context, tenant, reference, source string, p *agentskill.Pulled,
 ) (*Entry, error) {
 	if p == nil || p.Manifest == nil || p.Digest == "" || reference == "" {
 		return nil, errors.New("agentskillstore: publish needs a pulled Agent Skill and its reference")
+	}
+	if source != SourceTenant && source != SourceShared {
+		return nil, fmt.Errorf("agentskillstore: publish: unknown source %q", source)
 	}
 	m := p.Manifest
 	metadata, err := json.Marshal(m.Metadata)
@@ -174,10 +188,10 @@ func (s *postgresStore) Publish(
 	err = c.InTx(ctx, func(q datapool.SQL) error {
 		if _, err := q.Exec(ctx,
 			`INSERT INTO agent_skills
-			   (name, digest, reference, description, license, compatibility, metadata_json, allowed_tools)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			   (name, digest, reference, description, license, compatibility, metadata_json, allowed_tools, source)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 			 ON CONFLICT (digest) DO NOTHING`,
-			m.Name, p.Digest, reference, m.Description, m.License, m.Compatibility, string(metadata), tools); err != nil {
+			m.Name, p.Digest, reference, m.Description, m.License, m.Compatibility, string(metadata), tools, source); err != nil {
 			return fmt.Errorf("insert version: %w", err)
 		}
 		for _, f := range p.Files {

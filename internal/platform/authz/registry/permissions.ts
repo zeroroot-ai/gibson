@@ -2620,6 +2620,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.AgentSkillService/ListAgentSkillGrants": {
+    method: "/gibson.tenant.v1.AgentSkillService/ListAgentSkillGrants",
+    service: "gibson.tenant.v1.AgentSkillService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.AgentSkillService/ListAgentSkills": {
     method: "/gibson.tenant.v1.AgentSkillService/ListAgentSkills",
     service: "gibson.tenant.v1.AgentSkillService",

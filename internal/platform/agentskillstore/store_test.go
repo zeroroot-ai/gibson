@@ -83,7 +83,7 @@ func sum(b []byte) string {
 }
 
 func TestReadFile_RefusesAContentThatDoesNotMatchItsSha256(t *testing.T) {
-	entry := []any{"web-recon", "sha256:aa", "r/x@sha256:aa", "d", "", "", "{}", []string{}, time.Now(), true}
+	entry := []any{"web-recon", "sha256:aa", "r/x@sha256:aa", "d", "", "", "{}", []string{}, time.Now(), true, "tenant"}
 	good := newTestStore(&fakeSQL{rows: map[string][]any{
 		"FROM agent_skills":      entry,
 		"FROM agent_skill_files": {[]byte("guide"), sum([]byte("guide"))},
@@ -116,19 +116,19 @@ func TestReadFile_NeedsAVersionOfThatName(t *testing.T) {
 
 func TestPublish_RefusesAnIncompleteInput(t *testing.T) {
 	s := newTestStore(&fakeSQL{})
-	if _, err := s.Publish(context.Background(), "acme", "", nil); err == nil {
+	if _, err := s.Publish(context.Background(), "acme", "", SourceTenant, nil); err == nil {
 		t.Error("Publish with no Agent Skill must fail")
 	}
 	m := &agentskill.Manifest{Name: "web-recon", Description: "d"}
 	pulled := &agentskill.Pulled{Manifest: m, Digest: "sha256:aa"}
-	if _, err := s.Publish(context.Background(), "acme", "", pulled); err == nil {
+	if _, err := s.Publish(context.Background(), "acme", "", SourceTenant, pulled); err == nil {
 		t.Error("Publish with no reference must fail")
 	}
 }
 
 func TestPublish_MovesTheCurrentFlagInOneTransaction(t *testing.T) {
 	sql := &fakeSQL{rows: map[string][]any{
-		"FROM agent_skills": {"web-recon", "sha256:aa", "r@sha256:aa", "d", "", "", "{}", []string{}, time.Now(), true},
+		"FROM agent_skills": {"web-recon", "sha256:aa", "r@sha256:aa", "d", "", "", "{}", []string{}, time.Now(), true, "tenant"},
 	}}
 	s := newTestStore(sql)
 	p := &agentskill.Pulled{
@@ -136,7 +136,7 @@ func TestPublish_MovesTheCurrentFlagInOneTransaction(t *testing.T) {
 		Digest:   "sha256:aa",
 		Files:    []agentskill.File{{Path: "SKILL.md", Content: []byte("x")}},
 	}
-	e, err := s.Publish(context.Background(), "acme", "r@sha256:aa", p)
+	e, err := s.Publish(context.Background(), "acme", "r@sha256:aa", SourceTenant, p)
 	if err != nil || !e.Current || e.Digest != "sha256:aa" {
 		t.Fatalf("Publish = %+v, %v", e, err)
 	}
@@ -189,5 +189,13 @@ func TestToolLister_ListsTheCurrentAgentSkillsAsCatalogEntries(t *testing.T) {
 	boom := errors.New("db down")
 	if _, err := (ToolLister{Store: listStore{err: boom}}).ListTools(context.Background(), "acme"); !errors.Is(err, boom) {
 		t.Errorf("error = %v, want the store error", err)
+	}
+}
+
+func TestPublish_RefusesAnUnknownSource(t *testing.T) {
+	s := newTestStore(&fakeSQL{})
+	p := &agentskill.Pulled{Manifest: &agentskill.Manifest{Name: "a", Description: "d"}, Digest: "sha256:aa"}
+	if _, err := s.Publish(context.Background(), "acme", "r@sha256:aa", "other", p); err == nil {
+		t.Error("an unknown source must be refused")
 	}
 }

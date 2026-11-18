@@ -47,6 +47,17 @@ service AgentSkillService {
     };
   }
 
+  // ListAgentSkillGrants returns each grant of one Agent Skill: the agents and
+  // the missions that may load it.
+  rpc ListAgentSkillGrants(ListAgentSkillGrantsRequest) returns (ListAgentSkillGrantsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
   // ListSharedAgentSkills returns the Shared Agent Skills that the operator
   // offers. A tenant has none of them until a tenant admin enables one.
   rpc ListSharedAgentSkills(ListSharedAgentSkillsRequest) returns (ListSharedAgentSkillsResponse) {
@@ -130,6 +141,17 @@ message AgentSkillEntry {
   google.protobuf.Timestamp published_at = 9;
   // current is true for the newest publish of the name.
   bool current = 10;
+  // source says who published the version.
+  AgentSkillSource source = 11;
+}
+
+// AgentSkillSource says where a version came from.
+enum AgentSkillSource {
+  AGENT_SKILL_SOURCE_UNSPECIFIED = 0;
+  // AGENT_SKILL_SOURCE_TENANT is a version that the tenant published.
+  AGENT_SKILL_SOURCE_TENANT = 1;
+  // AGENT_SKILL_SOURCE_SHARED is a copy of a Shared Agent Skill of the operator.
+  AGENT_SKILL_SOURCE_SHARED = 2;
 }
 
 // AgentSkillFile names one file of a version, besides SKILL.md.
@@ -236,4 +258,20 @@ message EnableSharedAgentSkillRequest {
 
 message EnableSharedAgentSkillResponse {
   AgentSkillEntry entry = 1;
+}
+
+// AgentSkillGrant is one grant of an Agent Skill.
+message AgentSkillGrant {
+  AgentSkillSubjectKind subject_kind = 1;
+  // subject_id is the id of the agent identity or of the mission, with no type
+  // prefix. For an agent it is the id that ListAgentIdentities returns.
+  string subject_id = 2;
+}
+
+message ListAgentSkillGrantsRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+}
+
+message ListAgentSkillGrantsResponse {
+  repeated AgentSkillGrant grants = 1;
 }
