@@ -550,7 +550,7 @@ func (r *OTelMetricsRecorder) RecordAgentExecution(ctx context.Context, agentNam
 //
 // Parameters:
 //   - ctx: Context for trace correlation
-//   - status: Mission outcome (e.g., "completed", "failed", "cancelled")
+//   - status: Mission outcome (e.g., "completed", "failed", "canceled")
 //   - durationMs: Mission duration in milliseconds (converted to seconds for histogram)
 //
 // Example:

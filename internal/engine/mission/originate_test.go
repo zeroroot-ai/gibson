@@ -170,7 +170,7 @@ func TestOriginate_HappyPath_RecordsLineageBudgetAndScope(t *testing.T) {
 	assert.Equal(t, parent.ID, *child.ParentMissionID)
 	assert.Equal(t, 1, child.Depth)
 	assert.Equal(t, parent.TenantID, child.TenantID)
-	assert.Equal(t, MissionStatusPending, child.Status)
+	assert.Equal(t, MissionStatusSubmitted, child.Status)
 
 	// Scope: exactly the requested subset, nothing added.
 	assert.Equal(t, []types.ID{target}, child.TargetSet())

@@ -125,6 +125,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaFork(
 					NodeID:       task.NodeID,
 					TaskID:       task.ID.String(),
 					Model:        spec.Model,
+					Initiator:    missionInitiator(h.missionCtx.CreatedBy),
 					TaskB64:      dispatch.TaskB64,
 				}
 			}

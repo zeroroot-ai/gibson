@@ -106,7 +106,7 @@ func RescanReconciliationSystem(w *World) []Event {
 		if m.Name != ScanMissionName || m.Reconciled {
 			continue
 		}
-		if m.Status != MissionCompleted && m.Status != MissionFailed {
+		if !m.Status.IsTerminal() {
 			continue // still running: it has not finished looking
 		}
 		scans = append(scans, m)

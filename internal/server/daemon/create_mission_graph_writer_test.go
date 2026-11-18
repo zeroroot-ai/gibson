@@ -148,7 +148,7 @@ func TestCreateMission_MaterializesViaGraphWriter(t *testing.T) {
 	if inWorld == nil {
 		t.Fatalf("the World does not know mission %s; ListMissions would not list it", res.MissionID)
 	}
-	if inWorld.Status != brain.MissionPending || inWorld.CreatedBy != (principal.Principal{Kind: principal.User, ID: "123456789012345678"}) || inWorld.Name != "recon-1" {
+	if inWorld.Status != brain.MissionSubmitted || inWorld.CreatedBy != (principal.Principal{Kind: principal.User, ID: "123456789012345678"}) || inWorld.Name != "recon-1" {
 		t.Fatalf("World mission = %+v, want pending, named recon-1, created by the caller", *inWorld)
 	}
 	if got.CreatedBy != "user:123456789012345678" {

@@ -17,7 +17,7 @@ func (stubDecider) Decide(w *World) []Decision {
 	ms := w.MissionSnapshot()
 	var mission *MissionSnapshot
 	for i := range ms {
-		if ms[i].Status == MissionRunning {
+		if ms[i].Status == MissionWorking {
 			mission = &ms[i]
 			break
 		}
@@ -48,7 +48,7 @@ func TestOrchestrator_Loop(t *testing.T) {
 	e.Submit(MissionStarted{ID: "m1", Goal: "exfiltrate PII"})
 	e.Tick() // start -> dispatch w1 -> work running (then quiescent)
 
-	if ms := e.World.MissionSnapshot(); len(ms) != 1 || ms[0].Status != MissionRunning {
+	if ms := e.World.MissionSnapshot(); len(ms) != 1 || ms[0].Status != MissionWorking {
 		t.Fatalf("after start: missions = %+v, want one running", e.World.MissionSnapshot())
 	}
 	if ws := e.World.WorkSnapshot(); len(ws) != 1 || ws[0].State != WorkRunning {

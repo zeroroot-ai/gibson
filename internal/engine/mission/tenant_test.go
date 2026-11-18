@@ -18,7 +18,7 @@ func TestMission_WithTenant(t *testing.T) {
 		ID:                  types.NewID(),
 		Name:                "Test Mission",
 		Description:         "Test Description",
-		Status:              MissionStatusPending,
+		Status:              MissionStatusSubmitted,
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
 		CreatedAt:           NewUnixTimeNow(),
@@ -37,7 +37,7 @@ func TestMission_TenantSerialization(t *testing.T) {
 		ID:                  types.NewID(),
 		Name:                "Test Mission",
 		Description:         "Test Description",
-		Status:              MissionStatusPending,
+		Status:              MissionStatusSubmitted,
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
 		CreatedAt:           NewUnixTimeNow(),
@@ -71,7 +71,7 @@ func TestMission_BackwardCompatibility(t *testing.T) {
 		"id": "` + string(missionID) + `",
 		"name": "Old Mission",
 		"description": "Old Description",
-		"status": "pending",
+		"status": "submitted",
 		"target_id": "` + string(targetID) + `",
 		"mission_definition_id": "` + string(missionDefinitionID) + `",
 		"progress": 0,
@@ -92,7 +92,7 @@ func TestMission_BackwardCompatibility(t *testing.T) {
 	// Verify other fields are loaded correctly
 	assert.Equal(t, missionID, m.ID)
 	assert.Equal(t, "Old Mission", m.Name)
-	assert.Equal(t, MissionStatusPending, m.Status)
+	assert.Equal(t, MissionStatusSubmitted, m.Status)
 }
 
 // TestMission_OmitemptyBehavior verifies omitempty tag works correctly
@@ -102,7 +102,7 @@ func TestMission_OmitemptyBehavior(t *testing.T) {
 		ID:                  types.NewID(),
 		Name:                "Test Mission",
 		Description:         "Test Description",
-		Status:              MissionStatusPending,
+		Status:              MissionStatusSubmitted,
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
 		CreatedAt:           NewUnixTimeNow(),
@@ -142,7 +142,7 @@ func TestMission_MethodChaining(t *testing.T) {
 		ID:                  types.NewID(),
 		Name:                "Test Mission",
 		Description:         "Test Description",
-		Status:              MissionStatusPending,
+		Status:              MissionStatusSubmitted,
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
 		CreatedAt:           NewUnixTimeNow(),

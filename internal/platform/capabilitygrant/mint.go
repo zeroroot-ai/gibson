@@ -80,6 +80,7 @@ import (
 	"golang.org/x/crypto/hkdf"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
@@ -271,6 +272,16 @@ const CallingAgentClaim = "cag"
 // callback names its run, and the SDKs read it from this claim (gibson#1235).
 const MissionRunClaim = sdkcg.MissionRunClaim
 
+// InitiatorClaim is the name of the signed claim that carries the person who
+// created the mission, as an FGA user. ext-authz uses it as the subject of the
+// model access check (gibson#1388).
+const InitiatorClaim = modelcall.InitiatorClaim
+
+// InitiatorOf reads the initiator claim of a token whose signature was
+// verified. It is empty for a grant of a mission that no person created, and for
+// a grant minted before the claim existed.
+func InitiatorOf(token string) string { return modelcall.ClaimString(token, InitiatorClaim) }
+
 // MintRequest carries the per-task scope.
 type MintRequest struct {
 	// Subject is the agent's Zitadel service-account ID. Required.
@@ -305,6 +316,12 @@ type MintRequest struct {
 	// another agent is refused. Empty for the grant of an agent, whose subject
 	// names the agent.
 	CallingAgent string
+
+	// Initiator is the person who created the mission, as an FGA user
+	// ("user:<id>"). It travels as the signed claim "ini". A fork and a renewal
+	// copy it from the grant that they come from, and no caller can change it.
+	// Empty when no person created the mission.
+	Initiator string
 
 	// RecipientClass is the recipient workload's class as recorded on
 	// its Zitadel service-account. Acceptable values are "agent",
@@ -416,6 +433,9 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 	}
 	if req.MissionRunID != "" {
 		claims[MissionRunClaim] = req.MissionRunID
+	}
+	if req.Initiator != "" {
+		claims[InitiatorClaim] = req.Initiator
 	}
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)

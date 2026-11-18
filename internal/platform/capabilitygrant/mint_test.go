@@ -466,3 +466,33 @@ func TestMinter_MissionRunClaim(t *testing.T) {
 		t.Errorf("a malformed token: MissionRunOf = %q, want empty", got)
 	}
 }
+
+// The initiator is a signed claim. It is absent when the request names none.
+func TestMinter_InitiatorClaim(t *testing.T) {
+	m, err := NewMinter(context.Background(), Config{
+		Issuer: "https://test.daemon", Audience: "test-daemon",
+		KeyProvider: kpAdapter{[]byte(strings.Repeat("k", 32))}, KeyID: "k1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mint := func(initiator string) string {
+		tok, mErr := m.Mint(MintRequest{
+			Subject: "agent-1", Tenant: "acme", MissionID: "m", TaskID: "t",
+			AllowedRPCs: []string{"/x.S/Y"}, Initiator: initiator,
+		})
+		if mErr != nil {
+			t.Fatal(mErr)
+		}
+		return tok
+	}
+	if got := InitiatorOf(mint("user:alice")); got != "user:alice" {
+		t.Errorf("initiator = %q, want user:alice", got)
+	}
+	if got := InitiatorOf(mint("")); got != "" {
+		t.Errorf("initiator = %q, want none", got)
+	}
+	if got := InitiatorOf("not-a-token"); got != "" {
+		t.Errorf("initiator of garbage = %q, want none", got)
+	}
+}

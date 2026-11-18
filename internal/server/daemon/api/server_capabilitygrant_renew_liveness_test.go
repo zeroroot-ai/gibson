@@ -422,3 +422,37 @@ func TestRenewCapabilityGrant_RefusesWhenTheMemberLookupIsUnwired(t *testing.T) 
 		t.Fatalf("want FailedPrecondition naming the member liveness source, got %v", err)
 	}
 }
+
+// A renewal keeps the initiator of the grant that it renews. The caller cannot
+// name another one: the claim is copied from the signed token.
+func TestRenewCapabilityGrant_KeepsTheInitiator(t *testing.T) {
+	m, err := capabilitygrant.NewMinter(context.Background(), capabilitygrant.Config{
+		Issuer: "gibson-test", Audience: "gibson-harness", KeyID: "k1", KeyProvider: fakeKeyProvider{},
+	})
+	if err != nil {
+		t.Fatalf("NewMinter: %v", err)
+	}
+	claims := renewTestClaims()
+	original, err := m.Mint(capabilitygrant.MintRequest{
+		Subject: claims.Subject, Tenant: claims.Tenant.String(), MissionID: claims.MissionID,
+		TaskID: claims.TaskID, MissionRunID: "run-5", Initiator: "user:alice",
+		AllowedRPCs: claims.AllowedRPCs, RecipientClass: "agent",
+	})
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	s := &DaemonServer{}
+	s.WithCGRenewal(m, stubVerifier{claims: claims})
+	s.WithRenewalForkGuard(forkGuardStub{})
+	s.WithLiveMissionLookup(liveLookup{live: map[string]bool{"m1": true}})
+	s.WithLiveMemberLookup(memberLookup{})
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-capability-grant", original))
+	resp, err := s.RenewCapabilityGrant(ctx, renewRequest())
+	if err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	if got := capabilitygrant.InitiatorOf(resp.GetCapabilityGrant()); got != "user:alice" {
+		t.Fatalf("renewed grant initiator = %q, want user:alice", got)
+	}
+}

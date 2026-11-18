@@ -323,7 +323,7 @@ func rewoundMission(parent *mission.Mission, id types.ID, def *missionpb.Mission
 		TenantID:              parent.TenantID,
 		Name:                  parent.Name,
 		Description:           parent.Description,
-		Status:                mission.MissionStatusPending,
+		Status:                mission.MissionStatusSubmitted,
 		TargetID:              parent.TargetID,
 		AdditionalTargetIDs:   append([]types.ID(nil), parent.AdditionalTargetIDs...),
 		MissionDefinitionID:   parent.MissionDefinitionID,

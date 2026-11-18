@@ -1,0 +1,89 @@
+# ----------------------------------------------------------------------------
+# The agentgateway fixture (gibson#1366, epic slice 2a).
+#
+# In plain words: this workflow builds agentgateway from the code of upstream
+# PR #4383 at commit 6787029. It then runs the trace fixture against that
+# binary. The fixture proves that the gateway puts the request body and the
+# response body into a trace span, and that it refuses a call that the
+# authorization service refuses.
+#
+# Why a build in CI: the body capture on the code path of PR #4383 is proven
+# with a build in CI, and never with a build on a workstation (epic decision
+# 20). The Rust build is a heavy command.
+#
+# The steps:
+#   1. Fetch PR #4383 of agentgateway/agentgateway and check out the commit.
+#   2. Build the agentgateway binary.
+#   3. Run the fixture test in tests/fixtures/mockprovider with
+#      -tags=agentgateway_fixture. The test starts the binary, a mock model
+#      provider, a mock authorization service and an OTLP receiver.
+#
+# When the first agentgateway release has the conversion, change AGW_REF and
+# AGW_FETCH to the release tag (epic slice 27).
+#
+# ADR-0080: NEVER on pull_request, push or schedule. It runs by dispatch only.
+# ----------------------------------------------------------------------------
+name: agentgateway-fixture
+
+on:
+  workflow_dispatch: {}
+
+# One run at a time, and a run that started finishes.
+concurrency:
+  group: agentgateway-fixture-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AGW_REPO: https://github.com/agentgateway/agentgateway.git
+  # The pull request ref to fetch, and the commit to check out.
+  AGW_FETCH: pull/4383/head
+  AGW_REF: '6787029'
+
+jobs:
+  fixture:
+    name: the trace fixture passes against the agentgateway build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout gibson
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake clang pkg-config libssl-dev protobuf-compiler
+
+      - name: Fetch agentgateway at the pinned commit
+        run: |
+          git init "$RUNNER_TEMP/agentgateway"
+          cd "$RUNNER_TEMP/agentgateway"
+          git remote add origin "$AGW_REPO"
+          git fetch origin "$AGW_FETCH"
+          git checkout --detach "$AGW_REF"
+          # Make sure the checkout is the commit that the pin names.
+          head="$(git rev-parse HEAD)"
+          case "$head" in
+            "$AGW_REF"*) echo "agentgateway at $head" ;;
+            *) echo "::error::HEAD $head does not match the pin $AGW_REF"; exit 1 ;;
+          esac
+
+      - name: Build agentgateway
+        working-directory: ${{ runner.temp }}/agentgateway
+        run: |
+          rustup show
+          cargo build --release --bin agentgateway
+          test -x target/release/agentgateway
+
+      - name: Run the fixture
+        env:
+          AGENTGATEWAY_BIN: ${{ runner.temp }}/agentgateway/target/release/agentgateway
+        run: go test -tags=agentgateway_fixture -count=1 -v ./tests/fixtures/mockprovider

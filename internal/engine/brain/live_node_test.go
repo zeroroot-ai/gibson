@@ -77,7 +77,7 @@ func TestALiveAgentNodeKeepsItsMissionRunning(t *testing.T) {
 	if events := MissionCompletionSystem(w); len(events) != 0 {
 		t.Fatalf("a mission whose only node is still running must not complete, got %+v", events)
 	}
-	if m := w.MissionSnapshot(); len(m) != 1 || m[0].Status != MissionRunning {
+	if m := w.MissionSnapshot(); len(m) != 1 || m[0].Status != MissionWorking {
 		t.Fatalf("mission status = %+v, want running", m)
 	}
 }

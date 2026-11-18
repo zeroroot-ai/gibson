@@ -41,7 +41,7 @@ func TestGraphBus_NodeAddedPublish(t *testing.T) {
 					"id":        "mission-123",
 					"name":      "test-mission",
 					"tenant_id": tenant.String(),
-					"status":    "pending",
+					"status":    "submitted",
 				},
 			},
 		},

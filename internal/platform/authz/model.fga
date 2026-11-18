@@ -344,9 +344,18 @@ type team
 # gibson.daemon.v1.DaemonService/CreateMission, which writes the one tuple
 # this type holds: mission:<id>#belongs_to@tenant:<id>.
 #
-# No decision reads a mission relation. A rewind is authorized like a run:
-# whoever may run the mission may rewind it, through the writer check on the
-# tenant (D51). The mission-level admin and can_rewind relations are deleted.
+# One decision reads a mission relation: `active`. It gates a model call of the
+# mission at the gateway (gibson#1389). The daemon writes the tuple
+#
+#   tenant:<id> | active | mission:<id>   with condition mission_active{active: bool}
+#
+# and changes its context when the mission becomes active (working or input
+# required) or stops being active (paused, completed, failed, canceled).
+# ext-authz checks it on each model call that carries a mission. An absent tuple
+# denies the call. The pattern is the one of tenant.active_session (gibson#627).
+# A rewind is authorized like a run: whoever may run the mission may rewind it,
+# through the writer check on the tenant (D51). The mission-level admin and
+# can_rewind relations are deleted.
 #
 # Every mission, run, target, finding and mission-definition RPC is
 # authorized on the TENANT (`member` or `writer` on tenant:<id>, see
@@ -358,6 +367,7 @@ type team
 type mission
   relations
     define belongs_to: [tenant]
+    define active: [tenant with mission_active]
 
 # ----------------------------------------------------------------------
 # LLM provider / model access gating — spec `llm-user-attribution-governance`
@@ -595,4 +605,14 @@ type agent_skill
 # Spec: instant-session-revocation (gibson#627 Slice 1).
 condition token_not_revoked(token_issued_at: timestamp, revoked_at: timestamp) {
   token_issued_at > revoked_at
+}
+
+# mission_active — the model call gate of a mission (gibson#1389).
+#
+# The daemon sets `active` in the tuple context. It is true while the mission
+# is working or waits for input (brain.MissionStatus.IsActive), and false once
+# the mission is paused or ended. The request carries no context, so the tuple
+# alone decides.
+condition mission_active(active: bool) {
+  active
 }

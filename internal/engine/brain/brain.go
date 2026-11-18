@@ -96,6 +96,12 @@ type World struct {
 	// gibson#1364), in Timeline order.
 	agentSkillLoads []AgentSkillLoad
 
+	// countedTokenCalls holds, for each mission, the IDs of the model calls
+	// whose tokens the budget already counted (TokenUsed with a CallID). It
+	// makes a repeated delivery of one call count once. The set of a mission is
+	// dropped when the mission ends. Not ECS-backed.
+	countedTokenCalls map[string]map[string]struct{}
+
 	// missionLineage holds the lineage of each mission that a component
 	// originated (mission_lineage.go, gibson#734), keyed by mission id.
 	missionLineage map[string]MissionLineage
@@ -263,6 +269,7 @@ func NewWorld(tenant string) *World {
 		voiPlans:           ecs.NewMap1[VoIPlanState](w),
 		nodeBeliefs:        ecs.NewMap1[NodeBeliefRecord](w),
 		domainPacks:        make(map[string]DomainPackState),
+		countedTokenCalls:  make(map[string]map[string]struct{}),
 		missionLineage:     make(map[string]MissionLineage),
 		proofReviews:       make(map[string]BetProofSubmittedForReview),
 		ontologyGate:       taxonomy.NewPromotionGate(taxonomy.Global),

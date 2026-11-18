@@ -17,7 +17,7 @@ func TestMissionLineageFields(t *testing.T) {
 			ID:                  types.NewID(),
 			Name:                "Root Mission",
 			Description:         "A root mission",
-			Status:              MissionStatusPending,
+			Status:              MissionStatusSubmitted,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
 			CreatedAt:           NewUnixTimeNow(),
@@ -39,7 +39,7 @@ func TestMissionLineageFields(t *testing.T) {
 			ID:                  types.NewID(),
 			Name:                "Child Mission",
 			Description:         "A child mission",
-			Status:              MissionStatusPending,
+			Status:              MissionStatusSubmitted,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
 			CreatedAt:           NewUnixTimeNow(),
@@ -61,7 +61,7 @@ func TestMissionLineageFields(t *testing.T) {
 		parent := &Mission{
 			ID:                  parentID,
 			Name:                "Parent Mission",
-			Status:              MissionStatusPending,
+			Status:              MissionStatusSubmitted,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
 			CreatedAt:           NewUnixTimeNow(),
@@ -72,7 +72,7 @@ func TestMissionLineageFields(t *testing.T) {
 		grandchild := &Mission{
 			ID:                  types.NewID(),
 			Name:                "Grandchild Mission",
-			Status:              MissionStatusPending,
+			Status:              MissionStatusSubmitted,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
 			CreatedAt:           NewUnixTimeNow(),
@@ -91,7 +91,7 @@ func TestMissionLineageFields(t *testing.T) {
 		mission := (&Mission{
 			ID:                  types.NewID(),
 			Name:                "Chained Mission",
-			Status:              MissionStatusPending,
+			Status:              MissionStatusSubmitted,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
 			CreatedAt:           NewUnixTimeNow(),
@@ -111,7 +111,7 @@ func TestMissionBackwardCompatibility(t *testing.T) {
 			ID:                  types.NewID(),
 			Name:                "Legacy Mission",
 			Description:         "Created before lineage support",
-			Status:              MissionStatusPending,
+			Status:              MissionStatusSubmitted,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
 			CreatedAt:           NewUnixTimeNow(),
@@ -132,7 +132,7 @@ func TestMissionBackwardCompatibility(t *testing.T) {
 			ID:          types.NewID(),
 			Name:        "Test Mission",
 			Description: "Test Description",
-			Status:      MissionStatusPending,
+			Status:      MissionStatusSubmitted,
 			// No lineage fields set
 		}
 
@@ -149,7 +149,7 @@ func TestMissionJSONSerialization(t *testing.T) {
 		mission := &Mission{
 			ID:                  types.NewID(),
 			Name:                "Root",
-			Status:              MissionStatusPending,
+			Status:              MissionStatusSubmitted,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
 			CreatedAt:           NewUnixTimeNow(),
@@ -167,7 +167,7 @@ func TestMissionJSONSerialization(t *testing.T) {
 		mission := &Mission{
 			ID:                  types.NewID(),
 			Name:                "Child",
-			Status:              MissionStatusPending,
+			Status:              MissionStatusSubmitted,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
 			CreatedAt:           NewUnixTimeNow(),

@@ -115,11 +115,11 @@ func NewUnixTimePtrNow() UnixTimePtr {
 type MissionStatus string
 
 const (
-	// MissionStatusPending indicates the mission is created but not yet started.
-	MissionStatusPending MissionStatus = "pending"
+	// MissionStatusSubmitted indicates the mission is created but not yet started.
+	MissionStatusSubmitted MissionStatus = "submitted"
 
-	// MissionStatusRunning indicates the mission is currently executing.
-	MissionStatusRunning MissionStatus = "running"
+	// MissionStatusWorking indicates the mission is currently executing.
+	MissionStatusWorking MissionStatus = "working"
 
 	// MissionStatusPaused indicates the mission is temporarily suspended.
 	MissionStatusPaused MissionStatus = "paused"
@@ -130,8 +130,8 @@ const (
 	// MissionStatusFailed indicates the mission execution has failed.
 	MissionStatusFailed MissionStatus = "failed"
 
-	// MissionStatusCancelled indicates the mission was cancelled during execution.
-	MissionStatusCancelled MissionStatus = "cancelled"
+	// MissionStatusCanceled indicates the mission was canceled during execution.
+	MissionStatusCanceled MissionStatus = "canceled"
 )
 
 // Memory continuity modes define how agent memory is shared across mission runs.
@@ -158,7 +158,7 @@ func (s MissionStatus) String() string {
 // (completed, failed, or cancelled). Terminal states cannot transition to other states.
 func (s MissionStatus) IsTerminal() bool {
 	switch s {
-	case MissionStatusCompleted, MissionStatusFailed, MissionStatusCancelled:
+	case MissionStatusCompleted, MissionStatusFailed, MissionStatusCanceled:
 		return true
 	default:
 		return false
@@ -175,17 +175,17 @@ func (s MissionStatus) CanTransitionTo(target MissionStatus) bool {
 
 	// Valid transitions based on mission lifecycle
 	switch s {
-	case MissionStatusPending:
-		return target == MissionStatusRunning || target == MissionStatusCancelled
-	case MissionStatusRunning:
+	case MissionStatusSubmitted:
+		return target == MissionStatusWorking || target == MissionStatusCanceled
+	case MissionStatusWorking:
 		return target == MissionStatusPaused ||
 			target == MissionStatusCompleted ||
 			target == MissionStatusFailed ||
-			target == MissionStatusCancelled
+			target == MissionStatusCanceled
 	case MissionStatusPaused:
-		return target == MissionStatusRunning ||
+		return target == MissionStatusWorking ||
 			target == MissionStatusFailed ||
-			target == MissionStatusCancelled
+			target == MissionStatusCanceled
 	default:
 		return false
 	}

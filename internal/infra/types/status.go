@@ -105,11 +105,11 @@ func (s *CredentialStatus) UnmarshalJSON(data []byte) error {
 type MissionStatus string
 
 const (
-	MissionStatusPending   MissionStatus = "pending"
-	MissionStatusRunning   MissionStatus = "running"
+	MissionStatusSubmitted MissionStatus = "submitted"
+	MissionStatusWorking   MissionStatus = "working"
 	MissionStatusCompleted MissionStatus = "completed"
 	MissionStatusFailed    MissionStatus = "failed"
-	MissionStatusCancelled MissionStatus = "cancelled"
+	MissionStatusCanceled  MissionStatus = "canceled"
 )
 
 // String returns the string representation of MissionStatus
@@ -120,8 +120,8 @@ func (s MissionStatus) String() string {
 // IsValid checks if the MissionStatus is a valid value
 func (s MissionStatus) IsValid() bool {
 	switch s {
-	case MissionStatusPending, MissionStatusRunning, MissionStatusCompleted,
-		MissionStatusFailed, MissionStatusCancelled:
+	case MissionStatusSubmitted, MissionStatusWorking, MissionStatusCompleted,
+		MissionStatusFailed, MissionStatusCanceled:
 		return true
 	default:
 		return false

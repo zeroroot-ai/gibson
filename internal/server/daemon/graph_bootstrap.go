@@ -295,7 +295,7 @@ func (b *GraphBootstrapper) Bootstrap(
 		Description: m.Description,
 		TargetID:    m.TargetID.String(),
 		// The mission is being bootstrapped because it is starting to run.
-		Status:     string(mission.MissionStatusRunning),
+		Status:     string(mission.MissionStatusWorking),
 		Objective:  missionObjective(def),
 		YAMLSource: missionYAMLSource(m),
 		StartedAt:  startedAt,

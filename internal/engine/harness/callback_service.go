@@ -3399,18 +3399,38 @@ func protoTypedValueToAny(tv *commonpb.TypedValue) any {
 // missionStatusToProto converts internal MissionStatus to proto format
 func missionStatusToProto(status MissionStatus) harnesspb.MissionStatus {
 	switch status {
-	case MissionStatusPending:
+	case MissionStatusSubmitted:
 		return harnesspb.MissionStatus_MISSION_STATUS_SUBMITTED
-	case MissionStatusRunning:
+	case MissionStatusWorking:
 		return harnesspb.MissionStatus_MISSION_STATUS_WORKING
 	case MissionStatusCompleted:
 		return harnesspb.MissionStatus_MISSION_STATUS_COMPLETED
 	case MissionStatusFailed:
 		return harnesspb.MissionStatus_MISSION_STATUS_FAILED
-	case MissionStatusCancelled:
+	case MissionStatusCanceled:
 		return harnesspb.MissionStatus_MISSION_STATUS_CANCELED
 	default:
 		return harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED
+	}
+}
+
+// missionStatusFromProto converts a proto MissionStatus to the internal status.
+// It is the inverse of missionStatusToProto. The proto enum names PENDING and
+// RUNNING stay in the SDK until the SDK renames them.
+func missionStatusFromProto(status harnesspb.MissionStatus) MissionStatus {
+	switch status {
+	case harnesspb.MissionStatus_MISSION_STATUS_SUBMITTED:
+		return MissionStatusSubmitted
+	case harnesspb.MissionStatus_MISSION_STATUS_WORKING:
+		return MissionStatusWorking
+	case harnesspb.MissionStatus_MISSION_STATUS_COMPLETED:
+		return MissionStatusCompleted
+	case harnesspb.MissionStatus_MISSION_STATUS_FAILED:
+		return MissionStatusFailed
+	case harnesspb.MissionStatus_MISSION_STATUS_CANCELED:
+		return MissionStatusCanceled
+	default:
+		return ""
 	}
 }
 
@@ -3566,8 +3586,8 @@ func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *harnessp
 	filter := &MissionFilter{Limit: limit, Offset: offset}
 	if req.Filter != nil {
 		if req.Filter.Status != harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED {
-			// Map proto MissionStatus enum back to internal string representation.
-			st := MissionStatus(strings.ToLower(strings.TrimPrefix(req.Filter.Status.String(), "MISSION_STATUS_")))
+			// Map the proto MissionStatus enum back to the internal status.
+			st := missionStatusFromProto(req.Filter.Status)
 			filter.Status = &st
 		}
 	}

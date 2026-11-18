@@ -27,6 +27,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
@@ -2577,6 +2578,7 @@ func (h *DefaultAgentHarness) mintCGForWork(componentName, kind, taskID string) 
 		MissionID:      h.missionCtx.ID.String(),
 		TaskID:         taskID,
 		MissionRunID:   h.missionCtx.MissionRunID,
+		Initiator:      missionInitiator(h.missionCtx.CreatedBy),
 		RecipientClass: kind,
 		AllowedRPCs:    taskGrantAllowedRPCs(),
 	})
@@ -2684,7 +2686,7 @@ func (h *DefaultAgentHarness) resolveAgentStanding(ctx context.Context, name str
 // taskGrantAllowedRPCs is the callback surface a dispatched component's task
 // grant may call: every HarnessCallbackService method except secret
 // resolution (the minter refuses that for non-plugin recipients), plus the
-// grant renewal RPC. Derived from the service descriptor so a new callback
+// grant renewal RPC and the model call routes. Derived from the service descriptor so a new callback
 // RPC (Observe, WorldView, QueryNodes, ... gibson#1603) is never left off
 // a hand-kept list.
 func taskGrantAllowedRPCs() []string {
@@ -2700,5 +2702,8 @@ func taskGrantAllowedRPCs() []string {
 		out = append(out, "/"+desc.ServiceName+"/"+st.StreamName)
 	}
 	out = append(out, "/gibson.daemon.v1.DaemonService/RenewCapabilityGrant")
+	// The model call routes of the gateway (gibson#1388). A grant that does not
+	// list them cannot call a model through the gateway.
+	out = append(out, modelcall.GrantRoutes()...)
 	return out
 }

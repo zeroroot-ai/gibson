@@ -856,6 +856,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ModelProvider — one model provider of a tenant. The controller renders it
+	// into the backend and the route of the model gateway (gibson#1387). The
+	// model gateway is a required component.
+	modelGatewayConfig, err := modelGatewayConfigFromEnv(os.Getenv)
+	if err != nil {
+		setupLog.Error(err, "Invalid model gateway configuration")
+		os.Exit(1)
+	}
+	if err := (&controller.ModelProviderReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Render: modelGatewayConfig,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "ModelProvider")
+		os.Exit(1)
+	}
+
 	// TenantIdentity — declarative per-tenant identity (Zitadel org + requested
 	// OIDC clients) reconciler. Delegates to the SAME identityProvisioner (which
 	// wraps the zitadelClient the Tenant saga uses, both via the shared

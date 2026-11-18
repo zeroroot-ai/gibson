@@ -89,7 +89,7 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 	// ---- mission lifecycle -------------------------------------------
 
 	case brain.MissionStarted:
-		return missionEventData(now, "status", e.ID, "", "running", "")
+		return missionEventData(now, "status", e.ID, "", string(brain.MissionWorking), "")
 
 	case brain.MissionPauseRequested:
 		// Operator pause (gibson#851). The old path emitted this from
@@ -100,14 +100,17 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 		return missionEventData(now, "mission.paused", e.ID, "", "paused", "")
 
 	case brain.MissionResumed:
-		return missionEventData(now, "mission.resumed", e.ID, "", "running", "")
+		return missionEventData(now, "mission.resumed", e.ID, "", string(brain.MissionWorking), "")
 
 	case brain.MissionDone:
 		status := "completed"
 		errMsg := ""
-		if e.Outcome == brain.MissionFailed {
+		switch e.Outcome {
+		case brain.MissionFailed:
 			status = "failed"
 			errMsg = e.Reason
+		case brain.MissionCanceled:
+			status = string(brain.MissionCanceled)
 		}
 		return missionEventData(now, "status", e.ID, "", status, errMsg)
 	}

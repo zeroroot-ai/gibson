@@ -226,8 +226,8 @@ func (p *GraphProjector) project(ctx context.Context) {
 		// Missions are projected on the tick like every other entity, so the
 		// graph tracks a mission's status for its whole life. Before this, the
 		// two eager writers both ran when a mission STARTED, so :Mission.status
-		// was "running" forever and GetGraphSummary reported every mission as
-		// running. The tick does not know the objective, the
+		// was "working" forever and GetGraphSummary reported every mission as
+		// working. The tick does not know the objective, the
 		// definition or the start time; the upsert keeps the stored value for a
 		// field whose parameter is empty, which is what makes that safe.
 		for _, m := range eng.Missions() {

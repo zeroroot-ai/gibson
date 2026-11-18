@@ -17,8 +17,8 @@ import (
 type MissionStatus string
 
 const (
-	MissionStatusPending   MissionStatus = "pending"
-	MissionStatusRunning   MissionStatus = "running"
+	MissionStatusSubmitted MissionStatus = "submitted"
+	MissionStatusWorking   MissionStatus = "working"
 	MissionStatusCompleted MissionStatus = "completed"
 	MissionStatusFailed    MissionStatus = "failed"
 )

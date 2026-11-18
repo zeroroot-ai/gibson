@@ -147,6 +147,39 @@ func applyDestructiveActionRequested(w *World, e DestructiveActionRequested) {
 		Reversibility:     e.Reversibility,
 		RequestedAtUnixMS: e.RequestedAtUnixMS,
 	})
+	reconcileInputRequired(w, e.MissionID)
+}
+
+// reconcileInputRequired sets the state of a mission from its open approval
+// requests. A working mission with an open request becomes MissionInputRequired.
+// A mission in MissionInputRequired with no open request becomes MissionWorking.
+// Another state does not change: a paused mission or a mission that ended keeps
+// its state. An empty or unknown mission ID changes nothing. The call must not
+// run inside an open query.
+func reconcileInputRequired(w *World, missionID string) {
+	if missionID == "" {
+		return
+	}
+	ent, ok := findMission(w, missionID)
+	if !ok {
+		return
+	}
+	open := false
+	q := ecs.NewFilter1[DestructiveAction](w.ecs).Query()
+	for q.Next() {
+		if a := q.Get(); a.MissionID == missionID && !a.Decided {
+			open = true
+			q.Close()
+			break
+		}
+	}
+	m := w.missions.Get(ent)
+	switch {
+	case open && m.Status == MissionWorking:
+		m.Status = MissionInputRequired
+	case !open && m.Status == MissionInputRequired:
+		m.Status = MissionWorking
+	}
 }
 
 // DestructiveActionDecided records a human's approve/deny verdict for one
@@ -188,7 +221,9 @@ func applyDestructiveActionDecided(w *World, e DestructiveActionDecided) {
 		a.Approved = e.Approved
 		a.UserID = e.UserID
 		a.DecidedAtUnixMS = e.DecidedAtUnixMS
+		missionID := a.MissionID
 		q.Close()
+		reconcileInputRequired(w, missionID)
 		return
 	}
 	// Query exhausted → world unlocked.

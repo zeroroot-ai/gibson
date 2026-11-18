@@ -196,11 +196,11 @@ func (s *ConnBoundRunStore) UpdateStatus(ctx context.Context, id types.ID, statu
 	pipe.Do(ctx, "JSON.SET", connRunKey(id), "$.updated_at", string(nowJSON))
 
 	switch status {
-	case MissionRunStatusRunning:
+	case MissionRunStatusWorking:
 		if run.StartedAt == nil {
 			pipe.Do(ctx, "JSON.SET", connRunKey(id), "$.started_at", string(nowJSON))
 		}
-	case MissionRunStatusCompleted, MissionRunStatusFailed, MissionRunStatusCancelled:
+	case MissionRunStatusCompleted, MissionRunStatusFailed, MissionRunStatusCanceled:
 		if run.CompletedAt == nil {
 			pipe.Do(ctx, "JSON.SET", connRunKey(id), "$.completed_at", string(nowJSON))
 		}
@@ -256,7 +256,7 @@ func (s *ConnBoundRunStore) GetActive(ctx context.Context) ([]*MissionRun, error
 			if err != nil {
 				continue
 			}
-			if run.Status == MissionRunStatusRunning || run.Status == MissionRunStatusPaused {
+			if run.Status == MissionRunStatusWorking || run.Status == MissionRunStatusPaused {
 				allRuns = append(allRuns, run)
 			}
 		}

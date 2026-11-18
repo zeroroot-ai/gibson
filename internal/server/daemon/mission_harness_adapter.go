@@ -137,7 +137,7 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 		ID:                    types.NewID(),
 		Name:                  def.GetName(),
 		Description:           def.GetDescription(),
-		Status:                mission.MissionStatusPending,
+		Status:                mission.MissionStatusSubmitted,
 		TargetID:              req.TargetID,
 		MissionDefinitionID:   types.ID(def.GetId()),
 		MissionDefinitionJSON: string(defJSON),
@@ -281,7 +281,7 @@ func (a *missionHarnessAdapter) Cancel(ctx context.Context, missionID types.ID) 
 			return status.Errorf(codes.NotFound, "mission %s not found", missionID)
 		}
 		if !m.Status.IsTerminal() {
-			m.Status = mission.MissionStatusCancelled
+			m.Status = mission.MissionStatusCanceled
 			_ = store.Update(ctx, m)
 		}
 		return nil
@@ -300,7 +300,7 @@ func (a *missionHarnessAdapter) Cancel(ctx context.Context, missionID types.ID) 
 			return status.Errorf(codes.NotFound, "mission %s not found", missionID)
 		}
 		if !m.Status.IsTerminal() {
-			m.Status = mission.MissionStatusCancelled
+			m.Status = mission.MissionStatusCanceled
 			_ = store.Update(ctx, m)
 		}
 	}

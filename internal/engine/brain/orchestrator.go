@@ -11,24 +11,44 @@ import (
 	"github.com/mlange-42/ark/ecs"
 )
 
-// MissionStatus is the lifecycle state of a mission.
+// MissionStatus is the lifecycle state of a mission. The names follow the A2A
+// Task states (ADR-0175). "Paused" is the one state that A2A does not have.
 type MissionStatus string
 
 const (
-	// MissionPending is a mission a person created that has not run yet. It
+	// MissionSubmitted is a mission a person created that has not run yet. It
 	// is listed, attributed to its creator, and inert: no System acts on it
-	// until MissionStarted moves it to running (hosted#205).
-	MissionPending   MissionStatus = "pending"
-	MissionRunning   MissionStatus = "running"
-	MissionCompleted MissionStatus = "completed"
-	MissionFailed    MissionStatus = "failed"
-	// MissionPaused: a running mission halted by an operator (gibson#851,
+	// until MissionStarted moves it to working (hosted#205).
+	MissionSubmitted MissionStatus = "submitted"
+	MissionWorking   MissionStatus = "working"
+	// MissionInputRequired is a mission that waits for a person while an
+	// approval request is open. The mission keeps its work going, as ADR-0132
+	// requires: the fleet runs on while the decision is pending. The state
+	// returns to MissionWorking when the last open request is decided.
+	MissionInputRequired MissionStatus = "input_required"
+	MissionCompleted     MissionStatus = "completed"
+	MissionFailed        MissionStatus = "failed"
+	// MissionCanceled is a mission that a person stopped. It is terminal and
+	// it is not a failure.
+	MissionCanceled MissionStatus = "canceled"
+	// MissionPaused: a working mission halted by an operator (gibson#851,
 	// brain-native pause). The executor Systems stop dispatching/deciding for it
 	// until it is resumed; its World state is untouched, so resume continues
 	// exactly where it left off (the Timeline is the durable record — no separate
 	// checkpoint store, ADR-0101).
 	MissionPaused MissionStatus = "paused"
 )
+
+// IsTerminal reports whether the state ends a mission.
+func (s MissionStatus) IsTerminal() bool {
+	return s == MissionCompleted || s == MissionFailed || s == MissionCanceled
+}
+
+// IsActive reports whether the executor Systems act for a mission in this
+// state. A working mission and a mission that waits for input are both active.
+func (s MissionStatus) IsActive() bool {
+	return s == MissionWorking || s == MissionInputRequired
+}
 
 // Budget is the per-mission resource ceiling carried from CUE MissionConstraints
 // (ADR-0104). It is recorded here at projection; the budget/limit System that
@@ -122,7 +142,7 @@ func (MissionStarted) Kind() string { return "mission.started" }
 
 // MissionCreated records a mission a person created before it runs, so the
 // World, and ListMissions with it, know the mission and its creator from
-// creation. MissionStarted later moves the same entity to running; a
+// creation. MissionStarted later moves the same entity to working; a
 // MissionStarted for an unknown id still creates it, as before.
 type MissionCreated struct {
 	ID          string
@@ -142,7 +162,7 @@ func applyMissionCreated(w *World, e MissionCreated) {
 	}
 	w.missions.NewEntity(&Mission{
 		ID:             e.ID,
-		Status:         MissionPending,
+		Status:         MissionSubmitted,
 		DecisionCursor: -1,
 		Name:           e.Name,
 		Description:    e.Description,
@@ -186,10 +206,10 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		// A pending mission starts: it keeps what creation recorded and
 		// takes what the start adds. Any other status is a replay.
 		m := w.missions.Get(ent)
-		if m.Status != MissionPending {
+		if m.Status != MissionSubmitted {
 			return
 		}
-		m.Status = MissionRunning
+		m.Status = MissionWorking
 		m.Goal = e.Goal
 		m.BeliefModel = e.BeliefModel
 		if e.Name != "" {
@@ -213,7 +233,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		ID:             e.ID,
 		RunID:          e.RunID,
 		Goal:           e.Goal,
-		Status:         MissionRunning,
+		Status:         MissionWorking,
 		DecisionCursor: -1,
 		BeliefModel:    e.BeliefModel,
 		Name:           e.Name,
@@ -224,7 +244,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 	})
 }
 
-// MissionPauseRequested halts a running mission (operator pause). The executor
+// MissionPauseRequested halts a working mission (operator pause). The executor
 // Systems skip a paused mission until MissionResumed.
 type MissionPauseRequested struct {
 	ID    string
@@ -233,7 +253,7 @@ type MissionPauseRequested struct {
 
 func (MissionPauseRequested) Kind() string { return "mission.pause" }
 
-// MissionResumed returns a paused mission to running.
+// MissionResumed returns a paused mission to working.
 type MissionResumed struct {
 	ID    string
 	RunID string // the run to resume; see MissionDone.RunID
@@ -243,7 +263,7 @@ func (MissionResumed) Kind() string { return "mission.resume" }
 
 func applyMissionPauseRequested(w *World, e MissionPauseRequested) {
 	if ent, ok := findMission(w, e.ID); ok {
-		if m := w.missions.Get(ent); m.Status == MissionRunning {
+		if m := w.missions.Get(ent); m.Status.IsActive() {
 			m.Status = MissionPaused
 		}
 	}
@@ -252,7 +272,8 @@ func applyMissionPauseRequested(w *World, e MissionPauseRequested) {
 func applyMissionResumed(w *World, e MissionResumed) {
 	if ent, ok := findMission(w, e.ID); ok {
 		if m := w.missions.Get(ent); m.Status == MissionPaused {
-			m.Status = MissionRunning
+			m.Status = MissionWorking
+			reconcileInputRequired(w, e.ID)
 		}
 	}
 }
@@ -260,8 +281,8 @@ func applyMissionResumed(w *World, e MissionResumed) {
 func applyMissionDone(w *World, e MissionDone) {
 	if ent, ok := findMission(w, e.ID); ok {
 		m := w.missions.Get(ent)
-		if m.Status == MissionCompleted || m.Status == MissionFailed {
-			return // already terminal — idempotent (paused/running can still finish)
+		if m.Status.IsTerminal() {
+			return // already terminal — idempotent (paused or working can still finish)
 		}
 		outcome := e.Outcome
 		if outcome == "" {
@@ -269,6 +290,9 @@ func applyMissionDone(w *World, e MissionDone) {
 		}
 		m.Status = outcome
 		m.Reason = e.Reason
+		// A call that arrives after the end of the mission is not counted
+		// against a budget that no longer runs, so the set is not kept.
+		delete(w.countedTokenCalls, e.ID)
 	}
 	// A Decider decision that ends the mission carries the completion reason as its
 	// rationale (gibson#1062). The worker emits MissionDone before DecisionCompleted,

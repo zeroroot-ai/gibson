@@ -1,0 +1,94 @@
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  annotations:
+    gibson.zeroroot.ai/credential-secret: provider-gcp
+  labels:
+    app.kubernetes.io/managed-by: gibson-tenant-operator
+    gibson.zeroroot.ai/model-provider: gcp
+    gibson.zeroroot.ai/model-provider-namespace: tenant-acme
+    gibson.zeroroot.ai/tenant: acme
+  name: mp-acme-gcp
+  namespace: gibson-gateway
+spec:
+  ai:
+    provider:
+      vertexai:
+        projectId: my-project
+        region: us-central1
+  policies:
+    ai:
+      routes:
+        /v1/embeddings: Embeddings
+        /v1/models: Passthrough
+        /v1/responses: Responses
+    auth:
+      secretRef:
+        name: mp-acme-gcp-credential
+    extAuth:
+      backendRef:
+        name: gibson-ext-authz
+        namespace: gibson
+        port: 9001
+      failureMode: FailClosed
+      grpc:
+        contextExtensions:
+          gibson-provider: gcp
+          gibson-tenant: acme
+        requestMetadata:
+          gibson: '{"model": json(request.body).model}'
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: gibson-tenant-operator
+    gibson.zeroroot.ai/model-provider: gcp
+    gibson.zeroroot.ai/model-provider-namespace: tenant-acme
+    gibson.zeroroot.ai/tenant: acme
+  name: mp-acme-gcp
+  namespace: gibson-gateway
+spec:
+  parentRefs:
+  - name: model-gateway
+  rules:
+  - backendRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: mp-acme-gcp
+    matches:
+    - headers:
+      - name: x-gibson-tenant
+        type: Exact
+        value: acme
+      - name: x-gibson-provider
+        type: Exact
+        value: gcp
+      path:
+        type: Exact
+        value: /v1/responses
+    - headers:
+      - name: x-gibson-tenant
+        type: Exact
+        value: acme
+      - name: x-gibson-provider
+        type: Exact
+        value: gcp
+      path:
+        type: Exact
+        value: /v1/embeddings
+  - backendRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: mp-acme-gcp
+    matches:
+    - headers:
+      - name: x-gibson-tenant
+        type: Exact
+        value: acme
+      - name: x-gibson-provider
+        type: Exact
+        value: gcp
+      path:
+        type: Exact
+        value: /v1/models

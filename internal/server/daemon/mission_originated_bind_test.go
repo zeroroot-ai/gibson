@@ -49,7 +49,7 @@ func childWithPlaceholder(t *testing.T, targetID types.ID) *mission.Mission {
 		TenantID:              "tenant-a",
 		Name:                  "child-scan",
 		MissionDefinitionID:   types.NewID(),
-		Status:                mission.MissionStatusPending,
+		Status:                mission.MissionStatusSubmitted,
 		TargetID:              targetID,
 		MissionDefinitionJSON: string(defJSON),
 	}

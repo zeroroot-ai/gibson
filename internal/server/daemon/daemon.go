@@ -789,7 +789,8 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 	// the daemon directly over mTLS. Each one is allowed at the TLS layer here,
 	// and spiffePeerMethodPolicies gives it only its own methods.
 	peers, err := withConnectionPointPeers(d.config.Auth.SPIFFE.AllowedPeerIDs, configuredTD,
-		os.Getenv(api.EnvSignupStepCompleterSVID), os.Getenv(api.EnvTenantActivationSVID))
+		os.Getenv(api.EnvSignupStepCompleterSVID), os.Getenv(api.EnvTenantActivationSVID),
+		os.Getenv(api.EnvTraceCollectorSVID))
 	if err != nil {
 		_ = source.Close()
 		return err
@@ -1159,6 +1160,22 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			)
 		})
 		d.logger.Info(ctx, "Timeline→lifecycle projector installed on brain registry")
+
+		// Install the mission gate on every per-tenant engine (gibson#1389). It
+		// keeps the FGA tuple that ext-authz reads on a model call true to the
+		// World: active while a mission works, not active once it pauses or ends.
+		// FGA is required at start, so the authorizer is read when the engine is
+		// created. An authorizer that cannot write a conditioned tuple leaves the
+		// tuple absent, and ext-authz then refuses each model call (fail closed).
+		d.brainRegistry.OnEngine(func(e *brain.Engine) {
+			cw, ok := d.authorizer.(authz.ConditionalWriter)
+			if !ok {
+				d.logger.Error(ctx, "mission gate not installed: the authorizer cannot write a conditioned tuple",
+					"tenant", e.World.Tenant)
+				return
+			}
+			InstallMissionGate(e.World.Tenant, e, cw, d.logger.WithComponent("mission-gate").Slog())
+		})
 	}
 
 	// Share proto resolver between registry adapter and callback manager for unified caching

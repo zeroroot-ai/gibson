@@ -117,7 +117,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 	if ent, ok := findMission(w, e.ID); ok {
 		m := w.missions.Get(ent)
 		switch {
-		case m.Status == MissionPending:
+		case m.Status == MissionSubmitted:
 			// A mission that a person created and that has not run yet. Keep
 			// the entity, which holds the creator, and start its first run.
 			startRun(m, e)
@@ -137,7 +137,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 		ID:             e.ID,
 		RunID:          e.RunID,
 		Goal:           e.Goal,
-		Status:         MissionRunning,
+		Status:         MissionWorking,
 		Budget:         e.Budget,
 		DecisionCursor: -1,
 		DeciderSlot:    e.DeciderSlot,
@@ -223,12 +223,12 @@ func nodeName(workID string) string {
 	return workID
 }
 
-// startRun turns a pending mission into a running one, with the first run of
+// startRun turns a submitted mission into a working one, with the first run of
 // the projection. The entity keeps what creation recorded, such as the creator.
 func startRun(m *Mission, e MissionProjected) {
 	m.RunID = e.RunID
 	m.Goal = e.Goal
-	m.Status = MissionRunning
+	m.Status = MissionWorking
 	m.Budget = e.Budget
 	m.DecisionCursor = -1
 	m.DeciderSlot = e.DeciderSlot
