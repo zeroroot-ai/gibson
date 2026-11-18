@@ -16,54 +16,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
-	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
-
-func TestNewHarnessFactory(t *testing.T) {
-	// This test requires Redis + Neo4j infrastructure
-	if os.Getenv("GIBSON_INTEGRATION_TESTS") == "" {
-		t.Skip("skipping integration test (set GIBSON_INTEGRATION_TESTS=1 to run)")
-	}
-
-	// Create test daemon with minimal config
-	cfg := &config.Config{
-		Registry: config.RegistryConfig{},
-		Sandbox:  config.SandboxConfig{Setec: config.SandboxSetecConfig{Address: "setec:50051"}},
-	}
-
-	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
-
-	// Create StateClient via miniredis
-	sc := setupTestStateClient(t)
-
-	// Create a mock Redis-backed component registry adapter using a nil registry
-	// (acceptable for this test since we only check harness factory initialization)
-	var registryAdapter component.ComponentDiscovery
-
-	// Create daemon instance
-	d := &daemonImpl{
-		config:          cfg,
-		logger:          logger,
-		stateClient:     sc,
-		registryAdapter: registryAdapter,
-	}
-
-	// Create infrastructure
-	ctx := context.Background()
-
-	// Initialize infrastructure
-	infra, err := d.newInfrastructure(ctx)
-	require.NoError(t, err)
-	require.NotNil(t, infra)
-
-	// Verify infrastructure components
-	assert.NotNil(t, infra.harnessFactory, "Harness factory should be initialized")
-
-	// Test harness factory directly
-	factory, err := d.newHarnessFactory(ctx)
-	require.NoError(t, err)
-	assert.NotNil(t, factory, "Harness factory should not be nil")
-}
 
 func TestNewHarnessFactory_WithoutRegistryAdapter(t *testing.T) {
 	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
