@@ -71,7 +71,6 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/metric"
-	coltrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -1299,16 +1298,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	daemonSvc.WithSignupStepURL(os.Getenv(api.EnvSignupStepURL))
 	daemonSvc.WithConnectionPointCallers(connectionPointCallersFromEnv())
 	connectionv1.RegisterConnectionPointServiceServer(srv, daemonSvc)
-
-	// The OTLP trace service (gibson#1390, ADR-0172). The collector sends the
-	// spans of the gateway here. Only the SPIFFE identity in
-	// GIBSON_TRACE_COLLECTOR_SVID may call it. With no identity configured, no
-	// caller is accepted. Each model call span becomes the llm_call.observed and
-	// token.used events of its tenant.
-	if d.brainRegistry != nil {
-		coltrace.RegisterTraceServiceServer(srv, api.NewTraceReceiver(
-			traceCollectorSVIDFromEnv(), d.brainRegistry, d.logger.WithComponent("trace-receiver").Slog()))
-	}
 
 	// Register AdminTenantService — the dashboard-facing write side of
 	// operator-pull admin tenant CRUD (gibson#964, enables dashboard#855).

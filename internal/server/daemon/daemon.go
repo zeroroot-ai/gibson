@@ -789,8 +789,7 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 	// the daemon directly over mTLS. Each one is allowed at the TLS layer here,
 	// and spiffePeerMethodPolicies gives it only its own methods.
 	peers, err := withConnectionPointPeers(d.config.Auth.SPIFFE.AllowedPeerIDs, configuredTD,
-		os.Getenv(api.EnvSignupStepCompleterSVID), os.Getenv(api.EnvTenantActivationSVID),
-		os.Getenv(api.EnvTraceCollectorSVID))
+		os.Getenv(api.EnvSignupStepCompleterSVID), os.Getenv(api.EnvTenantActivationSVID))
 	if err != nil {
 		_ = source.Close()
 		return err
@@ -1680,6 +1679,20 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			d.logger.Error(ctx, "gRPC server error", "error", serveErr)
 		}
 	}()
+
+	// The OTLP trace listener has its own port (gibson#1390).
+	traceSys, err := d.buildTraceServer(ctx)
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to build trace listener: %w", err)
+	}
+	if traceSys != nil {
+		go func() {
+			if serveErr := traceSys.Serve(ctx); serveErr != nil {
+				d.logger.Error(ctx, "trace listener error", "error", serveErr)
+			}
+		}()
+	}
 
 	// Start health server
 	// Health port defaults to 8080, can be overridden via config or GIBSON_HEALTH_PORT env var
