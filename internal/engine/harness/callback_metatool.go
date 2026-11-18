@@ -51,7 +51,8 @@ func metaToolDescriptors() []ToolDescriptor {
 			Description: "Invoke a catalog tool by its canonical id (from search_tools), passing the " +
 				"tool's arguments. The id has the form mcp:<connector>:<tool>, native:<tool> or skill:<name>. " +
 				"Authorization is " +
-				"enforced; only ids returned by search_tools are invocable.",
+				"enforced; only ids returned by search_tools are invocable. A skill:<name> id returns the " +
+				"body of an Agent Skill. Set args.file to a path from the file list to read one reference file.",
 			InputSchema: schema.Object(map[string]schema.JSON{
 				"id":   schema.StringWithDesc("Canonical tool id, e.g. mcp:gitlab:create_issue."),
 				"args": schema.Any(),
@@ -110,6 +111,9 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 		authorizer,
 		s.connectors,
 	)
+	if store := s.agentSkillStore(); store != nil {
+		handler.WithSkills(store, nil)
+	}
 	caller := catalogCaller(ctx, state)
 
 	switch req.GetName() {

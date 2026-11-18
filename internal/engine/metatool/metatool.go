@@ -66,6 +66,10 @@ type Handler struct {
 	search     Searcher
 	authz      catalog.Authorizer
 	connectors ConnectorCaller
+
+	// skills and onSkillLoad serve a skill: id. See WithSkills.
+	skills      SkillStore
+	onSkillLoad func(ctx context.Context, load SkillLoad)
 }
 
 // NewHandler constructs a Handler. Any collaborator may be nil; the dependent

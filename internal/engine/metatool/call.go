@@ -174,6 +174,21 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 		return nil, derr
 	}
 	rec.Connector, rec.Tool = tid.Connector, tid.Tool
+	if tid.Source == toolid.SourceSkill {
+		// A load of an Agent Skill reads the tenant database. It is no connector
+		// call, so it has no connector audit record. The flight recorder
+		// records it, whatever its outcome.
+		result, err := h.loadSkill(ctx, c, tid)
+		var resultJSON []byte
+		if err == nil {
+			resultJSON, _ = json.Marshal(result)
+		}
+		finish(resultJSON, err)
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
 	if tid.Source != toolid.SourceMCP {
 		if _, err := h.Authorize(ctx, c.Caller, c.ID); err != nil {
 			finish(nil, err)

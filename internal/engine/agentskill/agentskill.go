@@ -126,7 +126,7 @@ func checkFiles(files []File) error {
 	seen := make(map[string]struct{}, len(files))
 	var total int
 	for _, f := range files {
-		if err := checkPath(f.Path); err != nil {
+		if err := ValidPath(f.Path); err != nil {
 			return err
 		}
 		if _, dup := seen[f.Path]; dup {
@@ -144,9 +144,9 @@ func checkFiles(files []File) error {
 	return nil
 }
 
-// checkPath refuses a path that is not a clean relative path inside the
+// ValidPath refuses a path that is not a clean relative path inside the
 // folder. It also refuses a path that a reader could resolve in a different way.
-func checkPath(p string) error {
+func ValidPath(p string) error {
 	switch {
 	case p == "":
 		return invalidf("a file has an empty path")
