@@ -65,4 +65,3 @@ func TestSubmitFinding_RefusesAWorkItemThatAnotherAgentClaimed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, submitter.submitted, 1)
 }
-
