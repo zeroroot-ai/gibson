@@ -22,7 +22,6 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
-	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -103,11 +102,15 @@ func (s *DaemonServer) listSavedProvider(
 	if _, err := s.providerConfig.Get(ctx, tenantID, name); err != nil {
 		return nil, 0, toGRPCProviderError("get provider", err)
 	}
+	initiator, err := callerInitiator(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
 	callCtx, cancel := context.WithTimeout(ctx, providerListTimeout)
 	defer cancel()
 	start := time.Now()
 	models, err := s.modelLister.Models(callCtx,
-		modelclient.Caller{Tenant: tenantID, Purpose: purpose, Initiator: principal.FGAUser(callerIdentity(ctx))},
+		modelclient.Caller{Tenant: tenantID, Purpose: purpose, Initiator: initiator},
 		modelclient.Target{Tenant: tenantID, Provider: name})
 	return models, time.Since(start).Milliseconds(), err
 }

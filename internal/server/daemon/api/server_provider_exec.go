@@ -277,7 +277,11 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	}
 
 	// 5. The identity of the call.
-	caller := modelclient.Caller{Tenant: tenantID, Initiator: principal.FGAUser(callerIdentity(ctx))}
+	initiator, err := callerInitiator(ctx)
+	if err != nil {
+		return nil, err
+	}
+	caller := modelclient.Caller{Tenant: tenantID, Initiator: initiator}
 	if req.GetMissionId() != "" {
 		caller.Mission, caller.Task, caller.Purpose = req.GetMissionId(), "chat-"+uuid.NewString(), "dashboard-chat"
 	} else {
@@ -291,10 +295,15 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	return gatewayRespToProto(resp), nil
 }
 
-// callerIdentity returns the identity of the caller, or an empty one.
-func callerIdentity(ctx context.Context) auth.Identity {
-	id, _ := auth.IdentityFromContext(ctx)
-	return id
+// callerInitiator returns the FGA user of the caller. A call with no identity
+// or with an empty subject fails. The model access check of the gateway needs
+// a real person, so the call must not go on with an empty one.
+func callerInitiator(ctx context.Context) (string, error) {
+	id, err := auth.IdentityFromContext(ctx)
+	if err != nil || id.Subject == "" {
+		return "", status_grpc.Errorf(codes.Unauthenticated, "caller identity required")
+	}
+	return principal.FGAUser(id), nil
 }
 
 // chatError maps an error of the gateway to a gRPC status. The text names no

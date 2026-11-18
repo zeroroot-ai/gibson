@@ -20,7 +20,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
-	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
@@ -490,8 +489,12 @@ func (s *DaemonServer) anyProviderListsModel(
 func (s *DaemonServer) providerListsModel(ctx context.Context, tenantID string, c *providerconfig.ProviderConfig, model string) bool {
 	// The list of the gateway is a passthrough and holds the model names. It
 	// holds no feature list, so a listed model counts as a chat model.
+	initiator, err := callerInitiator(ctx)
+	if err != nil {
+		return false
+	}
 	models, err := s.modelLister.Models(ctx,
-		modelclient.Caller{Tenant: tenantID, Purpose: modelcall.PurposeModelList, Initiator: principal.FGAUser(callerIdentity(ctx))},
+		modelclient.Caller{Tenant: tenantID, Purpose: modelcall.PurposeModelList, Initiator: initiator},
 		modelclient.Target{Tenant: tenantID, Provider: c.Name})
 	if err != nil {
 		return false

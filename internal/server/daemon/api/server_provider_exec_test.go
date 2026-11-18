@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
@@ -427,4 +428,23 @@ func TestProtoToolDefsToLLM_InvalidJsonFallsBackToObjectSchema(t *testing.T) {
 func TestErrRateLimited_IsSentinel(t *testing.T) {
 	wrapped := errors.Join(errors.New("outer"), ratelimit.ErrRateLimited)
 	assert.True(t, errors.Is(wrapped, ratelimit.ErrRateLimited))
+}
+
+// A call with no identity, or with an empty subject, has no initiator. The
+// call fails and never runs as an empty or privileged person.
+func TestCallerInitiator_FailsClosed(t *testing.T) {
+	for name, ctx := range map[string]context.Context{
+		"no identity":   context.Background(),
+		"empty subject": auth.WithIdentity(context.Background(), auth.Identity{}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := callerInitiator(ctx)
+			require.Error(t, err)
+			assert.Empty(t, got)
+			assert.Equal(t, codes.Unauthenticated, status.Code(err))
+		})
+	}
+	got, err := callerInitiator(auth.WithIdentity(context.Background(), auth.Identity{Subject: "user:alice"}))
+	require.NoError(t, err)
+	assert.Equal(t, "user:alice", got)
 }
