@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
 
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
 
@@ -37,8 +38,8 @@ import (
 // internal/server/extauthz/modelcall.
 const (
 	// HeaderTenant and HeaderProvider select the route of a call.
-	HeaderTenant   = "x-gibson-tenant"
-	HeaderProvider = "x-gibson-provider"
+	HeaderTenant   = modelcall.HeaderTenant
+	HeaderProvider = modelcall.HeaderProvider
 
 	// ExtTenant and ExtProvider are the context extension keys.
 	ExtTenant   = "gibson-tenant"
@@ -341,12 +342,13 @@ func route(
 	mp *gibsonv1alpha1.ModelProvider, cfg Config, name, modelBackend, listBackend string,
 ) *unstructured.Unstructured {
 	match := func(path string) map[string]any {
+		headers := []any{}
+		for _, h := range modelcall.RouteHeaders(mp.Spec.TenantID, mp.Name) {
+			headers = append(headers, map[string]any{"type": "Exact", "name": h.Name, "value": h.Value})
+		}
 		return map[string]any{
-			"path": map[string]any{"type": "Exact", "value": path},
-			"headers": []any{
-				map[string]any{"type": "Exact", "name": HeaderTenant, "value": mp.Spec.TenantID},
-				map[string]any{"type": "Exact", "name": HeaderProvider, "value": mp.Name},
-			},
+			"path":    map[string]any{"type": "Exact", "value": path},
+			"headers": headers,
 		}
 	}
 	ref := func(backendName string) []any {

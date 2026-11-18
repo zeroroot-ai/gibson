@@ -59,6 +59,27 @@ const (
 	MetadataModel     = "model"
 )
 
+// HeaderProvider is the route header that names the provider of a tenant. The
+// route of a provider matches it together with HeaderTenant. ext-authz sets
+// HeaderTenant again with the tenant of the grant, so a copy of a caller never
+// passes.
+const HeaderProvider = "x-gibson-provider"
+
+// RouteHeader is one header that a call must carry to match the route of a
+// provider.
+type RouteHeader struct{ Name, Value string }
+
+// RouteHeaders returns the headers that select the route of one provider of one
+// tenant. The HTTPRoute of the ModelProvider matches exactly these headers, and
+// each model client sends exactly these headers. One function builds both, so
+// the names cannot drift.
+func RouteHeaders(tenant, provider string) []RouteHeader {
+	return []RouteHeader{
+		{Name: HeaderTenant, Value: tenant},
+		{Name: HeaderProvider, Value: provider},
+	}
+}
+
 // Headers that ext-authz sets on an allowed model call. ext-authz sets each one
 // on every call, so a copy from the caller never reaches the provider side.
 const (
