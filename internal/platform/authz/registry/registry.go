@@ -3053,15 +3053,6 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.tenant.v1.ProviderService/ProbeProvider": {
-		Service:           "gibson.tenant.v1.ProviderService",
-		Relation:          "admin",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser,
-		Unauthenticated:   false,
-		Self:              false,
-	},
 	"/gibson.tenant.v1.ProviderService/SetDefaultProvider": {
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "writer",

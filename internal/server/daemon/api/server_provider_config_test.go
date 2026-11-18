@@ -15,6 +15,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
@@ -447,96 +449,142 @@ func TestGetProviderHealth_NilStore_FailedPrecondition(t *testing.T) {
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
-func TestGetProviderHealth_ResolveNotFound_NotFound(t *testing.T) {
-	store := &mockProviderStore{resolveErr: providerconfig.ErrNotFound}
-	s := serverWithStore(t, store)
+func savedProviderStore() *mockProviderStore {
+	return &mockProviderStore{getOut: &providerconfig.ProviderConfig{Name: "p", Type: llm.ProviderOpenAI, DefaultModel: "gpt-x", Enabled: true}}
+}
+
+func TestGetProviderHealth_NotFound_NotFound(t *testing.T) {
+	s := serverWithStore(t, &mockProviderStore{getErr: providerconfig.ErrNotFound})
+	s.modelLister = &fakeLister{}
 	_, err := s.GetProviderHealth(tenantCtx("acme"), &tenantv1.GetProviderHealthRequest{Name: "missing"})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
 
-func TestGetProviderHealth_UnknownProviderType_ReturnsUnhealthy(t *testing.T) {
-	// Resolve succeeds but the type is unknown → providers.NewProvider fails →
-	// the handler returns {Healthy: false, Error: "cannot construct provider: ..."}.
-	store := &mockProviderStore{
-		resolveOut: &providerconfig.DecryptedConfig{
-			ProviderConfig: providerconfig.ProviderConfig{
-				Name:         "bad",
-				Type:         llm.ProviderType("totally-made-up"),
-				DefaultModel: "x",
-			},
-			Credentials: map[string]string{"api_key": "sk-x"},
-		},
-	}
-	s := serverWithStore(t, store)
-	resp, err := s.GetProviderHealth(tenantCtx("acme"), &tenantv1.GetProviderHealthRequest{Name: "bad"})
-	require.NoError(t, err) // handler-level: no gRPC error
+func TestGetProviderHealth_ReportsTheListCall(t *testing.T) {
+	s := serverWithStore(t, savedProviderStore())
+	s.modelLister = &fakeLister{models: map[string][]modelclient.ModelEntry{"p": {{ID: "m"}}}}
+	resp, err := s.GetProviderHealth(tenantCtx("acme"), &tenantv1.GetProviderHealthRequest{Name: "p"})
+	require.NoError(t, err)
+	assert.True(t, resp.Healthy)
+
+	s.modelLister = &fakeLister{errs: map[string]error{"p": &modelclient.APIError{Status: 404}}}
+	resp, err = s.GetProviderHealth(tenantCtx("acme"), &tenantv1.GetProviderHealthRequest{Name: "p"})
+	require.NoError(t, err)
 	assert.False(t, resp.Healthy)
-	assert.NotEmpty(t, resp.Error)
+	assert.Contains(t, resp.Error, "not ready")
 }
 
 // ---------------------------------------------------------------------------
-// TestProvider
+// TestProvider and ListProviderModels: one GET of the model list of a saved
+// provider through the gateway (gibson#1394).
 // ---------------------------------------------------------------------------
 
-func TestTestProvider_NilInput_InvalidArgument(t *testing.T) {
-	s := serverWithStore(t, &mockProviderStore{})
-	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Input: nil})
+type recordingLister struct {
+	callers []modelclient.Caller
+	targets []modelclient.Target
+	models  []modelclient.ModelEntry
+	err     error
+	calls   int
+}
+
+func (r *recordingLister) Models(_ context.Context, c modelclient.Caller, t modelclient.Target) ([]modelclient.ModelEntry, error) {
+	r.calls++
+	r.callers, r.targets = append(r.callers, c), append(r.targets, t)
+	return r.models, r.err
+}
+
+func TestTestProvider_NeedsASavedProvider(t *testing.T) {
+	rec := &recordingLister{}
+	s := serverWithStore(t, &mockProviderStore{getErr: providerconfig.ErrNotFound})
+	s.modelLister = rec
+	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Name: "not-saved"})
+	assert.Equal(t, codes.NotFound, grpcCode(err))
+	assert.Zero(t, rec.calls, "no call tests a provider that is not saved")
+
+	_, err = s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
-func TestTestProvider_InvalidType_InvalidArgument(t *testing.T) {
-	s := serverWithStore(t, &mockProviderStore{})
-	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
-		Input: &tenantv1.ProviderConfigInput{Type: "not-a-real-provider"},
-	})
-	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+func TestTestProvider_SendsOneListCallWithTheProbePurpose(t *testing.T) {
+	rec := &recordingLister{models: []modelclient.ModelEntry{{ID: "b", ContextWindow: 100}, {ID: "a"}}}
+	s := serverWithStore(t, savedProviderStore())
+	s.modelLister = rec
+	resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Name: "p"})
+	require.NoError(t, err)
+	assert.True(t, resp.Ok)
+	assert.Equal(t, "gpt-x", resp.Model)
+	require.Len(t, resp.Models, 2)
+	assert.Equal(t, "a", resp.Models[0].Name, "the models are sorted")
+	require.Equal(t, 1, rec.calls)
+	assert.Equal(t, "provider_probe", rec.callers[0].Purpose)
+	assert.Equal(t, "user:user-test", rec.callers[0].Initiator)
+	assert.Equal(t, modelclient.Target{Tenant: "acme", Provider: "p"}, rec.targets[0])
 }
 
-func TestTestProvider_CustomType_InvalidArgument(t *testing.T) {
-	s := serverWithStore(t, &mockProviderStore{})
-	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
-		Input: &tenantv1.ProviderConfigInput{Type: "custom"},
-	})
-	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
-}
-
-func TestTestProvider_ProviderConstructionFails_ReturnsFalseOkNoGRPCError(t *testing.T) {
-	// providers.NewProvider("ollama") requires no API key so it will construct
-	// successfully in most cases. Use a type that truly does not exist to exercise
-	// the construction error path at the proto-level (invalid type → caught by
-	// validateProviderInput, so use a valid type but broken config).
-	// We rely on validateProviderInput to catch the bad type; for a valid type
-	// whose construction always succeeds, test the ok:false path via the
-	// GetProviderHealth handler or mock the factory directly.
-	// This test verifies the input-validation → codes.InvalidArgument path.
-	s := auditedServer(t)
-	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
-		Input: &tenantv1.ProviderConfigInput{Type: "unknown-x"},
-	})
-	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
-}
-
-// TestTestProvider_CredentialsNotEchoedBack verifies that plaintext credentials
-// submitted in the request never appear in the response fields.
-func TestTestProvider_CredentialsNotEchoedBack(t *testing.T) {
-	// Use ollama (no API key validation at construction time) with a sentinel value.
-	// The test catches any accidental echo of credentials in ok/error/model fields.
-	s := auditedServer(t)
-	// providerConfig is nil for TestProvider — it doesn't read from the store.
-	resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
-		Input: &tenantv1.ProviderConfigInput{
-			Name:         "my-ollama",
-			Type:         "ollama",
-			DefaultModel: "llama3",
-			Credentials:  map[string]string{"api_key": "PLAINTEXT-CREDENTIAL-SENTINEL"},
-		},
-	})
-	// We don't care about ok/error here — only that the credential sentinel
-	// is absent from every string field in the response.
-	if err == nil && resp != nil {
-		assert.NotContains(t, resp.Model, "PLAINTEXT-CREDENTIAL-SENTINEL")
-		assert.NotContains(t, resp.Error, "PLAINTEXT-CREDENTIAL-SENTINEL")
+func TestTestProvider_AFailedCallIsAnAnswerAndNotAnError(t *testing.T) {
+	cases := map[int]string{
+		http.StatusNotFound:  "not ready",
+		http.StatusForbidden: "refused",
 	}
+	for status, want := range cases {
+		rec := &recordingLister{err: &modelclient.APIError{Status: status, Body: "x"}}
+		s := serverWithStore(t, savedProviderStore())
+		s.modelLister = rec
+		resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Name: "p"})
+		require.NoError(t, err)
+		assert.False(t, resp.Ok)
+		assert.Contains(t, resp.Error, want)
+	}
+}
+
+func TestListProviderModels_CachesAGoodListAndDropsItOnUpdate(t *testing.T) {
+	rec := &recordingLister{models: []modelclient.ModelEntry{{ID: "m1"}}}
+	store := savedProviderStore()
+	store.updateOut = fakeProviderRecord("p")
+	store.getOut.DefaultModel = "m1"
+	store.getOut.DefaultModelContextWindow = 1000
+	s := serverWithStore(t, store)
+	s.modelLister = rec
+	ctx := tenantCtx("acme")
+
+	for range 2 {
+		resp, err := s.ListProviderModels(ctx, &tenantv1.ListProviderModelsRequest{Name: "p"})
+		require.NoError(t, err)
+		assert.True(t, resp.Ok)
+	}
+	assert.Equal(t, 1, rec.calls, "the second call is served from the cache")
+	assert.Equal(t, "model_list", rec.callers[0].Purpose)
+
+	_, err := s.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{Name: "p", Input: anthropicSaveInput("m1", 1000)})
+	require.NoError(t, err)
+	_, err = s.ListProviderModels(ctx, &tenantv1.ListProviderModelsRequest{Name: "p"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, rec.calls, "an update drops the cache")
+}
+
+func TestListProviderModels_AFailedCallIsNotCached(t *testing.T) {
+	rec := &recordingLister{err: &modelclient.APIError{Status: http.StatusTooManyRequests}}
+	s := serverWithStore(t, savedProviderStore())
+	s.modelLister = rec
+	resp, err := s.ListProviderModels(tenantCtx("acme"), &tenantv1.ListProviderModelsRequest{Name: "p"})
+	require.NoError(t, err)
+	assert.False(t, resp.Ok)
+	assert.Equal(t, "rate_limited", resp.ErrorClass)
+	rec.err = nil
+	rec.models = []modelclient.ModelEntry{{ID: "m"}}
+	resp, err = s.ListProviderModels(tenantCtx("acme"), &tenantv1.ListProviderModelsRequest{Name: "p"})
+	require.NoError(t, err)
+	assert.True(t, resp.Ok, "the failure left no entry")
+}
+
+func TestProviderModelHandlers_NeedTheClientAndTheStore(t *testing.T) {
+	s := serverWithStore(t, savedProviderStore())
+	_, err := s.ListProviderModels(tenantCtx("acme"), &tenantv1.ListProviderModelsRequest{Name: "p"})
+	assert.Equal(t, codes.FailedPrecondition, grpcCode(err), "no model client")
+	_, err = auditedServer(t).ListProviderModels(tenantCtx("acme"), &tenantv1.ListProviderModelsRequest{Name: "p"})
+	assert.Equal(t, codes.FailedPrecondition, grpcCode(err), "no store")
+	_, err = s.ListProviderModels(context.Background(), &tenantv1.ListProviderModelsRequest{Name: "p"})
+	assert.Equal(t, codes.Unauthenticated, grpcCode(err))
 }
 
 // ---------------------------------------------------------------------------
@@ -655,48 +703,6 @@ func TestValidateProviderInput_KnownTypes_NoError(t *testing.T) {
 			assert.NoError(t, err, "supported type %q must validate successfully", typ)
 		})
 	}
-}
-
-// ---------------------------------------------------------------------------
-// decryptedToLLMConfig (internal helper)
-// ---------------------------------------------------------------------------
-
-func TestDecryptedToLLMConfig_FieldMapping(t *testing.T) {
-	dec := &providerconfig.DecryptedConfig{
-		ProviderConfig: providerconfig.ProviderConfig{
-			Type:         llm.ProviderAnthropic,
-			DefaultModel: "claude-3-5-sonnet-20241022",
-		},
-		Credentials: map[string]string{
-			"api_key":  "sk-ant-secret",
-			"base_url": "https://custom.api.example.com",
-			"extra_k":  "extra_v",
-		},
-	}
-	cfg := decryptedToLLMConfig(dec)
-	assert.Equal(t, llm.ProviderAnthropic, cfg.Type)
-	assert.Equal(t, "sk-ant-secret", cfg.APIKey)
-	assert.Equal(t, "https://custom.api.example.com", cfg.BaseURL)
-	assert.Equal(t, "claude-3-5-sonnet-20241022", cfg.DefaultModel)
-	assert.Equal(t, map[string]string{"extra_k": "extra_v"}, cfg.Extra)
-}
-
-func TestDecryptedToLLMConfig_NoAPIKeyOrBaseURL_EmptyTypedFields(t *testing.T) {
-	dec := &providerconfig.DecryptedConfig{
-		ProviderConfig: providerconfig.ProviderConfig{
-			Type:         llm.ProviderBedrock,
-			DefaultModel: "anthropic.claude-3-5-sonnet-20241022-v2:0",
-		},
-		Credentials: map[string]string{
-			"aws_access_key_id":     "AKIAIOSFODNN7EXAMPLE",
-			"aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-			"aws_region":            "us-east-1",
-		},
-	}
-	cfg := decryptedToLLMConfig(dec)
-	assert.Empty(t, cfg.APIKey)
-	assert.Empty(t, cfg.BaseURL)
-	assert.Equal(t, "AKIAIOSFODNN7EXAMPLE", cfg.Extra["aws_access_key_id"])
 }
 
 // ---------------------------------------------------------------------------

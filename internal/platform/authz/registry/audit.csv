@@ -334,7 +334,6 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.ProviderService/GetSupportedProviders,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/ListProviderModels,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/ListProviders,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
-/gibson.tenant.v1.ProviderService/ProbeProvider,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/SetDefaultProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/TestProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/UpdateProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule

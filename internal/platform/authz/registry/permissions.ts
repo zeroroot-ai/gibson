@@ -3370,16 +3370,6 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
-  "/gibson.tenant.v1.ProviderService/ProbeProvider": {
-    method: "/gibson.tenant.v1.ProviderService/ProbeProvider",
-    service: "gibson.tenant.v1.ProviderService",
-    relation: "admin",
-    objectType: "tenant",
-    objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER,
-    unauthenticated: false,
-    self: false,
-  },
   "/gibson.tenant.v1.ProviderService/SetDefaultProvider": {
     method: "/gibson.tenant.v1.ProviderService/SetDefaultProvider",
     service: "gibson.tenant.v1.ProviderService",

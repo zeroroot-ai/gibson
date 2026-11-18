@@ -8,7 +8,6 @@ package api
 // states it. The save path calls no provider, so it never asks a model list.
 
 import (
-	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +15,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -29,21 +29,22 @@ func anthropicSaveInput(model string, window int32) *tenantv1.ProviderConfigInpu
 }
 
 func TestCreateProvider_StoresTheStatedWindowAndCallsNoProvider(t *testing.T) {
-	fake := newFakeAnthropic(t, http.StatusOK, `{"data":[],"has_more":false}`)
+	rec := &recordingLister{}
 	store := &mockProviderStore{createOut: fakeProviderRecord("p")}
-	s := withFakeAnthropic(serverWithStore(t, store), fake)
+	s := serverWithStore(t, store)
+	s.modelLister = rec
 
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{Input: anthropicSaveInput("claude-x", 64000)})
 	require.NoError(t, err)
 	assert.Equal(t, 64000, store.capturedCreateInput.DefaultModelContextWindow)
-	assert.Zero(t, fake.listCalls.Load(), "the save path asks no model list")
-	assert.Zero(t, fake.otherCalls.Load(), "the save path sends no completion")
+	assert.Zero(t, rec.calls, "the save path asks no model list")
 }
 
 func TestCreateProvider_RefusesAChatModelWithNoStatedWindow(t *testing.T) {
-	fake := newFakeAnthropic(t, http.StatusOK, `{"data":[{"id":"claude-a","max_input_tokens":200000}],"has_more":false}`)
+	rec := &recordingLister{models: []modelclient.ModelEntry{{ID: "claude-a", ContextWindow: 200000}}}
 	store := &mockProviderStore{createOut: fakeProviderRecord("p")}
-	s := withFakeAnthropic(serverWithStore(t, store), fake)
+	s := serverWithStore(t, store)
+	s.modelLister = rec
 
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{Input: anthropicSaveInput("claude-a", 0)})
 	require.Error(t, err)
@@ -51,7 +52,7 @@ func TestCreateProvider_RefusesAChatModelWithNoStatedWindow(t *testing.T) {
 	assert.Contains(t, err.Error(), "default_model_context_window")
 	assert.Contains(t, err.Error(), "claude-a")
 	assert.Nil(t, store.capturedCreateInput, "nothing is saved")
-	assert.Zero(t, fake.listCalls.Load(), "the refusal comes with no provider call")
+	assert.Zero(t, rec.calls, "the refusal comes with no provider call")
 }
 
 func TestCreateProvider_NoWindowIsNeededWithoutAChatModel(t *testing.T) {
@@ -87,22 +88,6 @@ func TestUpdateProvider_StoresTheStatedWindow(t *testing.T) {
 func TestFromProtoInput_CarriesTheStatedWindow(t *testing.T) {
 	in := fromProtoInput(&tenantv1.ProviderConfigInput{DefaultModelContextWindow: 654})
 	assert.Equal(t, 654, in.DefaultModelContextWindow)
-}
-
-func TestProbeProvider_FoundryNeedsTheModelInTheRequest(t *testing.T) {
-	ok := newFoundryFake(t, http.StatusOK,
-		`{"id":"m","type":"message","role":"assistant","model":"x","content":[{"type":"text","text":"p"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
-	s := withFakeFoundry(auditedServer(t), ok)
-	creds := map[string]string{"api_key": "k", "foundry_resource": "r"}
-
-	resp, err := s.ProbeProvider(tenantCtx("acme"), &tenantv1.ProbeProviderRequest{Type: "foundry", Credentials: creds})
-	require.NoError(t, err)
-	assert.False(t, resp.Ok)
-	assert.Contains(t, resp.ErrorMessage, "Enter a model name")
-
-	resp, err = s.ProbeProvider(tenantCtx("acme"), &tenantv1.ProbeProviderRequest{Type: "foundry", Credentials: creds, DefaultModel: "dep"})
-	require.NoError(t, err)
-	assert.True(t, resp.Ok, resp.ErrorMessage)
 }
 
 func TestSave_AStatedWindowMustBeInRange(t *testing.T) {

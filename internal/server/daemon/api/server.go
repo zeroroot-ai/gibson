@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
@@ -274,24 +275,6 @@ type DaemonServer struct {
 	// Added by spec 25-daemon-driven-provider-config task 4.
 	execLimiter execLimiterIface
 
-	// providerFactory constructs an llm.LLMProvider from a resolved ProviderConfig.
-	// Defaults to the package-level providerFactoryFunc; overridden in tests via
-	// WithProviderFactory. Must never be nil after NewDaemonServer.
-	// Added by spec 25-daemon-driven-provider-config task 4.
-	providerFactory func(cfg llm.ProviderConfig) (llm.LLMProvider, error)
-
-	// allowPrivateLLMEndpoints mirrors security.allow_private_llm_endpoints.
-	// False (the zero value, and the secure default) keeps the connect-time
-	// SSRF egress guard on for every provider this server constructs. Wired via
-	// WithAllowPrivateLLMEndpoints.
-	allowPrivateLLMEndpoints bool
-
-	// embedderFactory constructs an embedder.Embedder from a transient
-	// embedder.Config for the TestProvider / ProbeProvider embedding probe
-	// (gibson#1013). Defaults to embedder.NewFromProvider; overridden in tests via
-	// WithEmbedderFactory. Must never be nil after NewDaemonServer.
-	embedderFactory func(cfg embedder.Config) (embedder.Embedder, error)
-
 	// budgetEnforcer enforces per-user/team/tenant token and spend
 	// budgets around ExecuteLLM / StreamLLM. May be nil; when nil budget
 	// enforcement is skipped (absent-budget = unlimited, so this
@@ -301,6 +284,12 @@ type DaemonServer struct {
 
 	// chatModels sends the chat call of ExecuteLLM to the model gateway.
 	chatModels chatModels
+
+	// modelLister and providerListCache serve the model list of a saved provider
+	// (gibson#1394).
+	modelLister       modelLister
+	providerListCache *providerListCache
+	listCacheOnce     sync.Once
 
 	// modelGateInvalidator is called from Grant/Revoke so that the
 	// next slot resolution picks up the new grant state within
@@ -960,8 +949,6 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 		credentialHandler: credentialHandler,
 		logger:            logger.With("component", "daemon-grpc"),
 		sessionCounter:    0,
-		providerFactory:   providerFactoryFunc,
-		embedderFactory:   embedder.NewFromProvider,
 		gibsonPublicURL:   os.Getenv("GIBSON_PUBLIC_URL"),
 		// Always-non-nil default so provider-config handlers never need a
 		// request-path nil-guard ([[0003]]). WithReembedTrigger swaps in the

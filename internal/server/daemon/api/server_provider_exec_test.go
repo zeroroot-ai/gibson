@@ -176,11 +176,10 @@ func knownDecryptedConfig() *providerconfig.DecryptedConfig {
 
 // newExecServer builds a minimal DaemonServer with a stubbed provider store and
 // factory. Callers may further customise fields (e.g. WithExecLimiter).
-func newExecServer(store providerConfigStoreIface, factory func(llm.ProviderConfig) (llm.LLMProvider, error)) *DaemonServer {
+func newExecServer(store providerConfigStoreIface, _ func(llm.ProviderConfig) (llm.LLMProvider, error)) *DaemonServer {
 	s := &DaemonServer{
-		logger:          slog.Default(),
-		providerConfig:  store,
-		providerFactory: factory,
+		logger:         slog.Default(),
+		providerConfig: store,
 		// The budget enforcer is required: the daemon wires it at start.
 		budgetEnforcer: &stubBudgetEnforcer{},
 	}

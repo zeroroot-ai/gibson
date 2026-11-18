@@ -73,8 +73,9 @@ service ProviderService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
-  // TestProvider validates a proposed provider config by making a minimal live
-  // request.
+  // TestProvider tests a SAVED provider by name. It sends one GET of the model
+  // list through the route of the provider on the model gateway. It never tests
+  // a credential that is not saved (gibson#1394).
   rpc TestProvider(TestProviderRequest) returns (TestProviderResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "writer"
@@ -98,28 +99,9 @@ service ProviderService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
-  // ProbeProvider validates candidate provider credentials WITHOUT persisting
-  // them, and returns the live model catalog the provider's API exposes for
-  // those credentials. Used by the wizard's "Test connection" step.
-  //
-  // SECURITY: credentials transit memory only — they are passed to the
-  // transient provider client, the call is made, and the values are dropped
-  // when the request returns. They are never logged, never persisted, and
-  // never returned to the caller.
-  //
-  // Source: previously ProbeProvider in gibson.admin.v1.TenantAdminService
-  // (platform-sdk); moved here as it is customer-callable.
-  rpc ProbeProvider(ProbeProviderRequest) returns (ProbeProviderResponse) {
-    option (gibson.auth.v1.authz) = {
-      relation: "admin"
-      object_type: "tenant"
-      object_deriver: "tenant_from_identity"
-      allowed_identities: 1  // USER
-    };
-  }
-  // ListProviderModels fetches the live model catalog for an already-
-  // configured provider, looked up by name. Credentials are read from the
-  // encrypted store; the caller does not pass them.
+  // ListProviderModels fetches the live model catalog for a saved provider, by
+  // name. It sends one GET of the model list through the route of the provider
+  // on the model gateway. The caller passes no credential.
   rpc ListProviderModels(ListProviderModelsRequest) returns (ListProviderModelsResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "member"
@@ -394,7 +376,12 @@ message DeleteProviderRequest {
 message DeleteProviderResponse {}
 
 message TestProviderRequest {
-  ProviderConfigInput input = 1;
+  // The request no longer carries a proposed config. A call tests a credential
+  // that is saved, and nothing else.
+  reserved 1;
+  reserved "input";
+  // name is the name of a saved provider. Required.
+  string name = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 message TestProviderResponse {
@@ -402,67 +389,17 @@ message TestProviderResponse {
   int64 latency_ms = 2;
   string model = 3;
   string error = 4;
-  // Live models that the provider's list endpoint reports for these
-  // credentials. Empty when ok=false.
+  // Live models that the provider's list endpoint reports. Empty when ok=false.
   repeated ModelDescriptor models = 5;
-  // embedding_ok is true when an embedding probe was attempted and succeeded.
-  // False when no embedding probe was run (provider is chat-only or
-  // default_embedding_model was empty) or when the probe failed.
-  bool embedding_ok = 6;
-  // embedding_dimension is the vector dimension returned by the embedding
-  // probe. 0 when embedding_ok=false or no embedding probe was run.
-  int32 embedding_dimension = 7;
-  // embedding_error is the human-readable error from the embedding probe
-  // when embedding_ok=false and a probe was attempted.
-  string embedding_error = 8;
+  // The embedding probe is gone: the test is one model list call.
+  reserved 6, 7, 8;
+  reserved "embedding_ok", "embedding_dimension", "embedding_error";
 }
 
 message GetSupportedProvidersRequest {}
 
 message GetSupportedProvidersResponse {
   repeated SupportedProvider providers = 1;
-}
-
-// ProbeProviderRequest carries candidate provider credentials for a
-// validation-only call that returns the live model catalog. Credentials
-// are NEVER persisted by this RPC.
-// Source: previously ProbeProviderRequest in gibson.admin.v1 (platform-sdk).
-message ProbeProviderRequest {
-  // Provider type identifier (matches SupportedProvider.type).
-  string type = 1 [(buf.validate.field).string = { max_len: 1024 }];
-  // Credential map. Keys come from the provider's CredentialField.key entries;
-  // values are plaintext (used once, discarded).
-  map<string, string> credentials = 2;
-  // default_embedding_model is the embedding model to use in the probe.
-  // Required when the provider type serves embeddings and the caller wants an
-  // embedding probe (e.g. voyage, openai-compatible, tei). Optional for
-  // chat-only providers — if supplied, an embedding probe is also run.
-  string default_embedding_model = 3 [(buf.validate.field).string = { max_len: 4096 }];
-  // default_model is the chat model to test. Optional. Only a provider with no
-  // model list call (Foundry) needs it: the test completes one token against
-  // this model. A provider with a list call ignores it.
-  string default_model = 4 [(buf.validate.field).string = { max_len: 1024 }];
-}
-
-// ProbeProviderResponse carries the structured probe outcome.
-// Source: previously ProbeProviderResponse in gibson.admin.v1 (platform-sdk).
-message ProbeProviderResponse {
-  // True when the provider accepted the credentials and a model list was
-  // retrieved (or the embedding probe succeeded). False otherwise —
-  // error_message describes the reason.
-  bool ok = 1;
-  // Human-readable error message when ok=false.
-  string error_message = 2;
-  // Stable error class for programmatic dispatch when ok=false.
-  string error_class = 3;
-  // Live chat-model catalog the provider's API returned for these
-  // credentials. Empty when ok=false or the provider is embedding-only.
-  repeated ModelDescriptor models = 4;
-  // Round-trip latency to the upstream provider, in milliseconds.
-  int64 latency_ms = 5;
-  // embedding_dimension is the vector dimension returned by the embedding
-  // probe. 0 when no embedding probe was run or it failed.
-  int32 embedding_dimension = 6;
 }
 
 message ListProviderModelsRequest {

@@ -746,15 +746,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if err := startTimelineArchive(ctx, d.platformDB, func() timelinePoolForer { return d.pool }, d.logger.Slog()); err != nil {
 		return nil, err
 	}
-	// SSRF egress policy for every LLM provider this server constructs from a
-	// tenant-supplied base_url. Off by default (guard on); operators running an
-	// in-cluster or air-gapped model server opt in via
-	// security.allow_private_llm_endpoints — the same knob the embedder
-	// resolver honours below.
-	daemonSvc.WithAllowPrivateLLMEndpoints(d.config.Security.AllowPrivateLLMEndpoints)
 	// ExecuteLLM sends its chat call to the model gateway (gibson#1392).
 	if d.modelClient != nil {
 		daemonSvc.WithModelClient(d.modelClient)
+		daemonSvc.WithModelLister(d.modelClient)
 	}
 	if d.authorizer != nil {
 		daemonSvc.WithAuthorizer(d.authorizer)

@@ -16,12 +16,14 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -486,25 +488,20 @@ func (s *DaemonServer) anyProviderListsModel(
 // the model as a chat model. A model with the embedding feature and no chat
 // feature is not a chat model.
 func (s *DaemonServer) providerListsModel(ctx context.Context, tenantID string, c *providerconfig.ProviderConfig, model string) bool {
-	dec, err := s.providerConfig.Resolve(ctx, tenantID, c.Name)
-	if err != nil {
+	if s.modelLister == nil {
 		return false
 	}
-	factory := s.providerFactory
-	if factory == nil {
-		factory = providers.NewProvider
-	}
-	prov, err := factory(s.withEgressPolicy(decryptedConfigToLLMConfig(dec, "")))
-	if err != nil {
-		return false
-	}
-	models, err := prov.Models(ctx)
+	// The list of the gateway is a passthrough and holds the model names. It
+	// holds no feature list, so a listed model counts as a chat model.
+	models, err := s.modelLister.Models(ctx,
+		modelclient.Caller{Tenant: tenantID, Purpose: modelcall.PurposeModelList, Initiator: principal.FGAUser(callerIdentity(ctx))},
+		modelclient.Target{Tenant: tenantID, Provider: c.Name})
 	if err != nil {
 		return false
 	}
 	for _, m := range models {
-		if m.Name == model {
-			return !slices.Contains(m.Features, "embedding") || slices.Contains(m.Features, "chat")
+		if m.ID == model {
+			return true
 		}
 	}
 	return false

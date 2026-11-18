@@ -15,8 +15,6 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
-	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
@@ -48,17 +46,6 @@ type execLimiterIface interface {
 }
 
 // ---------------------------------------------------------------------------
-// Factory injection seam
-// ---------------------------------------------------------------------------
-
-// providerFactoryFunc is the default factory used to construct LLM providers
-// from a resolved ProviderConfig. The DaemonServer.providerFactory field
-// defaults to this at construction time so tests can substitute a mock.
-var providerFactoryFunc = func(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
-	return providers.NewProvider(cfg)
-}
-
-// ---------------------------------------------------------------------------
 // Wiring helpers (With* methods on DaemonServer)
 // ---------------------------------------------------------------------------
 
@@ -68,42 +55,6 @@ var providerFactoryFunc = func(cfg llm.ProviderConfig) (llm.LLMProvider, error) 
 // Added by spec 25-daemon-driven-provider-config task 4.
 func (s *DaemonServer) WithExecLimiter(l execLimiterIface) *DaemonServer {
 	s.execLimiter = l
-	return s
-}
-
-// WithProviderFactory replaces the default providers.NewProvider factory with
-// the given function. Intended for tests that need to inject a mock provider
-// without hitting real upstream LLM APIs.
-// Added by spec 25-daemon-driven-provider-config task 4.
-func (s *DaemonServer) WithProviderFactory(f func(cfg llm.ProviderConfig) (llm.LLMProvider, error)) *DaemonServer {
-	s.providerFactory = f
-	return s
-}
-
-// WithAllowPrivateLLMEndpoints forwards the operator-level
-// security.allow_private_llm_endpoints knob. When false (the default) every
-// provider this server constructs refuses, at connect time, to reach loopback,
-// link-local (169.254.169.254), RFC1918, CGNAT or IPv6 ULA addresses.
-func (s *DaemonServer) WithAllowPrivateLLMEndpoints(allow bool) *DaemonServer {
-	s.allowPrivateLLMEndpoints = allow
-	return s
-}
-
-// withEgressPolicy stamps the operator-level SSRF egress decision onto a
-// provider config. EVERY provider-construction path in this package must run
-// its config through this before calling the factory — that is what keeps the
-// guard un-skippable. The zero value stamps "guard on", so a path that is added
-// later and forgets fails closed, never open.
-func (s *DaemonServer) withEgressPolicy(cfg llm.ProviderConfig) llm.ProviderConfig {
-	cfg.AllowPrivateEndpoint = s.allowPrivateLLMEndpoints
-	return cfg
-}
-
-// WithEmbedderFactory replaces the default embedder.NewFromProvider factory
-// with the given function. Intended for tests that need to inject a mock
-// embedder without hitting real upstream embedding APIs (gibson#1013).
-func (s *DaemonServer) WithEmbedderFactory(f func(cfg embedder.Config) (embedder.Embedder, error)) *DaemonServer {
-	s.embedderFactory = f
 	return s
 }
 
@@ -428,39 +379,6 @@ func gatewayRespToProto(resp *modelclient.Response) *tenantv1.ExecuteLLMResponse
 // ---------------------------------------------------------------------------
 // Translation helpers — proto ↔ llm types
 // ---------------------------------------------------------------------------
-
-// decryptedConfigToLLMConfig converts a DecryptedConfig into an llm.ProviderConfig
-// suitable for passing to providers.NewProvider. The modelOverride, if non-empty,
-// replaces the stored default_model.
-//
-// SECURITY: dec.Credentials is read here and embedded into llm.ProviderConfig
-// fields. The ProviderConfig is consumed by the provider constructor and should
-// not be stored beyond that call.
-func decryptedConfigToLLMConfig(dec *providerconfig.DecryptedConfig, modelOverride string) llm.ProviderConfig {
-	model := dec.DefaultModel
-	if modelOverride != "" {
-		model = modelOverride
-	}
-
-	// extra collects provider-specific credentials beyond api_key / base_url.
-	extra := make(map[string]string)
-	for k, v := range dec.Credentials {
-		switch k {
-		case "api_key", "base_url":
-			// handled as typed fields below
-		default:
-			extra[k] = v
-		}
-	}
-
-	return llm.ProviderConfig{
-		Type:         dec.Type,
-		APIKey:       dec.Credentials["api_key"],
-		BaseURL:      dec.Credentials["base_url"],
-		DefaultModel: model,
-		Extra:        extra,
-	}
-}
 
 // protoMessagesToLLM converts the repeated LLMMessageContent proto messages
 // into the llm.Message slice expected by the provider interfaces.
