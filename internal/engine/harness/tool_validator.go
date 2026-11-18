@@ -179,7 +179,6 @@ func (v *ToolValidator) countEntities(discovery proto.Message) int {
 		len(pbDiscovery.Technologies) +
 		len(pbDiscovery.Certificates) +
 		len(pbDiscovery.Findings) +
-		len(pbDiscovery.Evidence) +
 		len(pbDiscovery.CustomNodes)
 
 	return count
