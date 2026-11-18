@@ -144,7 +144,7 @@ func TestCallbackResolveModel_Refusals(t *testing.T) {
 	assert.Zero(t, sm.calls, "no refusal reached the slot manager before the checks")
 }
 
-func TestCallbackResolveAgent_ReplyHoldsTheRouteTheCAAndTheCardURL(t *testing.T) {
+func TestResolveAgent_ReplyHoldsTheRouteTheCAAndTheCardURL(t *testing.T) {
 	svc := resolveService(t, resolveHarness(newStubSlotManager(), nil))
 	svc.componentRegistry = &gateFakeRegistry{tenantInstances: []component.ComponentInfo{
 		{Kind: "agent", Name: "peer-agent", InstanceID: "i1"},
@@ -166,7 +166,7 @@ func TestCallbackResolveAgent_ReplyHoldsTheRouteTheCAAndTheCardURL(t *testing.T)
 	assert.Equal(t, want, resp.GetRouteHeaders())
 }
 
-func TestCallbackResolveAgent_AnAgentOfTheCatalogNeedsNoRegisteredInstance(t *testing.T) {
+func TestResolveAgent_AnAgentOfTheCatalogNeedsNoRegisteredInstance(t *testing.T) {
 	svc := resolveService(t, resolveHarness(newStubSlotManager(), nil))
 
 	resp, err := svc.ResolveAgent(testCtxWithTenant(), &harnesspb.ResolveAgentRequest{
@@ -177,7 +177,7 @@ func TestCallbackResolveAgent_AnAgentOfTheCatalogNeedsNoRegisteredInstance(t *te
 	assert.Equal(t, "https://agents.example.test", resp.GetGatewayUrl())
 }
 
-func TestCallbackResolveAgent_Refusals(t *testing.T) {
+func TestResolveAgent_Refusals(t *testing.T) {
 	h := resolveHarness(newStubSlotManager(), nil)
 	svc := resolveService(t, h)
 	svc.componentRegistry = &gateFakeRegistry{}
