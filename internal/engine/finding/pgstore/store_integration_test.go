@@ -5,18 +5,21 @@
 // +build integration
 
 // store_integration_test.go runs the finding store against a real Postgres
-// (testcontainers). It applies the shipped migrations, so it proves that the
-// migrations and the store agree. The test skips when Docker is not available.
+// server that FINDING_TEST_PG_DSN names. It applies the shipped migrations with
+// the migration runner, so it proves that the migrations and the store agree.
 package pgstore_test
 
 import (
 	"context"
 	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	migratepg "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -25,7 +28,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
-	"github.com/zeroroot-ai/gibson/tests/testhelpers"
+	"github.com/zeroroot-ai/gibson/pkg/platform/migrations"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -39,30 +42,43 @@ func (p *tenantPool) Admin(context.Context) (*datapool.AdminConn, error) { retur
 func (p *tenantPool) SetAdminPool(datapool.AdminAcquirer)                {}
 func (p *tenantPool) Close() error                                       { return nil }
 
+// adminDSNEnv names the DSN of a Postgres server that the test may create
+// databases on. The test skips when it is not set.
+const adminDSNEnv = "FINDING_TEST_PG_DSN"
+
+// newStore makes a fresh database, applies every tenant migration with the
+// migration runner of the repo, and returns a store on it.
 func newStore(t *testing.T) (*pgstore.Store, *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
-	pgTLS := testhelpers.StartPostgresTLS(t, testhelpers.PostgresOptions{
-		User: "testuser", Password: "testpass", Database: "testdb",
-	})
-	var pool *pgxpool.Pool
-	require.Eventually(t, func() bool {
-		var err error
-		pool, err = pgxpool.New(ctx, pgTLS.DSN)
-		if err != nil {
-			return false
-		}
-		return pool.Ping(ctx) == nil
-	}, 30*time.Second, 200*time.Millisecond, "Postgres not ready")
+	adminDSN := os.Getenv(adminDSNEnv)
+	if adminDSN == "" {
+		t.Skipf("%s is not set", adminDSNEnv)
+	}
+	admin, err := pgxpool.New(ctx, adminDSN)
+	require.NoError(t, err)
+	t.Cleanup(admin.Close)
+	dbName := "findings_" + strings.ReplaceAll(types.NewID().String(), "-", "")
+	_, err = admin.Exec(ctx, "CREATE DATABASE "+dbName)
+	require.NoError(t, err)
+
+	cfg, err := pgxpool.ParseConfig(adminDSN)
+	require.NoError(t, err)
+	cfg.ConnConfig.Database = dbName
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	base := filepath.Join("..", "..", "..", "..", "pkg", "platform", "migrations", "postgres", "tenant")
-	for _, name := range []string{"004_findings.up.sql", "017_findings_mission_nullable.up.sql", "018_finding_evidence.up.sql"} {
-		up, err := os.ReadFile(filepath.Join(base, name))
-		require.NoError(t, err, "read %s", name)
-		_, err = pool.Exec(ctx, string(up))
-		require.NoError(t, err, "apply %s", name)
-	}
+	db := stdlib.OpenDB(*cfg.ConnConfig)
+	t.Cleanup(func() { _ = db.Close() })
+	src, err := migrations.NewTenantSource()
+	require.NoError(t, err)
+	driver, err := migratepg.WithInstance(db, &migratepg.Config{DatabaseName: dbName})
+	require.NoError(t, err)
+	m, err := migrate.NewWithInstance("iofs", src, dbName, driver)
+	require.NoError(t, err)
+	require.NoError(t, m.Up(), "the tenant migrations apply")
+
 	tp := &tenantPool{pg: pool}
 	return pgstore.New(func() datapool.Pool { return tp }), pool
 }
@@ -158,4 +174,53 @@ func TestStore_Integration_EvidenceRowsAndCascade(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM finding_evidence`).Scan(&n))
 	assert.Zero(t, n, "the delete cascades")
+}
+
+// TestStore_Integration_TransactionRollback makes the database refuse an
+// evidence row after the finding row was written. A NUL byte is valid in a Go
+// string and invalid in Postgres text. The finding row must not stay.
+func TestStore_Integration_TransactionRollback(t *testing.T) {
+	s, pool := newStore(t)
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+	f.Evidence = []*typespb.Evidence{
+		{Title: "ok", Content: "fine", Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED},
+		{Title: "bad", Content: "nul\x00byte", Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED},
+	}
+
+	err := s.Store(ctx, "acme", f)
+
+	require.Error(t, err)
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings`).Scan(&n))
+	assert.Zero(t, n, "no finding row")
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM finding_evidence`).Scan(&n))
+	assert.Zero(t, n, "no evidence row")
+}
+
+// TestStore_Integration_SizeLimit proves the 1 MiB refusal. The item at the
+// limit is stored whole. The item over the limit fails the submit.
+func TestStore_Integration_SizeLimit(t *testing.T) {
+	s, pool := newStore(t)
+	ctx := context.Background()
+	mk := func(size int) finding.EnhancedFinding {
+		f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+		f.Evidence = []*typespb.Evidence{{
+			Content: strings.Repeat("x", size), Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, ToolCallId: "call-1",
+		}}
+		return f
+	}
+
+	over := mk(finding.MaxEvidenceContentBytes + 1)
+	require.ErrorIs(t, s.Store(ctx, "acme", over), finding.ErrEvidenceTooLarge)
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings`).Scan(&n))
+	assert.Zero(t, n, "nothing written")
+
+	at := mk(finding.MaxEvidenceContentBytes)
+	require.NoError(t, s.Store(ctx, "acme", at))
+	got, err := s.GetWithEvidence(ctx, "acme", at.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Evidence, 1)
+	assert.Len(t, got.Evidence[0].GetContent(), finding.MaxEvidenceContentBytes, "stored whole, never truncated")
 }
