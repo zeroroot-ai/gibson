@@ -630,6 +630,46 @@ func TestPollWork_RecordsTheCallersTenantForItsOwnStream(t *testing.T) {
 	assert.Equal(t, victimTenant, env.mr.HGet(workContextKey("work-poll-2"), workContextTenantField))
 }
 
+// TestPollWork_CarriesTheTaskGrantInTheTypedField proves that the task grant of
+// a work item reaches the agent in PollWorkResponse.task_grant, and that the
+// work context holds no second copy of the secret.
+func TestPollWork_CarriesTheTaskGrantInTheTypedField(t *testing.T) {
+	env := newWorkIDEnv(t)
+	env.svc.registry = &pollRegistry{info: ComponentInfo{
+		Kind: "agent", Name: "scout", InstanceID: "inst-agent",
+	}}
+	_, err := env.queue.Enqueue(context.Background(), victimTenant, "agent", "scout", WorkItem{
+		WorkID:   "work-grant-1",
+		WorkType: "execute",
+		Context:  map[string]string{"mission_id": "mission-3", "capability_grant": "grant.jwt.value"},
+	})
+	require.NoError(t, err)
+
+	ctx := auth.ContextWithTenantString(context.Background(), victimTenant)
+	resp, err := env.svc.PollWork(ctx, &componentpb.PollWorkRequest{InstanceId: "inst-agent", TimeoutMs: 100})
+	require.NoError(t, err)
+	assert.Equal(t, "grant.jwt.value", resp.GetTaskGrant())
+	assert.NotContains(t, resp.GetContext(), "capability_grant")
+}
+
+// TestPollWork_AWorkItemWithNoGrantHasNoTaskGrant keeps the empty value: the
+// SDK then fails each gateway call with a clear error.
+func TestPollWork_AWorkItemWithNoGrantHasNoTaskGrant(t *testing.T) {
+	env := newWorkIDEnv(t)
+	env.svc.registry = &pollRegistry{info: ComponentInfo{
+		Kind: "agent", Name: "scout", InstanceID: "inst-agent",
+	}}
+	_, err := env.queue.Enqueue(context.Background(), victimTenant, "agent", "scout", WorkItem{
+		WorkID: "work-grant-2", WorkType: "execute", Context: map[string]string{"mission_id": "mission-4"},
+	})
+	require.NoError(t, err)
+
+	ctx := auth.ContextWithTenantString(context.Background(), victimTenant)
+	resp, err := env.svc.PollWork(ctx, &componentpb.PollWorkRequest{InstanceId: "inst-agent", TimeoutMs: 100})
+	require.NoError(t, err)
+	assert.Empty(t, resp.GetTaskGrant())
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch round-trip
 // ---------------------------------------------------------------------------

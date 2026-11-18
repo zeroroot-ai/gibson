@@ -14,7 +14,7 @@
 //
 // The parts:
 //   - The tenant's provider is the deterministic e2e mock (the fixture provider
-//     type, llm.FixtureProviderType), configured through the ProviderService
+//     type, the fixture provider type), configured through the ProviderService
 //     RPC like any provider. The tenant's slot manager serves it, behind the
 //     tenant's model gate.
 //   - The agent of the mission node is served by this suite: it registers as

@@ -777,13 +777,17 @@ func (s *HarnessCallbackService) validator() *ToolValidator {
 // ToolCallID is the ContextInfo.ToolExecutionId the calling agent's SDK already
 // stamps for provenance; when the caller left it empty a fresh id is minted so
 // the call is still captured (just not correlated to a PRODUCED-edge chain).
-func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, toolName, argumentsJSON, resultJSON, callErr string) {
+//
+// It returns the id that the record holds, or an empty string when nothing was
+// recorded. The tool call reply carries this id as tool_call_id, so a finding
+// can cite the call.
+func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, toolName, argumentsJSON, resultJSON, callErr string) string {
 	if s.toolCallSink == nil || contextInfo == nil {
-		return
+		return ""
 	}
 	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
-		return
+		return ""
 	}
 	toolCallID := contextInfo.GetToolExecutionId()
 	if toolCallID == "" {
@@ -804,6 +808,7 @@ func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInf
 		Err:                callErr,
 		RecordedAtUnixNano: time.Now().UnixNano(),
 	})
+	return toolCallID
 }
 
 // ============================================================================
@@ -938,13 +943,14 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		// Flight recorder (ADR-0120, gibson#271): capture the failed call too —
 		// the arguments the agent sent and why it failed, not just the ones
 		// that succeeded.
-		s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", err.Error())
+		callID := s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", err.Error())
 
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
+			ToolCallId: callID,
 		}, nil
 	}
 
@@ -992,13 +998,14 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		// a real (unmarshalable) result leaves no independent record at all,
 		// which is exactly the unrecorded path the completeness guard exists
 		// to catch.
-		s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", fmt.Sprintf("failed to marshal response: %v", err))
+		callID := s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", fmt.Sprintf("failed to marshal response: %v", err))
 
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to marshal response: %v", err),
 			},
+			ToolCallId: callID,
 		}, nil
 	}
 
@@ -1029,10 +1036,11 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	// transcript half captureLLMCall already folds in. Before this, tool I/O
 	// only reached the daemon as bare tool.call.* pub/sub metadata (no
 	// arguments/result text) and never became part of the Timeline.
-	s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), string(responseJSON), "")
+	callID := s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), string(responseJSON), "")
 
 	return &harnesspb.CallToolProtoResponse{
 		OutputJson: responseJSON,
+		ToolCallId: callID,
 	}, nil
 }
 

@@ -33,3 +33,12 @@ func RouteHeaders(tenant, agent, bank string) []modelcall.RouteHeader {
 
 // CardPath is the path of the Agent Card on the agent listener.
 const CardPath = "/.well-known/agent-card.json"
+
+// RouteA2A is the path of the A2A JSON-RPC endpoint of an agent on the Agent
+// gateway. The Edge removes the /gateway/agent prefix, so the gateway sees the
+// root path.
+const RouteA2A = "/"
+
+// GrantRoutes returns the routes that a task grant lists so that its holder can
+// send an A2A message through the Agent gateway.
+func GrantRoutes() []string { return []string{RouteA2A} }

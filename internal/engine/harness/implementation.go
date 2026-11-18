@@ -28,6 +28,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
@@ -2295,5 +2296,8 @@ func taskGrantAllowedRPCs() []string {
 	// The model call routes of the gateway (gibson#1388). A grant that does not
 	// list them cannot call a model through the gateway.
 	out = append(out, modelcall.GrantRoutes()...)
+	// The A2A route of the Agent gateway. A grant that does not list it cannot
+	// delegate to another agent (gibson#1400).
+	out = append(out, agentcall.GrantRoutes()...)
 	return out
 }

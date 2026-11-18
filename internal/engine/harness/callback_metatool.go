@@ -83,7 +83,38 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 	if err != nil {
 		return nil, err
 	}
+	return s.serveMetaTool(ctx, req, h)
+}
 
+// CallMetaTool serves a meta-tool for an agent in pull mode, which reaches the
+// daemon through ComponentService.CallTool. The agent has no harness here, so
+// an invoke_tool of a native id is refused: the agent calls a native tool by
+// its own name. The run must belong to the tenant.
+func (s *HarnessCallbackService) CallMetaTool(
+	ctx context.Context, tenant, missionID, runID, name string, input []byte,
+) (*harnesspb.CallToolProtoResponse, error) {
+	if !s.metaToolsWired() {
+		// gibson:no-tool-executed — the catalog is not wired; nothing runs.
+		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INTERNAL, "meta-tools are not wired on this daemon"), nil
+	}
+	if runID == "" {
+		// gibson:no-tool-executed — rejected before any dispatch is attempted.
+		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "a meta-tool call needs the work item of a mission run"), nil
+	}
+	state, err := s.authzStore.Get(ctx, runID)
+	if err != nil || state.TenantID != tenant {
+		// gibson:no-tool-executed — no resolvable run state of this tenant.
+		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, "run authz state not found"), nil //nolint:nilerr // the denial is the response
+	}
+	return s.serveMetaTool(ctx, &harnesspb.CallToolProtoRequest{
+		Context:   &harnesspb.ContextInfo{MissionId: missionID, MissionRunId: runID},
+		Name:      name,
+		InputJson: input,
+	}, nil)
+}
+
+// serveMetaTool runs a meta-tool. The harness is nil for an agent in pull mode.
+func (s *HarnessCallbackService) serveMetaTool(ctx context.Context, req *harnesspb.CallToolProtoRequest, h AgentHarness) (*harnesspb.CallToolProtoResponse, error) {
 	runID := req.GetContext().GetMissionRunId()
 	if runID == "" {
 		runID = req.GetContext().GetAgentRunId()
@@ -206,6 +237,10 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		argsJSON = []byte("{}")
 	}
 
+	// callID is the id that the flight recorder gave to the invoked call. The
+	// reply carries it as tool_call_id, so a finding can cite the call.
+	var callID string
+
 	// The one connector call: mission policy, can_execute, the intent record,
 	// the dispatch, and the flight recorder and audit records of the result.
 	result, err := h.Call(ctx, metatool.Call{
@@ -219,18 +254,24 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		// Flight recorder completeness (ADR-0131): invoke_tool dispatches a
 		// real catalog tool through the same trust boundary as a native
 		// CallToolProto call, so each call is recorded, a failed one too.
-		Recorder: func(rctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) {
-			s.captureToolCall(rctx, contextInfo, rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
+		Recorder: func(rctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
+			callID = s.captureToolCall(rctx, contextInfo, rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
+			return callID
 		},
 		Observer: &harnessCallObserver{s: s},
 	})
 	switch {
 	case err == nil:
-		return marshalMetaResult(s, struct {
+		resp, merr := marshalMetaResult(s, struct {
 			Result any `json:"result"`
 		}{Result: result})
+		return withToolCallID(resp, callID), merr
 	case errors.Is(err, metatool.ErrNativeID):
 		// The tool call handler owns a native call and its one record.
+		if harness == nil {
+			// gibson:no-tool-executed — a pull mode agent has no harness; it calls a native tool by name.
+			return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "call a native tool by its own name"), nil
+		}
 		tid, perr := toolid.Parse(in.ID)
 		if perr != nil {
 			tid, perr = toolid.Unflatten(in.ID)
@@ -257,7 +298,7 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 	}
 	s.logger.WarnContext(ctx, "meta-tool invoke failed", "id", in.ID, "tenant", caller.Tenant, "err", err)
 	// gibson:no-tool-executed — the observer recorded the failed call.
-	return metaToolErr(code, err.Error()), nil
+	return withToolCallID(metaToolErr(code, err.Error()), callID), nil
 }
 
 // runActiveCheck returns the run check of a mission policy for the status of a
@@ -340,8 +381,8 @@ func (s *HarnessCallbackService) MissionPolicyForRun(ctx context.Context, tenant
 // RecordToolCall writes the flight recorder record of a tool call that has no
 // harness callback context, such as a connector call through
 // ComponentService.CallTool. The tenant is on ctx.
-func (s *HarnessCallbackService) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) {
-	s.captureToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID}, rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
+func (s *HarnessCallbackService) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
+	return s.captureToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID}, rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
 }
 
 // harnessCallObserver writes the intent and result audit records of an
@@ -408,11 +449,12 @@ func (s *HarnessCallbackService) invokeNativeTool(ctx context.Context, contextIn
 		return nil, err
 	}
 	if e := resp.GetError(); e != nil {
-		return metaToolErr(e.GetCode(), e.GetMessage()), nil
+		return withToolCallID(metaToolErr(e.GetCode(), e.GetMessage()), resp.GetToolCallId()), nil
 	}
-	return marshalMetaResult(s, struct {
+	out, merr := marshalMetaResult(s, struct {
 		Result json.RawMessage `json:"result"`
 	}{Result: json.RawMessage(resp.GetOutputJson())})
+	return withToolCallID(out, resp.GetToolCallId()), merr
 }
 
 // metaSearchCandidate is the LLM-facing shape of a catalog candidate. InputSchema
@@ -439,4 +481,13 @@ func metaToolErr(code commonpb.ErrorCode, msg string) *harnesspb.CallToolProtoRe
 	return &harnesspb.CallToolProtoResponse{
 		Error: &harnesspb.HarnessError{Code: code, Message: msg},
 	}
+}
+
+// withToolCallID sets tool_call_id on a reply and returns the reply. A nil reply
+// stays nil.
+func withToolCallID(resp *harnesspb.CallToolProtoResponse, id string) *harnesspb.CallToolProtoResponse {
+	if resp != nil {
+		resp.ToolCallId = id
+	}
+	return resp
 }

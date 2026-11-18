@@ -19,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zeroroot-ai/sdk/protoresolver"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -686,8 +687,13 @@ func (m *CallbackManager) MissionPolicyForRun(ctx context.Context, tenant, runID
 
 // RecordToolCall writes the flight recorder record of a tool call that has no
 // harness callback context.
-func (m *CallbackManager) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) {
-	m.server.Service().RecordToolCall(ctx, rec, resultJSON, errText)
+func (m *CallbackManager) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
+	return m.server.Service().RecordToolCall(ctx, rec, resultJSON, errText)
+}
+
+// CallMetaTool serves search_tools and invoke_tool for an agent in pull mode.
+func (m *CallbackManager) CallMetaTool(ctx context.Context, tenant, missionID, runID, name string, input []byte) (*harnesspb.CallToolProtoResponse, error) {
+	return m.server.Service().CallMetaTool(ctx, tenant, missionID, runID, name, input)
 }
 
 // SetMissionBlockedTools sets the source of the mission deny list on the

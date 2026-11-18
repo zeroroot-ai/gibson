@@ -48,7 +48,6 @@ on:
       - 'internal/platform/component/slot_pin.go'
       - 'tests/e2e/model_gate_test.go'
       - '.github/scripts/run-e2e-job.sh'
-      - 'tests/e2e/fixtures/providers/mock-llm/**'
       - '.github/workflows/exit-test-model-gate.yml'
   workflow_dispatch: {}
 

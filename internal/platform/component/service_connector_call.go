@@ -85,12 +85,18 @@ func (s *ComponentServiceServer) callConnectorTool(
 		return nil, status.Errorf(codes.InvalidArgument, "input_json must be a JSON object: %v", err)
 	}
 
+	// callID is the id that the flight recorder gives to the call. The reply
+	// carries it as tool_call_id.
+	var callID string
 	call := metatool.Call{
 		Caller:   caller,
 		ID:       tid.Canonical(),
 		Args:     args,
 		ArgsJSON: []byte(req.InputJson),
-		Recorder: s.toolCallRecorder,
+		Recorder: func(rctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
+			callID = s.toolCallRecorder(rctx, rec, resultJSON, errText)
+			return callID
+		},
 		Observer: connectorAuditObserver{s: s},
 	}
 	if err := s.bindCallRun(ctx, tenant, req, &call); err != nil {
@@ -104,7 +110,7 @@ func (s *ComponentServiceServer) callConnectorTool(
 		if mErr != nil {
 			return nil, status.Errorf(codes.Internal, "encode the connector result: %v", mErr)
 		}
-		return &componentpb.CallToolResponse{OutputJson: string(out)}, nil
+		return &componentpb.CallToolResponse{OutputJson: string(out), ToolCallId: callID}, nil
 	case errors.Is(err, metatool.ErrBlocked), errors.Is(err, metatool.ErrRunInactive), errors.Is(err, metatool.ErrUnauthorized):
 		return nil, status.Errorf(codes.PermissionDenied, "the call of %s is not allowed", tid.Canonical())
 	case errors.Is(err, metatool.ErrAuditUnavailable):
@@ -115,7 +121,7 @@ func (s *ComponentServiceServer) callConnectorTool(
 			slog.String("tenant", tenant), slog.String("tool", tid.Canonical()), slog.String("error", err.Error()))
 		return &componentpb.CallToolResponse{Error: &componentpb.ComponentError{
 			Code: "[CONNECTOR_CALL_FAILED]", Message: err.Error(),
-		}}, nil
+		}, ToolCallId: callID}, nil
 	}
 }
 

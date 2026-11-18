@@ -1946,6 +1946,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				// policy of its run, the same policy as invoke_tool.
 				compSvc.WithMissionPolicy(d.callback.MissionPolicyForRun)
 				compSvc.WithToolCallRecorder(d.callback.RecordToolCall)
+				compSvc.WithMetaTools(metaToolAdapter{svc: d.callback})
 			}
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 

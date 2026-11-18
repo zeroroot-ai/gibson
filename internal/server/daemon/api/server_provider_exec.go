@@ -14,7 +14,6 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
@@ -91,7 +90,7 @@ func (s *DaemonServer) WithAuditQuery(q auditQueryIface) *DaemonServer {
 
 // enforceBudgetCheck runs the budget Check and maps an exceedance error to a
 // gRPC ResourceExhausted status carrying a gibson.budget.v1.BudgetExceeded
-// detail so SDK callers can decode it via llm.IsBudgetExceeded. It returns nil
+// detail so SDK callers can decode it via the budget detail. It returns nil
 // when the call is allowed. The enforcer is required: the daemon wires it at
 // start ([[0003]]).
 func (s *DaemonServer) enforceBudgetCheck(ctx context.Context, estimatedTokens int64) error {
@@ -141,7 +140,7 @@ func budgetScopeToProto(s budget.Scope) budgetstatuspb.BudgetScope {
 // the lower value is preserved (the cap is a ceiling, not a floor).
 //
 // Spec: mission-author-experience M4 (gibson#133).
-func applyContextPerCallCap(ctx context.Context, req *llm.CompletionRequest) {
+func applyContextPerCallCap(ctx context.Context, req *execRequest) {
 	cap, ok := contextkeys.GetPerCallTokenCap(ctx)
 	if !ok || cap <= 0 {
 		return
@@ -165,7 +164,7 @@ const defaultMaxOutputTokens = 4096
 // applyDefaultMaxTokens sets a sane max_tokens floor when the caller and any
 // per-call cap left it at 0. Without this the provider produces an empty
 // "length"-terminated completion.
-func applyDefaultMaxTokens(req *llm.CompletionRequest) {
+func applyDefaultMaxTokens(req *execRequest) {
 	if req.MaxTokens <= 0 {
 		req.MaxTokens = defaultMaxOutputTokens
 	}
@@ -266,7 +265,7 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	}
 
 	// 4. The request, in Open Responses items.
-	cr := llm.CompletionRequest{Model: model, Messages: protoMessagesToLLM(req.GetMessages())}
+	cr := execRequest{Model: model, Messages: protoMessagesToLLM(req.GetMessages())}
 	if req.MaxTokens != nil {
 		cr.MaxTokens = int(req.GetMaxTokens())
 	}
@@ -317,20 +316,20 @@ func (s *DaemonServer) chatError(ctx context.Context, provider string, err error
 }
 
 // toGatewayRequest builds the Open Responses request of an ExecuteLLM call.
-func toGatewayRequest(req *tenantv1.ExecuteLLMRequest, cr llm.CompletionRequest) (modelclient.Request, error) {
+func toGatewayRequest(req *tenantv1.ExecuteLLMRequest, cr execRequest) (modelclient.Request, error) {
 	out := modelclient.Request{MaxOutputTokens: cr.MaxTokens}
 	for _, m := range cr.Messages {
 		switch m.Role {
-		case llm.RoleSystem:
+		case roleSystem:
 			out.Input = append(out.Input, modelclient.SystemMessage(m.Content))
-		case llm.RoleAssistant:
+		case roleAssistant:
 			if m.Content != "" {
 				out.Input = append(out.Input, modelclient.AssistantMessage(m.Content))
 			}
 			for _, tc := range m.ToolCalls {
 				out.Input = append(out.Input, modelclient.FunctionCall(tc.ID, tc.Name, tc.Arguments))
 			}
-		case llm.RoleTool:
+		case roleTool:
 			out.Input = append(out.Input, modelclient.FunctionCallOutput(m.ToolCallID, m.Content))
 		default:
 			out.Input = append(out.Input, modelclient.UserMessage(m.Content))
@@ -381,22 +380,22 @@ func gatewayRespToProto(resp *modelclient.Response) *tenantv1.ExecuteLLMResponse
 // ---------------------------------------------------------------------------
 
 // protoMessagesToLLM converts the repeated LLMMessageContent proto messages
-// into the llm.Message slice expected by the provider interfaces.
-func protoMessagesToLLM(protoMsgs []*tenantv1.LLMMessageContent) []llm.Message {
+// into the execMessage slice expected by the provider interfaces.
+func protoMessagesToLLM(protoMsgs []*tenantv1.LLMMessageContent) []execMessage {
 	if len(protoMsgs) == 0 {
 		return nil
 	}
-	out := make([]llm.Message, 0, len(protoMsgs))
+	out := make([]execMessage, 0, len(protoMsgs))
 	for _, pm := range protoMsgs {
-		msg := llm.Message{
-			Role:    llm.Role(pm.GetRole()),
+		msg := execMessage{
+			Role:    execRole(pm.GetRole()),
 			Content: pm.GetContent(),
 			Name:    pm.GetName(),
 		}
 
 		// Tool calls requested by the assistant.
 		for _, tc := range pm.GetToolCalls() {
-			msg.ToolCalls = append(msg.ToolCalls, llm.ToolCall{
+			msg.ToolCalls = append(msg.ToolCalls, execToolCall{
 				ID:        tc.GetId(),
 				Name:      tc.GetName(),
 				Arguments: tc.GetArguments(),
@@ -407,9 +406,9 @@ func protoMessagesToLLM(protoMsgs []*tenantv1.LLMMessageContent) []llm.Message {
 		for _, tr := range pm.GetToolResults() {
 			// Tool result messages are modelled as a separate message per result
 			// in the llm package.  If multiple results arrive in a single proto
-			// message we promote each into its own llm.Message.
-			resultMsg := llm.Message{
-				Role:       llm.RoleTool,
+			// message we promote each into its own execMessage.
+			resultMsg := execMessage{
+				Role:       roleTool,
 				Content:    tr.GetContent(),
 				ToolCallID: tr.GetToolCallId(),
 			}
@@ -426,15 +425,15 @@ func protoMessagesToLLM(protoMsgs []*tenantv1.LLMMessageContent) []llm.Message {
 	return out
 }
 
-// protoToolDefsToLLM converts LLMToolDef proto messages to llm.ToolDef.
+// protoToolDefsToLLM converts LLMToolDef proto messages to execToolDef.
 // The ParametersJson field is expected to be a JSON-encoded object schema;
 // if it is empty or invalid JSON, the tool is included with an empty schema
 // (object with no properties) so the request still proceeds.
-func protoToolDefsToLLM(protoTools []*tenantv1.LLMToolDef) []llm.ToolDef {
+func protoToolDefsToLLM(protoTools []*tenantv1.LLMToolDef) []execToolDef {
 	if len(protoTools) == 0 {
 		return nil
 	}
-	out := make([]llm.ToolDef, 0, len(protoTools))
+	out := make([]execToolDef, 0, len(protoTools))
 	for _, pt := range protoTools {
 		params := schema.JSON{Type: "object"}
 		if raw := pt.GetParametersJson(); raw != "" {
@@ -443,7 +442,7 @@ func protoToolDefsToLLM(protoTools []*tenantv1.LLMToolDef) []llm.ToolDef {
 				params = parsed
 			}
 		}
-		out = append(out, llm.ToolDef{
+		out = append(out, execToolDef{
 			Name:        pt.GetName(),
 			Description: pt.GetDescription(),
 			Parameters:  params,

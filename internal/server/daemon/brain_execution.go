@@ -24,17 +24,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"log/slog"
 	"strings"
 	"sync"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 
 	"github.com/google/uuid"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -385,7 +385,7 @@ func (b *brainExecutor) Decide(ctx context.Context, mc brain.MissionContext) (br
 		if errors.As(err, &refused) && refused.Refused() {
 			// ext-authz refused the call: the model is not allowed, or the mission
 			// is not running. A pin that is refused cannot be served.
-			return b.deciderFailure(bind, types.WrapError(llm.ErrNoMatchingProvider,
+			return b.deciderFailure(bind, types.WrapError(gibsonharness.ErrNoMatchingProvider,
 				fmt.Sprintf("model_access_denied: the gateway refused the model %q on provider %q", picked.Model, picked.Provider), err))
 		}
 		return brain.DeciderOutput{}, fmt.Errorf("brain decide: llm: %w", err)
@@ -414,14 +414,27 @@ func (b *brainExecutor) deciderFailure(bind *missionBinding, err error) (brain.D
 	return brain.DeciderOutput{}, fmt.Errorf("brain decide: llm: %w", err)
 }
 
+// deciderMessage is one message of the prompt of the Decider.
+type deciderMessage struct {
+	Role    string
+	Content string
+}
+
+// The roles of a Decider prompt message.
+const (
+	deciderRoleSystem    = "system"
+	deciderRoleAssistant = "assistant"
+	deciderRoleUser      = "user"
+)
+
 // deciderInput maps the prompt messages to Open Responses items.
-func deciderInput(messages []llm.Message) []modelclient.Item {
+func deciderInput(messages []deciderMessage) []modelclient.Item {
 	out := make([]modelclient.Item, 0, len(messages))
 	for _, m := range messages {
 		switch m.Role {
-		case llm.RoleSystem:
+		case deciderRoleSystem:
 			out = append(out, modelclient.SystemMessage(m.Content))
-		case llm.RoleAssistant:
+		case deciderRoleAssistant:
 			out = append(out, modelclient.AssistantMessage(m.Content))
 		default:
 			out = append(out, modelclient.UserMessage(m.Content))
@@ -442,7 +455,7 @@ func pinnedDeciderUnservable(pin brain.DeciderSlot, err error) bool {
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	return errors.Is(err, types.NewError(llm.ErrNoMatchingProvider, ""))
+	return errors.Is(err, types.NewError(gibsonharness.ErrNoMatchingProvider, ""))
 }
 
 // catalog lists the mission tenant's enrolled components as brain capabilities.
@@ -595,7 +608,7 @@ func parseDecision(raw any) brain.DeciderOutput {
 // buildDeciderPrompt renders the own-mission slice + catalog into the Decider's
 // messages. The Decider reasons over structured World state, not a transcript
 // (CONTEXT.md / ADR-0101).
-func buildDeciderPrompt(mc brain.MissionContext) []llm.Message {
+func buildDeciderPrompt(mc brain.MissionContext) []deciderMessage {
 	system := "You are the orchestration Decider for an autonomous offensive-security mission. " +
 		"Reason over the current world state and choose the single next action that best advances the goal. " +
 		"You re-invoke existing capabilities with new inputs; you never author the knowledge graph. " +
@@ -643,9 +656,9 @@ func buildDeciderPrompt(mc brain.MissionContext) []llm.Message {
 		}
 	}
 
-	return []llm.Message{
-		{Role: llm.RoleSystem, Content: system},
-		{Role: llm.RoleUser, Content: b.String()},
+	return []deciderMessage{
+		{Role: deciderRoleSystem, Content: system},
+		{Role: deciderRoleUser, Content: b.String()},
 	}
 }
 

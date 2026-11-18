@@ -152,6 +152,9 @@ type ComponentServiceServer struct {
 	// a connector call.
 	toolCallRecorder metatool.FlightRecorder
 
+	// metaTools serves search_tools and invoke_tool for an agent in pull mode.
+	metaTools MetaToolCaller
+
 	// slotModels resolves a slot to a model for ResolveModel. modelGateway and
 	// agentGateway are the public gateways that the Resolve RPCs return.
 	slotModels   SlotModelResolver
@@ -953,6 +956,10 @@ func (s *ComponentServiceServer) memberHeartbeat(ctx context.Context, tenant str
 }
 
 // ---------------------------------------------------------------------------
+// workContextGrantKey is the key of the task grant in the context of a work
+// item. The dispatch sets it. PollWork moves it to PollWorkResponse.task_grant.
+const workContextGrantKey = "capability_grant"
+
 // PollWork
 // ---------------------------------------------------------------------------
 
@@ -1101,12 +1108,18 @@ func (s *ComponentServiceServer) PollWork(
 		}
 	}
 
+	// The task grant of the work item has one carrier: the typed field. The
+	// work context holds no copy of this secret.
+	taskGrant := item.Context[workContextGrantKey]
+	delete(item.Context, workContextGrantKey)
+
 	return &componentpb.PollWorkResponse{
 		WorkId:    item.WorkID,
 		WorkType:  item.WorkType,
 		Payload:   item.Payload,
 		Context:   item.Context,
 		TimeoutMs: item.TimeoutMs,
+		TaskGrant: taskGrant,
 	}, nil
 }
 
@@ -1358,6 +1371,12 @@ func (s *ComponentServiceServer) CallTool(
 		return nil, status.Error(codes.InvalidArgument, "input_json is required")
 	}
 
+	// The meta-tools are served by the daemon and not by a work queue. The SDK
+	// loads the pinned Agent Skills of a run through invoke_tool.
+	if req.ToolName == metatool.SearchToolsName || req.ToolName == metatool.InvokeToolName {
+		return s.callMetaTool(ctx, tenant, req)
+	}
+
 	// A connector tool id goes to the MCP client of the daemon, not to a work
 	// queue (ADR-0065).
 	if tid, ok := connectorToolID(req.ToolName); ok {
@@ -1430,12 +1449,17 @@ func (s *ComponentServiceServer) CallTool(
 	}
 
 	resp := &componentpb.CallToolResponse{OutputJson: string(result.Result)}
+	errText := ""
 	if result.Error != nil && result.Error.Code != "" {
 		resp.Error = &componentpb.ComponentError{
 			Code:    fmt.Sprintf("[%s]", result.Error.Code),
 			Message: result.Error.Message,
 		}
+		errText = result.Error.Message
 	}
+	// The record of the call has an id. The reply carries it, also when the call
+	// failed, so the agent can cite the call in a finding.
+	resp.ToolCallId = s.recordNativeToolCall(ctx, tenant, req, string(result.Result), errText)
 
 	s.logger.InfoContext(ctx, "call tool: result received",
 		slog.String("tenant", tenant),

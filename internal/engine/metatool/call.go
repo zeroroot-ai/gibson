@@ -94,8 +94,10 @@ type CallRecord struct {
 
 // FlightRecorder receives the record of each call, ADR-0131: a call is recorded
 // whatever its outcome, so the agent never gets the result of a tool without an
-// independent record of it.
-type FlightRecorder func(ctx context.Context, rec CallRecord, resultJSON []byte, errText string)
+// independent record of it. It returns the id that the record holds, or an empty
+// string when nothing was recorded. The reply of the call carries the id, so a
+// finding can cite the call.
+type FlightRecorder func(ctx context.Context, rec CallRecord, resultJSON []byte, errText string) string
 
 // CallObserver writes the audit records of a call. Intent runs before the call
 // and refuses it when it fails. Result runs after the call, whatever the
@@ -166,7 +168,7 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 		if err != nil {
 			errText = err.Error()
 		}
-		c.Recorder(ctx, rec, resultJSON, errText)
+		_ = c.Recorder(ctx, rec, resultJSON, errText)
 		c.Observer.Result(ctx, rec, resultJSON, err)
 	}
 	if derr != nil {
