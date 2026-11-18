@@ -3508,15 +3508,15 @@ func protoTypedValueToAny(tv *commonpb.TypedValue) any {
 func missionStatusToProto(status MissionStatus) harnesspb.MissionStatus {
 	switch status {
 	case MissionStatusPending:
-		return harnesspb.MissionStatus_MISSION_STATUS_PENDING
+		return harnesspb.MissionStatus_MISSION_STATUS_SUBMITTED
 	case MissionStatusRunning:
-		return harnesspb.MissionStatus_MISSION_STATUS_RUNNING
+		return harnesspb.MissionStatus_MISSION_STATUS_WORKING
 	case MissionStatusCompleted:
 		return harnesspb.MissionStatus_MISSION_STATUS_COMPLETED
 	case MissionStatusFailed:
 		return harnesspb.MissionStatus_MISSION_STATUS_FAILED
 	case MissionStatusCancelled:
-		return harnesspb.MissionStatus_MISSION_STATUS_CANCELLED
+		return harnesspb.MissionStatus_MISSION_STATUS_CANCELED
 	default:
 		return harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED
 	}

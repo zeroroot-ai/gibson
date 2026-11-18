@@ -2269,7 +2269,7 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 	protoMission := &daemonpb.Mission{
 		Id:                  result.MissionID,
 		Name:                result.Name,
-		Status:              daemonpb.MissionStatus_MISSION_STATUS_PENDING,
+		Status:              daemonpb.MissionStatus_MISSION_STATUS_SUBMITTED,
 		TargetId:            result.TargetID,
 		MissionDefinitionId: result.MissionDefinitionID,
 		CreatedBy:           principal.ToProto(result.CreatedBy),
