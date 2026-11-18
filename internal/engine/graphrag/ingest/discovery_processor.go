@@ -166,6 +166,5 @@ func countProtoNodes(discovery *graphragpb.DiscoveryResult) int {
 		len(discovery.Technologies) +
 		len(discovery.Certificates) +
 		len(discovery.Findings) +
-		len(discovery.Evidence) +
 		len(discovery.CustomNodes)
 }

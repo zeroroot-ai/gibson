@@ -60,10 +60,6 @@ func discoveryEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult) (events
 	skipped += entitySkipped
 	events = append(events, entityEvents...)
 
-	// Evidence has no World vocabulary yet. It is the Observations case
-	// (ADR-0112) that gibson#1258 builds.
-	skipped += len(d.Evidence)
-
 	return events, skipped
 }
 

@@ -200,12 +200,11 @@ func TestProcessSkipsRatherThanInventsWhatTheWorldCannotHold(t *testing.T) {
 		// Out-of-taxonomy shapes: the ADR-0112 Observations case, not built yet.
 		CustomNodes:           []*graphragpb.CustomNode{{NodeType: "Wharrgarbl"}},
 		ExplicitRelationships: []*graphragpb.ExplicitRelationship{{FromType: "a", ToType: "b", RelationshipType: "X"}},
-		Evidence:              []*graphragpb.Evidence{{Id: strp("ev1"), FindingId: "f-none", Type: "log"}},
 	})
 	require.NoError(t, err)
 	assert.Zero(t, res.EventsSubmitted)
 	assert.Empty(t, rec.events)
-	assert.Equal(t, 6, res.Skipped, "everything unmappable is counted, never silently dropped")
+	assert.Equal(t, 5, res.Skipped, "everything unmappable is counted, never silently dropped")
 }
 
 func TestFindingIDIsStableAcrossRedeliveryWhenTheAgentSuppliesNone(t *testing.T) {
