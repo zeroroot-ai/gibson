@@ -79,6 +79,10 @@ type worldSnapshotData struct {
 	// vanish across a snapshot and trim cycle.
 	ProofReviews []ProofReviewSnapshot `json:"proof_reviews"`
 
+	// AgentSkillLoads is each load of an Agent Skill (skill_load.go). Without it
+	// the loads would vanish across a snapshot and trim cycle.
+	AgentSkillLoads []AgentSkillLoad `json:"agent_skill_loads,omitempty"`
+
 	// MissionRewinds is the parent of each mission that a rewind started
 	// (ADR-0170). Without it the link from a rewound mission to its earlier
 	// run would vanish across a snapshot and trim cycle.
@@ -127,6 +131,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		MissionLineage:       w.MissionLineageSnapshot(),
 		ProofReviews:         w.ProofReviewSnapshot(),
 		MissionRewinds:       w.MissionRewindSnapshot(),
+		AgentSkillLoads:      w.AgentSkillLoadSnapshot(),
 
 		NextHostID:        w.nextHostID,
 		NextDomainID:      w.nextDomainID,
@@ -439,6 +444,11 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// Replay the parent of each rewound mission (ADR-0170).
 	for _, r := range data.MissionRewinds {
 		Reduce(w, MissionRewound(r))
+	}
+
+	// Replay the loads of Agent Skills, in Timeline order.
+	for _, l := range data.AgentSkillLoads {
+		Reduce(w, AgentSkillLoaded(l))
 	}
 
 	// Replay the lineage of each originated mission (gibson#734). Identity is

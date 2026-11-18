@@ -378,3 +378,44 @@ func TestIngestSinks_CarryTheMissionRun(t *testing.T) {
 		t.Errorf("the late finding has scan provenance %q %q, want none", got[0].ScanScope, got[0].LastScan)
 	}
 }
+
+// TestIngestSkillLoad_FeedsTheTimeline proves that one successful load gives one
+// event on the Timeline of the tenant, with the agent, the mission and the
+// digest, and that another tenant sees nothing.
+func TestIngestSkillLoad_FeedsTheTimeline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	sink := ingestSkillLoad(reg)
+
+	err := sink(ctx, "acme", harness.SkillLoadRecord{
+		MissionID: "m1", RunID: "r1", Agent: "agent_principal:a1", Name: "web-recon",
+		Digest: "sha256:aa", RecordedAtUnixNano: 5,
+	})
+	if err != nil {
+		t.Fatalf("sink: %v", err)
+	}
+	// An empty digest is not a load, and a missing Timeline refuses the load.
+	if err := sink(ctx, "acme", harness.SkillLoadRecord{MissionID: "m1", Name: "web-recon"}); err == nil {
+		t.Error("a load with no digest must be refused")
+	}
+	if err := ingestSkillLoad(nil)(ctx, "acme", harness.SkillLoadRecord{Digest: "sha256:aa"}); err == nil {
+		t.Error("a load with no Timeline must be refused")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		loads := reg.For("acme").AgentSkillLoads()
+		if len(loads) == 1 {
+			if loads[0].Digest != "sha256:aa" || loads[0].MissionID != "m1" || loads[0].Agent != "agent_principal:a1" {
+				t.Fatalf("load = %+v", loads[0])
+			}
+			if len(reg.For("other").AgentSkillLoads()) != 0 {
+				t.Fatal("cross-tenant load leak")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("load not recorded: %+v", reg.For("acme").AgentSkillLoads())
+}

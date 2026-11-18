@@ -1639,6 +1639,62 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - USER
+  "/gibson.tenant.v1.AgentSkillService/DeleteAgentSkill":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.AgentSkillService/EnableSharedAgentSkill":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.AgentSkillService/GetAgentSkill":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.AgentSkillService/GrantAgentSkill":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.AgentSkillService/ListAgentSkills":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.AgentSkillService/ListSharedAgentSkills":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.AgentSkillService/PublishAgentSkill":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.AgentSkillService/RevokeAgentSkill":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.BudgetService/GetBudget":
     relation: "member"
     object_type: "tenant"

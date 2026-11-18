@@ -37,10 +37,11 @@ func metaToolDescriptors() []ToolDescriptor {
 			Description: "Search the connector tool catalog for tools relevant to a task and " +
 				"return a small, authorized, ranked set of candidates. Use this to discover " +
 				"which tools exist before calling invoke_tool. Returns each candidate's " +
-				"canonical id, description, and input schema.",
+				"canonical id, description, and input schema. A result can also be an Agent Skill, " +
+				"a method that you load with invoke_tool. Its id has the form skill:<name>.",
 			InputSchema: schema.Object(map[string]schema.JSON{
 				"query":     schema.StringWithDesc("Free-text description of the capability you need (e.g. \"open a gitlab issue\")."),
-				"sources":   schema.Array(schema.StringWithDesc("Restrict to a source: \"mcp\" or \"native\".")),
+				"sources":   schema.Array(schema.StringWithDesc("Restrict to a source: \"mcp\", \"native\" or \"skill\".")),
 				"connector": schema.StringWithDesc("Restrict to a single connector/plugin name. Optional."),
 				"limit":     schema.Int(),
 			}),
@@ -48,8 +49,10 @@ func metaToolDescriptors() []ToolDescriptor {
 		{
 			Name: metatool.InvokeToolName,
 			Description: "Invoke a catalog tool by its canonical id (from search_tools), passing the " +
-				"tool's arguments. The id has the form mcp:<connector>:<tool> or native:<tool>. Authorization is " +
-				"enforced; only ids returned by search_tools are invocable.",
+				"tool's arguments. The id has the form mcp:<connector>:<tool>, native:<tool> or skill:<name>. " +
+				"Authorization is " +
+				"enforced; only ids returned by search_tools are invocable. A skill:<name> id returns the " +
+				"body of an Agent Skill. Set args.file to a path from the file list to read one reference file.",
 			InputSchema: schema.Object(map[string]schema.JSON{
 				"id":   schema.StringWithDesc("Canonical tool id, e.g. mcp:gitlab:create_issue."),
 				"args": schema.Any(),
@@ -104,11 +107,14 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 
 	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
 	handler := metatool.NewHandler(
-		catalog.NewEngine(component.NewCatalogToolLister(s.componentRegistry, s.connectors), authorizer),
+		catalog.NewEngine(s.toolLister(component.NewCatalogToolLister(s.componentRegistry, s.connectors)), authorizer),
 		authorizer,
 		s.connectors,
 	)
-	caller := catalog.Caller{Subject: "user:" + state.UserID, Tenant: state.TenantID}
+	if store := s.agentSkillStore(); store != nil {
+		handler.WithSkills(store, s.skillLoadHook(req.GetContext()))
+	}
+	caller := catalogCaller(ctx, state)
 
 	switch req.GetName() {
 	case metatool.SearchToolsName:
@@ -116,7 +122,7 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 			// gibson:no-tool-executed — denied before the search.
 			return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "mission run is not active"), nil //nolint:nilerr // the denial is the response, not a transport error
 		}
-		return s.metaSearch(ctx, handler, caller, req.GetInputJson())
+		return s.metaSearch(ctx, handler, caller, hideBlockedSkills(policy.Blocked), req.GetInputJson())
 	case metatool.InvokeToolName:
 		return s.metaInvoke(ctx, req.GetContext(), handler, h, caller, policy, req.GetInputJson())
 	default:
@@ -125,7 +131,7 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 	}
 }
 
-func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Handler, caller catalog.Caller, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
+func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Handler, caller catalog.Caller, hide func(toolid.ID) bool, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
 	var in struct {
 		Query     string   `json:"query"`
 		Sources   []string `json:"sources"`
@@ -144,6 +150,7 @@ func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Han
 		Sources:   toToolSources(in.Sources),
 		Connector: in.Connector,
 		Limit:     in.Limit,
+		Hide:      hide,
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "meta-tool search failed", "tenant", caller.Tenant, "err", err)

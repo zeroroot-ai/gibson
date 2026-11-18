@@ -538,6 +538,38 @@ type job
     # can_read — read the job and follow its events.
     define can_read: opened_by or scorer or can_read from parent
 
+# agent_skill — an Agent Skill, a folder in the Agent Skills format that a
+# mission agent can load (epic gibson#1364, decision 10).
+#
+# An Agent Skill is content. It has no identity and no grant of its own, so it
+# is not a component. Its object is tenant-qualified: "agent_skill:<tenant>/<name>"
+# (authz.AgentSkillObject). A Shared Agent Skill that the operator offers also
+# has one object for each entitled tenant.
+#
+# NO DEFAULT GRANT. The type admits no tenant#member and no user on a load
+# relation. A tenant member does not load an Agent Skill because the tenant owns
+# it. A tenant admin grants it to one agent or to one mission:
+#
+#   tenant:acme                    | owner           | agent_skill:acme/web-recon
+#   agent_principal:agent-abc-123  | granted_agent   | agent_skill:acme/web-recon
+#   mission:m-42                   | granted_mission | agent_skill:acme/web-recon
+#
+# can_load is true for an agent with a granted_agent tuple. A check on a mission
+# subject is true for a mission with a granted_mission tuple. can_manage is the
+# right to publish a version and to write or delete a grant. It needs a tenant
+# admin.
+type agent_skill
+  relations
+    define owner: [tenant]
+    # platform_enabled — the operator offers this Shared Agent Skill. The object
+    # is agent_skill:_shared/<name> (authz.SharedAgentSkillObject). It gives a
+    # tenant admin the right to enable the copy. It grants no load.
+    define platform_enabled: [system_tenant]
+    define granted_agent: [agent_principal]
+    define granted_mission: [mission]
+    define can_load: granted_agent or granted_mission
+    define can_manage: admin from owner
+
 # ----------------------------------------------------------------------
 # Conditions — OpenFGA CEL predicates for contextual tuple evaluation.
 # Added for instant-session-revocation (gibson#627).

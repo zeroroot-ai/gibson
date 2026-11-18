@@ -613,6 +613,14 @@ func (e *Engine) AgentToolCalls() []AgentToolCallSnapshot {
 	return e.World.AgentToolCallSnapshot()
 }
 
+// AgentSkillLoads returns each load of an Agent Skill by a mission agent, in
+// Timeline order (epic gibson#1364).
+func (e *Engine) AgentSkillLoads() []AgentSkillLoad {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.AgentSkillLoads()
+}
+
 // FlightRecorderPolicy returns the tenant's current retention/redaction policy
 // (ADR-0120, gibson#271).
 func (e *Engine) FlightRecorderPolicy() FlightRecorderPolicy {

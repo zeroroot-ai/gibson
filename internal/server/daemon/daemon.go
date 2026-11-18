@@ -38,6 +38,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/reconciler"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
@@ -457,6 +458,12 @@ type daemonImpl struct {
 	// Shutdown via pool.Close() in stopServices().
 	pool datapool.Pool
 
+	// agentSkills is the Agent Skill store. registerAgentSkill sets it.
+	agentSkills agentskillstore.Store
+	// sharedAgentSkills is the operator source of Agent Skills. registerAgentSkill
+	// sets it.
+	sharedAgentSkills *SharedAgentSkills
+
 	// graphBus is the in-process per-tenant graph-update bus.
 	// Created during buildGRPCServer and shared between graphServer (for
 	// WatchGraphUpdates SSE) and CreateMission (for NODE_ADDED publish).
@@ -644,6 +651,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithJobDriver(&lazyJobDriver{daemon: d}),
 		harness.WithConnectors(d.connectorMCPClient()),
 		harness.WithMissionBlockedTools(d.storedBlockedTools),
+		harness.WithAgentSkillStore(d.agentSkillStore),
 		harness.WithMemberLookup(&lazyMemberLookup{daemon: d}),
 		harness.WithTurnGrantMinter(&lazyTurnGrantMinter{daemon: d}),
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),
@@ -1518,6 +1526,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// tool.call.* pub/sub metadata with no argument/result text, so they
 		// never became part of the Timeline.
 		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
+		d.callback.SetSkillLoadSink(ingestSkillLoad(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")
 
 		// Wire PlaceBet's belief substrate (ADR-0122, ADR-0129,
@@ -1966,6 +1975,15 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// The refusal is a state, not a log line: /readyz names the credential
 		// an operator has to mount (gibson#1744).
 		d.registerComponentCatalogReadiness(ctx, catalogGate)
+
+		// Seed the platform gate of the Shared Agent Skills (epic gibson#1364):
+		// each offered name gets its platform_enabled tuple. Startup converge,
+		// best-effort, as for the connector gate above.
+		if d.sharedAgentSkills != nil {
+			if err := seedSharedAgentSkillGate(ctx, d.authorizer, d.sharedAgentSkills, d.logger.Slog()); err != nil {
+				d.logger.Warn(ctx, "shared Agent Skill gate seed failed (non-fatal)", "error", err)
+			}
+		}
 
 		// Seed the Domain Pack platform catalog gate (ADR-0133, gibson#381):
 		// every catalog pack gets its platform_enabled tuple, so

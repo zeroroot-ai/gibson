@@ -105,6 +105,11 @@ type Config struct {
 	TenantPostgres    TenantPostgresConfig    `mapstructure:"tenant_postgres" yaml:"tenant_postgres,omitempty"`
 	Sandbox           SandboxConfig           `mapstructure:"sandbox" yaml:"sandbox,omitempty"`
 	Belief            BeliefConfig            `mapstructure:"belief" yaml:"belief,omitempty"`
+	// SharedAgentSkills is the list of Shared Agent Skills that the operator
+	// offers to each tenant (epic gibson#1364). Each entry names a reference
+	// with a digest. The daemon pulls it at start with the credential of the
+	// daemon process.
+	SharedAgentSkills []SharedAgentSkillConfig `mapstructure:"shared_agent_skills" yaml:"shared_agent_skills,omitempty"`
 	// strictTenant controls whether TenantFromContext and related helpers use
 	// the fail-closed strict behaviour introduced in Phase 1. Read via
 	// StrictTenant(). Not sourced from YAML — env-var only.
@@ -678,4 +683,13 @@ type FgaTLSConfig struct {
 	// CAFile is the PEM CA bundle that signs the FGA server certificate.
 	// Required when Enabled is true: the daemon does not start without it.
 	CAFile string `mapstructure:"ca_file" yaml:"ca_file"`
+}
+
+// SharedAgentSkillConfig is one Shared Agent Skill of the operator source.
+type SharedAgentSkillConfig struct {
+	// Name is the name of the Agent Skill. It must equal the name in SKILL.md.
+	Name string `mapstructure:"name" yaml:"name"`
+	// Reference is a digest reference, <registry>/<repository>@sha256:<hex>. A tag
+	// is refused.
+	Reference string `mapstructure:"reference" yaml:"reference"`
 }

@@ -47,17 +47,31 @@ func (s *HarnessCallbackService) SearchTools(ctx context.Context, req *harnesspb
 		return searchToolsErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "mission run is not active"), nil
 	}
 
+	// A mission that denies an Agent Skill does not find it. The deny list is
+	// read only when Agent Skills are wired, because an unread list is not an
+	// empty one.
+	var hide func(toolid.ID) bool
+	if s.agentSkillStore() != nil {
+		policy, perr := s.policyFromState(ctx, state)
+		if perr != nil {
+			s.logger.ErrorContext(ctx, "SearchTools: the mission policy could not be loaded", "run_id", runID, "err", perr)
+			return searchToolsErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the mission policy could not be loaded"), nil
+		}
+		hide = hideBlockedSkills(policy.Blocked)
+	}
+
 	engine := catalog.NewEngine(
-		component.NewCatalogToolLister(s.componentRegistry, s.connectors),
+		s.toolLister(component.NewCatalogToolLister(s.componentRegistry, s.connectors)),
 		catalog.NewFGAAuthorizer(s.componentAuthorizer),
 	)
-	caller := catalog.Caller{Subject: "user:" + state.UserID, Tenant: state.TenantID}
+	caller := catalogCaller(ctx, state)
 
 	candidates, err := engine.Search(ctx, caller, catalog.Query{
 		Text:      req.GetQuery(),
 		Sources:   toToolSources(req.GetSources()),
 		Connector: req.GetConnector(),
 		Limit:     int(req.GetLimit()),
+		Hide:      hide,
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "SearchTools: search failed", "tenant", state.TenantID, "err", err)
@@ -78,7 +92,7 @@ func (s *HarnessCallbackService) SearchTools(ctx context.Context, req *harnesspb
 	return &harnesspb.SearchToolsResponse{Candidates: out}, nil
 }
 
-// toToolSources maps wire source strings ("mcp", "native") to toolid.Source,
+// toToolSources maps wire source strings ("mcp", "native", "skill") to toolid.Source,
 // dropping unrecognized values (the engine treats an empty filter as "all").
 func toToolSources(ss []string) []toolid.Source {
 	if len(ss) == 0 {
@@ -91,6 +105,8 @@ func toToolSources(ss []string) []toolid.Source {
 			out = append(out, toolid.SourceMCP)
 		case toolid.SourceNative:
 			out = append(out, toolid.SourceNative)
+		case toolid.SourceSkill:
+			out = append(out, toolid.SourceSkill)
 		}
 	}
 	return out

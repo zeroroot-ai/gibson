@@ -58,6 +58,18 @@ type SigstoreVerifier struct {
 	sctThreshold int
 }
 
+// NewKeychain returns the registry keychain of the daemon process. It reads
+// the docker config in credentialDir and falls back to the ambient keychain.
+// An empty credentialDir leaves the ambient keychain alone. The verifier and
+// the pull of an Agent Skill artifact use this one keychain. No per-tenant
+// credential exists in it.
+func NewKeychain(credentialDir string) authn.Keychain {
+	if path := DockerConfigPath(credentialDir); path != "" {
+		return authn.NewMultiKeychain(dockerConfigKeychain{path: path}, authn.DefaultKeychain)
+	}
+	return authn.DefaultKeychain
+}
+
 // NewSigstoreVerifier builds a verifier for the release pipeline's identity.
 //
 // credentialDir is the directory holding the registry credential as a docker
@@ -73,14 +85,10 @@ type SigstoreVerifier struct {
 // refuses every first-party image and the platform offers no component. That
 // is the failure this argument exists to end.
 func NewSigstoreVerifier(credentialDir string) *SigstoreVerifier {
-	keychain := authn.Keychain(authn.DefaultKeychain)
-	if path := DockerConfigPath(credentialDir); path != "" {
-		keychain = authn.NewMultiKeychain(dockerConfigKeychain{path: path}, authn.DefaultKeychain)
-	}
 	return &SigstoreVerifier{
 		issuer:          DefaultIssuer,
 		identityPattern: defaultIdentityRE,
-		keychain:        keychain,
+		keychain:        NewKeychain(credentialDir),
 		sctThreshold:    1,
 	}
 }

@@ -74,15 +74,41 @@ func (k dockerConfigKeychain) Resolve(target authn.Resource) (authn.Authenticato
 	case err != nil:
 		return nil, fmt.Errorf("read the registry credential at %s: %w", k.path, err)
 	}
+	return resolveFromDockerConfig(raw, target, k.path)
+}
+
+// resolveFromDockerConfig finds the credential for target in the bytes of a
+// docker config. source names where the bytes came from, for an error text.
+func resolveFromDockerConfig(raw []byte, target authn.Resource, source string) (authn.Authenticator, error) {
 	var cfg dockerConfig
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("parse the registry credential at %s: %w", k.path, err)
+		return nil, fmt.Errorf("parse the registry credential at %s: %w", source, err)
 	}
 	entry, ok := lookupAuth(cfg.Auths, target)
 	if !ok {
 		return authn.Anonymous, nil
 	}
-	return authenticatorFor(entry, k.path)
+	return authenticatorFor(entry, source)
+}
+
+// bytesKeychain resolves a registry credential from the bytes of a docker config.
+type bytesKeychain struct {
+	raw    []byte
+	source string
+}
+
+// Resolve implements authn.Keychain. A config with no entry for the registry
+// resolves to anonymous, so the secret of one registry is never sent to another.
+func (k bytesKeychain) Resolve(target authn.Resource) (authn.Authenticator, error) {
+	return resolveFromDockerConfig(k.raw, target, k.source)
+}
+
+// NewDockerConfigKeychain returns a keychain over the bytes of a docker config,
+// for example the value of a tenant secret. source names the secret in an error
+// text. It never reads the daemon process credential and never writes the bytes
+// anywhere.
+func NewDockerConfigKeychain(raw []byte, source string) authn.Keychain {
+	return bytesKeychain{raw: raw, source: source}
 }
 
 // lookupAuth finds the entry for a target. A docker config keys its entries by

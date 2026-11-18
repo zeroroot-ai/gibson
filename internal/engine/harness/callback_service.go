@@ -244,6 +244,13 @@ type HarnessCallbackService struct {
 	// definition. Nil refuses a connector call.
 	missionBlockedTools MissionBlockedToolsSource
 
+	// skillLoadSink receives each successful load of an Agent Skill. nil means
+	// the load is not recorded on the Timeline.
+	skillLoadSink SkillLoadSink
+
+	// agentSkills returns the Agent Skill store. It is nil when no store is wired.
+	agentSkills AgentSkillStoreSource
+
 	// componentAuthorizer is the FGA-backed authorizer for component authz decisions.
 	// One-code-path slice deploy#195: required for any callback service that
 	// will actually serve Authorize calls. The daemon wires this in setup
@@ -645,6 +652,10 @@ func NewHarnessCallbackService(logger *slog.Logger, opts ...CallbackServiceOptio
 		turnGrants:    noBankSurface{},
 		memberEvents:  noBankSurface{},
 		memberControl: NewMemberControl(),
+		// The Agent Skill seams are never nil. A daemon that serves no Agent Skill
+		// offers none, and a load with no sink fails.
+		agentSkills:   noAgentSkillStore,
+		skillLoadSink: noSkillLoadSink,
 	}
 
 	for _, opt := range opts {
@@ -688,6 +699,8 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 		turnGrants:       noBankSurface{},
 		memberEvents:     noBankSurface{},
 		memberControl:    NewMemberControl(),
+		agentSkills:      noAgentSkillStore,
+		skillLoadSink:    noSkillLoadSink,
 	}
 
 	for _, opt := range opts {

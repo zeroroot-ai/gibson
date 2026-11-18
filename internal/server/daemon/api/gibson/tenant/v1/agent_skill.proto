@@ -1,0 +1,239 @@
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
+
+// AgentSkillService manages the Agent Skills of one tenant (epic gibson#1364).
+//
+// An Agent Skill is a folder in the Agent Skills format. The publisher packs the
+// folder as an OCI image and pushes it to a registry that the tenant owns.
+// PublishAgentSkill takes a reference with a digest. The daemon pulls the image
+// by that digest, validates the folder, and stores the content in the database
+// of the tenant. A load reads that database and never the registry.
+//
+// A new publish of a name adds a version and makes it the current version. An
+// old digest stays readable. No default grant exists. A tenant admin grants an
+// Agent Skill to one agent or to one mission with GrantAgentSkill.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "buf/validate/validate.proto";
+import "gibson/auth/v1/options.proto";
+import "google/protobuf/timestamp.proto";
+
+service AgentSkillService {
+  // PublishAgentSkill pulls the image that the reference names, validates the
+  // folder in it, stores the content, and makes the version current.
+  rpc PublishAgentSkill(PublishAgentSkillRequest) returns (PublishAgentSkillResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListAgentSkills returns the current version of each Agent Skill of the
+  // tenant. With all_versions it returns each version.
+  rpc ListAgentSkills(ListAgentSkillsRequest) returns (ListAgentSkillsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListSharedAgentSkills returns the Shared Agent Skills that the operator
+  // offers. A tenant has none of them until a tenant admin enables one.
+  rpc ListSharedAgentSkills(ListSharedAgentSkillsRequest) returns (ListSharedAgentSkillsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // EnableSharedAgentSkill copies one Shared Agent Skill into the tenant and
+  // makes it the current version. It grants nothing. A tenant admin still
+  // grants it to an agent or a mission with GrantAgentSkill before a load.
+  rpc EnableSharedAgentSkill(EnableSharedAgentSkillRequest) returns (EnableSharedAgentSkillResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetAgentSkill returns one version with its body and its file list. An empty
+  // digest means the current version.
+  rpc GetAgentSkill(GetAgentSkillRequest) returns (GetAgentSkillResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // DeleteAgentSkill removes each version of a name and its grants.
+  rpc DeleteAgentSkill(DeleteAgentSkillRequest) returns (DeleteAgentSkillResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GrantAgentSkill lets one agent or one mission load an Agent Skill. It is
+  // idempotent.
+  rpc GrantAgentSkill(GrantAgentSkillRequest) returns (GrantAgentSkillResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // RevokeAgentSkill removes the grant of GrantAgentSkill. It is idempotent.
+  rpc RevokeAgentSkill(RevokeAgentSkillRequest) returns (RevokeAgentSkillResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// AgentSkillEntry is one published version of an Agent Skill.
+message AgentSkillEntry {
+  string name = 1;
+  // digest is the digest of the OCI image, in the form sha256:<hex>.
+  string digest = 2;
+  // reference is the digest reference that the publisher gave.
+  string reference = 3;
+  string description = 4;
+  string license = 5;
+  string compatibility = 6;
+  map<string, string> metadata = 7;
+  // allowed_tools is the list of the allowed-tools field. It can only narrow
+  // the tools that an agent uses.
+  repeated string allowed_tools = 8;
+  google.protobuf.Timestamp published_at = 9;
+  // current is true for the newest publish of the name.
+  bool current = 10;
+}
+
+// AgentSkillFile names one file of a version, besides SKILL.md.
+message AgentSkillFile {
+  string path = 1;
+  int64 size_bytes = 2;
+}
+
+message PublishAgentSkillRequest {
+  // name is the name of the Agent Skill and of its folder.
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+  // reference is a digest reference, <registry>/<repository>@sha256:<hex>. A tag
+  // is refused.
+  string reference = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // registry_secret is the name of a tenant secret that holds the registry
+  // credential, as the bytes of a docker config. The daemon reads it for this
+  // call only and never stores the value. Empty means an anonymous pull. The
+  // daemon never uses its own credential for a tenant reference.
+  string registry_secret = 3 [(buf.validate.field).string = { max_len: 255 }];
+}
+
+message PublishAgentSkillResponse {
+  AgentSkillEntry entry = 1;
+}
+
+message ListAgentSkillsRequest {
+  // name restricts the list to one name. Empty means each name.
+  string name = 1 [(buf.validate.field).string = { max_len: 64 }];
+  bool all_versions = 2;
+}
+
+message ListAgentSkillsResponse {
+  repeated AgentSkillEntry entries = 1;
+}
+
+message GetAgentSkillRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+  // digest selects a version. Empty means the current version.
+  string digest = 2 [(buf.validate.field).string = { max_len: 128 }];
+}
+
+message GetAgentSkillResponse {
+  AgentSkillEntry entry = 1;
+  // body is the text of SKILL.md after the frontmatter.
+  string body = 2;
+  repeated AgentSkillFile files = 3;
+}
+
+message DeleteAgentSkillRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+}
+
+message DeleteAgentSkillResponse {
+  // deleted_versions is how many versions the call removed.
+  int32 deleted_versions = 1;
+}
+
+// AgentSkillSubjectKind says what a grant names.
+enum AgentSkillSubjectKind {
+  AGENT_SKILL_SUBJECT_KIND_UNSPECIFIED = 0;
+  // AGENT_SKILL_SUBJECT_KIND_AGENT names an agent identity of the tenant.
+  AGENT_SKILL_SUBJECT_KIND_AGENT = 1;
+  // AGENT_SKILL_SUBJECT_KIND_MISSION names a mission of the tenant.
+  AGENT_SKILL_SUBJECT_KIND_MISSION = 2;
+}
+
+message GrantAgentSkillRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+  AgentSkillSubjectKind subject_kind = 2 [(buf.validate.field).enum = { defined_only: true, not_in: [0] }];
+  // subject_id is the id of the agent identity or of the mission, with no type
+  // prefix.
+  string subject_id = 3 [(buf.validate.field).string = { min_len: 1, max_len: 255 }];
+}
+
+message GrantAgentSkillResponse {}
+
+message RevokeAgentSkillRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+  AgentSkillSubjectKind subject_kind = 2 [(buf.validate.field).enum = { defined_only: true, not_in: [0] }];
+  string subject_id = 3 [(buf.validate.field).string = { min_len: 1, max_len: 255 }];
+}
+
+message RevokeAgentSkillResponse {}
+
+// SharedAgentSkillEntry is one Agent Skill that the operator offers.
+message SharedAgentSkillEntry {
+  string name = 1;
+  string description = 2;
+  // digest is the digest of the OCI image that the operator configured.
+  string digest = 3;
+  // enabled is true when the tenant holds this digest.
+  bool enabled = 4;
+}
+
+message ListSharedAgentSkillsRequest {}
+
+message ListSharedAgentSkillsResponse {
+  repeated SharedAgentSkillEntry entries = 1;
+}
+
+message EnableSharedAgentSkillRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+}
+
+message EnableSharedAgentSkillResponse {
+  AgentSkillEntry entry = 1;
+}

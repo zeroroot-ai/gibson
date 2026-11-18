@@ -10,6 +10,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -473,6 +474,29 @@ func toBrainToolCalls(calls []api.LLMToolCall) []brain.LlmToolCall {
 		out = append(out, brain.LlmToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
 	}
 	return out
+}
+
+// ingestSkillLoad returns the sink of the loads of Agent Skills (epic
+// gibson#1364): it folds each successful load into the Timeline of the tenant
+// of the call as one AgentSkillLoaded event, with the agent, the mission and
+// the digest.
+func ingestSkillLoad(reg *brain.Registry) harness.SkillLoadSink {
+	return func(_ context.Context, tenant string, l harness.SkillLoadRecord) error {
+		if reg == nil || l.Digest == "" {
+			return errors.New("daemon: the load of an Agent Skill has no Timeline or no digest")
+		}
+		reg.For(tenant).Submit(brain.AgentSkillLoaded{
+			MissionID:          l.MissionID,
+			MissionRunID:       l.MissionRunID,
+			RunID:              l.RunID,
+			Agent:              l.Agent,
+			Name:               l.Name,
+			Digest:             l.Digest,
+			File:               l.File,
+			RecordedAtUnixNano: l.RecordedAtUnixNano,
+		})
+		return nil
+	}
 }
 
 // ingestToolCall returns the daemon's tool-call capture sink (ADR-0120,
