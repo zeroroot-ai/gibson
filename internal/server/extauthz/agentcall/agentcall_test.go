@@ -44,7 +44,4 @@ func TestCardPathName(t *testing.T) {
 			t.Errorf("%q gave %q", p, n)
 		}
 	}
-	if !IsA2APath("/") || IsA2APath("/v1/responses") {
-		t.Fatal("IsA2APath")
-	}
 }

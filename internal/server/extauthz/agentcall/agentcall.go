@@ -112,13 +112,3 @@ func CardPathName(path string) (string, bool) {
 	}
 	return name, true
 }
-
-// IsA2APath reports whether path is the A2A endpoint or the Agent Card of an
-// agent.
-func IsA2APath(path string) bool {
-	if path == RouteA2A {
-		return true
-	}
-	_, ok := CardPathName(path)
-	return ok
-}

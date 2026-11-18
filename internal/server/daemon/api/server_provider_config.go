@@ -263,15 +263,6 @@ const (
 	auditProviderDefaultChanged providerAuditAction = "provider_default_changed"
 )
 
-// emitProviderAudit logs a provider-related audit event via the daemon's
-// AuditLogger. The audit logger is required: the daemon wires it at start.
-// Credential material MUST NOT appear in the action or metadata.
-func (s *DaemonServer) emitProviderAudit(ctx context.Context, tenantID, action, providerName string) {
-	s.auditLogger.Log(ctx, action, "provider", providerName, map[string]any{
-		"tenant_id": tenantID,
-	})
-}
-
 // recordProviderAudit writes the audit record of a provider change durably,
 // BEFORE the change takes effect. The change fails when the record cannot be
 // written, so no provider change exists without its record (gibson#676).

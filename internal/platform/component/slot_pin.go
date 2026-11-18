@@ -123,20 +123,6 @@ func (r *RedisWorkContextRegistry) WorkMaxTokensPerCall(ctx context.Context, wor
 // to the LLM adapter.
 type slotPinKey struct{}
 
-// withSlotPin returns ctx carrying pin. A nil pin returns ctx unchanged.
-func withSlotPin(ctx context.Context, pin *agent.SlotConfig) context.Context {
-	if pin == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, slotPinKey{}, pin)
-}
-
-// slotPinFrom returns the slot pin in ctx, or nil.
-func slotPinFrom(ctx context.Context) *agent.SlotConfig {
-	pin, _ := ctx.Value(slotPinKey{}).(*agent.SlotConfig)
-	return pin
-}
-
 // nodeSlotPin returns the pin of slot for the work item workID.
 //
 // The caller has claimed the work item (claimedWorkOwner), and owner is the

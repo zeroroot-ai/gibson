@@ -51,12 +51,6 @@ func AllowPrivateAddresses() PullerOption {
 	return func(p *Puller) { p.transport = httpsOnly{inner: netguard.Transport(true)} }
 }
 
-// WithTransportForTest replaces the transport, with no HTTPS check and no
-// address limit. It exists only so a test can reach an in-process registry.
-func WithTransportForTest(rt http.RoundTripper) PullerOption {
-	return func(p *Puller) { p.transport = rt }
-}
-
 // NewPuller returns a Puller with the HTTPS check and the address limit.
 func NewPuller(opts ...PullerOption) *Puller {
 	p := &Puller{transport: httpsOnly{inner: netguard.Transport(false)}}

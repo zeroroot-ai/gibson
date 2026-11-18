@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/google/uuid"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
@@ -211,6 +210,3 @@ func textOf(parts a2a.ContentParts) string {
 	}
 	return out
 }
-
-// NewMessageID returns a fresh A2A message id.
-func NewMessageID() string { return uuid.NewString() }

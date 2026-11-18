@@ -5,7 +5,6 @@ package component
 
 import (
 	"context"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -130,23 +129,4 @@ func candidateTags(c catalog.Candidate) []string {
 		tags = append(tags, "connector:"+c.Connector)
 	}
 	return tags
-}
-
-// metadataList reads a comma-separated registration metadata value. Registration
-// metadata is map[string]string on the wire, so list-valued fields arrive joined.
-func metadataList(md map[string]string, key string) []string {
-	raw := md[key]
-	if raw == "" {
-		return nil
-	}
-	out := make([]string, 0, 4)
-	for _, field := range strings.Split(raw, ",") {
-		if f := strings.TrimSpace(field); f != "" {
-			out = append(out, f)
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }

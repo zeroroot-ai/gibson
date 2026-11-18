@@ -703,16 +703,3 @@ func TestValidateProviderInput_KnownTypes_NoError(t *testing.T) {
 		})
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Audit emission — nil logger is a no-op
-// ---------------------------------------------------------------------------
-
-func TestEmitProviderAudit_WritesTheRecord(t *testing.T) {
-	rec := &audittest.Recorder{}
-	s := auditedServer(t)
-	s.auditLogger = auditLoggerOver(t, rec)
-	s.emitProviderAudit(tenantCtx("acme"), "acme", auditProviderTested, "my-provider")
-	require.Eventually(t, func() bool { return len(rec.Events()) == 1 }, 2*time.Second, 10*time.Millisecond)
-	assert.Equal(t, "my-provider", rec.Events()[0].TargetID)
-}

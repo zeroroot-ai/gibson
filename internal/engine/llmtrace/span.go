@@ -71,14 +71,6 @@ type Cost struct {
 	Total string
 }
 
-// String returns the total, or "unknown".
-func (c Cost) String() string {
-	if !c.Known {
-		return "unknown"
-	}
-	return c.Total
-}
-
 // Observation is one model call, read from a span.
 type Observation struct {
 	// CallID is stable for the span. A second read of the same span gives the

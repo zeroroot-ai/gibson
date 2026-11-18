@@ -142,11 +142,11 @@ func TestFromSpan_OpenResponsesCall(t *testing.T) {
 // "unknown", and never zero.
 func TestFromSpan_CostIsUnknownForAnUnpricedModel(t *testing.T) {
 	priced := mustObserve(t, "messages_plain")
-	if !priced.Cost.Known || priced.Cost.Total != "0.00069" || priced.Cost.String() != "0.00069" {
+	if !priced.Cost.Known || priced.Cost.Total != "0.00069" {
 		t.Errorf("priced cost = %+v, want 0.00069", priced.Cost)
 	}
 	unpriced := mustObserve(t, "responses_plain")
-	if unpriced.Cost.Known || unpriced.Cost.Total != "" || unpriced.Cost.String() != "unknown" {
+	if unpriced.Cost.Known || unpriced.Cost.Total != "" {
 		t.Errorf("unpriced cost = %+v, want unknown", unpriced.Cost)
 	}
 	ev := unpriced.Events(time.Unix(1, 0))[0].(brain.LlmCallObserved)

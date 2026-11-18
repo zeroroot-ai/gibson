@@ -319,11 +319,6 @@ func TestParseTask_ATaskWithNoStateIsAFailure(t *testing.T) {
 	}
 }
 
-func TestNewMessageIDIsUnique(t *testing.T) {
-	if a, b := NewMessageID(), NewMessageID(); a == "" || a == b {
-		t.Errorf("ids = %q and %q, want two distinct ids", a, b)
-	}
-}
 func TestBuildMessage_CarriesThePinnedSkills(t *testing.T) {
 	raw, err := BuildMessage(testTask(), Run{PinnedSkills: []string{"skill:triage", "skill:review"}})
 	if err != nil {
