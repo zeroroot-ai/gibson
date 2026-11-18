@@ -35,6 +35,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -108,14 +109,27 @@ func newChainEnv(t *testing.T, filter modelgate.Filter) *chainEnv {
 // returns the work id.
 func (e *chainEnv) dispatchNode(t *testing.T, slots []*missionpb.LLMSlotConfig) string {
 	t.Helper()
+	return e.enqueueTask(t, e.dispatchTask(t, slots, nil, 0))
+}
+
+// dispatchTask runs the projection, the scheduler and brainExecutor.Dispatch
+// for one AGENT node and returns the task that DelegateToAgent gets. nodeCap is
+// the max_tokens_per_call of the node, or nil. missionCap is the value of the
+// mission constraints.
+func (e *chainEnv) dispatchTask(
+	t *testing.T, slots []*missionpb.LLMSlotConfig, nodeCap *int32, missionCap int32,
+) agent.Task {
+	t.Helper()
 	def := &missionpb.MissionDefinition{
-		Id: "m1",
+		Id:          "m1",
+		Constraints: &missionpb.MissionConstraints{MaxTokensPerCall: missionCap},
 		Nodes: map[string]*missionpb.MissionNode{
 			"recon": {
 				Type: missionpb.NodeType_NODE_TYPE_AGENT,
 				Config: &missionpb.MissionNode_AgentConfig{AgentConfig: &missionpb.AgentNodeConfig{
-					AgentName: "recon",
-					LlmSlots:  slots,
+					AgentName:        "recon",
+					LlmSlots:         slots,
+					MaxTokensPerCall: nodeCap,
 				}},
 			},
 		},
@@ -142,11 +156,19 @@ func (e *chainEnv) dispatchNode(t *testing.T, slots []*missionpb.LLMSlotConfig) 
 		t.Fatal("the agent node never reached DelegateToAgent")
 	}
 
+	return task
+}
+
+// enqueueTask puts the agent work item of the task on the queue the way
+// delegateToAgentViaWorkQueue does, and returns the work id.
+func (e *chainEnv) enqueueTask(t *testing.T, task agent.Task) string {
+	t.Helper()
 	workID := "agent-recon-chain"
-	_, err = e.queue.Enqueue(context.Background(), chainTenant, "agent", "recon", component.WorkItem{
-		WorkID:   workID,
-		WorkType: "execute",
-		SlotPins: gibsonharness.WorkSlotPins(task.SlotOverrides),
+	_, err := e.queue.Enqueue(context.Background(), chainTenant, "agent", "recon", component.WorkItem{
+		WorkID:           workID,
+		WorkType:         "execute",
+		SlotPins:         gibsonharness.WorkSlotPins(task.SlotOverrides),
+		MaxTokensPerCall: task.MaxTokensPerCall,
 	})
 	require.NoError(t, err)
 	// The served agent claimed its work item, as PollWork records.
@@ -157,17 +179,26 @@ func (e *chainEnv) dispatchNode(t *testing.T, slots []*missionpb.LLMSlotConfig) 
 // resolve calls ResolveModel for a slot of the work item, as a served agent in
 // pull mode does. It returns the provider and the model of the reply.
 func (e *chainEnv) resolve(workID, slot string) (provider, model string, err error) {
+	resp, err := e.resolveReply(workID, slot)
+	if err != nil {
+		return "", "", err
+	}
+	return resp.GetProvider(), resp.GetModel(), nil
+}
+
+// resolveReply is resolve with the whole reply.
+func (e *chainEnv) resolveReply(workID, slot string) (*componentpb.ResolveModelResponse, error) {
 	tid, tidErr := auth.NewTenantID(chainTenant)
 	if tidErr != nil {
-		return "", "", fmt.Errorf("tenant: %w", tidErr)
+		return nil, fmt.Errorf("tenant: %w", tidErr)
 	}
 	ctx := auth.WithIdentity(auth.ContextWithTenantString(context.Background(), chainTenant),
 		auth.Identity{Subject: chainClaimant, Tenant: tid})
 	resp, err := e.svc.ResolveModel(ctx, &componentpb.ResolveModelRequest{WorkId: workID, Slot: slot})
 	if err != nil {
-		return "", "", fmt.Errorf("resolve %s: %w", slot, err)
+		return nil, fmt.Errorf("resolve %s: %w", slot, err)
 	}
-	return resp.GetProvider(), resp.GetModel(), nil
+	return resp, nil
 }
 
 // A node that pins a provider and a model gets that provider and model when
@@ -263,4 +294,80 @@ func TestNodeSlotPin_AProviderOnlyPinNeverFallsBack(t *testing.T) {
 			assert.Empty(t, provider, "the tenant default must not serve a pinned slot")
 		})
 	}
+}
+
+// resolveOnTheHarness resolves a slot the way an agent in callback mode does:
+// the child harness of the node answers, built from the task that
+// DelegateToAgent got. The callback service passes the harness to
+// gibsonharness.ResolveModel.
+func (e *chainEnv) resolveOnTheHarness(t *testing.T, task agent.Task, slot string) (*gibsonharness.ModelResolution, error) {
+	t.Helper()
+	factory, err := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
+		SlotManagerForTenant: fixedTenantSlots(e.manager),
+		Logger:               slog.New(slog.DiscardHandler),
+		TargetFacts:          func() gibsonharness.TargetFactsLookup { return noTargets{} },
+	})
+	require.NoError(t, err)
+	mc := gibsonharness.MissionContext{
+		ID: types.NewID(), TenantID: chainTenant, CurrentAgent: "recon",
+		NodeSlotOverrides: task.SlotOverrides, NodeMaxTokensPerCall: task.MaxTokensPerCall,
+	}
+	h, err := factory.Create("recon", mc, gibsonharness.TargetInfo{})
+	require.NoError(t, err)
+	res, err := gibsonharness.ResolveModel(context.Background(), h, chainTenant, slot,
+		gibsonharness.GatewayInfo{URL: "https://models.test"})
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", slot, err)
+	}
+	return res, nil
+}
+
+// One node pin reaches the answer of BOTH services, from the mission definition
+// through the projection, the scheduler and the dispatch. The pinned provider
+// and model, and the token cap of the node, are the same on the ComponentService
+// (an agent in pull mode) and on the harness behind the callback service (an
+// agent in callback mode).
+func TestNodeSlotPin_ReachesResolveModelOnBothServices(t *testing.T) {
+	env := newChainEnv(t, nil)
+	nodeCap := int32(700)
+	task := env.dispatchTask(t,
+		[]*missionpb.LLMSlotConfig{{Slot: "fast", Provider: "fast-p", Model: "f-large"}}, &nodeCap, 5000)
+	require.Equal(t, int32(700), task.MaxTokensPerCall, "the node cap wins over the mission cap")
+	workID := env.enqueueTask(t, task)
+
+	pull, err := env.resolveReply(workID, "fast")
+	require.NoError(t, err)
+	callback, err := env.resolveOnTheHarness(t, task, "fast")
+	require.NoError(t, err)
+
+	assert.Equal(t, "fast-p", pull.GetProvider())
+	assert.Equal(t, "f-large", pull.GetModel())
+	assert.EqualValues(t, 700, pull.GetMaxOutputTokens())
+	assert.Equal(t, "fast-p", callback.Provider)
+	assert.Equal(t, "f-large", callback.Model)
+	assert.EqualValues(t, 700, callback.MaxOutputTokens)
+	assert.Equal(t, pull.GetRouteHeaders(), callback.RouteHeaders)
+
+	// A slot that the node does not pin keeps the tenant default on both.
+	pull, err = env.resolveReply(workID, "primary")
+	require.NoError(t, err)
+	callback, err = env.resolveOnTheHarness(t, task, "primary")
+	require.NoError(t, err)
+	assert.Equal(t, "default-p", pull.GetProvider())
+	assert.Equal(t, "default-p", callback.Provider)
+}
+
+// A node with no cap gets the cap of the mission on both services.
+func TestNodeSlotPin_TheMissionTokenCapReachesBothServices(t *testing.T) {
+	env := newChainEnv(t, nil)
+	task := env.dispatchTask(t, nil, nil, 3000)
+	workID := env.enqueueTask(t, task)
+
+	pull, err := env.resolveReply(workID, "primary")
+	require.NoError(t, err)
+	callback, err := env.resolveOnTheHarness(t, task, "primary")
+	require.NoError(t, err)
+
+	assert.EqualValues(t, 3000, pull.GetMaxOutputTokens())
+	assert.EqualValues(t, 3000, callback.MaxOutputTokens)
 }
