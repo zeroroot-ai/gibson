@@ -187,13 +187,9 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 	if len(toolCallIDs) == 0 {
 		return s.submitProofForReview(ctx, req, mission.ID.String(), target.ID.String())
 	}
-	if len(toolCallIDs) > brain.MaxProofToolCallIDs {
-		return nil, status.Errorf(codes.InvalidArgument,
-			"tool_call_ids names %d calls, over the limit of %d", len(toolCallIDs), brain.MaxProofToolCallIDs)
-	}
-	calls, missing, err := s.proofSettlement.RecordedToolCalls(ctx, mission.ID.String(), toolCallIDs)
+	evidence, missing, err := s.recordedEvidence(ctx, mission.ID.String(), toolCallIDs)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "SubmitProof: read recorded tool calls: %v", err)
+		return nil, err
 	}
 	if len(missing) > 0 {
 		return &harnesspb.SubmitProofResponse{
@@ -224,7 +220,7 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 		Technique:            settlement.TechniqueID(technique),
 		PredicateType:        domainPackCELPredicateType,
 		PredicateParams:      json.RawMessage(rawExpr),
-		Evidence:             brain.RecordedEvidence(calls),
+		Evidence:             evidence,
 		Destructive:          destructive,
 		PredictedProbability: predictedProbability,
 	})

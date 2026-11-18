@@ -2049,6 +2049,29 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 func (s *HarnessCallbackService) recordedFindingEvidence(
 	ctx context.Context, missionID string, toolCallIDs []string,
 ) ([]*typespb.Evidence, *harnesspb.HarnessError, error) {
+	evidence, missing, err := s.recordedEvidence(ctx, missionID, toolCallIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(missing) > 0 {
+		return nil, &harnesspb.HarnessError{
+			Code: commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
+			Message: fmt.Sprintf(
+				"SubmitFinding: the daemon holds no record of tool call %q for this mission", missing[0]),
+		}, nil
+	}
+	return evidence, nil, nil
+}
+
+// recordedEvidence is the one function that reads the record of tool calls for
+// a proof and for a finding. It drops a repeated ID, checks the limit, reads
+// the record of the mission of the caller in the tenant of the caller, and
+// builds the tier 1 evidence with brain.RecordedEvidence. It returns the IDs
+// that name no record, and it returns no evidence if one ID is missing. An
+// empty list of IDs gives no evidence.
+func (s *HarnessCallbackService) recordedEvidence(
+	ctx context.Context, missionID string, toolCallIDs []string,
+) (evidence []*typespb.Evidence, missing []string, err error) {
 	ids := uniqueStrings(toolCallIDs)
 	if len(ids) == 0 {
 		return nil, nil, nil
@@ -2059,18 +2082,14 @@ func (s *HarnessCallbackService) recordedFindingEvidence(
 	}
 	if s.proofSettlement == nil {
 		return nil, nil, status.Error(codes.Unavailable,
-			"SubmitFinding: the record of tool calls is not wired on this daemon")
+			"the record of tool calls is not wired on this daemon")
 	}
 	calls, missing, err := s.proofSettlement.RecordedToolCalls(ctx, missionID, ids)
 	if err != nil {
-		return nil, nil, status.Errorf(codes.Internal, "SubmitFinding: read recorded tool calls: %v", err)
+		return nil, nil, status.Errorf(codes.Internal, "read recorded tool calls: %v", err)
 	}
 	if len(missing) > 0 {
-		return nil, &harnesspb.HarnessError{
-			Code: commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
-			Message: fmt.Sprintf(
-				"SubmitFinding: the daemon holds no record of tool call %q for this mission", missing[0]),
-		}, nil
+		return nil, missing, nil
 	}
 	return brain.RecordedEvidence(calls), nil, nil
 }

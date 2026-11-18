@@ -13,9 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -38,7 +41,7 @@ func (m *submitFindingHarness) SubmitFinding(_ context.Context, f agent.Finding)
 }
 
 func newSubmitFindingService(
-	t *testing.T, h *submitFindingHarness, engine *testProofSettlementEngine,
+	t *testing.T, h *submitFindingHarness, engine brain.ProofSettlementEngine,
 ) *HarnessCallbackService {
 	t.Helper()
 	registry := NewCallbackHarnessRegistry()
@@ -216,4 +219,50 @@ func TestSubmitFinding_EvidenceOverTheLimitIsInvalidArgument(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp.GetError())
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, resp.GetError().GetCode())
+}
+
+// evidenceCapturingEngine records the evidence that a proof hands to the
+// settlement of a bet.
+type evidenceCapturingEngine struct {
+	*testProofSettlementEngine
+	captured []*typespb.Evidence
+}
+
+func (e *evidenceCapturingEngine) SettleBetTrue(
+	ctx context.Context, registry *settlement.Registry, authorize brain.DestructiveProofAuthorizer, req brain.BetSettlementRequest,
+) (bool, error) {
+	e.captured = req.Evidence
+	return e.testProofSettlementEngine.SettleBetTrue(ctx, registry, authorize, req)
+}
+
+// TestProofAndFindingHoldTheSameEvidenceForOneToolCall proves that a proof and
+// a finding that name the same tool call build the same tier 1 item. One
+// function reads the record for both.
+func TestProofAndFindingHoldTheSameEvidenceForOneToolCall(t *testing.T) {
+	base := newTestProofSettlementEngine(t, "acme", map[string]string{"T1190": `false`})
+	engine := &evidenceCapturingEngine{testProofSettlementEngine: base}
+	recordToolCall(t, base, "mission-A", "call-1", `{"status_code":200,"body":"admin panel"}`)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	proofHarness := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
+	substrate := newFakeBeliefSubstrate()
+	require.NoError(t, substrate.SetBelief(ctx, claimNodeRef("acme", "hyp-1"),
+		brain.NodeBelief{Belief: brain.Belief{Exploitable: 0.5}}))
+	proofSvc := newSubmitProofService(t, proofHarness, "recon-agent", substrate, engine)
+	proofResp, err := proofSvc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", "call-1"))
+	require.NoError(t, err)
+	require.Nil(t, proofResp.GetError())
+	require.Len(t, engine.captured, 1)
+
+	findingHarness := &submitFindingHarness{submitProofMockHarness: submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}}
+	findingSvc := newSubmitFindingService(t, findingHarness, engine)
+	findingResp, err := findingSvc.SubmitFinding(ctx, submitFindingRequest("mission-A", nil, "call-1"))
+	require.NoError(t, err)
+	require.Nil(t, findingResp.GetError())
+	require.Len(t, findingHarness.submitted, 1)
+	require.Len(t, findingHarness.submitted[0].Evidence, 1)
+
+	assert.True(t, proto.Equal(engine.captured[0], findingHarness.submitted[0].Evidence[0]),
+		"proof item %v differs from finding item %v", engine.captured[0], findingHarness.submitted[0].Evidence[0])
+	assert.Equal(t, `{"status_code":200,"body":"admin panel"}`, engine.captured[0].GetContent())
 }
