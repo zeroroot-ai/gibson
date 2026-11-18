@@ -245,6 +245,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			ItemKind:     wi.Kind,
 			Target:       wi.Target,
 			Input:        wi.Input,
+			ParentID:     wi.ParentID,
 			Timeout:      wi.Timeout,
 			Group:        wi.Group,
 			Limit:        wi.Limit,

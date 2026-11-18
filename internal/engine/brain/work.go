@@ -49,12 +49,17 @@ const (
 // `running` (dispatched directly). DependsOn references other WorkItem IDs that
 // must reach `done` before this one is dispatchable.
 type WorkItem struct {
-	ID         string
-	MissionID  string   // owning mission (empty for free-standing work)
-	RunID      string   // the run of the mission that owns the item (gibson#1217)
-	Kind       string   // "tool" | "agent" | "plugin"
-	Target     string   // the capability being executed
-	Input      string   // opaque dispatch input (e.g. the CUE node config), carried for dispatch
+	ID        string
+	MissionID string // owning mission (empty for free-standing work)
+	RunID     string // the run of the mission that owns the item (gibson#1217)
+	Kind      string // "tool" | "agent" | "plugin"
+	Target    string // the capability being executed
+	Input     string // opaque dispatch input (e.g. the CUE node config), carried for dispatch
+	// ParentID is the id of the work item whose run delegated to this one, for
+	// example an A2A message from an agent to another agent. Empty means the
+	// mission itself started the item. The chain of parents is the delegation
+	// depth.
+	ParentID   string
 	DependsOn  []string // WorkItem IDs that must be `done` before this is dispatchable
 	State      WorkState
 	Result     string
@@ -131,6 +136,9 @@ type WorkDispatched struct {
 	ItemKind string // tool | agent | plugin
 	Target   string
 	Input    string
+	// ParentID names the work item whose run delegated to this one. See
+	// WorkItem.ParentID.
+	ParentID string
 	// Timeout carries the node's execution bound to the dispatch effect-handler
 	// so it does not have to read the World back inside the locked tick — the
 	// same reason MissionID and Input are carried here (gibson#1602).
@@ -251,6 +259,7 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		Kind:         e.ItemKind,
 		Target:       e.Target,
 		Input:        e.Input,
+		ParentID:     e.ParentID,
 		State:        WorkRunning,
 		Attempts:     1,
 		Timeout:      e.Timeout,
@@ -323,6 +332,7 @@ type WorkSnapshot struct {
 	Kind       string
 	Target     string
 	Input      string
+	ParentID   string
 	DependsOn  []string
 	State      WorkState
 	Result     string
@@ -374,6 +384,7 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 			Kind:                   wi.Kind,
 			Target:                 wi.Target,
 			Input:                  wi.Input,
+			ParentID:               wi.ParentID,
 			DependsOn:              append([]string(nil), wi.DependsOn...),
 			State:                  wi.State,
 			Result:                 wi.Result,

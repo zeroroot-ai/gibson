@@ -2313,3 +2313,7 @@ func taskGrantAllowedRPCs() []string {
 	out = append(out, agentcall.GrantRoutes()...)
 	return out
 }
+
+// MaxDelegationDepth is the limit on the length of a delegation chain. A
+// DelegateToAgent call and an A2A message both stop at it.
+func MaxDelegationDepth() int { return defaultMaxDelegationDepth }

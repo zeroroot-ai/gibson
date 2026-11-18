@@ -30,6 +30,9 @@ type DispatchRequest struct {
 	Kind   string // tool | agent | plugin
 	Target string // capability name
 	Input  string // opaque dispatch input (CUE node config)
+	// ParentID is the id of the work item whose run delegated to this one.
+	// Empty means a mission node started it.
+	ParentID string
 	// Timeout is the node's declared execution bound (MissionNode.timeout).
 	// Zero means the node declared none; the Dispatcher decides what that means
 	// for its kind — a live agent runs until it returns a result or its worker
@@ -93,6 +96,7 @@ func (h *DispatchHandler) Tap(ev Event) {
 		Kind:         d.ItemKind,
 		Target:       d.Target,
 		Input:        d.Input,
+		ParentID:     d.ParentID,
 		Timeout:      d.Timeout,
 		Network:      d.Network,
 		SlotPins:     d.SlotPins,

@@ -1703,6 +1703,21 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		}()
 	}
 
+	// The A2A listener has its own port (gibson#1400). Only the Agent gateway
+	// can call it.
+	a2aSys, err := d.buildA2AServer(ctx)
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to build A2A listener: %w", err)
+	}
+	if a2aSys != nil {
+		go func() {
+			if serveErr := a2aSys.Serve(ctx); serveErr != nil {
+				d.logger.Error(ctx, "A2A listener error", "error", serveErr)
+			}
+		}()
+	}
+
 	// Start health server
 	// Health port defaults to 8080, can be overridden via config or GIBSON_HEALTH_PORT env var
 	healthPort := d.config.Health.Port

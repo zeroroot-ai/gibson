@@ -87,6 +87,11 @@ type deciderModels interface {
 type brainExecutor struct {
 	registry component.ComponentDiscovery
 	logger   *slog.Logger
+	// cancels holds the cancel function of each running A2A work item, by work
+	// id. CancelWork calls it. A mission node has no entry, because only an A2A
+	// CancelTask cancels a single item.
+	cancelMu sync.Mutex
+	cancels  map[string]context.CancelFunc
 	// jobs is where a job node's jobs live (ADR-0119, gibson#1713). Read per
 	// dispatch because the data-plane pool is built after the executor.
 	jobs func() (job.Store, error)
@@ -176,7 +181,10 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 			// node needs (gibson#1602).
 			// The network scope of the node decides the egress of the agent
 			// sandbox (owner decision S6, gibson#865).
-			res, err := bind.harness.DelegateToAgent(bind.ctx, req.Target, agent.Task{
+			agentCtx, release := b.trackWork(bind.ctx, req)
+			defer release()
+			res, err := bind.harness.DelegateToAgent(agentCtx, req.Target, agent.Task{
+				ID:      a2aTaskID(req),
 				Goal:    req.Input,
 				Timeout: req.Timeout,
 				Network: req.Network,
@@ -213,6 +221,19 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 			// implementation, which is how an off-cluster component serves a
 			// mission node.
 			out, err := b.dispatchTool(bind, req)
+			if err != nil {
+				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
+				return
+			}
+			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Result: out})
+
+		case workKindBank, workKindJobTurn:
+			// An A2A message aimed at a bank, or at a job of a bank. The
+			// daemon opens the job, or sends the next turn, and waits for the
+			// turn (gibson#1400).
+			jobCtx, release := b.trackWork(bind.ctx, req)
+			defer release()
+			out, err := b.dispatchBankTurn(jobCtx, bind, req)
 			if err != nil {
 				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
 				return

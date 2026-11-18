@@ -142,3 +142,25 @@ func TestWorkStates_SurviveSnapshotAndCodec(t *testing.T) {
 		t.Fatalf("decoded %+v", ev)
 	}
 }
+
+func TestWorkParentID_SurvivesSnapshotAndReplay(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, WorkDispatched{ID: "parent", ItemKind: "agent", Target: "a"})
+	Reduce(w, WorkDispatched{ID: "child", ItemKind: "agent", Target: "b", ParentID: "parent"})
+	got := map[string]string{}
+	for _, wi := range w.WorkSnapshot() {
+		got[wi.ID] = wi.ParentID
+	}
+	if got["child"] != "parent" || got["parent"] != "" {
+		t.Fatalf("parents = %v", got)
+	}
+	restored, err := RestoreWorld(SnapshotWorld(w, "0"), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wi := range restored.WorkSnapshot() {
+		if wi.ID == "child" && wi.ParentID != "parent" {
+			t.Fatalf("restored parent = %q", wi.ParentID)
+		}
+	}
+}
