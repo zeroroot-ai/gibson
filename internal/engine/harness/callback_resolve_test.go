@@ -158,9 +158,9 @@ func TestResolveAgent_ReplyHoldsTheRouteTheCAAndTheCardURL(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, "https://agents.example.test", resp.GetGatewayUrl())
+	assert.Equal(t, "https://agents.example.test/", resp.GetGatewayUrl())
 	assert.Equal(t, "AGENT-CA", resp.GetGatewayCaPem())
-	assert.Equal(t, "https://agents.example.test"+agentcall.CardPath, resp.GetAgentCardUrl())
+	assert.Equal(t, "https://agents.example.test/.well-known/agent-card.json", resp.GetAgentCardUrl())
 	want := map[string]string{}
 	for _, h := range agentcall.RouteHeaders(resolveTenant, "peer-agent", bank) {
 		want[h.Name] = h.Value
@@ -176,7 +176,7 @@ func TestResolveAgent_AnAgentOfTheCatalogNeedsNoRegisteredInstance(t *testing.T)
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, "https://agents.example.test", resp.GetGatewayUrl())
+	assert.Equal(t, "https://agents.example.test/", resp.GetGatewayUrl())
 }
 
 func TestResolveAgent_Refusals(t *testing.T) {
@@ -234,7 +234,7 @@ func TestResolveAgent_AnOutsideAgentGetsTheAgentGatewayRoute(t *testing.T) {
 		Context: resolveContext(), Name: "partner-scout",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "https://agents.example.test", resp.GetGatewayUrl())
+	assert.Equal(t, "https://agents.example.test/", resp.GetGatewayUrl())
 	assert.Equal(t, "partner-scout", resp.GetRouteHeaders()["x-gibson-route-agent"])
 
 	_, err = svc.ResolveAgent(testCtxWithTenant(), &harnesspb.ResolveAgentRequest{

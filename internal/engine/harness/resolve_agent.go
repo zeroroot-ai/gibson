@@ -48,8 +48,8 @@ func BuildAgentResolution(tenant, name, bank string, gw GatewayInfo) (*AgentReso
 	for _, h := range agentcall.RouteHeaders(tenant, name, bank) {
 		headers[h.Name] = h.Value
 	}
-	base := strings.TrimRight(gw.URL, "/")
 	return &AgentResolution{
-		GatewayURL: base, RouteHeaders: headers, GatewayCAPEM: gw.CAPEM, AgentCardURL: base + agentcall.CardPath,
+		GatewayURL: gw.URLFor(agentcall.RouteA2A), RouteHeaders: headers, GatewayCAPEM: gw.CAPEM,
+		AgentCardURL: gw.URLFor(agentcall.CardPath),
 	}, nil
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 )
 
@@ -32,15 +33,10 @@ var (
 	ErrResolveNoGateway    = errors.New("resolve model: the model gateway is not configured")
 )
 
-// GatewayInfo is what an agent needs to reach the model gateway. The daemon
-// reads it from GIBSON_MODEL_GATEWAY_URL and from the file named by
-// GIBSON_MODEL_GATEWAY_CA_FILE.
-type GatewayInfo struct {
-	// URL is the base URL. The agent calls POST {URL}/v1/responses.
-	URL string
-	// CAPEM is the PEM bundle of the CA that signs the gateway certificate.
-	CAPEM string
-}
+// GatewayInfo is what an agent needs to reach a gateway. The daemon reads it
+// from the environment. It is the type of the component service, so the join
+// of a base URL and a route exists once.
+type GatewayInfo = component.GatewayInfo
 
 // ModelResolution is the answer of ResolveModel.
 type ModelResolution struct {
@@ -89,7 +85,7 @@ func ResolveModel(
 		headers[rh.Name] = rh.Value
 	}
 	return &ModelResolution{
-		Model: picked.Model, Provider: picked.Provider, GatewayURL: strings.TrimRight(gw.URL, "/"),
+		Model: picked.Model, Provider: picked.Provider, GatewayURL: gw.URLFor(""),
 		RouteHeaders: headers, ContextWindow: int32(picked.ContextWindow), //nolint:gosec // bounded by maxContextWindow at save
 		GatewayCAPEM: gw.CAPEM, MaxOutputTokens: picked.MaxOutputTokens,
 	}, nil

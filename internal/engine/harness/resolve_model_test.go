@@ -8,6 +8,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 )
 
@@ -113,5 +114,28 @@ func TestDefaultAgentHarness_ResolveSlotModelAppliesTheNodeCap(t *testing.T) {
 				t.Errorf("MaxOutputTokens = %d, want %d", got.MaxOutputTokens, tc.want)
 			}
 		})
+	}
+}
+
+// The public base URL of a gateway is the Edge route without its trailing slash.
+// The Edge matches the prefix /gateway/agent/, so the JSON-RPC endpoint and the
+// Agent Card path must both start with that prefix. The model URL stays a base,
+// because the model client adds /v1/responses.
+func TestGatewayInfoURLFor_JoinsTheBaseAndTheRoute(t *testing.T) {
+	const agentBase = "https://api.localhost.zeroroot.ai:443/gateway/agent"
+	const modelBase = "https://api.localhost.zeroroot.ai:443/gateway/model"
+	for _, base := range []string{agentBase, agentBase + "/"} {
+		gw := GatewayInfo{URL: base}
+		if got, want := gw.URLFor(agentcall.RouteA2A), agentBase+"/"; got != want {
+			t.Errorf("endpoint = %q, want %q", got, want)
+		}
+		if got, want := gw.URLFor(agentcall.CardPath), agentBase+"/.well-known/agent-card.json"; got != want {
+			t.Errorf("card = %q, want %q", got, want)
+		}
+	}
+	for _, base := range []string{modelBase, modelBase + "/"} {
+		if got := (GatewayInfo{URL: base}).URLFor(""); got != modelBase {
+			t.Errorf("model = %q, want %q", got, modelBase)
+		}
 	}
 }

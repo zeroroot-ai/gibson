@@ -48,6 +48,18 @@ type GatewayInfo struct {
 	CAPEM string
 }
 
+// URLFor joins the public base URL of a gateway and a route. It is the one place
+// where a base and a path meet, so no reply has a double slash or a missing one.
+// The route is empty or starts with a slash.
+//
+// A model URL is a base: the client adds the route of each call, so the model
+// route is empty and the URL has no trailing slash. An agent URL is a complete
+// endpoint: the A2A client posts to it as it is. The Edge matches the prefix
+// /gateway/agent/ with the slash, so the A2A endpoint is the base plus "/".
+func (g GatewayInfo) URLFor(route string) string {
+	return strings.TrimRight(g.URL, "/") + route
+}
+
 // WithSlotModelResolver sets the resolver that ResolveModel uses.
 func (s *ComponentServiceServer) WithSlotModelResolver(r SlotModelResolver) *ComponentServiceServer {
 	s.slotModels = r
@@ -132,7 +144,7 @@ func (s *ComponentServiceServer) ResolveModel(
 		headers[h.Name] = h.Value
 	}
 	return &componentpb.ResolveModelResponse{
-		Model: picked.Model, Provider: picked.Provider, GatewayUrl: strings.TrimRight(s.modelGateway.URL, "/"),
+		Model: picked.Model, Provider: picked.Provider, GatewayUrl: s.modelGateway.URLFor(""),
 		RouteHeaders: headers, ContextWindow: int32(picked.ContextWindow), //nolint:gosec // bounded at save
 		GatewayCaPem: s.modelGateway.CAPEM, MaxOutputTokens: agent.MinLimit(picked.MaxOutputTokens, nodeCap),
 	}, nil
@@ -174,9 +186,9 @@ func (s *ComponentServiceServer) ResolveAgent(
 	for _, h := range agentcall.RouteHeaders(tenant, name, req.GetBankId()) {
 		headers[h.Name] = h.Value
 	}
-	base := strings.TrimRight(s.agentGateway.URL, "/")
 	return &componentpb.ResolveAgentResponse{
-		GatewayUrl: base, RouteHeaders: headers, GatewayCaPem: s.agentGateway.CAPEM,
-		AgentCardUrl: base + agentcall.CardPath,
+		GatewayUrl: s.agentGateway.URLFor(agentcall.RouteA2A), RouteHeaders: headers,
+		GatewayCaPem: s.agentGateway.CAPEM,
+		AgentCardUrl: s.agentGateway.URLFor(agentcall.CardPath),
 	}, nil
 }
