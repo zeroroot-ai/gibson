@@ -174,6 +174,43 @@ runs:
           '{.spec.template.spec.containers[?(@.name=="manager")].image}' "tenant-operator:${TAG}"
         kubectl -n "$NS" rollout status deployment/gibson-tenant-operator --timeout=15m
 
+    # agentgateway sends an unattached policy to no proxy. A route whose ext-authz
+    # policy is not attached has no ext-authz check, so a call on it would pass
+    # with no authorization. Before the first test call, each AgentgatewayPolicy
+    # must be Accepted and Attached on at least one ancestor. The step fails
+    # otherwise and names the policies that are not.
+    - name: Each AgentgatewayPolicy is Accepted and Attached
+      shell: bash
+      run: |
+        set -euo pipefail
+        bad_policies() {
+          kubectl get agentgatewaypolicies.agentgateway.dev -A -o json | jq -r '
+            .items[]
+            | . as $p
+            | ($p.status.ancestors // []) as $a
+            | def ok($t): any($a[]?.conditions[]?; .type == $t and .status == "True");
+              select((($a | length) == 0) or (ok("Accepted") | not) or (ok("Attached") | not))
+            | "\($p.metadata.namespace)/\($p.metadata.name) accepted=\(ok("Accepted")) attached=\(ok("Attached")) ancestors=\($a | length)"'
+        }
+        count=$(kubectl get agentgatewaypolicies.agentgateway.dev -A -o json | jq '.items | length')
+        if [ "$count" -eq 0 ]; then
+          echo "::error::the cluster has no AgentgatewayPolicy, so no route has an ext-authz check"
+          exit 1
+        fi
+        bad=""
+        for _ in $(seq 1 30); do
+          bad=$(bad_policies)
+          [ -z "$bad" ] && break
+          sleep 10
+        done
+        if [ -n "$bad" ]; then
+          echo "::error::an AgentgatewayPolicy is not both Accepted and Attached, so its route has no policy at the proxy:"
+          echo "$bad"
+          kubectl get agentgatewaypolicies.agentgateway.dev -A -o yaml | tail -n 200
+          exit 1
+        fi
+        echo "all ${count} AgentgatewayPolicy objects are Accepted and Attached"
+
     # The suite runs inside the cluster. The daemon listener speaks SPIFFE mTLS
     # and refuses plaintext, so the suite needs an attested SVID, which means it
     # must be a pod in the mesh (run-e2e-job.sh).
