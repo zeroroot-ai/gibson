@@ -573,3 +573,14 @@ func failedAction(ev audit.Event, cause error) audit.Event {
 func HostKeyID(jwk json.RawMessage) (string, error) {
 	return jwkThumbprint(jwk)
 }
+
+// RevokePrincipal revokes every enrollment of the principal in the tenant: its
+// grants, its agent rows and its hosts. After it returns, the key descriptor of
+// each agent of the principal is withheld, so a signed token of the principal
+// fails verification at the next fetch.
+func (s *CapabilityGrantService) RevokePrincipal(ctx context.Context, tenantID, principalRef string) error {
+	if _, err := s.store.RevokePrincipal(ctx, tenantID, principalRef); err != nil {
+		return fmt.Errorf("capabilitygrant: revoke principal: %w", err)
+	}
+	return nil
+}

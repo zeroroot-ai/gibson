@@ -6,11 +6,13 @@ package api
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 )
@@ -22,6 +24,7 @@ func TestRevokeAgentIdentity_HappyPath(t *testing.T) {
 	srv := newTestDaemonServer(t).
 		WithIdPAdminClient(fakeidp).
 		WithAuthorizer(az).
+		WithPrincipalRevoker(&fakePrincipalRevoker{}).
 		WithTenantAdminAuditWriter(fakeAudit)
 
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
@@ -51,7 +54,7 @@ func TestRevokeAgentIdentity_NotFound(t *testing.T) {
 		},
 	}
 	az := newFakeAuthorizer().allow("tenant:acme", "belongs_to", "agent_principal:missing-id")
-	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az)
+	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az).WithPrincipalRevoker(&fakePrincipalRevoker{})
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
 
 	_, err := srv.RevokeAgentIdentity(ctx, &tenantpb.RevokeAgentIdentityRequest{
@@ -77,7 +80,7 @@ func TestRevokeAgentIdentity_OrphanInTenantScope(t *testing.T) {
 		},
 	}
 	az := newFakeAuthorizer() // no belongs_to tuple at all
-	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az)
+	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az).WithPrincipalRevoker(&fakePrincipalRevoker{})
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
 
 	_, err := srv.RevokeAgentIdentity(ctx, &tenantpb.RevokeAgentIdentityRequest{
@@ -100,7 +103,7 @@ func TestRevokeAgentIdentity_OrphanInTenantScope(t *testing.T) {
 func TestRevokeAgentIdentity_CrossTenantNotFound(t *testing.T) {
 	fakeidp := &fakeIDPClient{}
 	az := newFakeAuthorizer() // no ownership tuple for tenant acme
-	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az)
+	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az).WithPrincipalRevoker(&fakePrincipalRevoker{})
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
 
 	_, err := srv.RevokeAgentIdentity(ctx, &tenantpb.RevokeAgentIdentityRequest{
@@ -220,4 +223,88 @@ func TestServiceAccountInTenantScope(t *testing.T) {
 			t.Fatal("expected an error for an unknown principal type")
 		}
 	})
+}
+
+// fakePrincipalRevoker records the principals whose Capability Grant rows it revoked.
+type fakePrincipalRevoker struct {
+	calls []string
+	err   error
+}
+
+func (f *fakePrincipalRevoker) RevokePrincipal(_ context.Context, tenantID, principalRef string) error {
+	f.calls = append(f.calls, tenantID+"|"+principalRef)
+	return f.err
+}
+
+// A revoke sets the Capability Grant rows of the identity to revoked, so its key
+// descriptor is withheld, and it deletes each grant of the identity to a published
+// mission definition. Without both, the identity keeps its key and its grants.
+func TestRevokeAgentIdentity_RevokesTheCapabilityGrantsAndTheInboundGrants(t *testing.T) {
+	const principal = "agent_principal:some-uuid"
+	az := &recordingAuthorizer{fakeAuthorizer: newFakeAuthorizer().allow("tenant:acme", "belongs_to", principal)}
+	az.stored = []authz.Tuple{
+		{User: principal, Relation: "granted_caller", Object: "published_mission:acme/recon"},
+		{User: principal, Relation: "granted_caller", Object: "published_mission:acme/scan"},
+		{User: "agent_principal:other", Relation: "granted_caller", Object: "published_mission:acme/recon"},
+	}
+	revoker := &fakePrincipalRevoker{}
+	srv := newTestDaemonServer(t).WithIdPAdminClient(&fakeIDPClient{}).WithAuthorizer(az).WithPrincipalRevoker(revoker)
+
+	_, err := srv.RevokeAgentIdentity(ctxWithTenantAdmin(context.Background(), "acme", "user-admin"),
+		&tenantpb.RevokeAgentIdentityRequest{PrincipalId: principal})
+
+	if err != nil {
+		t.Fatalf("RevokeAgentIdentity: %v", err)
+	}
+	if len(revoker.calls) != 1 || revoker.calls[0] != "acme|"+principal {
+		t.Errorf("revoker calls = %v", revoker.calls)
+	}
+	want := []authz.Tuple{
+		{User: principal, Relation: "granted_caller", Object: "published_mission:acme/recon"},
+		{User: principal, Relation: "granted_caller", Object: "published_mission:acme/scan"},
+	}
+	for _, w := range want {
+		if !slices.Contains(az.deleted, w) {
+			t.Errorf("the grant %v was not deleted: %v", w, az.deleted)
+		}
+	}
+	if slices.Contains(az.deleted, authz.Tuple{User: "agent_principal:other", Relation: "granted_caller", Object: "published_mission:acme/recon"}) {
+		t.Error("the grant of another identity was deleted")
+	}
+}
+
+// When the Capability Grant revoke fails, nothing else is revoked, so the caller
+// can retry and no identity is half revoked.
+func TestRevokeAgentIdentity_AFailedGrantRevokeRevokesNothingElse(t *testing.T) {
+	fakeidp := &fakeIDPClient{}
+	az := newFakeAuthorizer().allow("tenant:acme", "belongs_to", "agent_principal:some-uuid")
+	for name, srv := range map[string]*DaemonServer{
+		"the store fails": newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az).
+			WithPrincipalRevoker(&fakePrincipalRevoker{err: errors.New("db down")}),
+		"no store": newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az),
+	} {
+		_, err := srv.RevokeAgentIdentity(ctxWithTenantAdmin(context.Background(), "acme", "user-admin"),
+			&tenantpb.RevokeAgentIdentityRequest{PrincipalId: "agent_principal:some-uuid"})
+		if status.Code(err) != codes.Internal && status.Code(err) != codes.Unavailable {
+			t.Errorf("%s: code = %v, want Internal or Unavailable", name, status.Code(err))
+		}
+	}
+	if len(fakeidp.deleteCalls) != 0 {
+		t.Errorf("the IdP account was deleted after a failed grant revoke: %d calls", len(fakeidp.deleteCalls))
+	}
+}
+
+// A failed read of the inbound grants leaves the IdP account in place.
+func TestRevokeAgentIdentity_AFailedGrantReadRevokesNoAccount(t *testing.T) {
+	fakeidp := &fakeIDPClient{}
+	az := newFakeAuthorizer().allow("tenant:acme", "belongs_to", "agent_principal:some-uuid")
+	az.readErr = errors.New("fga down")
+	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az).WithPrincipalRevoker(&fakePrincipalRevoker{})
+
+	_, err := srv.RevokeAgentIdentity(ctxWithTenantAdmin(context.Background(), "acme", "user-admin"),
+		&tenantpb.RevokeAgentIdentityRequest{PrincipalId: "agent_principal:some-uuid"})
+
+	if status.Code(err) != codes.Internal || len(fakeidp.deleteCalls) != 0 {
+		t.Errorf("code = %v, delete calls = %d", status.Code(err), len(fakeidp.deleteCalls))
+	}
 }

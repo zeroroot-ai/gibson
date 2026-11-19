@@ -251,6 +251,19 @@ func NewComponentVerifier(cfg ComponentConfig) (*ComponentVerifier, error) {
 //   - ErrReplayed         — this (kid, jti) was already accepted
 //   - ErrReplayStateUnavailable — the replay store did not answer
 func (v *ComponentVerifier) Verify(ctx context.Context, token, method string) (ComponentIdentity, error) {
+	return v.verify(ctx, token, method, false)
+}
+
+// VerifyFresh is Verify with a key descriptor that the verifier reads from the
+// daemon for this call, and never from its cache. A revoked agent, or a change of
+// its capabilities, applies at the next call, and not after the cache time. The
+// call costs one request to the daemon. A route that must honor a revoke at once
+// uses it.
+func (v *ComponentVerifier) VerifyFresh(ctx context.Context, token, method string) (ComponentIdentity, error) {
+	return v.verify(ctx, token, method, true)
+}
+
+func (v *ComponentVerifier) verify(ctx context.Context, token, method string, fresh bool) (ComponentIdentity, error) {
 	// Peek the header for kid + typ without trusting the signature yet.
 	kid, typ, err := peekHeader(token)
 	if err != nil {
@@ -263,7 +276,7 @@ func (v *ComponentVerifier) Verify(ctx context.Context, token, method string) (C
 		return ComponentIdentity{}, fmt.Errorf("%w: missing kid", ErrMalformed)
 	}
 
-	desc, err := v.resolve(ctx, kid)
+	desc, err := v.resolve(ctx, kid, fresh)
 	if err != nil {
 		return ComponentIdentity{}, fmt.Errorf("%w: kid %s: %w", ErrUnknownKey, kid, err)
 	}
@@ -463,18 +476,25 @@ func (v *ComponentVerifier) checkLifetime(parsed *jwt.Token) error {
 }
 
 // resolve returns the cached descriptor for kid, fetching on miss/expiry.
-func (v *ComponentVerifier) resolve(ctx context.Context, kid string) (cachedDescriptor, error) {
-	v.mu.RLock()
-	if d, ok := v.cache[kid]; ok && time.Now().Before(d.exp) {
+func (v *ComponentVerifier) resolve(ctx context.Context, kid string, fresh bool) (cachedDescriptor, error) {
+	if !fresh {
+		v.mu.RLock()
+		if d, ok := v.cache[kid]; ok && time.Now().Before(d.exp) {
+			v.mu.RUnlock()
+			componentCacheHits.Inc()
+			return d, nil
+		}
 		v.mu.RUnlock()
-		componentCacheHits.Inc()
-		return d, nil
 	}
-	v.mu.RUnlock()
 
 	componentCacheMisses.Inc()
 	d, err := v.fetch(ctx, kid)
 	if err != nil {
+		// A fresh read that fails drops the cached entry, so a later call that
+		// reads the cache cannot use a descriptor that the daemon withheld.
+		v.mu.Lock()
+		delete(v.cache, kid)
+		v.mu.Unlock()
 		return cachedDescriptor{}, err
 	}
 	v.mu.Lock()

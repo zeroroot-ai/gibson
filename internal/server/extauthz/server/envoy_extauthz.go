@@ -514,6 +514,15 @@ func (s *EnvoyAuthzServer) tryComponentAuth(ctx context.Context, method string, 
 func (s *EnvoyAuthzServer) verifyComponent(
 	ctx context.Context, method string, httpHeaders map[string]string,
 ) (cid cgjwt.ComponentIdentity, deny *authv3.CheckResponse, handled bool) {
+	return s.verifyComponentWith(ctx, method, httpHeaders, s.component.Verify)
+}
+
+// verifyComponentWith is verifyComponent with the verify function of the caller.
+// The inbound A2A class passes VerifyFresh, so a revoke applies at once.
+func (s *EnvoyAuthzServer) verifyComponentWith(
+	ctx context.Context, method string, httpHeaders map[string]string,
+	verify func(ctx context.Context, token, method string) (cgjwt.ComponentIdentity, error),
+) (cid cgjwt.ComponentIdentity, deny *authv3.CheckResponse, handled bool) {
 	token := extractCapabilityGrant(httpHeaders)
 	if token == "" {
 		return cgjwt.ComponentIdentity{}, nil, false
@@ -521,7 +530,7 @@ func (s *EnvoyAuthzServer) verifyComponent(
 
 	// Bind the token to this exact request: Verify refuses a token whose
 	// `method` claim does not match the request method (gibson#1246).
-	cid, err := s.component.Verify(ctx, token, method)
+	cid, err := verify(ctx, token, method)
 	if errors.Is(err, cgjwt.ErrReplayStateUnavailable) {
 		// The replay store did not answer, so the token cannot be proven
 		// new. Refuse the call (fail closed). The token is not at fault, so

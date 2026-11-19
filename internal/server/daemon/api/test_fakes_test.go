@@ -12,6 +12,7 @@ package api
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
@@ -28,6 +29,26 @@ type fakeAuthorizer struct {
 	listUsersErr error
 	checks       []checkRecord
 	writes       []authz.Tuple // tuples captured by Write
+	stored       []authz.Tuple // tuples that ReadTuples returns
+	readErr      error
+}
+
+// ReadTuples returns the stored tuples that match the filter. An empty filter
+// field is a wildcard. A bare type filter ("type:") matches each object of the type.
+func (a *fakeAuthorizer) ReadTuples(_ context.Context, user, relation, object string) ([]authz.Tuple, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.readErr != nil {
+		return nil, a.readErr
+	}
+	var out []authz.Tuple
+	for _, t := range a.stored {
+		if (user == "" || t.User == user) && (relation == "" || t.Relation == relation) &&
+			(object == "" || t.Object == object || (strings.HasSuffix(object, ":") && strings.HasPrefix(t.Object, object))) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 type checkRecord struct {

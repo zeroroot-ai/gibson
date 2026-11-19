@@ -109,6 +109,30 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 		}
 	}
 
+	// Revoke the Capability Grant rows of the principal first. A revoked agent row
+	// has no key descriptor, so the signed token of the principal fails at once,
+	// and the principal can start no mission. The call is safe to repeat. When it
+	// fails, nothing else is revoked, and the caller can retry.
+	if s.principalRevoker == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "the capability grant store is not configured; nothing was revoked")
+	}
+	if err := s.principalRevoker.RevokePrincipal(ctx, tenantID, req.PrincipalId); err != nil {
+		s.logger.ErrorContext(ctx, "RevokeAgentIdentity: capability grant revoke failed",
+			slog.String("tenant_id", tenantID),
+			slog.String("principal_id", req.PrincipalId),
+			slog.String("error", err.Error()),
+		)
+		return nil, status_grpc.Error(codes.Internal, "failed to revoke the capability grants of the identity")
+	}
+
+	// The grants to published mission definitions go with the identity. They are
+	// read before the IdP account goes, so a failed read leaves the identity in
+	// place and the caller can retry.
+	grantTuples, gerr := inboundGrantTuples(ctx, s.authorizer, req.PrincipalId)
+	if gerr != nil {
+		return nil, status_grpc.Error(codes.Internal, "failed to list the inbound grants of the identity")
+	}
+
 	// Delete the service account from the IdP.
 	if err := s.idpAdminClient.DeleteServiceAccount(ctx, accountID); err != nil {
 		if s.tenantAdminAuditWriter != nil {
@@ -144,6 +168,8 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 			})
 		}
 	}
+	// The identity can no longer call a published mission definition.
+	tuplesToDelete = append(tuplesToDelete, grantTuples...)
 	if derr := s.authorizer.Delete(ctx, tuplesToDelete); derr != nil {
 		// Non-fatal: log but don't fail the RPC. The IdP revocation already
 		// happened; FGA cleanup can be retried manually.

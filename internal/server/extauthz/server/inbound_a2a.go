@@ -51,7 +51,8 @@ func denyInbound(reason string, resp *authv3.CheckResponse) *authv3.CheckRespons
 // task grant are not accepted, and a request that carries a Zitadel token and
 // no such JWT is refused. The checks, in order:
 //
-//  1. The token verifies against the key descriptor of the daemon. The token
+//  1. The token verifies against the key descriptor of the daemon, which ext-authz
+//     reads for this call and never from its cache, so a revoke applies at once. The token
 //     names the exact path, it is short lived and it is single use. A revoked or
 //     lapsed identity has no descriptor, so it fails here.
 //  2. The descriptor lists the ceiling mission:originate.
@@ -84,7 +85,7 @@ func (s *EnvoyAuthzServer) inboundA2AResponse(ctx context.Context, req *authv3.C
 		s.log.WarnContext(ctx, "ext-authz: inbound A2A call with a token that is not a component token", "path", path)
 		return denyInbound(inboundDenyTokenType, denyForbidden())
 	}
-	cid, deny, _ := s.verifyComponent(ctx, path, httpHeaders)
+	cid, deny, _ := s.verifyComponentWith(ctx, path, httpHeaders, s.component.VerifyFresh)
 	if deny != nil {
 		return deny
 	}

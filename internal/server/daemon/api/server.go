@@ -253,6 +253,9 @@ type DaemonServer struct {
 	// May be nil; when nil, Agent Auth RPCs return codes.Unavailable.
 	// Added by agent-auth-fga-integration spec.
 	capabilityGrantService *capabilitygrant.CapabilityGrantService
+	// principalRevoker revokes the Capability Grant rows of a principal. The
+	// revoke of an agent identity needs it.
+	principalRevoker PrincipalRevoker
 
 	// manifestBuilder builds signed capability manifests for GetCapabilityManifest.
 	// May be nil; when nil, GetCapabilityManifest returns codes.Unavailable.
@@ -456,6 +459,20 @@ type missionDraftStoreIface interface {
 	ListPage(ctx context.Context, tenantID, after string, limit int) ([]*missiondraft.MissionDraft, string, error)
 	Get(ctx context.Context, tenantID, draftID string) (*missiondraft.MissionDraft, error)
 	Delete(ctx context.Context, tenantID, draftID string) error
+}
+
+// PrincipalRevoker revokes each Capability Grant row of a principal: the grants,
+// the agent rows and the hosts. *capabilitygrant.CapabilityGrantService is the
+// implementation.
+type PrincipalRevoker interface {
+	RevokePrincipal(ctx context.Context, tenantID, principalRef string) error
+}
+
+// WithPrincipalRevoker sets the revoker of the Capability Grant rows of a
+// principal.
+func (s *DaemonServer) WithPrincipalRevoker(r PrincipalRevoker) *DaemonServer {
+	s.principalRevoker = r
+	return s
 }
 
 // MissionQuotaChecker is the narrow interface the DaemonServer uses to enforce
@@ -1064,6 +1081,7 @@ func (s *DaemonServer) GetConversationStore() conversationStoreIface {
 // Added by agent-auth-fga-integration spec.
 func (s *DaemonServer) WithCapabilityGrantService(svc *capabilitygrant.CapabilityGrantService) *DaemonServer {
 	s.capabilityGrantService = svc
+	s.principalRevoker = svc
 	return s
 }
 

@@ -347,3 +347,17 @@ func (s *InboundMissionService) ListInboundCallers(
 	ids, next := pagetoken.Page(page, ids, func(id string) string { return id })
 	return &tenantv1.ListInboundCallersResponse{IdentityIds: ids, NextPageToken: next}, nil
 }
+
+// inboundGrantTuples reads every stored grant of one principal to a published
+// mission definition. ReadTuples pages through the tuples, so no grant is left out.
+func inboundGrantTuples(ctx context.Context, az any, principalRef string) ([]authz.Tuple, error) {
+	reader, ok := az.(authz.TupleReader)
+	if !ok {
+		return nil, errors.New("the authorizer cannot read stored tuples")
+	}
+	tuples, err := reader.ReadTuples(ctx, principalRef, "granted_caller", "published_mission:")
+	if err != nil {
+		return nil, fmt.Errorf("read the inbound grants of %s: %w", principalRef, err)
+	}
+	return tuples, nil
+}

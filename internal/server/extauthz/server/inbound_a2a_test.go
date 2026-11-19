@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -287,5 +288,44 @@ func TestInboundA2A_CountsEachRefusalByReason(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(extauthzInboundA2ADeniedTotal.WithLabelValues(inboundDenyNoGrant)); got != before+1 {
 		t.Errorf("the no-grant counter = %v, want %v", got, before+1)
+	}
+}
+
+// A revoke applies at the next call. ext-authz keeps the key descriptor of an agent
+// for the cache time, but the inbound class reads it for each call. The first call
+// of the identity passes, the daemon then withholds the descriptor, and the second
+// call fails inside the cache time.
+func TestInboundA2A_ARevokeAppliesAtTheNextCall(t *testing.T) {
+	pub, priv := mustGenEd25519(t)
+	var revoked atomic.Bool
+	doc := map[string]any{
+		"keys": []map[string]string{{
+			"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pub), "kid": inboundKID,
+		}},
+		"principal": inboundPrincipal, "tenant": modelTenant, "status": "active", "capabilities": originateCeiling,
+	}
+	body, _ := json.Marshal(doc)
+	desc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if revoked.Load() {
+			http.Error(w, "unknown key", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(desc.Close)
+	srv := buildComponentServer(t, &modelFGA{allow: grantedInbound()}, desc.URL+"/capabilitygrant/v1/keys")
+	srv.edgeIDs = idSet([]string{edgeSVID})
+	path := agentcall.InboundPathFor(inboundAgent)
+	call := func() codes.Code {
+		resp, err := srv.Check(peerContext(t, edgeSVID), inboundRequest(path, mintInboundJWT(t, priv, "agent+jwt", path), nil))
+		return statusOf(t, resp, err)
+	}
+
+	if got := call(); got != codes.OK {
+		t.Fatalf("before the revoke: status = %v, want OK", got)
+	}
+	revoked.Store(true)
+	if got := call(); got != codes.Unauthenticated {
+		t.Fatalf("after the revoke: status = %v, want Unauthenticated", got)
 	}
 }

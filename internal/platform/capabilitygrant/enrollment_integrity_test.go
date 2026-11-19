@@ -1123,3 +1123,59 @@ func TestGetHost_EmptyListIsRecordedAndNullLiteralIsNot(t *testing.T) {
 		assert.Equal(t, wantRecorded, h.CeilingRecorded, raw)
 	}
 }
+
+// RevokePrincipal sets the grants, the agent rows and the hosts of the principal to
+// revoked in one transaction. After it, no agent row of the principal is active,
+// so AgentKeyDescriptor withholds the key.
+func TestRevokePrincipal_RevokesGrantsAgentsAndHostsInOneTransaction(t *testing.T) {
+	store, mock, _ := newMockedStore(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE capability_grant_grants SET status = 'revoked'").
+		WithArgs("acme", "agent_principal:acct-1").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE capability_grant_agents SET status = 'revoked'").
+		WithArgs("acme", "agent_principal:acct-1").WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec("UPDATE capability_grant_hosts SET status = 'revoked'").
+		WithArgs("acme", "agent_principal:acct-1").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	n, err := store.RevokePrincipal(context.Background(), "acme", "agent_principal:acct-1")
+
+	require.NoError(t, err)
+	assert.EqualValues(t, 4, n)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRevokePrincipal_Refusals(t *testing.T) {
+	store, _, _ := newMockedStore(t)
+	_, err := store.RevokePrincipal(context.Background(), "", "agent_principal:a")
+	require.Error(t, err)
+	_, err = store.RevokePrincipal(context.Background(), "acme", "")
+	require.Error(t, err)
+
+	for name, fail := range map[string]func(m sqlmock.Sqlmock){
+		"begin": func(m sqlmock.Sqlmock) { m.ExpectBegin().WillReturnError(errors.New("boom")) },
+		"statement": func(m sqlmock.Sqlmock) {
+			m.ExpectBegin()
+			m.ExpectExec("UPDATE capability_grant_grants").WillReturnError(errors.New("boom"))
+			m.ExpectRollback()
+		},
+		"commit": func(m sqlmock.Sqlmock) {
+			m.ExpectBegin()
+			for range 3 {
+				m.ExpectExec("UPDATE").WillReturnResult(sqlmock.NewResult(0, 0))
+			}
+			m.ExpectCommit().WillReturnError(errors.New("boom"))
+		},
+	} {
+		s, m, _ := newMockedStore(t)
+		fail(m)
+		_, err := s.RevokePrincipal(context.Background(), "acme", "agent_principal:a")
+		require.ErrorContains(t, err, "boom", name)
+	}
+}
+
+func TestService_RevokePrincipalReportsAStoreFailure(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectBegin().WillReturnError(errors.New("boom"))
+	require.ErrorContains(t, m.svc.RevokePrincipal(context.Background(), "acme", "agent_principal:a"), "revoke principal")
+}

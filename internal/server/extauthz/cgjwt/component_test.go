@@ -631,3 +631,42 @@ func TestComponentVerify_ReadsTheCapabilitiesOfTheDescriptor(t *testing.T) {
 		})
 	}
 }
+
+// A descriptor that the daemon withholds after the first read must stop a token at
+// the next VerifyFresh call, although the cache time is long. Verify reads the cache.
+func TestComponentVerifyFresh_ReadsTheDescriptorOfTheDaemonForEachCall(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	var revoked atomic.Bool
+	doc := map[string]any{
+		"keys": []map[string]string{{
+			"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pub), "kid": "agent-1",
+		}},
+		"principal": "agent_principal:9", "tenant": "acme", "status": "active",
+	}
+	body, _ := json.Marshal(doc)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if revoked.Load() {
+			http.Error(w, "unknown key", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys") // TTL is one minute
+	mint := func() string { return mintAgentJWT(t, priv, "agent-1", "agent+jwt", time.Now().Add(55*time.Second)) }
+
+	if _, err := v.VerifyFresh(context.Background(), mint(), testMethod); err != nil {
+		t.Fatalf("VerifyFresh before the revoke: %v", err)
+	}
+	revoked.Store(true)
+
+	if _, err := v.Verify(context.Background(), mint(), testMethod); err != nil {
+		t.Fatalf("Verify reads the cache, so it still accepts inside the cache time: %v", err)
+	}
+	if _, err := v.VerifyFresh(context.Background(), mint(), testMethod); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("VerifyFresh after the revoke = %v, want ErrUnknownKey", err)
+	}
+	if _, err := v.Verify(context.Background(), mint(), testMethod); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("Verify after a failed fresh read must not use the dropped cache entry: %v", err)
+	}
+}
