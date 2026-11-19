@@ -74,18 +74,18 @@ func (c publishedCards) Card(ctx context.Context, tenant, agent string) (*a2a.Ag
 }
 
 // buildA2AInboundServer builds the inbound A2A listener (epic gibson#1367). The
-// TLS layer accepts the one SPIFFE ID of the Edge and no other peer. With no
-// Edge identity configured the daemon starts no listener, and the result is nil.
-func (d *daemonImpl) buildA2AInboundServer(ctx context.Context) (*httpSubsystem, error) {
+// TLS layer accepts the one SPIFFE ID of the Edge and no other peer. The listener
+// is required. A missing setting stops the daemon at start.
+func (d *daemonImpl) buildA2AInboundServer() (*httpSubsystem, error) {
 	const label = "A2A inbound listener"
 	svid := strings.TrimSpace(os.Getenv(EnvA2AInboundEdgeSVID))
 	if svid == "" {
-		d.logger.Info(ctx, "no Edge identity is configured; the inbound A2A listener is off", "env", EnvA2AInboundEdgeSVID)
-		return nil, nil
+		return nil, fmt.Errorf("%s: %s is not set. Set it to the SPIFFE ID of the Edge", label, EnvA2AInboundEdgeSVID)
 	}
 	addr := strings.TrimSpace(os.Getenv(EnvA2AInboundAddr))
 	if addr == "" {
-		return nil, fmt.Errorf("%s: %s is set and %s is not", label, EnvA2AInboundEdgeSVID, EnvA2AInboundAddr)
+		return nil, fmt.Errorf("%s: %s is not set. Set it to the listen address, for example \":8444\"",
+			label, EnvA2AInboundAddr)
 	}
 	edge, err := spiffeid.FromString(svid)
 	if err != nil {

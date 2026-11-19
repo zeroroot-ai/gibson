@@ -1732,18 +1732,16 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 	// The inbound A2A listener has its own port (epic gibson#1367). Only the Edge
 	// can call it.
-	a2aInboundSys, err := d.buildA2AInboundServer(ctx)
+	a2aInboundSys, err := d.buildA2AInboundServer()
 	if err != nil {
 		d.stopServices(ctx)
 		return fmt.Errorf("failed to build inbound A2A listener: %w", err)
 	}
-	if a2aInboundSys != nil {
-		go func() {
-			if serveErr := a2aInboundSys.Serve(ctx); serveErr != nil {
-				d.logger.Error(ctx, "inbound A2A listener error", "error", serveErr)
-			}
-		}()
-	}
+	go func() {
+		if serveErr := a2aInboundSys.Serve(ctx); serveErr != nil {
+			d.logger.Error(ctx, "inbound A2A listener error", "error", serveErr)
+		}
+	}()
 
 	// Start health server
 	// Health port defaults to 8080, can be overridden via config or GIBSON_HEALTH_PORT env var
