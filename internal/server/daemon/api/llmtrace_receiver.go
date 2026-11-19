@@ -279,7 +279,9 @@ func (r *TraceReceiver) deliver(ctx context.Context, attrs []*commonpb.KeyValue)
 	for _, ev := range obs.Events(r.now()) {
 		eng.Submit(ev)
 	}
-	if r.usage != nil {
+	// A failed call used no tokens and has no price, so it adds nothing to the
+	// platform budget.
+	if r.usage != nil && !obs.Failed() {
 		err := r.usage.RecordModelCall(ctx, ModelCallUsage{
 			Tenant: tenant.String(), CallID: obs.CallID, Mission: obs.Mission,
 			Tokens: obs.InputTokens + obs.OutputTokens, CostKnown: obs.Cost.Known, CostUSD: obs.Cost.Total,

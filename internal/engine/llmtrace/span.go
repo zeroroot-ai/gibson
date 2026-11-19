@@ -94,12 +94,28 @@ type Observation struct {
 	CacheWriteTokens int64
 	Cost             Cost
 
+	// HTTPStatus is the status that the gateway answered. It is 0 when the span
+	// has none. A status of 400 or more is a failed call: Items holds the
+	// request items only, and Failure holds the error text of the reply.
+	HTTPStatus int
+	Failure    string
+
 	// Items is the transcript as Open Responses items: the input items, then
 	// the output items.
 	Items []json.RawMessage
 }
 
-// FromSpan reads a model call from a span.
+// maxFailureBytes bounds the error text of a failed call. A provider error is
+// short, and the event is not the place for a page of HTML.
+const maxFailureBytes = 4096
+
+// Failed reports whether the gateway answered the call with an error status.
+func (o Observation) Failed() bool { return o.HTTPStatus >= 400 }
+
+// FromSpan reads a model call from a span. A call with an error status is a
+// record too. The gateway answers it with a plain text body, for example
+// "route not found", so the body is not decoded. The call holds the request
+// items, the status and the text of the reply, and it holds no tokens.
 func FromSpan(sp Span) (Observation, error) {
 	a := sp.Attributes
 	path := attrString(a, attrURLPath)
@@ -131,6 +147,7 @@ func FromSpan(sp Span) (Observation, error) {
 		OutputTokens:     attrInt(a, attrOutTokens),
 		CacheReadTokens:  attrInt(a, attrCacheRead),
 		CacheWriteTokens: attrInt(a, attrCacheWrite),
+		HTTPStatus:       int(attrInt(a, attrHTTPCode)),
 	}
 	if total := attrString(a, attrCostTotal); total != "" {
 		if _, err := strconv.ParseFloat(total, 64); err == nil {
@@ -144,6 +161,12 @@ func FromSpan(sp Span) (Observation, error) {
 	}
 	o.Items = in
 
+	if o.Failed() {
+		o.Failure = truncateText(respBody, maxFailureBytes)
+		o.InputTokens, o.OutputTokens, o.CacheReadTokens, o.CacheWriteTokens = 0, 0, 0, 0
+		o.Cost = Cost{}
+		return o, nil
+	}
 	if respBody != "" {
 		reply := respBody
 		if IsStreamBody(respBody) {
@@ -184,11 +207,22 @@ func (o Observation) Events(recordedAt time.Time) []brain.Event {
 		CacheReadTokens:    int(o.CacheReadTokens),
 		CacheWriteTokens:   int(o.CacheWriteTokens),
 		Cost:               cost,
+		Completion:         o.Failure,
+		HTTPStatus:         o.HTTPStatus,
 	}}
-	if o.Mission != "" {
+	// A failed call used no tokens, so it adds no usage to the mission.
+	if o.Mission != "" && !o.Failed() {
 		events = append(events, brain.TokenUsed{MissionID: o.Mission, Tokens: o.InputTokens + o.OutputTokens, CallID: o.CallID})
 	}
 	return events
+}
+
+// truncateText cuts s to at most n bytes, on a rune boundary.
+func truncateText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "")
 }
 
 func attrString(a map[string]any, k string) string {

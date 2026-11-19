@@ -606,6 +606,13 @@ func TestGatewayFixture(t *testing.T) {
 		if after := len(provider.Requests()); after != before {
 			t.Errorf("provider got %d new request, want 0", after-before)
 		}
+		// A refused call is a record too. The span of the refusal holds the request
+		// body and the status. The daemon reads it as a failed model call.
+		sp := otlp.waitSpan(t, "marker-forbidden")
+		if got := sp.All["http.response.status_code"]; fmt.Sprint(got) != "403" {
+			t.Errorf("span status = %v, want 403", got)
+		}
+		dumpSpan(t, "messages_denied", sp)
 	})
 
 	t.Run("e_authorization_service_down_gives_403", func(t *testing.T) {

@@ -250,3 +250,49 @@ func TestFoldStream_ResponsesWithoutACompletedEvent(t *testing.T) {
 		t.Errorf("folded reply = %s, want the text hello", raw)
 	}
 }
+
+// messages_denied is a real span of agentgateway v1.7.0: the authorization
+// service refused the model, and the gateway answered 403 with no body.
+func TestFromSpan_ARefusedCallIsARecordWithItsStatus(t *testing.T) {
+	o := mustObserve(t, "messages_denied")
+	if !o.Failed() || o.HTTPStatus != 403 {
+		t.Fatalf("status = %d, failed = %v, want 403 and true", o.HTTPStatus, o.Failed())
+	}
+	if got := itemTypes(t, o.Items); len(got) != 3 {
+		t.Fatalf("items = %v, want the three request items", got)
+	}
+	if o.InputTokens != 0 || o.OutputTokens != 0 {
+		t.Errorf("tokens = %d and %d, want zero", o.InputTokens, o.OutputTokens)
+	}
+}
+
+// A hand made span: the gateway answers a failed call with a plain text body.
+// The body is not JSON, and the call still gives its record. The span is the
+// real span messages_denied with the status and the body that the cluster test
+// of 2026-11-19 logged ("route not found", 404, and "connection timed out", 503).
+func TestFromSpan_AFailedCallWithATextBodyIsNotDropped(t *testing.T) {
+	for _, tc := range []struct {
+		status int64
+		body   string
+	}{{404, "route not found"}, {503, "connection timed out"}} {
+		sp := loadSpan(t, "messages_denied")
+		sp.Attributes["http.response.status_code"] = tc.status
+		sp.Attributes["gibson.response_body"] = tc.body
+		sp.Attributes["gen_ai.usage.input_tokens"] = int64(7) // a failed call holds no tokens
+		o, err := FromSpan(sp)
+		if err != nil {
+			t.Fatalf("status %d: FromSpan: %v", tc.status, err)
+		}
+		if o.HTTPStatus != int(tc.status) || o.Failure != tc.body || o.InputTokens != 0 {
+			t.Errorf("observation = %+v", o)
+		}
+		events := o.Events(time.Unix(1, 0))
+		if len(events) != 1 {
+			t.Fatalf("events = %d, want the call event only: a failed call adds no usage", len(events))
+		}
+		ev, ok := events[0].(brain.LlmCallObserved)
+		if !ok || ev.HTTPStatus != int(tc.status) || ev.Completion != tc.body || ev.PromptTokens != 0 || len(ev.Items) != 3 {
+			t.Errorf("event = %+v", events[0])
+		}
+	}
+}

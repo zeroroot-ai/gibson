@@ -56,6 +56,10 @@ type LlmCall struct {
 	// empty when the gateway has no price for the model. Empty means unknown. It
 	// is never "0" for an unpriced model.
 	Cost string
+	// HTTPStatus is the status that the gateway answered. It is 0 when the
+	// source does not know it. A status of 400 or more means that the call
+	// failed, and Completion then holds the error text of the reply.
+	HTTPStatus int
 	// RecordedAtUnixNano stamps when the daemon observed this call, carried on
 	// the event rather than read from time.Now() during Reduce, so a later
 	// retention sweep (FlightRecorderRetentionSwept) replays deterministically
@@ -122,6 +126,9 @@ type LlmCallObserved struct {
 	CacheReadTokens  int               `json:",omitempty"`
 	CacheWriteTokens int               `json:",omitempty"`
 	Cost             string            `json:",omitempty"`
+	// HTTPStatus is the status of the gateway reply. A status of 400 or more
+	// means that the call failed. Completion then holds the error text.
+	HTTPStatus int `json:",omitempty"`
 }
 
 func (LlmCallObserved) Kind() string { return "llm_call.observed" }
@@ -183,6 +190,9 @@ func applyLlmCallObserved(w *World, e LlmCallObserved) {
 			if c.Cost == "" {
 				c.Cost = e.Cost
 			}
+			if c.HTTPStatus == 0 {
+				c.HTTPStatus = e.HTTPStatus
+			}
 			q.Close()
 			return
 		}
@@ -203,6 +213,7 @@ func applyLlmCallObserved(w *World, e LlmCallObserved) {
 		CacheReadTokens:     e.CacheReadTokens,
 		CacheWriteTokens:    e.CacheWriteTokens,
 		Cost:                e.Cost,
+		HTTPStatus:          e.HTTPStatus,
 	})
 }
 
@@ -309,6 +320,7 @@ type LlmCallSnapshot struct {
 	CacheReadTokens     int               `json:",omitempty"`
 	CacheWriteTokens    int               `json:",omitempty"`
 	Cost                string            `json:",omitempty"`
+	HTTPStatus          int               `json:",omitempty"`
 }
 
 // TotalTokens is the prompt+completion token count — the per-call cost signal
@@ -337,6 +349,7 @@ func (w *World) LlmCallSnapshot() []LlmCallSnapshot {
 			CacheReadTokens:     c.CacheReadTokens,
 			CacheWriteTokens:    c.CacheWriteTokens,
 			Cost:                c.Cost,
+			HTTPStatus:          c.HTTPStatus,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CallID < out[j].CallID })

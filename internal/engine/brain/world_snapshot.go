@@ -528,6 +528,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			CacheReadTokens:     c.CacheReadTokens,
 			CacheWriteTokens:    c.CacheWriteTokens,
 			Cost:                c.Cost,
+			HTTPStatus:          c.HTTPStatus,
 		})
 	}
 
