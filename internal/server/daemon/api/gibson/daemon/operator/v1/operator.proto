@@ -386,6 +386,35 @@ service DaemonOperatorService {
     };
   }
 
+  // GetTenantOutsideAgents returns the outside A2A agents that one tenant
+  // registered, from the records of the daemon (gibson#1403). The tenant
+  // operator pulls it for each tenant and renders the backend and the route of
+  // each agent into the namespace of the Agent gateway. The daemon holds the
+  // records and cannot write cluster resources (ADR-0023). The reply holds the
+  // name of the credential secret and never a credential value.
+  rpc GetTenantOutsideAgents(GetTenantOutsideAgentsRequest) returns (GetTenantOutsideAgentsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetOutsideAgentCredential returns the content of the credential Secret of
+  // one outside agent (gibson#1403). The tenant operator writes the Secret in
+  // the namespace of the Agent gateway. The daemon reads the tenant secret that
+  // the record names, keeps no copy and never calls the agent with the value.
+  // The handler serves only the direct-dial SPIFFE peer of the tenant operator.
+  rpc GetOutsideAgentCredential(GetOutsideAgentCredentialRequest) returns (GetOutsideAgentCredentialResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
   // ListDesiredCatalogPlugins returns every (tenant, catalog plugin) pair a
   // tenant enabled (gibson#815). The tenant-operator pulls it and runs one
   // instance of the plugin for each pair. The daemon holds the desired state
@@ -967,6 +996,43 @@ message GetTenantModelProvidersResponse {
   repeated DesiredModelProvider providers = 1;
   // skipped lists each record that has no gateway route, as "<name>: <reason>".
   repeated string skipped = 2;
+}
+
+// GetTenantOutsideAgentsRequest names one tenant.
+message GetTenantOutsideAgentsRequest {
+  // tenant_id is the tenant slug. Required.
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+}
+
+// DesiredOutsideAgent is one outside agent record of a tenant.
+message DesiredOutsideAgent {
+  // name is the name of the agent in the tenant. It is a DNS label.
+  string name = 1;
+  // a2a_url is the HTTPS URL of the A2A endpoint of the agent.
+  string a2a_url = 2;
+  // credential_secret is the name of the tenant secret that holds the
+  // credential, or is empty when the agent needs none. It is a name and never a
+  // value.
+  string credential_secret = 3;
+}
+
+message GetTenantOutsideAgentsResponse {
+  repeated DesiredOutsideAgent agents = 1;
+}
+
+// GetOutsideAgentCredentialRequest asks for the Secret content of one outside
+// agent.
+message GetOutsideAgentCredentialRequest {
+  // tenant_id is the tenant slug. Required.
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // name is the name of the outside agent. The daemon reads the credential
+  // secret that the record of this agent names. Required.
+  string name = 2 [(buf.validate.field).string = { min_len: 1, max_len: 255 }];
+}
+
+message GetOutsideAgentCredentialResponse {
+  // data is the content of the Secret, by the key names that the gateway reads.
+  map<string, bytes> data = 1;
 }
 
 // ---------------------------------------------------------------------------

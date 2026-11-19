@@ -43,6 +43,8 @@ const (
 	DaemonOperatorService_GetConnectorCredential_FullMethodName        = "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorCredential"
 	DaemonOperatorService_GetModelProviderCredential_FullMethodName    = "/gibson.daemon.operator.v1.DaemonOperatorService/GetModelProviderCredential"
 	DaemonOperatorService_GetTenantModelProviders_FullMethodName       = "/gibson.daemon.operator.v1.DaemonOperatorService/GetTenantModelProviders"
+	DaemonOperatorService_GetTenantOutsideAgents_FullMethodName        = "/gibson.daemon.operator.v1.DaemonOperatorService/GetTenantOutsideAgents"
+	DaemonOperatorService_GetOutsideAgentCredential_FullMethodName     = "/gibson.daemon.operator.v1.DaemonOperatorService/GetOutsideAgentCredential"
 	DaemonOperatorService_ListDesiredCatalogPlugins_FullMethodName     = "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredCatalogPlugins"
 	DaemonOperatorService_ReportCatalogPluginStatus_FullMethodName     = "/gibson.daemon.operator.v1.DaemonOperatorService/ReportCatalogPluginStatus"
 )
@@ -222,6 +224,19 @@ type DaemonOperatorServiceClient interface {
 	// the list. It is in skipped, with the reason. The reply holds the name of
 	// the credential secret and never a credential value.
 	GetTenantModelProviders(ctx context.Context, in *GetTenantModelProvidersRequest, opts ...grpc.CallOption) (*GetTenantModelProvidersResponse, error)
+	// GetTenantOutsideAgents returns the outside A2A agents that one tenant
+	// registered, from the records of the daemon (gibson#1403). The tenant
+	// operator pulls it for each tenant and renders the backend and the route of
+	// each agent into the namespace of the Agent gateway. The daemon holds the
+	// records and cannot write cluster resources (ADR-0023). The reply holds the
+	// name of the credential secret and never a credential value.
+	GetTenantOutsideAgents(ctx context.Context, in *GetTenantOutsideAgentsRequest, opts ...grpc.CallOption) (*GetTenantOutsideAgentsResponse, error)
+	// GetOutsideAgentCredential returns the content of the credential Secret of
+	// one outside agent (gibson#1403). The tenant operator writes the Secret in
+	// the namespace of the Agent gateway. The daemon reads the tenant secret that
+	// the record names, keeps no copy and never calls the agent with the value.
+	// The handler serves only the direct-dial SPIFFE peer of the tenant operator.
+	GetOutsideAgentCredential(ctx context.Context, in *GetOutsideAgentCredentialRequest, opts ...grpc.CallOption) (*GetOutsideAgentCredentialResponse, error)
 	// ListDesiredCatalogPlugins returns every (tenant, catalog plugin) pair a
 	// tenant enabled (gibson#815). The tenant-operator pulls it and runs one
 	// instance of the plugin for each pair. The daemon holds the desired state
@@ -471,6 +486,26 @@ func (c *daemonOperatorServiceClient) GetTenantModelProviders(ctx context.Contex
 	return out, nil
 }
 
+func (c *daemonOperatorServiceClient) GetTenantOutsideAgents(ctx context.Context, in *GetTenantOutsideAgentsRequest, opts ...grpc.CallOption) (*GetTenantOutsideAgentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTenantOutsideAgentsResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_GetTenantOutsideAgents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonOperatorServiceClient) GetOutsideAgentCredential(ctx context.Context, in *GetOutsideAgentCredentialRequest, opts ...grpc.CallOption) (*GetOutsideAgentCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOutsideAgentCredentialResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_GetOutsideAgentCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonOperatorServiceClient) ListDesiredCatalogPlugins(ctx context.Context, in *ListDesiredCatalogPluginsRequest, opts ...grpc.CallOption) (*ListDesiredCatalogPluginsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListDesiredCatalogPluginsResponse)
@@ -666,6 +701,19 @@ type DaemonOperatorServiceServer interface {
 	// the list. It is in skipped, with the reason. The reply holds the name of
 	// the credential secret and never a credential value.
 	GetTenantModelProviders(context.Context, *GetTenantModelProvidersRequest) (*GetTenantModelProvidersResponse, error)
+	// GetTenantOutsideAgents returns the outside A2A agents that one tenant
+	// registered, from the records of the daemon (gibson#1403). The tenant
+	// operator pulls it for each tenant and renders the backend and the route of
+	// each agent into the namespace of the Agent gateway. The daemon holds the
+	// records and cannot write cluster resources (ADR-0023). The reply holds the
+	// name of the credential secret and never a credential value.
+	GetTenantOutsideAgents(context.Context, *GetTenantOutsideAgentsRequest) (*GetTenantOutsideAgentsResponse, error)
+	// GetOutsideAgentCredential returns the content of the credential Secret of
+	// one outside agent (gibson#1403). The tenant operator writes the Secret in
+	// the namespace of the Agent gateway. The daemon reads the tenant secret that
+	// the record names, keeps no copy and never calls the agent with the value.
+	// The handler serves only the direct-dial SPIFFE peer of the tenant operator.
+	GetOutsideAgentCredential(context.Context, *GetOutsideAgentCredentialRequest) (*GetOutsideAgentCredentialResponse, error)
 	// ListDesiredCatalogPlugins returns every (tenant, catalog plugin) pair a
 	// tenant enabled (gibson#815). The tenant-operator pulls it and runs one
 	// instance of the plugin for each pair. The daemon holds the desired state
@@ -753,6 +801,12 @@ func (UnimplementedDaemonOperatorServiceServer) GetModelProviderCredential(conte
 }
 func (UnimplementedDaemonOperatorServiceServer) GetTenantModelProviders(context.Context, *GetTenantModelProvidersRequest) (*GetTenantModelProvidersResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTenantModelProviders not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) GetTenantOutsideAgents(context.Context, *GetTenantOutsideAgentsRequest) (*GetTenantOutsideAgentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTenantOutsideAgents not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) GetOutsideAgentCredential(context.Context, *GetOutsideAgentCredentialRequest) (*GetOutsideAgentCredentialResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetOutsideAgentCredential not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) ListDesiredCatalogPlugins(context.Context, *ListDesiredCatalogPluginsRequest) (*ListDesiredCatalogPluginsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListDesiredCatalogPlugins not implemented")
@@ -1195,6 +1249,42 @@ func _DaemonOperatorService_GetTenantModelProviders_Handler(srv interface{}, ctx
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonOperatorService_GetTenantOutsideAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantOutsideAgentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).GetTenantOutsideAgents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_GetTenantOutsideAgents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).GetTenantOutsideAgents(ctx, req.(*GetTenantOutsideAgentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonOperatorService_GetOutsideAgentCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOutsideAgentCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).GetOutsideAgentCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_GetOutsideAgentCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).GetOutsideAgentCredential(ctx, req.(*GetOutsideAgentCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonOperatorService_ListDesiredCatalogPlugins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListDesiredCatalogPluginsRequest)
 	if err := dec(in); err != nil {
@@ -1329,6 +1419,14 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTenantModelProviders",
 			Handler:    _DaemonOperatorService_GetTenantModelProviders_Handler,
+		},
+		{
+			MethodName: "GetTenantOutsideAgents",
+			Handler:    _DaemonOperatorService_GetTenantOutsideAgents_Handler,
+		},
+		{
+			MethodName: "GetOutsideAgentCredential",
+			Handler:    _DaemonOperatorService_GetOutsideAgentCredential_Handler,
 		},
 		{
 			MethodName: "ListDesiredCatalogPlugins",

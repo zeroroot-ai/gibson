@@ -163,6 +163,16 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 		reason:  "the ModelProvider sync loop pulls the provider records of each tenant (gibson#1387); the handler also checks the TLS peer",
 	},
 
+	daemonoperatorv1.DaemonOperatorService_GetTenantOutsideAgents_FullMethodName: {
+		allowed: true,
+		reason:  "the outside agent sync loop pulls the records of each tenant (gibson#1403); the handler also checks the TLS peer",
+	},
+
+	daemonoperatorv1.DaemonOperatorService_GetOutsideAgentCredential_FullMethodName: {
+		allowed: true,
+		reason:  "the outside agent sync loop writes the credential Secret of the gateway (gibson#1403); the handler also checks the TLS peer",
+	},
+
 	// --- operator-denied: least privilege, no caller wired ---
 	daemonoperatorv1.DaemonOperatorService_UpsertTenantQuota_FullMethodName: {
 		allowed: false,

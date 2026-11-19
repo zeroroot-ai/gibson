@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"log/slog"
 	"os"
 	"strings"
@@ -135,6 +136,10 @@ type DaemonServer struct {
 	// call the RPC (the tenant operator).
 	modelCredStore ConnectorSecretResolver
 	modelCredPeer  string
+
+	// outsideAgents backs GetTenantOutsideAgents and GetOutsideAgentCredential
+	// (gibson#1403). The tenant secret store and the peer are the two above.
+	outsideAgents outsideagentstore.Store
 
 	// cgMinter / cgVerifier back the RenewCapabilityGrant RPC.
 	// liveMissions gates CG renewal on the mission run still executing
