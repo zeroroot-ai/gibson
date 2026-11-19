@@ -14,6 +14,7 @@
 package helpers
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -307,6 +308,68 @@ func (g *GatewayAccess) RawCall(
 	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	return resp.StatusCode, string(b), nil
+}
+
+// StreamResponse sends one streamed Open Responses call with the headers of the
+// route and the grant of the work item. It reads the server-sent events to the
+// end. It returns the text of the deltas and whether response.completed came.
+// The daemon has no streamed call, so the stream reader lives in the test.
+func (g *GatewayAccess) StreamResponse(ctx context.Context, r modelclient.Request) (string, bool, error) {
+	r.Model, r.Stream = g.Model, true
+	body, err := json.Marshal(r)
+	if err != nil {
+		return "", false, fmt.Errorf("encode the request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(g.URL, "/")+"/v1/responses", strings.NewReader(string(body)))
+	if err != nil {
+		return "", false, fmt.Errorf("build the request: %w", err)
+	}
+	for k, v := range g.RouteHeaders {
+		req.Header.Set(k, v)
+	}
+	req.Header.Set("x-capability-grant", g.Grant)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := g.http.Do(req)
+	if err != nil {
+		return "", false, fmt.Errorf("send to the gateway: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode/100 != 2 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", false, fmt.Errorf("the gateway answered %d: %s", resp.StatusCode, b)
+	}
+	var text strings.Builder
+	completed := false
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
+	for sc.Scan() {
+		data, ok := strings.CutPrefix(sc.Text(), "data:")
+		data = strings.TrimSpace(data)
+		if !ok || data == "" || data == "[DONE]" {
+			continue
+		}
+		var ev struct {
+			Type  string `json:"type"`
+			Delta string `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			return "", false, fmt.Errorf("decode a stream event: %w", err)
+		}
+		switch ev.Type {
+		case "response.output_text.delta":
+			text.WriteString(ev.Delta)
+		case "response.completed":
+			completed = true
+		case "response.failed", "error":
+			return "", false, fmt.Errorf("the stream failed: %s", data)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", false, fmt.Errorf("read the stream: %w", err)
+	}
+	return text.String(), completed, nil
 }
 
 // IsRefusal reports whether a status is a refusal by policy.

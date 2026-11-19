@@ -161,68 +161,6 @@ func TestRespond_StructuredOutput(t *testing.T) {
 	}
 }
 
-func TestStream_TextAndFinalResponse(t *testing.T) {
-	sse := "event: response.created\ndata: {\"type\":\"response.created\"}\n\n" +
-		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hel\"}\n\n" +
-		": keep-alive\n\n" +
-		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"lo\"}\n\n" +
-		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":" +
-		strings.Join(strings.Fields(plainReply), " ") + "}\n\n" +
-		"data: [DONE]\n\n"
-	var body string
-	c, _ := gateway(t, func(w http.ResponseWriter, r *http.Request, b []byte) {
-		body = string(b)
-		if r.Header.Get("Accept") != "text/event-stream" {
-			t.Errorf("accept = %q", r.Header.Get("Accept"))
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, sse)
-	})
-	s, err := c.Stream(context.Background(), testCaller, testTarget, Request{Input: []Item{UserMessage("hi")}})
-	if err != nil {
-		t.Fatalf("Stream: %v", err)
-	}
-	defer func() { _ = s.Close() }()
-	var text strings.Builder
-	var final *Response
-	for s.Next() {
-		ev := s.Event()
-		text.WriteString(ev.Delta)
-		if ev.Response != nil {
-			final = ev.Response
-		}
-	}
-	if err := s.Err(); err != nil {
-		t.Fatalf("Err: %v", err)
-	}
-	if text.String() != "hello" {
-		t.Errorf("text = %q", text.String())
-	}
-	if final == nil || final.Usage.OutputTokens != 3 {
-		t.Errorf("final = %+v", final)
-	}
-	if !strings.Contains(body, `"stream":true`) {
-		t.Errorf("body has no stream flag: %s", body)
-	}
-}
-
-func TestStream_FailureEvent(t *testing.T) {
-	c, _ := gateway(t, func(w http.ResponseWriter, _ *http.Request, _ []byte) {
-		_, _ = io.WriteString(w, "data: {\"type\":\"error\",\"code\":\"overloaded\",\"message\":\"busy\"}\n\n")
-	})
-	s, err := c.Stream(context.Background(), testCaller, testTarget, Request{Input: []Item{UserMessage("hi")}})
-	if err != nil {
-		t.Fatalf("Stream: %v", err)
-	}
-	defer func() { _ = s.Close() }()
-	for s.Next() {
-	}
-	var f *ResponseFailure
-	if !errors.As(s.Err(), &f) || f.Code != "overloaded" {
-		t.Fatalf("Err = %v, want a ResponseFailure", s.Err())
-	}
-}
-
 func TestRespond_GatewayRefusals(t *testing.T) {
 	cases := map[int]struct{ refused, noRoute, retry bool }{
 		http.StatusForbidden:          {refused: true},

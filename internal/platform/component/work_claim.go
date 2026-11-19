@@ -135,9 +135,9 @@ func (s *ComponentServiceServer) resolveClaimedWork(ctx context.Context, tenant,
 
 // claimedWorkOwner resolves the claim of the work item that a work-scoped RPC
 // names, and returns the tenant that owns it. A call with no work id has no
-// owner and no claim to check. Complete, CompleteStream, CompleteWithTools,
-// CompleteStructured, CreateMission and GetMissionRunHistory use it, because
-// the work id selects a mission, a slot pin or a usage record for the caller.
+// owner and no claim to check. ResolveModel, ResolveAgent, CreateMission and
+// GetMissionRunHistory use it, because the work id selects a mission, a slot or
+// a run record for the caller.
 func (s *ComponentServiceServer) claimedWorkOwner(ctx context.Context, tenant, workID string) (string, error) {
 	if workID == "" {
 		return "", nil

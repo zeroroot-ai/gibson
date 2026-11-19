@@ -368,25 +368,10 @@ func aaifOpenResponsesPoints(
 	})
 
 	t.Run("a streamed call is observed with all items, tokens and cost", func(t *testing.T) {
-		c, err := g.Client()
-		require.NoError(t, err)
-		stream, err := c.Stream(s.ctx, g.Caller(), g.Target(), toolRoundTrip())
-		require.NoError(t, err, "open the stream")
-		var text strings.Builder
-		completed := false
-		for stream.Next() {
-			ev := stream.Event()
-			switch ev.Type {
-			case modelclient.EventTextDelta:
-				text.WriteString(ev.Delta)
-			case modelclient.EventCompleted:
-				completed = true
-			}
-		}
-		require.NoError(t, stream.Err(), "read the stream")
-		require.NoError(t, stream.Close())
+		text, completed, err := g.StreamResponse(s.ctx, toolRoundTrip())
+		require.NoError(t, err, "the streamed call")
 		require.True(t, completed, "the stream must end with response.completed")
-		require.Equal(t, aaifMockReply, text.String())
+		require.Equal(t, aaifMockReply, text)
 
 		helpers.Eventually(t, aaifTraceTimeout, "two llm_call.observed events", func() (bool, string) {
 			n := len(s.observedCalls(t, work.MissionID))

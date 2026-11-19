@@ -210,8 +210,7 @@ func (c *Client) Respond(ctx context.Context, caller Caller, target Target, req 
 	return &out, nil
 }
 
-// ResponseFailure is a reply with status 2xx that holds an error object, or a
-// stream that ended with a failure event.
+// ResponseFailure is a reply with status 2xx that holds an error object.
 type ResponseFailure struct {
 	Code    string
 	Message string
