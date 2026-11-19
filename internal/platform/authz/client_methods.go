@@ -255,7 +255,17 @@ func (f *fgaAuthorizer) Delete(ctx context.Context, tuples []Tuple) error {
 		}
 	}
 
-	_, err := f.client.DeleteTuples(callCtx).Body(deletes).Execute()
+	// OpenFGA rejects the whole batch when one tuple to delete is absent, unless
+	// the request says to ignore a missing delete (on_missing, server 1.10 and
+	// later, the chart pins 1.21). The interface contract is per-tuple
+	// idempotency: an absent tuple is a no-op and the present ones go.
+	_, err := f.client.DeleteTuples(callCtx).
+		Options(fgaclient.ClientWriteOptions{
+			Conflict: fgaclient.ClientWriteConflictOptions{
+				OnMissingDeletes: fgaclient.CLIENT_WRITE_REQUEST_ON_MISSING_DELETES_IGNORE,
+			},
+		}).
+		Body(deletes).Execute()
 
 	durationMs := time.Since(start).Milliseconds()
 	span.SetAttributes(attribute.Int64("authz.duration_ms", durationMs))

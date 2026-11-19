@@ -461,6 +461,12 @@ func (s *AgentSkillService) DeleteAgentSkill(
 	if err != nil {
 		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
 	}
+	// A name that no version holds is NotFound, before any tuple work. The first
+	// run of the Agent Skills exit test deleted a name that was never published
+	// and read Internal from FGA.
+	if _, gerr := s.store.Get(ctx, tenant, req.GetName(), ""); gerr != nil {
+		return nil, agentSkillStatus(ctx, rpc, gerr)
+	}
 	// The tuples go first. A failure here leaves the content in place, and the
 	// caller can retry.
 	tuples := []authz.Tuple{{User: "tenant:" + tenant, Relation: "owner", Object: object}}
