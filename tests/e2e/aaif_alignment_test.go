@@ -293,6 +293,31 @@ func (s *aaifSetup) waitObserved(
 	return found
 }
 
+// requireCallDetail reads the call through GetLlmCall, the RPC that the dashboard
+// calls for the model call view (dashboard#373), and checks the record: the
+// request items hold the tool result that the agent sent, the output items hold
+// the reply of the mock, and the provider and the status are set. The test uses
+// its own identity, the one that reads the Timeline.
+func (s *aaifSetup) requireCallDetail(t *testing.T, observed helpers.ObservedLlmCall) {
+	t.Helper()
+	resp, err := s.world.GetLlmCall(s.ctx, &worldpb.GetLlmCallRequest{CallId: observed.CallID})
+	require.NoError(t, err, "GetLlmCall(%s)", observed.CallID)
+	d := resp.GetCall()
+	require.NotNil(t, d, "GetLlmCall returned no call")
+	require.Equal(t, observed.CallID, d.GetCallId())
+	require.NotEmpty(t, d.GetRequestItems(), "the call must hold its request items")
+	require.Contains(t, strings.Join(d.GetRequestItems(), "\n"), aaifToolResult,
+		"the request items must hold the tool result that the agent sent")
+	require.NotEmpty(t, d.GetOutputItems(), "a call that worked must hold its output items")
+	require.Contains(t, strings.Join(d.GetOutputItems(), "\n"), aaifMockReply, "the output items must hold the reply")
+	require.NotEmpty(t, d.GetProvider(), "the call must name the provider")
+	require.Equal(t, observed.Provider, d.GetProvider())
+	require.EqualValues(t, http.StatusOK, d.GetHttpStatus(), "the status of a call that worked")
+	require.Empty(t, d.GetErrorText(), "a call that worked has no error text")
+	require.EqualValues(t, aaifMockPromptTokens, d.GetPromptTokens())
+	require.EqualValues(t, aaifMockOutputTokens, d.GetCompletionTokens())
+}
+
 func itemsContain(c helpers.ObservedLlmCall, want string) bool {
 	for _, it := range c.Items {
 		if strings.Contains(it, want) {
@@ -333,6 +358,7 @@ func aaifOpenResponsesPoints(
 		call := s.waitObserved(t, work.MissionID, "llm_call.observed holds the call with the tool round trip",
 			func(c helpers.ObservedLlmCall) bool { return itemsContain(c, aaifToolResult) })
 		requireCallPoints(t, call, aaifMockReply)
+		s.requireCallDetail(t, call)
 		require.True(t, itemsContain(call, "function_call"), "the event must hold the prior tool call; items: %q", call.Items)
 		require.True(t, itemsContain(call, "function_call_output"), "the event must hold the tool result; items: %q", call.Items)
 		if wantCost {
