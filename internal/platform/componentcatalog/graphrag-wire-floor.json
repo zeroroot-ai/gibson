@@ -1,5 +1,5 @@
 {
-  "floor": "v0.202.0",
+  "floor": "v0.210.0",
   "reserved": [
     "AttackPattern.data_sources",
     "AttackPattern.platforms",
@@ -9,6 +9,7 @@
     "Certificate.san",
     "Certificate.serial_number",
     "DiscoveryResult.compliance_signals",
+    "DiscoveryResult.evidence",
     "Domain.created_date",
     "Domain.expiry_date",
     "Domain.registrar",
