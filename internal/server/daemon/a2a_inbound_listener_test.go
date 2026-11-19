@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
 	"github.com/zeroroot-ai/gibson/internal/server/a2aserver"
@@ -120,11 +121,51 @@ func TestPublishedCards_Failures(t *testing.T) {
 	require.ErrorContains(t, err, "build the inbound card of agent recon")
 }
 
+// checkAuthorizer answers Check from a set of allowed questions and records each one.
+type checkAuthorizer struct {
+	authz.Authorizer
+	allow map[string]bool
+	err   error
+	asked []string
+}
+
+func (c *checkAuthorizer) Check(_ context.Context, user, relation, object string) (bool, error) {
+	key := user + "|" + relation + "|" + object
+	c.asked = append(c.asked, key)
+	return c.allow[key], c.err
+}
+
+func TestInboundGrants_CanOriginateAsksFGAForTheCallerOnThePublishedDefinition(t *testing.T) {
+	az := &checkAuthorizer{allow: map[string]bool{"agent_principal:9|can_originate|published_mission:acme/recon": true}}
+	g := inboundGrants{authorizer: az}
+	caller := a2aserver.InboundCaller{Tenant: "acme", Subject: "agent_principal:9"}
+
+	ok, err := g.CanOriginate(context.Background(), caller, "recon")
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	ok, err = g.CanOriginate(context.Background(), caller, "scanner")
+	require.NoError(t, err)
+	assert.False(t, ok, "no grant to another agent")
+	ok, err = g.CanOriginate(context.Background(), a2aserver.InboundCaller{Tenant: "other", Subject: "agent_principal:9"}, "recon")
+	require.NoError(t, err)
+	assert.False(t, ok, "the grant of one tenant is not the grant of another")
+
+	_, err = g.CanOriginate(context.Background(), caller, "Bad/Name")
+	require.Error(t, err)
+	az.err = errors.New("fga down")
+	_, err = g.CanOriginate(context.Background(), caller, "recon")
+	require.ErrorContains(t, err, "check can_originate")
+}
+
 func inboundListenerDaemon(t *testing.T, mutate func(d *daemonImpl)) *daemonImpl {
 	t.Helper()
 	return a2aListenerDaemon(t, func(d *daemonImpl) {
 		d.inboundMissions = publishedFor("recon")
 		d.compRegistry = cardRegistry{}
+		d.authorizer = &checkAuthorizer{allow: map[string]bool{
+			"agent_principal:9|can_originate|published_mission:acme/recon": true,
+		}}
 		d.daemonServer = api.NewDaemonServer(nil, nil, nil)
 		d.pool = stubPool{}
 		if mutate != nil {
@@ -153,6 +194,7 @@ func TestBuildA2AInboundServer_RefusesAnIncompleteSetup(t *testing.T) {
 			"not available"},
 		{"no component registry", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.compRegistry = nil },
 			"not available"},
+		{"no authorizer", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.authorizer = nil }, "not available"},
 		{"no daemon server", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.daemonServer = nil },
 			"the daemon server is not available"},
 		{"no brain registry", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.brainRegistry = nil },
@@ -207,9 +249,10 @@ func TestBuildA2AInboundServer_ServesThePublishedCardAndNothingElse(t *testing.T
 	rec := get("/a2a/inbound/recon/.well-known/agent-card.json")
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "https://edge.example/a2a/inbound/recon", "the trailing slash of the URL is trimmed")
-	assert.Equal(t, http.StatusNotFound, get("/a2a/inbound/scanner/.well-known/agent-card.json").Code)
+	assert.Equal(t, http.StatusForbidden, get("/a2a/inbound/scanner/.well-known/agent-card.json").Code,
+		"an agent that the caller has no grant to: the daemon refuses")
 
-	// A message to an agent with no published definition gets a rejected Task.
+	// A message to an agent that the caller has no grant to is refused by the daemon.
 	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":` +
 		`{"messageId":"m","role":"ROLE_USER","parts":[{"text":"scan"}]}}}`
 	req := httptest.NewRequest(http.MethodPost, "/a2a/inbound/scanner", strings.NewReader(body))
@@ -219,5 +262,5 @@ func TestBuildA2AInboundServer_ServesThePublishedCardAndNothingElse(t *testing.T
 	rpc := httptest.NewRecorder()
 	sub.srv.Handler.ServeHTTP(rpc, req)
 	assert.Equal(t, http.StatusOK, rpc.Code)
-	assert.Contains(t, rpc.Body.String(), "TASK_STATE_REJECTED")
+	assert.Contains(t, rpc.Body.String(), "no grant to this agent")
 }

@@ -120,7 +120,7 @@ const sendBody = `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"mess
 
 func TestInboundRPC_SendMessageStartsARunForTheAgentInThePath(t *testing.T) {
 	starts := &fakeStarts{task: &a2a.Task{ID: "m-1", ContextID: "m-1", Status: a2a.TaskStatus{State: a2a.TaskStateSubmitted}}}
-	h := NewInboundHandler(starts, &recordingCards{})
+	h := NewInboundHandler(starts, &recordingCards{}, allowGrants)
 	// A forged route header and mission header change nothing.
 	headers := map[string]string{
 		"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9",
@@ -176,7 +176,7 @@ func TestInboundRPC_Refusals(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := rpcCall(NewInboundHandler(tt.starts, &recordingCards{}), tt.path, tt.body, tt.headers)
+			rec := rpcCall(NewInboundHandler(tt.starts, &recordingCards{}, allowGrants), tt.path, tt.body, tt.headers)
 			assert.Equal(t, tt.wantStatus, rec.Code)
 			assert.Contains(t, rec.Body.String(), tt.wantBody)
 			assert.NotContains(t, rec.Body.String(), "redis is down", "an internal cause never reaches the caller")
@@ -204,7 +204,7 @@ func TestInboundRPC_GetAndCancelActForTheCallerOfTheHeaders(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			starts := &fakeStarts{task: &a2a.Task{ID: "m-1", ContextID: "m-1",
 				Status: a2a.TaskStatus{State: a2a.TaskStateWorking}}}
-			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), "/a2a/inbound/recon", body, trusted)
+			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, allowGrants), "/a2a/inbound/recon", body, trusted)
 
 			require.Equal(t, http.StatusOK, rec.Code)
 			assert.Contains(t, rec.Body.String(), "TASK_STATE_WORKING")
@@ -234,7 +234,7 @@ func TestInboundRPC_GetAndCancelRefusals(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			starts := &fakeStarts{err: tt.err}
-			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), "/a2a/inbound/recon", tt.body, trusted)
+			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, allowGrants), "/a2a/inbound/recon", tt.body, trusted)
 			assert.Equal(t, http.StatusOK, rec.Code)
 			assert.Contains(t, rec.Body.String(), tt.want)
 			assert.NotContains(t, rec.Body.String(), "redis is down")
@@ -259,7 +259,7 @@ func TestInboundRPC_AMessageToATaskIsRefusedAndStartsNothing(t *testing.T) {
 		`{"messageId":"m","taskId":"m-1","role":"ROLE_USER","parts":[{"text":"yes, approve"}]}}}`
 	trusted := map[string]string{"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"}
 
-	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), "/a2a/inbound/recon", body, trusted)
+	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, allowGrants), "/a2a/inbound/recon", body, trusted)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "cannot answer an approval")
@@ -280,7 +280,7 @@ func TestInboundRPC_AMalformedTargetListIsAnInvalidParamsError(t *testing.T) {
 			starts := &fakeStarts{}
 			// The fake start runs TargetsOf as the daemon does.
 			body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m","role":"ROLE_USER","parts":` + parts + `}}}`
-			h := NewInboundHandler(startsThatReadTargets{starts}, &recordingCards{})
+			h := NewInboundHandler(startsThatReadTargets{starts}, &recordingCards{}, allowGrants)
 			rec := rpcCall(h, "/a2a/inbound/recon", body, trusted)
 			assert.Contains(t, rec.Body.String(), "invalid params")
 			assert.NotContains(t, rec.Body.String(), "internal error")
@@ -306,11 +306,80 @@ func TestInboundRPC_ABodyOverTheLimitIsRefused(t *testing.T) {
 	big := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m","role":"ROLE_USER",` +
 		`"parts":[{"text":"` + strings.Repeat("A", MaxInboundRequestBytes) + `"}]}}}`
 
-	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), "/a2a/inbound/recon", big, trusted)
+	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, allowGrants), "/a2a/inbound/recon", big, trusted)
 
 	assert.Contains(t, rec.Body.String(), "error")
 	assert.Empty(t, starts.got)
 
-	ok := rpcCall(NewInboundHandler(starts, &recordingCards{}), "/a2a/inbound/recon", sendBody, trusted)
+	ok := rpcCall(NewInboundHandler(starts, &recordingCards{}, allowGrants), "/a2a/inbound/recon", sendBody, trusted)
 	assert.Contains(t, ok.Body.String(), "result", "a normal message still passes")
+}
+
+// fakeGrants answers the question of the live grant.
+type fakeGrants struct {
+	ok    bool
+	err   error
+	asked int
+}
+
+func (f *fakeGrants) CanOriginate(context.Context, InboundCaller, string) (bool, error) {
+	f.asked++
+	return f.ok, f.err
+}
+
+var allowGrants = &fakeGrants{ok: true}
+
+// The method that runs is the method that checks. A start, a cancel and the Agent
+// Card need the live grant. A read needs none, so a caller keeps the read of its own
+// missions after an unpublish or a revoke of its grant.
+func TestInboundRPC_TheGrantIsCheckedByTheMethodThatRuns(t *testing.T) {
+	trusted := map[string]string{"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"}
+	task := &a2a.Task{ID: "m-1", ContextID: "m-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted}}
+	tests := []struct {
+		name        string
+		body        string
+		wantGrant   bool
+		wantReaches int
+	}{
+		{"a start", sendBody, true, 1},
+		{"a cancel", cancelBody, true, 1},
+		{"a read", getBody, false, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+" with no grant", func(t *testing.T) {
+			starts := &fakeStarts{task: task}
+			grants := &fakeGrants{}
+			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, grants), "/a2a/inbound/recon", tt.body, trusted)
+			if tt.wantGrant {
+				assert.Contains(t, rec.Body.String(), "error", "no grant refuses the call")
+				assert.Empty(t, starts.got)
+				assert.Empty(t, starts.asked, "a refused call reached no run")
+				assert.Equal(t, 1, grants.asked)
+			} else {
+				assert.Contains(t, rec.Body.String(), "TASK_STATE_COMPLETED", "a read needs no grant")
+				assert.Equal(t, 0, grants.asked, "a read asks no grant")
+			}
+		})
+	}
+	// The grant check fails inside: the call is refused and starts nothing.
+	starts := &fakeStarts{task: task}
+	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, &fakeGrants{err: errors.New("fga down")}),
+		"/a2a/inbound/recon", sendBody, trusted)
+	assert.Contains(t, rec.Body.String(), "error")
+	assert.NotContains(t, rec.Body.String(), "fga down")
+	assert.Empty(t, starts.got)
+}
+
+func TestInboundCard_NeedsTheLiveGrant(t *testing.T) {
+	cards := &recordingCards{cards: map[string]*a2a.AgentCard{"recon": {Name: "recon"}}}
+	hdr := map[string]string{"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"}
+
+	rec := inboundGet(NewInboundHandler(&fakeStarts{}, cards, &fakeGrants{}), "/a2a/inbound/recon"+agentcall.CardPath, hdr)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Zero(t, cards.asked, "no card is read for a caller with no grant")
+
+	rec = inboundGet(NewInboundHandler(&fakeStarts{}, cards, &fakeGrants{err: errors.New("fga down")}),
+		"/a2a/inbound/recon"+agentcall.CardPath, hdr)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "fga down")
 }

@@ -96,11 +96,40 @@ type InboundRuns interface {
 	Cancel(ctx context.Context, caller InboundCaller, id a2a.TaskID) (*a2a.Task, error)
 }
 
+// InboundGrants decides the right of a caller to use a published definition. The
+// daemon is the one place that makes this decision. ext-authz proves who the caller
+// is and that it has the ceiling mission:originate, and it never sees the JSON-RPC
+// method, which is in the body. The handler of each method knows what it does, so
+// the handler asks: a start, a cancel and the Agent Card need the live grant, and
+// a read needs only the ownership of the mission. A caller cannot name a start as a
+// read, because the method that runs is the method that checks.
+type InboundGrants interface {
+	// CanOriginate reports whether the caller holds the grant to the published
+	// definition of the agent now.
+	CanOriginate(ctx context.Context, caller InboundCaller, agent string) (bool, error)
+}
+
+// ErrNoGrant reports a caller with no grant to the published definition.
+var ErrNoGrant = fmt.Errorf("%w: the caller has no grant to this agent", ErrRefused)
+
+// requireGrant refuses a caller that holds no grant now.
+func requireGrant(ctx context.Context, grants InboundGrants, c InboundCaller, agent string) error {
+	ok, err := grants.CanOriginate(ctx, c, agent)
+	if err != nil {
+		return fmt.Errorf("check the grant of %s: %w", c.Subject, err)
+	}
+	if !ok {
+		return ErrNoGrant
+	}
+	return nil
+}
+
 // inboundRPC is the a2asrv.RequestHandler of the inbound listener. It serves
 // SendMessage, GetTask and CancelTask. Every other method is not supported.
 type inboundRPC struct {
 	UnsupportedMethods
-	runs InboundRuns
+	runs   InboundRuns
+	grants InboundGrants
 }
 
 var _ a2asrv.RequestHandler = (*inboundRPC)(nil)
@@ -132,6 +161,9 @@ func (h *inboundRPC) SendMessage(ctx context.Context, req *a2a.SendMessageReques
 	if req.Message.TaskID != "" {
 		return nil, MapError(ErrApprovalAnswer)
 	}
+	if err := requireGrant(ctx, h.grants, c, agent); err != nil {
+		return nil, MapError(err)
+	}
 	task, err := h.runs.Start(ctx, InboundStart{Caller: c, Agent: agent, Message: req.Message})
 	if err != nil {
 		return nil, MapError(err)
@@ -139,7 +171,10 @@ func (h *inboundRPC) SendMessage(ctx context.Context, req *a2a.SendMessageReques
 	return task, nil
 }
 
-// GetTask returns the Task of a mission that the caller started.
+// GetTask returns the Task of a mission that the caller started. It needs no grant:
+// a caller keeps the read of its own missions after an unpublish or a revoke of its
+// grant. The ownership check of the runs decides. A revoked identity does not reach
+// this point, because ext-authz refuses it.
 func (h *inboundRPC) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Task, error) {
 	c, _, err := h.callOf(ctx)
 	if err != nil {
@@ -157,9 +192,12 @@ func (h *inboundRPC) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a
 
 // CancelTask ends a mission that the caller started.
 func (h *inboundRPC) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*a2a.Task, error) {
-	c, _, err := h.callOf(ctx)
+	c, agent, err := h.callOf(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if err := requireGrant(ctx, h.grants, c, agent); err != nil {
+		return nil, MapError(err)
 	}
 	if req == nil || req.ID == "" {
 		return nil, fmt.Errorf("%w: the request names no task", a2a.ErrInvalidParams)
@@ -174,11 +212,11 @@ func (h *inboundRPC) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest)
 // NewInboundHandler returns the HTTP handler of the inbound listener. The JSON-RPC
 // endpoint of a published agent is at "/a2a/inbound/<agent>". The Agent Card of
 // it is at "/a2a/inbound/<agent>/.well-known/agent-card.json".
-func NewInboundHandler(runs InboundRuns, cards Cards) http.Handler {
+func NewInboundHandler(runs InboundRuns, cards Cards, grants InboundGrants) http.Handler {
 	mux := http.NewServeMux()
-	rpc := a2asrv.NewJSONRPCHandler(&inboundRPC{runs: runs})
+	rpc := a2asrv.NewJSONRPCHandler(&inboundRPC{runs: runs, grants: grants})
 	mux.Handle("POST "+agentcall.InboundPrefix+"{agent}", inboundMiddleware(rpc))
-	mux.Handle("GET "+agentcall.InboundPrefix+"{agent}"+agentcall.CardPath, inboundMiddleware(inboundCardHandler(cards)))
+	mux.Handle("GET "+agentcall.InboundPrefix+"{agent}"+agentcall.CardPath, inboundMiddleware(inboundCardHandler(cards, grants)))
 	return mux
 }
 
@@ -205,11 +243,19 @@ func inboundMiddleware(next http.Handler) http.Handler {
 // inboundCardHandler serves the Agent Card of the agent in the path. A published
 // agent has a card. An agent that is not published has none, and the caller
 // cannot tell it from an agent that does not exist.
-func inboundCardHandler(cards Cards) http.Handler {
+func inboundCardHandler(cards Cards, grants InboundGrants) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		c, agent, ok := inboundCallFrom(req.Context())
 		if !ok {
 			http.Error(w, ErrNoInboundCaller.Error(), http.StatusUnauthorized)
+			return
+		}
+		if err := requireGrant(req.Context(), grants, c, agent); err != nil {
+			if errors.Is(err, ErrNoGrant) {
+				http.Error(w, "permission denied", http.StatusForbidden)
+				return
+			}
+			http.Error(w, "the grant is not available", http.StatusInternalServerError)
 			return
 		}
 		card, err := cards.Card(req.Context(), c.Tenant, agent)

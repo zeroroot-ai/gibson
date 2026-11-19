@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -814,4 +816,44 @@ func TestInboundRuns_AQuotaOrSuspensionRefusalIsARejectedTask(t *testing.T) {
 	r := newInboundRuns(&recordingStarter{err: status.Error(codes.Internal, "boom")})
 	_, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
 	require.Error(t, err)
+}
+
+// denyGrants is the state after an unpublish or a revoke of the grant of a caller.
+type denyGrants struct{}
+
+func (denyGrants) CanOriginate(context.Context, a2aserver.InboundCaller, string) (bool, error) {
+	return false, nil
+}
+
+// After an unpublish or a revoke of its grant, a caller keeps the read of the
+// missions that it started, with the full result. It cannot start and it cannot
+// cancel. Another caller reads nothing of them.
+func TestInboundHandler_AfterTheGrantIsGoneACallerKeepsTheReadAndNothingElse(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.findings.findings = []finding.EnhancedFinding{{Finding: agent.Finding{ID: types.NewID(), Title: "Open SSH"}}}
+	f.end(brain.MissionCompleted)
+	f.runs.source = &fakePinSource{}
+	h := a2aserver.NewInboundHandler(f.runs, nil, denyGrants{})
+	call := func(subject, method, params string) string {
+		body := `{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":` + params + `}`
+		req := httptest.NewRequest(http.MethodPost, "/a2a/inbound/recon", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-gibson-tenant", "acme")
+		req.Header.Set("x-gibson-subject", subject)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+	id := `{"id":"` + f.mission + `"}`
+
+	read := call(inboundCallerRef, "GetTask", id)
+	assert.Contains(t, read, "TASK_STATE_COMPLETED", "the owner keeps the read")
+	assert.Contains(t, read, "Open SSH", "and the full result")
+
+	assert.Contains(t, call("agent_principal:other", "GetTask", id), "TASK_NOT_FOUND", "another caller reads nothing")
+	assert.Contains(t, call(inboundCallerRef, "CancelTask", id), "no grant", "the cancel needs the live grant")
+	start := call(inboundCallerRef, "SendMessage", `{"message":{"messageId":"m","role":"ROLE_USER","parts":[{"text":"x"}]}}`)
+	assert.Contains(t, start, "no grant", "a new start is refused")
+	assert.Empty(t, f.stopped, "no mission was ended")
 }

@@ -7,30 +7,21 @@ import (
 	"context"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
-	typev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"google.golang.org/grpc/codes"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/capname"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 )
 
-// relationCanOriginate is the right of an agent identity to start a mission from
-// one published mission definition.
-const relationCanOriginate = "can_originate"
-
 // Reasons for a refused inbound A2A call. They are the label of
 // extauthz_inbound_a2a_denied_total.
 const (
-	inboundDenyPath       = "path"
-	inboundDenyNoToken    = "no_capability_grant"
-	inboundDenyTokenType  = "not_a_component_token"
-	inboundDenyCeiling    = "no_originate_ceiling"
-	inboundDenyExtraBit   = "extra_ceiling"
-	inboundDenyNoGrant    = "no_grant_to_definition"
-	inboundDenyFGAUnavail = "fga_unavailable"
+	inboundDenyPath      = "path"
+	inboundDenyNoToken   = "no_capability_grant"
+	inboundDenyTokenType = "not_a_component_token"
+	inboundDenyCeiling   = "no_originate_ceiling"
+	inboundDenyExtraBit  = "extra_ceiling"
 )
 
 var extauthzInboundA2ADeniedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -69,8 +60,7 @@ func (s *EnvoyAuthzServer) inboundA2AResponse(ctx context.Context, req *authv3.C
 	path := extractMethod(req)
 	httpHeaders := req.GetAttributes().GetRequest().GetHttp().GetHeaders()
 
-	agent, _, ok := agentcall.InboundPathAgent(path)
-	if !ok {
+	if _, _, ok := agentcall.InboundPathAgent(path); !ok {
 		s.log.WarnContext(ctx, "ext-authz: an inbound A2A path that names no valid agent", "path", path)
 		return denyInbound(inboundDenyPath, denyForbidden())
 	}
@@ -105,27 +95,6 @@ func (s *EnvoyAuthzServer) inboundA2AResponse(ctx context.Context, req *authv3.C
 				"path", path, "principal", cid.Principal, "capability", c)
 			return denyInbound(inboundDenyExtraBit, denyForbidden())
 		}
-	}
-
-	object, err := authz.PublishedMissionObject(cid.Tenant, agent)
-	if err != nil {
-		s.log.WarnContext(ctx, "ext-authz: inbound A2A agent cannot form an FGA object", "path", path, "err", err)
-		return denyInbound(inboundDenyPath, denyForbidden())
-	}
-	granted, err := s.cache.CheckRelation(ctx, cid.Principal, relationCanOriginate, object, nil)
-	if err != nil {
-		extauthzFGAUnavailableTotal.Inc()
-		s.log.ErrorContext(ctx, "ext-authz: FGA unavailable (inbound A2A grant)", "path", path, "err", err)
-		return denyInbound(inboundDenyFGAUnavail,
-			denyResponse(codes.Unavailable, typev3.StatusCode_ServiceUnavailable, bodyUnavailable))
-	}
-	if !granted {
-		// A caller with no grant, and a caller of an agent that is not published,
-		// get the same answer. It learns nothing about the agents of the tenant.
-		s.log.InfoContext(ctx, "ext-authz: inbound A2A caller has no grant to the published definition",
-			"path", path, "principal", cid.Principal, "tenant", cid.Tenant, "agent", agent)
-		extauthzDeniedTotal.WithLabelValues(agentcall.InboundPrefix).Inc()
-		return denyInbound(inboundDenyNoGrant, denyForbidden())
 	}
 
 	extauthzAllowedTotal.WithLabelValues(agentcall.InboundPrefix).Inc()

@@ -7,7 +7,6 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -145,10 +144,10 @@ func TestInboundA2A_AllowsAGrantedCallerAndSetsTheTrustedHeaders(t *testing.T) {
 					t.Errorf("the header %s must be removed, since the call has no mission", hdr)
 				}
 			}
-			q := mock.questions()
-			if len(q) != 1 || q[0].User != inboundPrincipal || q[0].Relation != "can_originate" ||
-				q[0].Object != inboundObject {
-				t.Errorf("FGA was asked %+v, want can_originate of %s on %s", q, inboundPrincipal, inboundObject)
+			// The right to use the definition is the check of the daemon. ext-authz asks
+			// FGA nothing about it, so a read of an own mission works after an unpublish.
+			if q := mock.questions(); len(q) != 0 {
+				t.Errorf("FGA was asked %+v, want no question", q)
 			}
 		})
 	}
@@ -166,25 +165,6 @@ func TestInboundA2A_Refusals(t *testing.T) {
 		extra map[string]string
 		want  codes.Code
 	}{
-		{
-			name: "a caller with no grant to the definition", c: inboundCase{capabilities: originateCeiling},
-			peer: edgeSVID, path: path, want: codes.PermissionDenied,
-		},
-		{
-			name: "an agent that is not published", c: inboundCase{capabilities: originateCeiling, allow: grantedInbound()},
-			peer: edgeSVID, path: "/a2a/inbound/unpublished", want: codes.PermissionDenied,
-			token: func(t *testing.T, priv ed25519.PrivateKey) string {
-				t.Helper()
-				return mintInboundJWT(t, priv, "agent+jwt", "/a2a/inbound/unpublished")
-			},
-		},
-		{
-			name: "a grant that belongs to another tenant",
-			c: inboundCase{capabilities: originateCeiling, allow: map[string]bool{
-				tupleKey(inboundPrincipal, "can_originate", "published_mission:other/recon"): true,
-			}},
-			peer: edgeSVID, path: path, want: codes.PermissionDenied,
-		},
 		{
 			name: "a caller with no mission:originate ceiling", c: inboundCase{allow: grantedInbound()},
 			peer: edgeSVID, path: path, want: codes.PermissionDenied,
@@ -245,11 +225,6 @@ func TestInboundA2A_Refusals(t *testing.T) {
 			c:    inboundCase{capabilities: originateCeiling, allow: grantedInbound()},
 			peer: gatewaySVID, path: path, want: codes.PermissionDenied,
 		},
-		{
-			name: "FGA that does not answer",
-			c:    inboundCase{capabilities: originateCeiling, allow: grantedInbound(), fgaErr: errors.New("fga down")},
-			peer: edgeSVID, path: path, want: codes.Unavailable,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -283,16 +258,16 @@ func TestInboundA2A_NoCeilingAsksNoFGAQuestion(t *testing.T) {
 }
 
 func TestInboundA2A_CountsEachRefusalByReason(t *testing.T) {
-	srv, priv, _ := inboundServer(t, inboundCase{capabilities: originateCeiling})
+	srv, priv, _ := inboundServer(t, inboundCase{})
 	path := "/a2a/inbound/" + inboundAgent
-	before := testutil.ToFloat64(extauthzInboundA2ADeniedTotal.WithLabelValues(inboundDenyNoGrant))
+	before := testutil.ToFloat64(extauthzInboundA2ADeniedTotal.WithLabelValues(inboundDenyCeiling))
 
 	resp, err := srv.Check(peerContext(t, edgeSVID), inboundRequest(path, mintInboundJWT(t, priv, "agent+jwt", path), nil))
 	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
 		t.Fatalf("status = %v, want PermissionDenied", got)
 	}
-	if got := testutil.ToFloat64(extauthzInboundA2ADeniedTotal.WithLabelValues(inboundDenyNoGrant)); got != before+1 {
-		t.Errorf("the no-grant counter = %v, want %v", got, before+1)
+	if got := testutil.ToFloat64(extauthzInboundA2ADeniedTotal.WithLabelValues(inboundDenyCeiling)); got != before+1 {
+		t.Errorf("the no-ceiling counter = %v, want %v", got, before+1)
 	}
 }
 
@@ -332,5 +307,24 @@ func TestInboundA2A_ARevokeAppliesAtTheNextCall(t *testing.T) {
 	revoked.Store(true)
 	if got := call(); got != codes.Unauthenticated {
 		t.Fatalf("after the revoke: status = %v, want Unauthenticated", got)
+	}
+}
+
+// ext-authz admits an identity with the ceiling and no grant to the definition. The
+// right to start and to cancel is the check of the daemon, and a read of an own
+// mission needs no grant. ext-authz cannot tell the methods apart, because the
+// JSON-RPC method is in the body, so it never decides by the grant.
+func TestInboundA2A_AdmitsAnIdentityWithTheCeilingAndNoGrant(t *testing.T) {
+	t.Parallel()
+	srv, priv, mock := inboundServer(t, inboundCase{capabilities: originateCeiling})
+	path := "/a2a/inbound/" + inboundAgent
+
+	resp, err := srv.Check(peerContext(t, edgeSVID), inboundRequest(path, mintInboundJWT(t, priv, "agent+jwt", path), nil))
+
+	if got := statusOf(t, resp, err); got != codes.OK {
+		t.Fatalf("status = %v, want OK", got)
+	}
+	if q := mock.questions(); len(q) != 0 {
+		t.Errorf("FGA was asked %+v, want no question", q)
 	}
 }

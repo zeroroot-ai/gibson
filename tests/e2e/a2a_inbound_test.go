@@ -427,6 +427,7 @@ func TestA2AInbound(t *testing.T) {
 		require.Equal(t, inboundFindingText, res.Findings[0].Evidence[0].Content, "the evidence is raw")
 	})
 
+	var doneTask string
 	t.Run("a data part narrows the targets, and nothing else does", func(t *testing.T) {
 		id, state := f.startFromMessage(t, caller, sendParams("scan the middle target", f.targets[1]))
 		require.Equal(t, "TASK_STATE_SUBMITTED", state)
@@ -435,6 +436,7 @@ func TestA2AInbound(t *testing.T) {
 		require.Equal(t, f.targets[1], f.primaryTarget(t, id), "the mission has exactly the target of the data part")
 		work.Complete()
 		f.waitState(t, caller, id, "TASK_STATE_COMPLETED")
+		doneTask = id
 	})
 
 	t.Run("a target outside the definition gets rejected and no mission starts", func(t *testing.T) {
@@ -487,8 +489,42 @@ func TestA2AInbound(t *testing.T) {
 			status, body := noGrant.call(ctx, t, http.MethodGet, cardPath, nil, nil)
 			return status == http.StatusForbidden, fmt.Sprintf("HTTP %d: %s", status, body)
 		})
+		// The daemon decides the grant of a start, so the answer is a JSON-RPC error.
 		status, body := noGrant.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"), nil)
-		require.Equal(t, http.StatusForbidden, status, "body: %s", body)
+		require.Equal(t, http.StatusOK, status, "body: %s", body)
+		require.NotNil(t, decodeRPC(t, body).Error, "a caller with no grant starts no mission: %s", body)
+	})
+
+	t.Run("after its grant is revoked a caller keeps the read and nothing else", func(t *testing.T) {
+		keeper, keeperID := f.provision(t, "inbound-e2e-keeper", ceiling)
+		f.grant(t, keeperID)
+		var id string
+		helpers.Eventually(t, time.Minute, "the keeper starts a mission", func() (bool, string) {
+			status, body := keeper.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"), nil)
+			r := decodeRPC(t, body)
+			if status != http.StatusOK || r.Result.Task == nil {
+				return false, string(body)
+			}
+			id = r.Result.Task.ID
+			return true, ""
+		})
+		work := f.agent.Next(t, inboundTimeout)
+		work.Complete()
+		f.waitState(t, keeper, id, "TASK_STATE_COMPLETED")
+
+		_, err := f.inbound.RevokeInboundCaller(ctx, &tenantv1.RevokeInboundCallerRequest{Agent: inboundAgent, IdentityId: keeperID})
+		require.NoError(t, err, "RevokeInboundCaller")
+
+		status, body := keeper.rpc(ctx, t, inboundAgent, "GetTask", `{"id":"`+id+`"}`, nil)
+		require.Equal(t, http.StatusOK, status, "body: %s", body)
+		require.Equal(t, "TASK_STATE_COMPLETED", decodeRPC(t, body).Result.Task.Status.State, "the read stays")
+		_, body = keeper.rpc(ctx, t, inboundAgent, "CancelTask", `{"id":"`+id+`"}`, nil)
+		require.NotNil(t, decodeRPC(t, body).Error, "the cancel needs the live grant: %s", body)
+		_, body = keeper.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"), nil)
+		require.NotNil(t, decodeRPC(t, body).Error, "a new start is refused: %s", body)
+		// The read of a task of another caller is not found.
+		_, body = keeper.rpc(ctx, t, inboundAgent, "GetTask", `{"id":"`+doneTask+`"}`, nil)
+		require.NotNil(t, decodeRPC(t, body).Error, "the task of another caller is not found: %s", body)
 	})
 
 	t.Run("a caller with no ceiling is refused", func(t *testing.T) {
