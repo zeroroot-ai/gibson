@@ -25,6 +25,11 @@ import (
 // x-gibson-tenant and x-gibson-subject with overwrite. The handler trusts these
 // two headers and nothing else of the caller. It reads the agent from the path.
 
+// MaxInboundRequestBytes is the size limit of the body of an inbound request. A
+// message holds text and a target list, so 1 MiB is far above any real message. No
+// existing constant bounds an A2A message, so this is the limit of the endpoint.
+const MaxInboundRequestBytes = 1 << 20
+
 // InboundCaller is the verified caller of an inbound request.
 type InboundCaller struct {
 	// Tenant is the tenant of the key descriptor of the caller. The caller cannot
@@ -192,6 +197,7 @@ func inboundMiddleware(next http.Handler) http.Handler {
 			http.NotFound(w, req)
 			return
 		}
+		req.Body = http.MaxBytesReader(w, req.Body, MaxInboundRequestBytes)
 		next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), inboundCtxKey{}, inboundCall{caller: c, agent: agent})))
 	})
 }

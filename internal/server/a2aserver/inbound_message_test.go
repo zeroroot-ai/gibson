@@ -297,3 +297,20 @@ func (s startsThatReadTargets) Start(ctx context.Context, req InboundStart) (*a2
 	}
 	return s.fakeStarts.Start(ctx, req)
 }
+
+// A body over the limit is refused, and it starts nothing. Without a limit the
+// handler reads a body of any size.
+func TestInboundRPC_ABodyOverTheLimitIsRefused(t *testing.T) {
+	trusted := map[string]string{"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"}
+	starts := &fakeStarts{}
+	big := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m","role":"ROLE_USER",` +
+		`"parts":[{"text":"` + strings.Repeat("A", MaxInboundRequestBytes) + `"}]}}}`
+
+	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), agentcall.InboundPathFor("recon"), big, trusted)
+
+	assert.Contains(t, rec.Body.String(), "error")
+	assert.Empty(t, starts.got)
+
+	ok := rpcCall(NewInboundHandler(starts, &recordingCards{}), agentcall.InboundPathFor("recon"), sendBody, trusted)
+	assert.Contains(t, ok.Body.String(), "result", "a normal message still passes")
+}
