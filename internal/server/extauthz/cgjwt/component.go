@@ -71,7 +71,21 @@ type ComponentVerifier struct {
 
 	mu    sync.RWMutex
 	cache map[string]cachedDescriptor // kid -> descriptor
+	// missing remembers the kids that the daemon did not know, until the time in the
+	// value. It is bounded by maxMissingKids. missingTTL is how long a miss stays.
+	missing    map[string]time.Time
+	missingTTL time.Duration
 }
+
+// DefaultMissingKidTTL is how long a kid that the daemon does not know stays in the
+// negative cache. An identity that is created just after a miss can start to call
+// after this time at the latest. A shorter time costs more daemon reads from callers
+// that send tokens of unknown kids.
+const DefaultMissingKidTTL = 3 * time.Second
+
+// maxMissingKids bounds the negative cache. When it is full of live entries, a new
+// miss is not remembered, and the next call for that kid reads the daemon.
+const maxMissingKids = 1024
 
 // DefaultComponentMaxLifetime bounds how long a component token may live.
 // Component tokens are signed per RPC and the SDK gives them ~55 seconds;
@@ -212,6 +226,8 @@ func NewComponentVerifier(cfg ComponentConfig) (*ComponentVerifier, error) {
 		audiences:   auds,
 		replay:      cfg.ReplayStore,
 		cache:       map[string]cachedDescriptor{},
+		missing:     map[string]time.Time{},
+		missingTTL:  DefaultMissingKidTTL,
 	}
 	if v.ttl <= 0 {
 		v.ttl = 5 * time.Minute
@@ -297,9 +313,9 @@ func (v *ComponentVerifier) descriptorFor(ctx context.Context, kid, token string
 	return desc, nil
 }
 
-// precheckSignature verifies the signature of a token with the cached key of its
-// kid. It does nothing for a kid that has no cached key, and the full check then
-// uses the key of the fresh read. It checks the signature and no claim.
+// precheckSignature verifies the signature and the expiry of a token with the cached
+// key of its kid. It does nothing for a kid that has no cached key, and the full check
+// then uses the key of the fresh read.
 func (v *ComponentVerifier) precheckSignature(kid, token string) error {
 	v.mu.RLock()
 	cached, ok := v.cache[kid]
@@ -312,9 +328,19 @@ func (v *ComponentVerifier) precheckSignature(kid, token string) error {
 			return nil, fmt.Errorf("%w: unexpected alg %q", ErrSignature, t.Method.Alg())
 		}
 		return cached.key, nil
-	}, jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}), jwt.WithoutClaimsValidation())
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}), jwt.WithExpirationRequired())
 	if err == nil {
 		return nil
+	}
+	// An expired token, or a token with no exp, is refused here, so a captured token
+	// of a real kid cannot cost a fresh daemon read after it expires.
+	if errors.Is(err, jwt.ErrTokenExpired) {
+		componentRejectedTotal.WithLabelValues("expired").Inc()
+		return fmt.Errorf("%w: %w", ErrExpired, err)
+	}
+	if errors.Is(err, jwt.ErrTokenRequiredClaimMissing) {
+		componentRejectedTotal.WithLabelValues("no_expiry").Inc()
+		return fmt.Errorf("%w: %w", ErrExpired, err)
 	}
 	if errors.Is(err, jwt.ErrTokenSignatureInvalid) || errors.Is(err, jwt.ErrSignatureInvalid) {
 		componentRejectedTotal.WithLabelValues("signature").Inc()
@@ -542,9 +568,15 @@ func (v *ComponentVerifier) resolve(ctx context.Context, kid string, fresh bool)
 		v.mu.RUnlock()
 	}
 
+	if v.knownMissing(kid) {
+		return cachedDescriptor{}, errKeyNotFound
+	}
 	componentCacheMisses.Inc()
 	d, err := v.fetch(ctx, kid)
 	if err != nil {
+		if errors.Is(err, errKeyNotFound) {
+			v.rememberMissing(kid)
+		}
 		// A fresh read that fails drops the cached entry, so a later call that
 		// reads the cache cannot use a descriptor that the daemon withheld.
 		v.mu.Lock()
@@ -556,6 +588,33 @@ func (v *ComponentVerifier) resolve(ctx context.Context, kid string, fresh bool)
 	v.cache[kid] = d
 	v.mu.Unlock()
 	return d, nil
+}
+
+// knownMissing reports whether the daemon said, a short time ago, that it has no key
+// for the kid.
+func (v *ComponentVerifier) knownMissing(kid string) bool {
+	v.mu.RLock()
+	until, ok := v.missing[kid]
+	v.mu.RUnlock()
+	return ok && time.Now().Before(until)
+}
+
+// rememberMissing keeps a kid in the negative cache for missingTTL.
+func (v *ComponentVerifier) rememberMissing(kid string) {
+	now := time.Now()
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if len(v.missing) >= maxMissingKids {
+		for k, until := range v.missing {
+			if !now.Before(until) {
+				delete(v.missing, k)
+			}
+		}
+		if len(v.missing) >= maxMissingKids {
+			return
+		}
+	}
+	v.missing[kid] = now.Add(v.missingTTL)
 }
 
 func (v *ComponentVerifier) fetch(ctx context.Context, kid string) (cachedDescriptor, error) {

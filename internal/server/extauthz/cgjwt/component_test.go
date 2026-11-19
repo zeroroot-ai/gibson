@@ -707,3 +707,80 @@ func TestComponentVerifyFresh_AForgedTokenCausesNoFreshRead(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, reads.Load(), "a good token still reads the status fresh")
 }
+
+// countingDescriptorServer serves the descriptor of one kid and counts the reads.
+func countingDescriptorServer(t *testing.T, pub ed25519.PublicKey, kid string) (*httptest.Server, *atomic.Int64) {
+	t.Helper()
+	var reads atomic.Int64
+	doc := map[string]any{
+		"keys":      []map[string]string{{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pub), "kid": kid}},
+		"principal": "agent_principal:9", "tenant": "acme", "status": "active",
+	}
+	body, _ := json.Marshal(doc)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads.Add(1)
+		if !strings.HasSuffix(r.URL.Path, "/"+kid) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &reads
+}
+
+// An expired token of a real kid, or one with no exp, is refused by the cached key
+// and costs no fresh read. A captured token cannot load the database after it expires.
+func TestComponentVerifyFresh_AnExpiredOrOpenTokenCausesNoFreshRead(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	srv, reads := countingDescriptorServer(t, pub, "agent-1")
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+	_, err := v.VerifyFresh(context.Background(), mintAgentJWT(t, priv, "agent-1", "agent+jwt", time.Now().Add(55*time.Second)), testMethod)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, reads.Load())
+
+	_, err = v.VerifyFresh(context.Background(), mintAgentJWT(t, priv, "agent-1", "agent+jwt", time.Now().Add(-time.Minute)), testMethod)
+	require.ErrorIs(t, err, ErrExpired)
+	noExp := mintAgentJWTClaims(t, priv, "agent-1", jwt.MapClaims{
+		"iss": "host-abc", "sub": "agent-1", "aud": testAudience, "iat": time.Now().Add(-time.Second).Unix(), "jti": "no-exp",
+	})
+	_, err = v.VerifyFresh(context.Background(), noExp, testMethod)
+	require.ErrorIs(t, err, ErrExpired)
+
+	assert.EqualValues(t, 1, reads.Load(), "neither token made a fresh read")
+}
+
+// A kid that the daemon does not know is remembered for a short time, so repeated
+// tokens of one unknown kid cost one read. The entry ends after DefaultMissingKidTTL,
+// so an identity that is created after a miss can call after that time at the latest.
+func TestComponentVerify_AnUnknownKidIsRememberedForAShortTime(t *testing.T) {
+	_, priv := mustGenKey(t)
+	pub, _ := mustGenKey(t)
+	srv, reads := countingDescriptorServer(t, pub, "agent-1")
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+	v.missingTTL = 50 * time.Millisecond
+	mint := func() string { return mintAgentJWT(t, priv, "ghost", "agent+jwt", time.Now().Add(55*time.Second)) }
+
+	for range 5 {
+		_, err := v.VerifyFresh(context.Background(), mint(), testMethod)
+		require.ErrorIs(t, err, ErrUnknownKey)
+	}
+	assert.EqualValues(t, 1, reads.Load(), "five tokens of one unknown kid cost one read")
+
+	time.Sleep(80 * time.Millisecond)
+	_, err := v.VerifyFresh(context.Background(), mint(), testMethod)
+	require.ErrorIs(t, err, ErrUnknownKey)
+	assert.EqualValues(t, 2, reads.Load(), "after the time the kid is read again")
+	assert.Equal(t, 3*time.Second, DefaultMissingKidTTL)
+}
+
+func TestComponentVerify_TheNegativeCacheIsBounded(t *testing.T) {
+	pub, _ := mustGenKey(t)
+	srv, _ := countingDescriptorServer(t, pub, "agent-1")
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+	v.missingTTL = time.Hour
+	for i := range maxMissingKids + 50 {
+		v.rememberMissing(fmt.Sprintf("kid-%d", i))
+	}
+	assert.Len(t, v.missing, maxMissingKids)
+}

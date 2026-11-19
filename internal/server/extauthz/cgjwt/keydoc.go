@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -65,6 +66,10 @@ func (d keyDoc) isBare() bool {
 // path-escaped before it is joined onto the base URL. Without that, a kid such
 // as "../../admin" would address a different daemon endpoint than the key
 // endpoint this verifier is configured for.
+// errKeyNotFound reports that the daemon has no key for the kid. The daemon answers
+// the same for an unknown kid, a revoked identity and a lapsed one.
+var errKeyNotFound = errors.New("cgjwt: no key for the kid")
+
 func fetchKeyDoc(ctx context.Context, client *http.Client, baseURL, kid string) (keyDoc, error) {
 	target := baseURL + "/" + url.PathEscape(kid)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
@@ -77,6 +82,9 @@ func fetchKeyDoc(ctx context.Context, client *http.Client, baseURL, kid string) 
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return keyDoc{}, fmt.Errorf("key fetch status %d: %w", resp.StatusCode, errKeyNotFound)
+		}
 		return keyDoc{}, fmt.Errorf("key fetch status %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxKeyDocBytes))
