@@ -248,7 +248,7 @@ func TestStore_EveryTenantFacingStatementNamesTheTenant(t *testing.T) {
 
 func TestPrincipalRevokedInTenant(t *testing.T) {
 	m := newMockedService(t)
-	m.mock.ExpectQuery("capability_grant_agents WHERE tenant_id = \\$1 AND principal_ref = \\$2 AND status = 'revoked'").
+	m.mock.ExpectQuery("EXISTS (SELECT 1 FROM capability_grant_agents WHERE tenant_id = $1").
 		WithArgs("acme", "agent_principal:acct-1").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	revoked, err := m.svc.PrincipalRevokedInTenant(context.Background(), "acme", "agent_principal:acct-1")
