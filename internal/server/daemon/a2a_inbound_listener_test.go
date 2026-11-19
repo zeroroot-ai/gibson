@@ -33,6 +33,7 @@ type fakePublished struct {
 	releaseErr error
 	events     []string
 	owners     map[string]string
+	ownerErr   error
 }
 
 func (f *fakePublished) Reserve(
@@ -53,6 +54,9 @@ func (f *fakePublished) Release(_ context.Context, _, slot string) error {
 }
 
 func (f *fakePublished) Owner(_ context.Context, _, missionID string) (string, error) {
+	if f.ownerErr != nil {
+		return "", f.ownerErr
+	}
 	o, ok := f.owners[missionID]
 	if !ok {
 		return "", inboundmissionstore.ErrNotFound

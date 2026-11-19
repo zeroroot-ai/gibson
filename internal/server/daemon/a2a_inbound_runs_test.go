@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/stretchr/testify/assert"
@@ -297,6 +296,7 @@ type taskFixture struct {
 	stopCtx  context.Context
 	stopErr  error
 	mission  string
+	owners   *fakePublished
 }
 
 func newTaskFixture(t *testing.T) *taskFixture {
@@ -306,11 +306,12 @@ func newTaskFixture(t *testing.T) *taskFixture {
 	f := &taskFixture{
 		findings: &fakeMissionFindings{},
 		mission:  types.NewID().String(),
+		owners:   &fakePublished{owners: map[string]string{}},
 	}
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	f.eng = reg.For("acme")
 	f.runs = &inboundRuns{
-		registry: reg, findings: f.findings,
+		registry: reg, findings: f.findings, published: f.owners,
 		stop: func(ctx context.Context, id string) error {
 			f.stopCtx = ctx
 			f.stopped = append(f.stopped, id)
@@ -322,6 +323,9 @@ func newTaskFixture(t *testing.T) *taskFixture {
 
 // startMission folds the start of a mission that the principal created.
 func (f *taskFixture) startMission(created principal.Principal) {
+	if created.Kind == principal.Component {
+		f.owners.owners[f.mission] = created.ID
+	}
 	f.eng.Submit(brain.MissionStarted{ID: f.mission, RunID: "run-1", TenantID: "acme", CreatedBy: created})
 	f.eng.Tick()
 }
@@ -418,31 +422,31 @@ func TestInboundRuns_TaskNeverShowsTheMissionOfAnotherCaller(t *testing.T) {
 	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
 }
 
-func TestInboundRuns_ARunThatTheWorldHasNotFoldedBelongsToItsCaller(t *testing.T) {
+// The owner comes from the task row in the database, so every replica gives the
+// same answer, also while this replica has not folded the mission into its World.
+func TestInboundRuns_TheOwnerComesFromTheDatabaseAndNotFromAReplica(t *testing.T) {
 	f := newTaskFixture(t)
-	f.runs.remember(f.mission, ownerCaller)
+	f.owners.owners[f.mission] = inboundCallerRef // the World of this replica holds nothing
 
 	task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
+
+	// A second replica has its own memory and the same database.
+	second := newTaskFixture(t)
+	second.runs.published = f.owners
+	task, err = second.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
 
 	_, err = f.runs.Task(context.Background(), otherCaller, a2a.TaskID(f.mission))
 	require.ErrorIs(t, err, a2aserver.ErrNotFound, "another caller reads nothing of it")
 
-	// The entry lapses with time, and the World is the record after that.
-	f.runs.pending[f.mission] = inboundPending{tenant: "acme", owner: inboundCallerRef, at: time.Now().Add(-2 * inboundPendingTTL)}
+	f.owners.ownerErr = errors.New("db down")
 	_, err = f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
-	require.ErrorIs(t, err, a2aserver.ErrNotFound)
-	f.runs.remember("other-mission", ownerCaller)
-	assert.NotContains(t, f.runs.pending, f.mission, "a lapsed entry is dropped")
-
-	// Once the World holds the mission, the entry is dropped.
-	g := newTaskFixture(t)
-	g.runs.remember(g.mission, ownerCaller)
-	g.startMission(ownerRef)
-	_, err = g.runs.Task(context.Background(), ownerCaller, a2a.TaskID(g.mission))
-	require.NoError(t, err)
-	assert.NotContains(t, g.runs.pending, g.mission)
+	require.ErrorContains(t, err, "read the owner of mission")
+	_, err = f.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	require.ErrorContains(t, err, "read the owner of mission")
 }
 
 func TestInboundRuns_TaskFailures(t *testing.T) {

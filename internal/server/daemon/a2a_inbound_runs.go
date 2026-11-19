@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -50,9 +49,6 @@ type inboundRuns struct {
 	findings missionFindingReader
 	// stop ends a running mission of the tenant on the context.
 	stop func(ctx context.Context, missionID string) error
-
-	mu      sync.Mutex
-	pending map[string]inboundPending
 }
 
 // inboundReservationGrace is how long a reserved place may wait for its mission. A
@@ -75,18 +71,6 @@ func (r *inboundRuns) missionFinished(tenant string) func(missionID string) bool
 		}
 		return false
 	}
-}
-
-// inboundPendingTTL is how long a started mission may be missing from the World.
-// The World folds the start of a mission on its next tick, so a mission is
-// missing for a moment only.
-const inboundPendingTTL = time.Minute
-
-// inboundPending is a mission that the daemon started and the World has not
-// folded. It keeps the owner, so the caller can read its own Task at once.
-type inboundPending struct {
-	tenant, owner string
-	at            time.Time
 }
 
 // missionFindingReader reads the findings of one mission with all of their
@@ -203,64 +187,34 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		}
 		return nil, fmt.Errorf("record the mission %s of agent %s: %w", missionID, req.Agent, err)
 	}
-	r.remember(missionID, c)
 	return &a2a.Task{
 		ID: a2a.TaskID(missionID), ContextID: missionID,
 		Status: a2a.TaskStatus{State: a2a.TaskStateSubmitted},
 	}, nil
 }
 
-func (r *inboundRuns) remember(missionID string, c a2aserver.InboundCaller) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.pending == nil {
-		r.pending = map[string]inboundPending{}
-	}
-	for k, v := range r.pending {
-		if time.Since(v.at) > inboundPendingTTL {
-			delete(r.pending, k)
-		}
-	}
-	r.pending[missionID] = inboundPending{tenant: c.Tenant, owner: c.Subject, at: time.Now()}
-}
-
-func (r *inboundRuns) isPending(missionID string, c a2aserver.InboundCaller) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	p, ok := r.pending[missionID]
-	return ok && p.tenant == c.Tenant && p.owner == c.Subject && time.Since(p.at) <= inboundPendingTTL
-}
-
-// ownedMission returns the snapshot of a mission that the caller started. A
-// mission that another caller started, a mission that no inbound call started
-// and a mission that does not exist all give ErrNotFound, so the caller learns
-// nothing about them. A mission that the World has not folded yet gives the
+// ownedMission returns the snapshot of a mission that the caller started. The
+// task row in the database names the caller, so every replica gives the same
+// answer. A mission that another caller started, a mission that no inbound call
+// started and a mission that does not exist all give ErrNotFound, so the caller
+// learns nothing about them. A mission that the World does not hold yet gives the
 // snapshot of a submitted mission.
-func (r *inboundRuns) ownedMission(c a2aserver.InboundCaller, id string) (brain.MissionSnapshot, error) {
-	eng, ok := api.TenantEngine(r.registry, c.Tenant)
-	if !ok {
+func (r *inboundRuns) ownedMission(ctx context.Context, c a2aserver.InboundCaller, id string) (brain.MissionSnapshot, error) {
+	owner, err := r.published.Owner(ctx, c.Tenant, id)
+	if errors.Is(err, inboundmissionstore.ErrNotFound) || (err == nil && owner != c.Subject) {
 		return brain.MissionSnapshot{}, a2aserver.ErrNotFound
 	}
-	for _, m := range eng.Missions() {
-		if m.ID != id {
-			continue
-		}
-		if m.CreatedBy != inboundPrincipal(c.Subject) {
-			return brain.MissionSnapshot{}, a2aserver.ErrNotFound
-		}
-		r.forget(id)
-		return m, nil
+	if err != nil {
+		return brain.MissionSnapshot{}, fmt.Errorf("read the owner of mission %s: %w", id, err)
 	}
-	if r.isPending(id, c) {
-		return brain.MissionSnapshot{ID: id, Status: brain.MissionSubmitted}, nil
+	if eng, ok := api.TenantEngine(r.registry, c.Tenant); ok {
+		for _, m := range eng.Missions() {
+			if m.ID == id {
+				return m, nil
+			}
+		}
 	}
-	return brain.MissionSnapshot{}, a2aserver.ErrNotFound
-}
-
-func (r *inboundRuns) forget(id string) {
-	r.mu.Lock()
-	delete(r.pending, id)
-	r.mu.Unlock()
+	return brain.MissionSnapshot{ID: id, Status: brain.MissionSubmitted}, nil
 }
 
 // inputRequiredText is the message of a Task that waits for an approval. An
@@ -273,7 +227,7 @@ const inputRequiredText = "the mission waits for a person in the tenant to decid
 // evidence. A result over the size limit fails with a clear error and is never
 // truncated.
 func (r *inboundRuns) Task(ctx context.Context, c a2aserver.InboundCaller, id a2a.TaskID) (*a2a.Task, error) {
-	m, err := r.ownedMission(c, string(id))
+	m, err := r.ownedMission(ctx, c, string(id))
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +273,7 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 // mission of another caller is not found. A mission in a final state cannot be
 // canceled.
 func (r *inboundRuns) Cancel(ctx context.Context, c a2aserver.InboundCaller, id a2a.TaskID) (*a2a.Task, error) {
-	m, err := r.ownedMission(c, string(id))
+	m, err := r.ownedMission(ctx, c, string(id))
 	if err != nil {
 		return nil, err
 	}
