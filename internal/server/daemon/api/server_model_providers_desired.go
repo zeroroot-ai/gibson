@@ -52,6 +52,10 @@ func gatewayProviderType(t providerconfig.ProviderType) (gwType, skip string) {
 		return gatewayTypeVertexAI, ""
 	case providerconfig.ProviderVoyage:
 		return "", "voyage is not a provider type: the model gateway does not accept its reply"
+	case providerconfig.ProviderOllama, providerconfig.ProviderCloudflare, providerconfig.ProviderCohere,
+		providerconfig.ProviderHuggingFace, providerconfig.ProviderLlamafile, providerconfig.ProviderMistral,
+		providerconfig.ProviderCustom, providerconfig.ProviderFoundry, providerconfig.ProviderTEI:
+		// The model gateway has no route for these types.
 	}
 	return "", fmt.Sprintf("the model gateway has no route for the provider type %q", t)
 }

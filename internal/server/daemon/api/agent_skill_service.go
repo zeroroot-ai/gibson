@@ -426,8 +426,10 @@ func (s *AgentSkillService) grantTuple(
 		subject, relation = "agent_principal:"+subjectID, "granted_agent"
 	case tenantv1.AgentSkillSubjectKind_AGENT_SKILL_SUBJECT_KIND_MISSION:
 		subject, relation = "mission:"+subjectID, "granted_mission"
-	default:
+	case tenantv1.AgentSkillSubjectKind_AGENT_SKILL_SUBJECT_KIND_UNSPECIFIED:
 		return authz.Tuple{}, status_grpc.Error(codes.InvalidArgument, rpc+": the subject kind is not set")
+	default:
+		return authz.Tuple{}, status_grpc.Error(codes.InvalidArgument, rpc+": the subject kind is not known")
 	}
 	if !verify {
 		return authz.Tuple{User: subject, Relation: relation, Object: object}, nil

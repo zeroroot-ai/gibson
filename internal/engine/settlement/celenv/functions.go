@@ -283,8 +283,9 @@ func evidenceItemText(item map[string]any) (string, bool) {
 		}
 		return string(data), true
 
-	case sdkfinding.EvidenceScreenshot:
-		// A screenshot has no text representation.
+	case sdkfinding.EvidenceScreenshot, sdkfinding.EvidenceOther:
+		// A screenshot and an evidence of the other type have no text
+		// representation.
 		return "", false
 
 	default:

@@ -181,8 +181,10 @@ func newEvidenceRows(items []*typespb.Evidence) ([]evidenceRow, error) {
 				return nil, fmt.Errorf("%w: item %d is tier 2 and names a tool call", finding.ErrInvalidEvidence, i)
 			}
 			row.tier = 2
-		default:
+		case typespb.EvidenceTier_EVIDENCE_TIER_UNSPECIFIED:
 			return nil, fmt.Errorf("%w: item %d has no tier", finding.ErrInvalidEvidence, i)
+		default:
+			return nil, fmt.Errorf("%w: item %d has the unknown tier %d", finding.ErrInvalidEvidence, i, item.GetTier())
 		}
 		if len(row.content) > finding.MaxEvidenceContentBytes {
 			return nil, fmt.Errorf("%w: item %d holds %d bytes, the limit is %d",

@@ -161,6 +161,10 @@ const (
 	MissionStatusFailed MissionStatus = "failed"
 	// MissionStatusCanceled indicates the mission was canceled before completion.
 	MissionStatusCanceled MissionStatus = "canceled"
+	// MissionStatusPaused indicates an operator halted the mission.
+	MissionStatusPaused MissionStatus = "paused"
+	// MissionStatusInputRequired indicates the mission waits for a person.
+	MissionStatusInputRequired MissionStatus = "input_required"
 )
 
 // MissionRecord represents minimal mission information needed for spawn limits.

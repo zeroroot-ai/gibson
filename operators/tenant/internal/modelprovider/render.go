@@ -110,6 +110,12 @@ func Render(mp *gibsonv1alpha1.ModelProvider, cfg Config) ([]*unstructured.Unstr
 		backends = append(backends,
 			backend(mp, cfg, modelBackend, bedrockRuntime(spec), awsAuth(spec, mp.Name, ""), true),
 			backend(mp, cfg, listBackend, bedrockControl(spec), awsAuth(spec, mp.Name, "bedrock"), false))
+	case gibsonv1alpha1.ModelProviderAnthropic, gibsonv1alpha1.ModelProviderOpenAI,
+		gibsonv1alpha1.ModelProviderOpenAICompatible, gibsonv1alpha1.ModelProviderGemini,
+		gibsonv1alpha1.ModelProviderVertexAI:
+		// These types have one AI backend. A type that is not known goes the same
+		// way, and aiProvider refuses it.
+		fallthrough
 	default:
 		aiSpec, err := aiProvider(spec)
 		if err != nil {
@@ -247,6 +253,9 @@ func aiProvider(spec gibsonv1alpha1.ModelProviderSpec) (map[string]any, error) {
 		provider["gemini"] = map[string]any{}
 	case gibsonv1alpha1.ModelProviderVertexAI:
 		provider["vertexai"] = map[string]any{"projectId": spec.ProjectID, "region": spec.Region}
+	case gibsonv1alpha1.ModelProviderBedrock:
+		// Bedrock has a runtime backend and a control backend, and Render builds both.
+		fallthrough
 	default:
 		return nil, fmt.Errorf("modelprovider: type %q has no AI backend", spec.Type)
 	}

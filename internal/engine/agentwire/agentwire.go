@@ -161,7 +161,9 @@ func resultOf(t *a2a.Task, o Outcome) agent.Result {
 	case a2a.TaskStateCompleted:
 	case a2a.TaskStateCanceled:
 		r.Status = agent.ResultStatusCancelled
-	default:
+	case a2a.TaskStateFailed, a2a.TaskStateRejected, a2a.TaskStateUnspecified,
+		a2a.TaskStateSubmitted, a2a.TaskStateWorking, a2a.TaskStateInputRequired, a2a.TaskStateAuthRequired:
+		// A run that ends in any other state did not finish its work.
 		r.Status = agent.ResultStatusFailed
 	}
 	for _, art := range t.Artifacts {

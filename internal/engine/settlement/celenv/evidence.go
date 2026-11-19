@@ -46,6 +46,14 @@ func evidenceItemMap(e *typespb.Evidence) map[string]any {
 		typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE,
 		typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION:
 		content = decodeContent(e.GetContent())
+	case typespb.EvidenceType_EVIDENCE_TYPE_UNSPECIFIED,
+		typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT,
+		typespb.EvidenceType_EVIDENCE_TYPE_CODE,
+		typespb.EvidenceType_EVIDENCE_TYPE_LOG,
+		typespb.EvidenceType_EVIDENCE_TYPE_OTHER,
+		typespb.EvidenceType_EVIDENCE_TYPE_PAYLOAD,
+		typespb.EvidenceType_EVIDENCE_TYPE_NETWORK_TRACE:
+		// The content of these types is the text as stored.
 	}
 	return map[string]any{
 		"type":    string(finding.EvidenceTypeName(e.GetType())),

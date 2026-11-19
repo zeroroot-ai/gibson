@@ -764,6 +764,8 @@ func agentWorkFailure(workID, runID string, err error) brain.WorkCompleted {
 		switch state := brain.WorkStateFromTask(se.State); state {
 		case brain.WorkCanceled, brain.WorkInputRequired:
 			return brain.WorkCompleted{ID: workID, RunID: runID, State: state, Err: se.Message}
+		case brain.WorkPending, brain.WorkRunning, brain.WorkDone, brain.WorkFailed, brain.WorkSkipped:
+			// These states fail the item below.
 		}
 	}
 	return brain.WorkCompleted{ID: workID, RunID: runID, Err: err.Error()}

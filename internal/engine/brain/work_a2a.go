@@ -24,10 +24,10 @@ func WorkStateFromTask(s a2a.TaskState) WorkState {
 		return WorkCanceled
 	case a2a.TaskStateInputRequired, a2a.TaskStateAuthRequired:
 		return WorkInputRequired
-	default:
-		// failed, rejected, unspecified
-		return WorkFailed
+	case a2a.TaskStateFailed, a2a.TaskStateRejected, a2a.TaskStateUnspecified:
+		// These states map to failed.
 	}
+	return WorkFailed
 }
 
 // TaskStateFromWork maps the state of a WorkItem to the A2A Task state that
@@ -46,7 +46,8 @@ func TaskStateFromWork(s WorkState) a2a.TaskState {
 		return a2a.TaskStateCanceled
 	case WorkInputRequired:
 		return a2a.TaskStateInputRequired
-	default:
-		return a2a.TaskStateFailed
+	case WorkFailed:
+		// A failed item reports the failed state.
 	}
+	return a2a.TaskStateFailed
 }

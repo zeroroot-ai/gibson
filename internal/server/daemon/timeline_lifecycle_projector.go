@@ -91,6 +91,8 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 				msg = "canceled"
 			}
 			return missionEventData(now, "node.failed", missionID, e.ID, "", msg)
+		case brain.WorkPending, brain.WorkRunning, brain.WorkDone, brain.WorkFailed, brain.WorkSkipped:
+			// The error of the event decides the result, below.
 		}
 		if e.Err != "" {
 			return missionEventData(now, "node.failed", missionID, e.ID, "", e.Err)
@@ -122,6 +124,9 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 			errMsg = e.Reason
 		case brain.MissionCanceled:
 			status = string(brain.MissionCanceled)
+		case brain.MissionCompleted, brain.MissionSubmitted, brain.MissionWorking,
+			brain.MissionInputRequired, brain.MissionPaused:
+			// The event reports completed for each other outcome.
 		}
 		return missionEventData(now, "status", e.ID, "", status, errMsg)
 	}

@@ -534,6 +534,8 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
 			fmt.Sprintf("remote agent %q ended in state %s", name, outcome.State),
 			&agentwire.StateError{State: outcome.State, Message: outcome.Result.Error.Message})
+	case brain.WorkPending, brain.WorkRunning, brain.WorkDone, brain.WorkFailed, brain.WorkSkipped:
+		// The checks below handle these states.
 	}
 	if brain.WorkStateFromTask(outcome.State) == brain.WorkFailed {
 		// A remote agent that reports a failure fails the node with its own

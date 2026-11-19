@@ -76,6 +76,8 @@ func TaskFromWork(id, missionID string, wi brain.WorkSnapshot) *a2a.Task {
 		if wi.Err != "" {
 			t.Status.Message = a2a.NewMessageForTask(a2a.MessageRoleAgent, t, a2a.NewTextPart(wi.Err))
 		}
+	case brain.WorkPending, brain.WorkRunning, brain.WorkSkipped:
+		// These states have no message and no artifact.
 	case brain.WorkDone:
 		if wi.Result != "" {
 			t.Artifacts = []*a2a.Artifact{{

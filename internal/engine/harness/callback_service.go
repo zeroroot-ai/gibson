@@ -2648,6 +2648,10 @@ func missionStatusToProto(status MissionStatus) harnesspb.MissionStatus {
 		return harnesspb.MissionStatus_MISSION_STATUS_FAILED
 	case MissionStatusCanceled:
 		return harnesspb.MissionStatus_MISSION_STATUS_CANCELED
+	case MissionStatusPaused:
+		return harnesspb.MissionStatus_MISSION_STATUS_PAUSED
+	case MissionStatusInputRequired:
+		return harnesspb.MissionStatus_MISSION_STATUS_INPUT_REQUIRED
 	default:
 		return harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED
 	}
@@ -2668,9 +2672,14 @@ func missionStatusFromProto(state harnesspb.MissionStatus) MissionStatus {
 		return MissionStatusFailed
 	case harnesspb.MissionStatus_MISSION_STATUS_CANCELED:
 		return MissionStatusCanceled
-	default:
-		return ""
+	case harnesspb.MissionStatus_MISSION_STATUS_PAUSED:
+		return MissionStatusPaused
+	case harnesspb.MissionStatus_MISSION_STATUS_INPUT_REQUIRED:
+		return MissionStatusInputRequired
+	case harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED:
+		// An unspecified status has no internal status.
 	}
+	return ""
 }
 
 // RunMission implements the mission execution RPC by delegating to the MissionOperator.

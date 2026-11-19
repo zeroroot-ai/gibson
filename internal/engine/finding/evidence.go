@@ -30,9 +30,10 @@ func EvidenceTypeName(t typespb.EvidenceType) sdkfinding.EvidenceType {
 		return sdkfinding.EvidenceConversation
 	case typespb.EvidenceType_EVIDENCE_TYPE_NETWORK_TRACE:
 		return sdkfinding.EvidenceNetworkTrace
-	default:
-		return sdkfinding.EvidenceOther
+	case typespb.EvidenceType_EVIDENCE_TYPE_UNSPECIFIED, typespb.EvidenceType_EVIDENCE_TYPE_OTHER:
+		// These types have no name of their own. They map to the other type.
 	}
+	return sdkfinding.EvidenceOther
 }
 
 // EvidenceTypeFromName is the inverse of EvidenceTypeName. A name that is not
@@ -55,7 +56,8 @@ func EvidenceTypeFromName(n sdkfinding.EvidenceType) typespb.EvidenceType {
 		return typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION
 	case sdkfinding.EvidenceNetworkTrace:
 		return typespb.EvidenceType_EVIDENCE_TYPE_NETWORK_TRACE
-	default:
-		return typespb.EvidenceType_EVIDENCE_TYPE_OTHER
+	case sdkfinding.EvidenceOther:
+		// The other type maps to EVIDENCE_TYPE_OTHER, as a name that is not in the list does.
 	}
+	return typespb.EvidenceType_EVIDENCE_TYPE_OTHER
 }

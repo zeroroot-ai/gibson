@@ -17,9 +17,10 @@ func CategoryPrefix(cat secretsv1.SecretCategory) string {
 		return "cred:"
 	case secretsv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG:
 		return "provider_config:"
-	default:
-		return ""
+	case secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED:
+		// An unspecified category has no prefix.
 	}
+	return ""
 }
 
 // StoredName returns the broker key of a tenant secret. Tenant secrets are
