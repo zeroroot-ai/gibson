@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -525,8 +526,57 @@ func TestInboundMiddleware_SetsTheWriteDeadline(t *testing.T) {
 			h.ServeHTTP(rec, req)
 
 			require.NotEmpty(t, rec.deadlines, "the response has a write deadline")
-			last := rec.deadlines[len(rec.deadlines)-1]
+			require.True(t, rec.deadlines[len(rec.deadlines)-1].IsZero(), "the deadline is cleared at the end")
+			last := rec.deadlines[len(rec.deadlines)-2]
 			assert.WithinDuration(t, before.Add(WriteTimeoutFor(size)), last, 5*time.Second)
+		})
+	}
+}
+
+// orderRecorder records the order of the deadlines and the writes of a response.
+type orderRecorder struct {
+	*httptest.ResponseRecorder
+	events []string
+}
+
+func (o *orderRecorder) SetWriteDeadline(t time.Time) error {
+	if t.IsZero() {
+		o.events = append(o.events, "deadline:cleared")
+	} else {
+		o.events = append(o.events, "deadline:set")
+	}
+	return nil
+}
+
+func (o *orderRecorder) Write(b []byte) (int, error) {
+	o.events = append(o.events, "write")
+	return o.ResponseRecorder.Write(b)
+}
+
+// On a kept-alive connection the deadline of one request must not stay for the next.
+// The deadline is set before the first write, and it is cleared after the last one.
+// The refusal of a request with no caller is a write too, so it is bound.
+func TestInboundMiddleware_SetsTheDeadlineFirstAndClearsItLast(t *testing.T) {
+	task := &a2a.Task{ID: "m-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted}}
+	for name, headers := range map[string]map[string]string{
+		"a refused request":   nil,
+		"an answered request": {"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := NewInboundHandler(&fakeStarts{task: task, resultSize: 20 << 20}, &recordingCards{}, allowGrants)
+			req := httptest.NewRequest(http.MethodPost, "/a2a/inbound/recon", strings.NewReader(getBody))
+			for k, v := range headers {
+				req.Header.Set(k, v)
+			}
+			rec := &orderRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+			h.ServeHTTP(rec, req)
+
+			require.GreaterOrEqual(t, len(rec.events), 3, "%v", rec.events)
+			assert.Equal(t, "deadline:set", rec.events[0], "the deadline comes before any write")
+			assert.Equal(t, "deadline:cleared", rec.events[len(rec.events)-1], "the deadline is cleared at the end")
+			firstWrite := slices.Index(rec.events, "write")
+			assert.Greater(t, firstWrite, 0)
 		})
 	}
 }

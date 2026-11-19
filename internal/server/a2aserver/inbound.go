@@ -327,6 +327,17 @@ func NewInboundHandler(runs InboundRuns, cards Cards, grants InboundGrants) http
 // agent. The agent is never read from a header or from the body.
 func inboundMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// The deadline is the first step, before any write, so the refusals below are
+		// bound too. On a kept-alive connection the deadline of one request would
+		// stay for the next, so it is cleared when this request ends. The flush comes
+		// first, so the whole response is written under the deadline.
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Now().Add(InboundWriteFloor))
+		defer func() {
+			_ = rc.Flush()
+			_ = rc.SetWriteDeadline(time.Time{})
+		}()
+
 		c, err := InboundCallerFromHeaders(req.Header)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
@@ -340,13 +351,10 @@ func inboundMiddleware(next http.Handler) http.Handler {
 		req.Body = http.MaxBytesReader(w, req.Body, MaxInboundRequestBytes)
 		hooked, done := WithResponseHooks(req.Context())
 		defer done()
-		// The write of a response is bounded. A result sets a longer deadline for its
-		// size (ExtendWriteDeadline).
-		rc := http.NewResponseController(w)
+		// A result sets a longer deadline for its size (ExtendWriteDeadline).
 		if h, ok := hooked.Value(hooksKey{}).(*responseHooks); ok {
 			h.rc = rc
 		}
-		_ = rc.SetWriteDeadline(time.Now().Add(InboundWriteFloor))
 		next.ServeHTTP(w, req.WithContext(context.WithValue(hooked, inboundCtxKey{}, inboundCall{caller: c, agent: agent})))
 	})
 }
