@@ -672,6 +672,23 @@ func main() {
 			setupLog.Error(err, "Failed to register the model provider sync runnable")
 			os.Exit(1)
 		}
+		// Pull the outside agent records of each tenant and render the backend, the
+		// route and the credential Secret of each into the gateway namespace
+		// (gibson#1403). The agent gateway is a required component.
+		agentGatewayConfig, aerr := agentGatewayConfigFromEnv(os.Getenv)
+		if aerr != nil {
+			setupLog.Error(aerr, "Invalid agent gateway configuration")
+			os.Exit(1)
+		}
+		if err := (&controller.OutsideAgentSyncRunnable{
+			Client:      mgr.GetClient(),
+			Daemon:      grpcClient,
+			Credentials: grpcClient,
+			Render:      agentGatewayConfig,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to register the outside agent sync runnable")
+			os.Exit(1)
+		}
 		if sagaAudit, gerr = audit.NewSagaEmitter(grpcClient); gerr != nil {
 			setupLog.Error(gerr, "saga audit emitter init failed")
 			os.Exit(1)

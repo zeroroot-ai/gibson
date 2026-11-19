@@ -29,6 +29,7 @@ import (
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/modelprovider"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/outsideagent"
 )
 
 // modelProviderCredentialRetry is how long the controller waits before it looks
@@ -161,38 +162,9 @@ func (r *ModelProviderReconciler) syncCredential(
 		return "", errors.New("the daemon returned an empty credential")
 	}
 	key := types.NamespacedName{Namespace: r.Render.Namespace, Name: secretName}
-	var live corev1.Secret
-	getErr := r.Get(ctx, key, &live)
-	if apierrors.IsNotFound(getErr) {
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: key.Namespace, Name: key.Name,
-				Labels:      r.credentialLabels(mp),
-				Annotations: map[string]string{modelprovider.AnnotationCredentialSecret: mp.Spec.CredentialSecret},
-			},
-			Type: corev1.SecretTypeOpaque,
-			Data: data,
-		}
-		if cerr := r.Create(ctx, secret); cerr != nil {
-			return "", fmt.Errorf("create the credential Secret %s: %w", key.Name, cerr)
-		}
-		return "", nil
-	}
-	if getErr != nil {
-		return "", fmt.Errorf("read the credential Secret %s: %w", key.Name, getErr)
-	}
-	if secretDataEqual(live.Data, data) && labelsContain(live.Labels, r.credentialLabels(mp)) {
-		return "", nil
-	}
-	live.Data = data
-	if live.Labels == nil {
-		live.Labels = map[string]string{}
-	}
-	for k, v := range r.credentialLabels(mp) {
-		live.Labels[k] = v
-	}
-	if uerr := r.Update(ctx, &live); uerr != nil {
-		return "", fmt.Errorf("update the credential Secret %s: %w", key.Name, uerr)
+	annotations := map[string]string{modelprovider.AnnotationCredentialSecret: mp.Spec.CredentialSecret}
+	if err := upsertSecret(ctx, r.Client, key, r.credentialLabels(mp), annotations, data); err != nil {
+		return "", err
 	}
 	return "", nil
 }
@@ -218,17 +190,36 @@ func secretDataEqual(a, b map[string][]byte) bool {
 
 // apply creates the object, or updates it when its spec or labels differ.
 func (r *ModelProviderReconciler) apply(ctx context.Context, desired *unstructured.Unstructured) error {
+	return applyObject(ctx, r.Client, desired)
+}
+
+// ownerLabelKeys are the labels that name the owner of a gateway object.
+var ownerLabelKeys = []string{
+	modelprovider.LabelTenant, modelprovider.LabelModelProvider, outsideagent.LabelOutsideAgent,
+}
+
+// applyObject creates the object, or updates it when its spec or labels differ.
+// It is the write of each controller and loop that renders gateway objects.
+func applyObject(ctx context.Context, c client.Client, desired *unstructured.Unstructured) error {
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(desired.GroupVersionKind())
-	err := r.Get(ctx, client.ObjectKeyFromObject(desired), current)
+	err := c.Get(ctx, client.ObjectKeyFromObject(desired), current)
 	if apierrors.IsNotFound(err) {
-		if cerr := r.Create(ctx, desired.DeepCopy()); cerr != nil {
+		if cerr := c.Create(ctx, desired.DeepCopy()); cerr != nil {
 			return fmt.Errorf("create %s %s: %w", desired.GetKind(), desired.GetName(), cerr)
 		}
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("read %s %s: %w", desired.GetKind(), desired.GetName(), err)
+	}
+	// Two names can render to one object name (tenant a-b with agent c, and
+	// tenant a with agent b-c). The object of another owner is never replaced.
+	for _, k := range ownerLabelKeys {
+		if have, want := current.GetLabels()[k], desired.GetLabels()[k]; have != "" && want != "" && have != want {
+			return fmt.Errorf("%s %s belongs to another owner (label %s is %q, not %q)",
+				desired.GetKind(), desired.GetName(), k, have, want)
+		}
 	}
 	wantSpec, _, _ := unstructured.NestedFieldNoCopy(desired.Object, "spec")
 	haveSpec, _, _ := unstructured.NestedFieldNoCopy(current.Object, "spec")
@@ -245,8 +236,49 @@ func (r *ModelProviderReconciler) apply(ctx context.Context, desired *unstructur
 		merged[k] = v
 	}
 	updated.SetLabels(merged)
-	if uerr := r.Update(ctx, updated); uerr != nil {
+	if uerr := c.Update(ctx, updated); uerr != nil {
 		return fmt.Errorf("update %s %s: %w", desired.GetKind(), desired.GetName(), uerr)
+	}
+	return nil
+}
+
+// upsertSecret writes a Secret in the namespace of the gateway. It creates the
+// Secret, or it replaces the data and merges the labels when they differ. The
+// error text never holds a value.
+func upsertSecret(
+	ctx context.Context, c client.Client, key types.NamespacedName,
+	labels, annotations map[string]string, data map[string][]byte,
+) error {
+	var live corev1.Secret
+	getErr := c.Get(ctx, key, &live)
+	if apierrors.IsNotFound(getErr) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: key.Namespace, Name: key.Name, Labels: labels, Annotations: annotations,
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: data,
+		}
+		if cerr := c.Create(ctx, secret); cerr != nil {
+			return fmt.Errorf("create the credential Secret %s: %w", key.Name, cerr)
+		}
+		return nil
+	}
+	if getErr != nil {
+		return fmt.Errorf("read the credential Secret %s: %w", key.Name, getErr)
+	}
+	if secretDataEqual(live.Data, data) && labelsContain(live.Labels, labels) {
+		return nil
+	}
+	live.Data = data
+	if live.Labels == nil {
+		live.Labels = map[string]string{}
+	}
+	for k, v := range labels {
+		live.Labels[k] = v
+	}
+	if uerr := c.Update(ctx, &live); uerr != nil {
+		return fmt.Errorf("update the credential Secret %s: %w", key.Name, uerr)
 	}
 	return nil
 }

@@ -552,3 +552,58 @@ func (c *EntitlementsGRPCClient) TenantModelProviders(
 	}
 	return out, resp.GetSkipped(), nil
 }
+
+// DesiredOutsideAgent is one outside agent record of a tenant, as the daemon
+// returns it. The credential secret is a name and never a value.
+type DesiredOutsideAgent struct {
+	Name             string
+	A2AURL           string
+	CredentialSecret string
+}
+
+// TenantOutsideAgents reads the outside agent records of one tenant via
+// DaemonOperatorService.GetTenantOutsideAgents (gibson#1403). It satisfies the
+// OutsideAgentRecords interface of the controller package.
+func (c *EntitlementsGRPCClient) TenantOutsideAgents(
+	ctx context.Context, tenantID string,
+) ([]DesiredOutsideAgent, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.GetTenantOutsideAgents(authedCtx, &operatorv1.GetTenantOutsideAgentsRequest{TenantId: tenantID})
+	if err := translateGRPCError("get-tenant-outside-agents", err); err != nil {
+		return nil, err
+	}
+	out := make([]DesiredOutsideAgent, 0, len(resp.GetAgents()))
+	for _, a := range resp.GetAgents() {
+		out = append(out, DesiredOutsideAgent{
+			Name: a.GetName(), A2AURL: a.GetA2AUrl(), CredentialSecret: a.GetCredentialSecret(),
+		})
+	}
+	return out, nil
+}
+
+// OutsideAgentCredential reads the content of the credential Secret of an
+// outside agent via DaemonOperatorService.GetOutsideAgentCredential
+// (gibson#1403). A record or a tenant secret that does not exist gives
+// clients.ErrNotFound. The error text never holds a value.
+func (c *EntitlementsGRPCClient) OutsideAgentCredential(
+	ctx context.Context, tenantID, name string,
+) (map[string][]byte, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.GetOutsideAgentCredential(authedCtx, &operatorv1.GetOutsideAgentCredentialRequest{
+		TenantId: tenantID, Name: name,
+	})
+	if grpcstatus.Code(err) == codes.NotFound {
+		metrics.ObserveDaemonCallError("get-outside-agent-credential", err)
+		return nil, fmt.Errorf("entitlements: get-outside-agent-credential: %w", clients.ErrNotFound)
+	}
+	if err := translateGRPCError("get-outside-agent-credential", err); err != nil {
+		return nil, err
+	}
+	return resp.GetData(), nil
+}
