@@ -46,7 +46,7 @@ func faultRig(
 		WithStatusSubresource(&gibsonv1alpha1.ModelProvider{}).WithInterceptorFuncs(funcs).Build()
 	r := &ModelProviderReconciler{
 		Client: c, Scheme: scheme,
-		Render:      modelprovider.Config{Namespace: "gibson-gateway", GatewayName: "model-gateway"},
+		Render:      modelprovider.Config{Namespace: "gibson-gateway", GatewayName: "model-gateway", SectionName: "model"},
 		Credentials: anthropicCredentials(),
 	}
 	return r, c
@@ -426,7 +426,7 @@ func TestModelProvider_SetupWithManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager: %v", err)
 	}
-	valid := modelprovider.Config{Namespace: "gibson-gateway", GatewayName: "model-gateway"}
+	valid := modelprovider.Config{Namespace: "gibson-gateway", GatewayName: "model-gateway", SectionName: "model"}
 
 	bad := &ModelProviderReconciler{Client: mgr.GetClient(), Credentials: anthropicCredentials()}
 	if err := bad.SetupWithManager(mgr); err == nil || !strings.Contains(err.Error(), "namespace is required") {

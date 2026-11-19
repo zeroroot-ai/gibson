@@ -36,6 +36,7 @@ metadata:
 spec:
   parentRefs:
   - name: agent-gateway
+    sectionName: agent
   rules:
   - backendRefs:
     - group: agentgateway.dev

@@ -80,7 +80,7 @@ func outsideSyncRig(
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(all...).Build()
 	return &OutsideAgentSyncRunnable{
 		Client: c, Daemon: rec, Credentials: creds,
-		Render: outsideagent.Config{Namespace: testGatewayNS, GatewayName: "agent-gateway"},
+		Render: outsideagent.Config{Namespace: testGatewayNS, GatewayName: "agent-gateway", SectionName: "agent"},
 	}, c
 }
 

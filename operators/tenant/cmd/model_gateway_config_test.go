@@ -12,11 +12,12 @@ func TestModelGatewayConfigFromEnv(t *testing.T) {
 	full := map[string]string{
 		envModelGatewayNamespace: "gibson-gateway",
 		envModelGatewayName:      "model-gateway",
+		envModelGatewayListener:  "model",
 	}
 	get := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
 	cfg, err := modelGatewayConfigFromEnv(get(full))
-	if err != nil || cfg.Namespace != "gibson-gateway" || cfg.GatewayName != "model-gateway" {
+	if err != nil || cfg.Namespace != "gibson-gateway" || cfg.GatewayName != "model-gateway" || cfg.SectionName != "model" {
 		t.Fatalf("config = %+v, %v", cfg, err)
 	}
 
@@ -37,11 +38,12 @@ func TestAgentGatewayConfigFromEnv(t *testing.T) {
 	full := map[string]string{
 		envModelGatewayNamespace: "gibson-gateway",
 		envAgentGatewayName:      "agent-gateway",
+		envAgentGatewayListener:  "agent",
 	}
 	get := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
 	cfg, err := agentGatewayConfigFromEnv(get(full))
-	if err != nil || cfg.Namespace != "gibson-gateway" || cfg.GatewayName != "agent-gateway" {
+	if err != nil || cfg.Namespace != "gibson-gateway" || cfg.GatewayName != "agent-gateway" || cfg.SectionName != "agent" {
 		t.Fatalf("config = %+v, %v", cfg, err)
 	}
 

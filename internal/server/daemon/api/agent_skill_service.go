@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/infra/netguard"
 	"strconv"
 	"strings"
 
@@ -131,7 +132,13 @@ func requireSkillName(rpc, name string) error {
 }
 
 // agentSkillStatus maps a store or pull error to a gRPC status.
-func agentSkillStatus(rpc string, err error) error {
+func agentSkillStatus(ctx context.Context, rpc string, err error) error {
+	// The registry host comes from the tenant. A refusal of the egress guard names
+	// the address that the host resolved to, so the client gets a fixed text.
+	var blocked *netguard.BlockedAddressError
+	if errors.As(err, &blocked) {
+		return status_grpc.Error(codes.InvalidArgument, rpc+": "+netguard.RedactBlocked(ctx, err).Error())
+	}
 	switch {
 	case errors.Is(err, agentskill.ErrOverLimit):
 		return status_grpc.Error(codes.ResourceExhausted, rpc+": "+err.Error())
@@ -195,11 +202,11 @@ func (s *AgentSkillService) PublishAgentSkill(
 	}
 	pulled, err := s.pull(ctx, req.GetReference(), req.GetName(), keychain)
 	if err != nil {
-		return nil, agentSkillStatus(rpc, err)
+		return nil, agentSkillStatus(ctx, rpc, err)
 	}
 	entry, err := s.store.Publish(ctx, tenant, req.GetReference(), agentskillstore.SourceTenant, pulled)
 	if err != nil {
-		return nil, agentSkillStatus(rpc, err)
+		return nil, agentSkillStatus(ctx, rpc, err)
 	}
 	if err := s.fga.Write(ctx, []authz.Tuple{{User: "tenant:" + tenant, Relation: "owner", Object: object}}); err != nil {
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the owner tuple: %v", rpc, err))
@@ -259,7 +266,7 @@ func (s *AgentSkillService) ListAgentSkills(
 	limit := page.Limit()
 	entries, err := s.store.ListPage(ctx, tenant, req.GetName(), req.GetAllVersions(), after, limit+1)
 	if err != nil {
-		return nil, agentSkillStatus(rpc, err)
+		return nil, agentSkillStatus(ctx, rpc, err)
 	}
 	more := len(entries) > limit
 	if more {
@@ -310,7 +317,7 @@ func (s *AgentSkillService) ListAgentSkillGrants(
 		return nil, err
 	}
 	if _, err := s.store.Get(ctx, tenant, req.GetName(), ""); err != nil {
-		return nil, agentSkillStatus(rpc, err)
+		return nil, agentSkillStatus(ctx, rpc, err)
 	}
 	var grants []*tenantv1.AgentSkillGrant
 	for _, g := range grantRelations {
@@ -355,7 +362,7 @@ func (s *AgentSkillService) ListSharedAgentSkills(
 		}
 		_, gerr := s.store.Get(ctx, tenant, name, e.Pulled.Digest)
 		if gerr != nil && !errors.Is(gerr, agentskillstore.ErrNotFound) {
-			return nil, agentSkillStatus(rpc, gerr)
+			return nil, agentSkillStatus(ctx, rpc, gerr)
 		}
 		out.Entries = append(out.Entries, &tenantv1.SharedAgentSkillEntry{
 			Name: name, Description: e.Pulled.Manifest.Description, Digest: e.Pulled.Digest, Enabled: gerr == nil,
@@ -397,7 +404,7 @@ func (s *AgentSkillService) EnableSharedAgentSkill(
 	}
 	entry, err := s.store.Publish(ctx, tenant, shared.Reference, agentskillstore.SourceShared, shared.Pulled)
 	if err != nil {
-		return nil, agentSkillStatus(rpc, err)
+		return nil, agentSkillStatus(ctx, rpc, err)
 	}
 	if err := s.fga.Write(ctx, []authz.Tuple{{User: "tenant:" + tenant, Relation: "owner", Object: object}}); err != nil {
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the owner tuple: %v", rpc, err))
@@ -421,13 +428,13 @@ func (s *AgentSkillService) GetAgentSkill(
 	if digest == "" {
 		cur, gerr := s.store.Get(ctx, tenant, req.GetName(), "")
 		if gerr != nil {
-			return nil, agentSkillStatus(rpc, gerr)
+			return nil, agentSkillStatus(ctx, rpc, gerr)
 		}
 		digest = cur.Digest
 	}
 	loaded, err := s.store.Load(ctx, tenant, req.GetName(), digest)
 	if err != nil {
-		return nil, agentSkillStatus(rpc, err)
+		return nil, agentSkillStatus(ctx, rpc, err)
 	}
 	out := &tenantv1.GetAgentSkillResponse{Entry: agentSkillEntryProto(loaded.Entry), Body: loaded.Body}
 	for _, f := range loaded.Files {
@@ -474,7 +481,7 @@ func (s *AgentSkillService) DeleteAgentSkill(
 	}
 	n, err := s.store.Delete(ctx, tenant, req.GetName())
 	if err != nil {
-		return nil, agentSkillStatus(rpc, err)
+		return nil, agentSkillStatus(ctx, rpc, err)
 	}
 	return &tenantv1.DeleteAgentSkillResponse{DeletedVersions: int32Count(int(n))}, nil
 }
@@ -532,7 +539,7 @@ func (s *AgentSkillService) GrantAgentSkill(
 	}
 	// A grant on a name that has no version is refused.
 	if _, err := s.store.Get(ctx, tenant, req.GetName(), ""); err != nil {
-		return nil, agentSkillStatus(rpc, err)
+		return nil, agentSkillStatus(ctx, rpc, err)
 	}
 	if err := s.fga.Write(ctx, []authz.Tuple{tuple}); err != nil {
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the grant: %v", rpc, err))

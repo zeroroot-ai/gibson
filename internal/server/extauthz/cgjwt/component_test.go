@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // startDescriptorServer serves the per-kid descriptor (a JWKS superset) the
@@ -582,4 +584,234 @@ func TestComponentVerify_RejectsMissingMethod(t *testing.T) {
 	if _, err := v.Verify(context.Background(), tok, testMethod); !errors.Is(err, ErrMalformed) {
 		t.Fatalf("err = %v, want ErrMalformed (unbound token with no method claim must be rejected)", err)
 	}
+}
+
+// startCapabilityServer serves a descriptor that lists capabilities.
+func startCapabilityServer(t *testing.T, pub ed25519.PublicKey, kid string, capabilities []string) *httptest.Server {
+	t.Helper()
+	doc := map[string]any{
+		"keys": []map[string]string{{
+			"kty": "OKP", "crv": "Ed25519",
+			"x":   base64.RawURLEncoding.EncodeToString(pub),
+			"kid": kid, "alg": "EdDSA", "use": "sig",
+		}},
+		"principal": "agent_principal:9", "tenant": "acme", "status": "active",
+		"capabilities": capabilities,
+	}
+	body, _ := json.Marshal(doc)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// The capabilities of the identity come from the descriptor of the daemon, and
+// never from the token.
+func TestComponentVerify_ReadsTheCapabilitiesOfTheDescriptor(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	tests := []struct {
+		name          string
+		capabilities  []string
+		wantOriginate bool
+	}{
+		{"the descriptor lists the ceiling", []string{"mission:originate"}, true},
+		{"the descriptor lists no capability", nil, false},
+		{"the descriptor lists another capability", []string{"mission:delegate"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := startCapabilityServer(t, pub, "agent-1", tt.capabilities)
+			v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+			tok := mintAgentJWT(t, priv, "agent-1", "agent+jwt", time.Now().Add(55*time.Second))
+
+			id, err := v.Verify(context.Background(), tok, testMethod)
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			if got := id.Has("mission:originate"); got != tt.wantOriginate {
+				t.Errorf("Has(mission:originate) = %v, want %v", got, tt.wantOriginate)
+			}
+		})
+	}
+}
+
+// A descriptor that the daemon withholds after the first read must stop a token at
+// the next VerifyFresh call, although the cache time is long. Verify reads the cache.
+func TestComponentVerifyFresh_ReadsTheDescriptorOfTheDaemonForEachCall(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	var revoked atomic.Bool
+	doc := map[string]any{
+		"keys": []map[string]string{{
+			"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pub), "kid": "agent-1",
+		}},
+		"principal": "agent_principal:9", "tenant": "acme", "status": "active",
+	}
+	body, _ := json.Marshal(doc)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if revoked.Load() {
+			http.Error(w, "unknown key", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys") // TTL is one minute
+	mint := func() string { return mintAgentJWT(t, priv, "agent-1", "agent+jwt", time.Now().Add(55*time.Second)) }
+
+	if _, err := v.VerifyFresh(context.Background(), mint(), testMethod); err != nil {
+		t.Fatalf("VerifyFresh before the revoke: %v", err)
+	}
+	revoked.Store(true)
+
+	if _, err := v.Verify(context.Background(), mint(), testMethod); err != nil {
+		t.Fatalf("Verify reads the cache, so it still accepts inside the cache time: %v", err)
+	}
+	if _, err := v.VerifyFresh(context.Background(), mint(), testMethod); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("VerifyFresh after the revoke = %v, want ErrUnknownKey", err)
+	}
+	if _, err := v.Verify(context.Background(), mint(), testMethod); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("Verify after a failed fresh read must not use the dropped cache entry: %v", err)
+	}
+}
+
+// A token that the cached key rejects causes no fresh read. Without this a caller
+// that knows a kid could make the daemon read its database for each forged token.
+func TestComponentVerifyFresh_AForgedTokenCausesNoFreshRead(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	_, other := mustGenKey(t)
+	var reads atomic.Int64
+	doc := map[string]any{
+		"keys": []map[string]string{{
+			"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pub), "kid": "agent-1",
+		}},
+		"principal": "agent_principal:9", "tenant": "acme", "status": "active",
+	}
+	body, _ := json.Marshal(doc)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reads.Add(1)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+	exp := time.Now().Add(55 * time.Second)
+
+	_, err := v.VerifyFresh(context.Background(), mintAgentJWT(t, priv, "agent-1", "agent+jwt", exp), testMethod)
+	require.NoError(t, err, "the first call fills the cache")
+	require.EqualValues(t, 1, reads.Load())
+
+	_, err = v.VerifyFresh(context.Background(), mintAgentJWT(t, other, "agent-1", "agent+jwt", exp), testMethod)
+
+	require.ErrorIs(t, err, ErrSignature)
+	assert.EqualValues(t, 1, reads.Load(), "a forged token makes no fresh read")
+
+	_, err = v.VerifyFresh(context.Background(), mintAgentJWT(t, priv, "agent-1", "agent+jwt", exp), testMethod)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, reads.Load(), "a good token still reads the status fresh")
+}
+
+// countingDescriptorServer serves the descriptor of one kid and counts the reads.
+func countingDescriptorServer(t *testing.T, pub ed25519.PublicKey, kid string) (*httptest.Server, *atomic.Int64) {
+	t.Helper()
+	var reads atomic.Int64
+	doc := map[string]any{
+		"keys":      []map[string]string{{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pub), "kid": kid}},
+		"principal": "agent_principal:9", "tenant": "acme", "status": "active",
+	}
+	body, _ := json.Marshal(doc)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads.Add(1)
+		if !strings.HasSuffix(r.URL.Path, "/"+kid) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &reads
+}
+
+// An expired token of a real kid, or one with no exp, is refused by the cached key
+// and costs no fresh read. A captured token cannot load the database after it expires.
+func TestComponentVerifyFresh_AnExpiredOrOpenTokenCausesNoFreshRead(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	srv, reads := countingDescriptorServer(t, pub, "agent-1")
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+	_, err := v.VerifyFresh(context.Background(), mintAgentJWT(t, priv, "agent-1", "agent+jwt", time.Now().Add(55*time.Second)), testMethod)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, reads.Load())
+
+	_, err = v.VerifyFresh(context.Background(), mintAgentJWT(t, priv, "agent-1", "agent+jwt", time.Now().Add(-time.Minute)), testMethod)
+	require.ErrorIs(t, err, ErrExpired)
+	noExp := mintAgentJWTClaims(t, priv, "agent-1", jwt.MapClaims{
+		"iss": "host-abc", "sub": "agent-1", "aud": testAudience, "iat": time.Now().Add(-time.Second).Unix(), "jti": "no-exp",
+	})
+	_, err = v.VerifyFresh(context.Background(), noExp, testMethod)
+	require.ErrorIs(t, err, ErrExpired)
+
+	assert.EqualValues(t, 1, reads.Load(), "neither token made a fresh read")
+}
+
+// A kid that the daemon does not know is remembered for a short time, so repeated
+// tokens of one unknown kid cost one read. The entry ends after DefaultMissingKidTTL,
+// so an identity that is created after a miss can call after that time at the latest.
+func TestComponentVerify_AnUnknownKidIsRememberedForAShortTime(t *testing.T) {
+	_, priv := mustGenKey(t)
+	pub, _ := mustGenKey(t)
+	srv, reads := countingDescriptorServer(t, pub, "agent-1")
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+	v.missingTTL = 50 * time.Millisecond
+	mint := func() string { return mintAgentJWT(t, priv, "ghost", "agent+jwt", time.Now().Add(55*time.Second)) }
+
+	for range 5 {
+		_, err := v.VerifyFresh(context.Background(), mint(), testMethod)
+		require.ErrorIs(t, err, ErrUnknownKey)
+	}
+	assert.EqualValues(t, 1, reads.Load(), "five tokens of one unknown kid cost one read")
+
+	time.Sleep(80 * time.Millisecond)
+	_, err := v.VerifyFresh(context.Background(), mint(), testMethod)
+	require.ErrorIs(t, err, ErrUnknownKey)
+	assert.EqualValues(t, 2, reads.Load(), "after the time the kid is read again")
+	assert.Equal(t, 3*time.Second, DefaultMissingKidTTL)
+}
+
+func TestComponentVerify_TheNegativeCacheIsBounded(t *testing.T) {
+	pub, _ := mustGenKey(t)
+	srv, _ := countingDescriptorServer(t, pub, "agent-1")
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+	v.missingTTL = time.Hour
+	for i := range maxMissingKids + 50 {
+		v.rememberMissing(fmt.Sprintf("kid-%d", i))
+	}
+	assert.Len(t, v.missing, maxMissingKids)
+}
+
+// A 503 from the key server is a transient failure. The call is refused, and the kid is
+// not remembered as unknown, so the next call after the daemon recovers works.
+func TestComponentVerifyFresh_A503IsNotCachedAsAnUnknownKid(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	var down atomic.Bool
+	doc := map[string]any{
+		"keys":      []map[string]string{{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pub), "kid": "agent-1"}},
+		"principal": "agent_principal:9", "tenant": "acme", "status": "active",
+	}
+	body, _ := json.Marshal(doc)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if down.Load() {
+			http.Error(w, "key lookup unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+	mint := func() string { return mintAgentJWT(t, priv, "agent-1", "agent+jwt", time.Now().Add(55*time.Second)) }
+
+	down.Store(true)
+	_, err := v.VerifyFresh(context.Background(), mint(), testMethod)
+	require.ErrorIs(t, err, ErrUnknownKey, "the call fails closed")
+	assert.False(t, v.knownMissing("agent-1"), "a 503 makes no negative cache entry")
+
+	down.Store(false)
+	_, err = v.VerifyFresh(context.Background(), mint(), testMethod)
+	require.NoError(t, err, "the next call works as soon as the daemon is back")
 }

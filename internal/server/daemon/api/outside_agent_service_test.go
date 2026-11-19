@@ -191,6 +191,15 @@ func TestRegisterOutsideAgent_RefusalNamesNoLLMSetting(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "allow_private_llm_endpoints")
 	assert.Contains(t, err.Error(), outsideAgentAddressHint)
+	assert.Contains(t, err.Error(), "the host does not resolve to a public address")
+	assertNoAddressDetail(t, err)
+	_, err = f.svc.RegisterOutsideAgent(f.ctx, &tenantv1.RegisterOutsideAgentRequest{
+		Name: "a", A2AUrl: "https://rebind.example/"})
+	assertNoAddressDetail(t, err)
+	_, err = f.svc.RegisterOutsideAgent(f.ctx, &tenantv1.RegisterOutsideAgentRequest{
+		Name: "a", A2AUrl: "https://no-such-host.example/"})
+	require.Error(t, err)
+	assertNoAddressDetail(t, err)
 }
 
 func registeredOutside(t *testing.T) *outsideFixture {

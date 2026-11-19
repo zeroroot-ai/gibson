@@ -38,7 +38,10 @@ type Runs interface {
 
 // handler is the a2asrv.RequestHandler of the daemon. It serves SendMessage,
 // GetTask and CancelTask. Every other method is not supported.
-type handler struct{ runs Runs }
+type handler struct {
+	UnsupportedMethods
+	runs Runs
+}
 
 var _ a2asrv.RequestHandler = (*handler)(nil)
 
@@ -101,15 +104,23 @@ func (h *handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*
 	return t, nil
 }
 
-func (h *handler) ListTasks(context.Context, *a2a.ListTasksRequest) (*a2a.ListTasksResponse, error) {
+// UnsupportedMethods answers each A2A method that the daemon does not serve:
+// listing, streaming, push notifications and the extended card. A handler embeds
+// it and implements the methods that it serves.
+type UnsupportedMethods struct{}
+
+// ListTasks is not supported.
+func (UnsupportedMethods) ListTasks(context.Context, *a2a.ListTasksRequest) (*a2a.ListTasksResponse, error) {
 	return nil, a2a.ErrUnsupportedOperation
 }
 
-func (h *handler) SubscribeToTask(context.Context, *a2a.SubscribeToTaskRequest) iter.Seq2[a2a.Event, error] {
+// SubscribeToTask is not supported.
+func (UnsupportedMethods) SubscribeToTask(context.Context, *a2a.SubscribeToTaskRequest) iter.Seq2[a2a.Event, error] {
 	return unsupportedStream()
 }
 
-func (h *handler) SendStreamingMessage(context.Context, *a2a.SendMessageRequest) iter.Seq2[a2a.Event, error] {
+// SendStreamingMessage is not supported.
+func (UnsupportedMethods) SendStreamingMessage(context.Context, *a2a.SendMessageRequest) iter.Seq2[a2a.Event, error] {
 	return unsupportedStream()
 }
 
@@ -117,23 +128,28 @@ func unsupportedStream() iter.Seq2[a2a.Event, error] {
 	return func(yield func(a2a.Event, error) bool) { yield(nil, a2a.ErrUnsupportedOperation) }
 }
 
-func (h *handler) GetTaskPushConfig(context.Context, *a2a.GetTaskPushConfigRequest) (*a2a.PushConfig, error) {
+// GetTaskPushConfig is not supported. The daemon has no push notifications.
+func (UnsupportedMethods) GetTaskPushConfig(context.Context, *a2a.GetTaskPushConfigRequest) (*a2a.PushConfig, error) {
 	return nil, a2a.ErrPushNotificationNotSupported
 }
 
-func (h *handler) ListTaskPushConfigs(context.Context, *a2a.ListTaskPushConfigRequest) (*a2a.ListTaskPushConfigResponse, error) {
+// ListTaskPushConfigs is not supported.
+func (UnsupportedMethods) ListTaskPushConfigs(context.Context, *a2a.ListTaskPushConfigRequest) (*a2a.ListTaskPushConfigResponse, error) {
 	return nil, a2a.ErrPushNotificationNotSupported
 }
 
-func (h *handler) CreateTaskPushConfig(context.Context, *a2a.PushConfig) (*a2a.PushConfig, error) {
+// CreateTaskPushConfig is not supported.
+func (UnsupportedMethods) CreateTaskPushConfig(context.Context, *a2a.PushConfig) (*a2a.PushConfig, error) {
 	return nil, a2a.ErrPushNotificationNotSupported
 }
 
-func (h *handler) DeleteTaskPushConfig(context.Context, *a2a.DeleteTaskPushConfigRequest) error {
+// DeleteTaskPushConfig is not supported.
+func (UnsupportedMethods) DeleteTaskPushConfig(context.Context, *a2a.DeleteTaskPushConfigRequest) error {
 	return a2a.ErrPushNotificationNotSupported
 }
 
-func (h *handler) GetExtendedAgentCard(context.Context, *a2a.GetExtendedAgentCardRequest) (*a2a.AgentCard, error) {
+// GetExtendedAgentCard is not supported. The daemon serves no extended card.
+func (UnsupportedMethods) GetExtendedAgentCard(context.Context, *a2a.GetExtendedAgentCardRequest) (*a2a.AgentCard, error) {
 	return nil, a2a.ErrExtendedCardNotConfigured
 }
 
@@ -159,6 +175,8 @@ func MapError(err error) error {
 		return a2a.ErrTaskNotCancelable
 	case errors.Is(err, ErrRefused):
 		return fmt.Errorf("%w: %w", a2a.ErrUnauthorized, err)
+	case errors.Is(err, ErrBusy):
+		return fmt.Errorf("%w: %w", a2a.ErrServerError, err)
 	case errors.Is(err, a2a.ErrInvalidParams):
 		return err
 	default:

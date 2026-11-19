@@ -20,6 +20,10 @@ const (
 	envModelGatewayNamespace = "GIBSON_MODEL_GATEWAY_NAMESPACE"
 	// envModelGatewayName is the name of the Gateway that the routes attach to.
 	envModelGatewayName = "GIBSON_MODEL_GATEWAY_NAME"
+	// envModelGatewayListener is the name of the listener of that Gateway for the
+	// model routes. The chart names the listener, and the route attaches to it and
+	// to no other, so the policies of the agent listener do not apply to it.
+	envModelGatewayListener = "GIBSON_MODEL_GATEWAY_LISTENER"
 )
 
 // modelGatewayConfigFromEnv reads the render configuration of the model gateway.
@@ -36,6 +40,7 @@ func modelGatewayConfigFromEnv(getenv func(string) string) (modelprovider.Config
 	cfg := modelprovider.Config{
 		Namespace:   read(envModelGatewayNamespace),
 		GatewayName: read(envModelGatewayName),
+		SectionName: read(envModelGatewayListener),
 	}
 	if len(missing) > 0 {
 		return modelprovider.Config{}, fmt.Errorf("the model gateway is a required component, and %s must be set",
@@ -51,6 +56,11 @@ func modelGatewayConfigFromEnv(getenv func(string) string) (modelprovider.Config
 // this name to the name of the model Gateway when one Gateway has both listeners.
 const envAgentGatewayName = "GIBSON_AGENT_GATEWAY_NAME"
 
+// envAgentGatewayListener is the name of the listener of that Gateway for the routes
+// of the outside agents. The route attaches to it and to no other, so the policies of
+// the model listener do not apply to it.
+const envAgentGatewayListener = "GIBSON_AGENT_GATEWAY_LISTENER"
+
 // agentGatewayConfigFromEnv reads the render configuration of the outside agents.
 // It names each missing variable.
 func agentGatewayConfigFromEnv(getenv func(string) string) (outsideagent.Config, error) {
@@ -65,6 +75,7 @@ func agentGatewayConfigFromEnv(getenv func(string) string) (outsideagent.Config,
 	cfg := outsideagent.Config{
 		Namespace:   read(envModelGatewayNamespace),
 		GatewayName: read(envAgentGatewayName),
+		SectionName: read(envAgentGatewayListener),
 	}
 	if len(missing) > 0 {
 		return outsideagent.Config{}, fmt.Errorf("the agent gateway is a required component, and %s must be set",

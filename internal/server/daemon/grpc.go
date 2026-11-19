@@ -718,6 +718,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Create and register daemon service.
 	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
+	d.daemonServer = daemonSvc
 	// The list RPCs take their page token signers from the one key source.
 	// The daemon builds the page keys once. Every paged service takes its
 	// signers from them.
@@ -1714,6 +1715,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if err := d.registerOutsideAgent(ctx, srv, pageKeys); err != nil {
 		return nil, err
 	}
+	if err := d.registerInboundMission(ctx, srv, pageKeys); err != nil {
+		return nil, err
+	}
 	// The tenant operator pulls the outside agent records and their credential
 	// through the two operator RPCs (gibson#1403).
 	daemonSvc.WithOutsideAgentOperatorSource(d.outsideAgents)
@@ -2464,8 +2468,8 @@ func (d *daemonImpl) QueryPlugin(ctx context.Context, name, method string, _ map
 // RunMission starts a mission by reference and returns an event channel.
 // The mission definition and target must already be registered — inline
 // construction and YAML paths were removed under spec mission-api-only-cleanup.
-func (d *daemonImpl) RunMission(ctx context.Context, missionDefinitionID, targetID string, variables map[string]string, memoryContinuity string) (string, error) {
-	return d.RunMissionWithManager(ctx, missionDefinitionID, targetID, variables, memoryContinuity)
+func (d *daemonImpl) RunMission(ctx context.Context, req api.RunMissionData) (string, error) {
+	return d.RunMissionWithManager(ctx, req)
 }
 
 // StopMission stops a running mission.

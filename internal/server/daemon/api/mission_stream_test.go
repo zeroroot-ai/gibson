@@ -123,7 +123,7 @@ func TestRunMission_RunError(t *testing.T) {
 		subscribeFn: func(context.Context, []string, string) (<-chan EventData, error) {
 			return events, nil
 		},
-		runMissionFn: func(context.Context, string, string, map[string]string, string) (string, error) {
+		runMissionFn: func(context.Context, RunMissionData) (string, error) {
 			return "", errors.New("definition not found")
 		},
 	}
@@ -147,7 +147,7 @@ func TestRunMission_StreamsUntilTerminal(t *testing.T) {
 			subscribedMissionID = &missionID
 			return events, nil
 		},
-		runMissionFn: func(context.Context, string, string, map[string]string, string) (string, error) {
+		runMissionFn: func(context.Context, RunMissionData) (string, error) {
 			return "m-1", nil
 		},
 	}
@@ -183,7 +183,7 @@ func TestRunMission_SubscriptionClosedRunContinues(t *testing.T) {
 		subscribeFn: func(context.Context, []string, string) (<-chan EventData, error) {
 			return events, nil
 		},
-		runMissionFn: func(context.Context, string, string, map[string]string, string) (string, error) {
+		runMissionFn: func(context.Context, RunMissionData) (string, error) {
 			return "m-1", nil
 		},
 	}
@@ -203,7 +203,7 @@ func TestRunMission_ClientDisconnectRunContinues(t *testing.T) {
 		subscribeFn: func(context.Context, []string, string) (<-chan EventData, error) {
 			return events, nil
 		},
-		runMissionFn: func(context.Context, string, string, map[string]string, string) (string, error) {
+		runMissionFn: func(context.Context, RunMissionData) (string, error) {
 			return "m-1", nil
 		},
 	}

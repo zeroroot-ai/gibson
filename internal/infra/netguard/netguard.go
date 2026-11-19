@@ -26,7 +26,9 @@ package netguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"syscall"
@@ -213,29 +215,75 @@ type Resolver interface {
 	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
+// hostRefusedText is the only text that a client sees when CheckHost refuses a host.
+const hostRefusedText = "the host does not resolve to a public address"
+
+// HostRefusedError reports that CheckHost refused a host. Error() is safe to send
+// to an API client: it holds no address, no address class and no resolver detail.
+// The detail is for the daemon log. A caller reads it with Detail, and it does not
+// pass the detail to a client. The error does not unwrap to the detail, so errors.Is
+// and errors.As on the error never reach it.
+type HostRefusedError struct {
+	hint   string
+	detail string
+}
+
+// Error returns the fixed text and the hint of the setting, when there is one.
+func (e *HostRefusedError) Error() string {
+	if e.hint == "" {
+		return hostRefusedText
+	}
+	return hostRefusedText + " (" + e.hint + ")"
+}
+
+// Detail returns the address, its class or the resolver error. It is for the log.
+func (e *HostRefusedError) Detail() string { return e.detail }
+
 // CheckHost resolves host and refuses it when ANY address is in a blocked
 // class. It is a check at one point in time, for example at registration. It is
 // NOT a connect-time control: the name can resolve to another address later, so
 // the code that makes the connection must use ControlWithHint or a guard of its own.
-// An IP literal is checked without a lookup. A refusal carries hint.
+// An IP literal is checked without a lookup.
+//
+// A refusal is a *HostRefusedError. A blocked address, a failed lookup and a host with
+// no address all give the same safe text, with hint. The text names no address, class
+// or resolver, so a tenant cannot use the refusal to probe the network of the daemon.
 func CheckHost(ctx context.Context, r Resolver, host, hint string) error {
+	refuse := func(detail string) error { return &HostRefusedError{hint: hint, detail: detail} }
 	if ip := net.ParseIP(host); ip != nil {
 		if class := BlockedClass(ip); class != "" {
-			return &BlockedAddressError{Addr: ip.String(), Class: class, Hint: hint}
+			return refuse((&BlockedAddressError{Addr: ip.String(), Class: class}).Error())
 		}
 		return nil
 	}
 	addrs, err := r.LookupIPAddr(ctx, host)
 	if err != nil {
-		return fmt.Errorf("netguard: resolve %s: %w", host, err)
+		return refuse(fmt.Sprintf("netguard: resolve %s: %v", host, err))
 	}
 	if len(addrs) == 0 {
-		return fmt.Errorf("netguard: resolve %s: no address", host)
+		return refuse(fmt.Sprintf("netguard: resolve %s: no address", host))
 	}
 	for _, a := range addrs {
 		if class := BlockedClass(a.IP); class != "" {
-			return &BlockedAddressError{Addr: a.IP.String(), Class: class, Hint: hint}
+			return refuse((&BlockedAddressError{Addr: a.IP.String(), Class: class}).Error())
 		}
 	}
 	return nil
+}
+
+// RedactBlocked prepares an error for an API client. When the chain holds a
+// *BlockedAddressError, the connect-time guard refused the connection. The text of
+// that error, and the text of the *net.OpError that wraps it, name the address that
+// the host resolved to. A tenant that controls the host name could read internal
+// addresses from it. RedactBlocked then writes the detail to the daemon log and
+// returns a *HostRefusedError, whose text is fixed. An error with no refusal in its
+// chain comes back unchanged. A caller that returns a dial error to a client passes
+// it through RedactBlocked first.
+func RedactBlocked(ctx context.Context, err error) error {
+	var blocked *BlockedAddressError
+	if !errors.As(err, &blocked) {
+		return err
+	}
+	slog.WarnContext(ctx, "connection refused by the egress guard", "detail", err.Error())
+	return &HostRefusedError{hint: blocked.Hint, detail: err.Error()}
 }

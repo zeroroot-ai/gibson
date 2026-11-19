@@ -24,6 +24,16 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
+// revokeCleanupUnfinished is the message when the FGA cleanup of a revoke fails. The
+// revoke of the identity is done. Only the inbound A2A route reads the key descriptor
+// fresh for each call (VerifyFresh). The other routes use the descriptor cache of
+// ext-authz, so a revoked identity can still use them until that entry ends. A retry
+// only finishes the cleanup. A revoke that takes effect at once on every route needs
+// a revocation marker that ext-authz reads on each call, for example a Redis key that
+// the daemon sets and that the replay store of ext-authz already reaches. That is a
+// follow-up and not part of this change.
+const revokeCleanupUnfinished = "the identity is revoked: it is blocked on the inbound A2A route now, and on every other route when the key cache of ext-authz ends (5 minutes by default, EXT_AUTHZ_CGJWT_DESCRIPTOR_TTL). The cleanup of its permission tuples did not finish. Retry the revoke to finish the cleanup"
+
 // RevokeAgentIdentity permanently revokes a machine identity.
 // Idempotent: a second call after success returns codes.NotFound.
 // Cross-tenant: a call for a principal owned by another tenant returns
@@ -80,7 +90,21 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 		// gibson#606).
 		orphan, lerr := s.serviceAccountInTenantScope(ctx, tenantID, fgaType, accountID)
 		if lerr != nil || !orphan {
-			return nil, status_grpc.Error(codes.NotFound, "principal not found")
+			// A retry of a revoke can find the IdP account gone and the belongs_to
+			// tuple gone. The revoked rows of the principal in this tenant prove that
+			// it was the tenant's, so the cleanup of the other tuples can go on.
+			revoked := false
+			if s.principalRevoker != nil {
+				var rerr error
+				revoked, rerr = s.principalRevoker.PrincipalRevokedInTenant(ctx, tenantID, req.PrincipalId)
+				if rerr != nil {
+					s.logger.WarnContext(ctx, "RevokeAgentIdentity: could not read the revoked rows",
+						slog.String("tenant_id", tenantID), slog.String("error", rerr.Error()))
+				}
+			}
+			if !revoked {
+				return nil, status_grpc.Error(codes.NotFound, "principal not found")
+			}
 		}
 		s.logger.WarnContext(ctx, "RevokeAgentIdentity: principal has no belongs_to tuple; revoking orphaned IdP account",
 			slog.String("tenant_id", tenantID),
@@ -109,23 +133,52 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 		}
 	}
 
-	// Delete the service account from the IdP.
-	if err := s.idpAdminClient.DeleteServiceAccount(ctx, accountID); err != nil {
-		if s.tenantAdminAuditWriter != nil {
-			failed := revoked
-			failed.Decision = "deny"
-			s.tenantAdminAuditWriter.Log(failed)
-		}
-		if errors.Is(err, idp.ErrNotFound) {
-			// Already deleted — idempotent NotFound.
-			return nil, status_grpc.Error(codes.NotFound, "principal not found or already revoked")
-		}
-		s.logger.ErrorContext(ctx, "RevokeAgentIdentity: IdP delete failed",
+	// Revoke the Capability Grant rows of the principal first. A revoked agent row
+	// has no key descriptor, so the signed token of the principal fails on the
+	// inbound A2A route at once (it reads the descriptor fresh for each call), and on
+	// every other route when the descriptor cache of ext-authz ends. The call is safe to repeat. When it
+	// fails, nothing else is revoked, and the caller can retry. A revoke ends the
+	// access of the identity. The missions that it started continue, as after an
+	// unpublish, and a tenant admin can stop them in the dashboard.
+	if s.principalRevoker == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "the capability grant store is not configured; nothing was revoked")
+	}
+	if err := s.principalRevoker.RevokePrincipal(ctx, tenantID, req.PrincipalId); err != nil {
+		s.logger.ErrorContext(ctx, "RevokeAgentIdentity: capability grant revoke failed",
 			slog.String("tenant_id", tenantID),
-			slog.String("account_id", accountID),
+			slog.String("principal_id", req.PrincipalId),
 			slog.String("error", err.Error()),
 		)
-		return nil, status_grpc.Error(codes.Internal, "failed to revoke identity in identity provider")
+		return nil, status_grpc.Error(codes.Internal, "failed to revoke the capability grants of the identity")
+	}
+
+	// The grants to published mission definitions go with the identity. They are
+	// read before the IdP account goes, so a failed read leaves the identity in
+	// place and the caller can retry.
+	grantTuples, gerr := inboundGrantTuples(ctx, s.authorizer, req.PrincipalId)
+	if gerr != nil {
+		return nil, status_grpc.Error(codes.Internal, "failed to list the inbound grants of the identity")
+	}
+
+	// Delete the service account from the IdP. An account that is already gone is
+	// the state of a retry after an earlier call deleted it and failed to clean FGA.
+	// The cleanup below then still runs, so a retry finishes the revoke.
+	if err := s.idpAdminClient.DeleteServiceAccount(ctx, accountID); err != nil {
+		if !errors.Is(err, idp.ErrNotFound) {
+			if s.tenantAdminAuditWriter != nil {
+				failed := revoked
+				failed.Decision = "deny"
+				s.tenantAdminAuditWriter.Log(failed)
+			}
+			s.logger.ErrorContext(ctx, "RevokeAgentIdentity: IdP delete failed",
+				slog.String("tenant_id", tenantID),
+				slog.String("account_id", accountID),
+				slog.String("error", err.Error()),
+			)
+			return nil, status_grpc.Error(codes.Internal, "failed to revoke identity in identity provider")
+		}
+		s.logger.InfoContext(ctx, "RevokeAgentIdentity: the IdP account is already deleted, the FGA cleanup continues",
+			slog.String("tenant_id", tenantID), slog.String("account_id", accountID))
 	}
 
 	// Delete all FGA tuples where this principal appears (authorizer is
@@ -144,14 +197,29 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 			})
 		}
 	}
-	if derr := s.authorizer.Delete(ctx, tuplesToDelete); derr != nil {
-		// Non-fatal: log but don't fail the RPC. The IdP revocation already
-		// happened; FGA cleanup can be retried manually.
-		s.logger.WarnContext(ctx, "RevokeAgentIdentity: FGA tuple cleanup failed (IdP revocation succeeded)",
+	// The identity can no longer call a published mission definition.
+	tuplesToDelete = append(tuplesToDelete, grantTuples...)
+	// A delete batch fails as a whole when one tuple is absent (the write semantics
+	// of OpenFGA), and an orphan identity can miss its belongs_to or its owner tuple.
+	// Only the tuples that exist are deleted, and the absent ones are logged.
+	present, absent, rerr := existingTuples(ctx, s.authorizer, tuplesToDelete)
+	if rerr != nil {
+		s.logger.ErrorContext(ctx, "RevokeAgentIdentity: FGA tuple read failed (the revoke itself is done)",
+			slog.String("tenant_id", tenantID), slog.String("principal_id", req.PrincipalId), slog.String("error", rerr.Error()))
+		return nil, status_grpc.Error(codes.Unavailable, revokeCleanupUnfinished)
+	}
+	if len(absent) > 0 {
+		s.logger.InfoContext(ctx, "RevokeAgentIdentity: tuples already absent",
+			slog.String("principal_id", req.PrincipalId), slog.Int("count", len(absent)))
+	}
+	if derr := s.authorizer.Delete(ctx, present); derr != nil {
+		s.logger.ErrorContext(ctx, "RevokeAgentIdentity: FGA tuple cleanup failed (the revoke itself is done)",
 			slog.String("tenant_id", tenantID),
 			slog.String("principal_id", req.PrincipalId),
+			slog.Int("tuples_left", len(present)),
 			slog.String("error", derr.Error()),
 		)
+		return nil, status_grpc.Error(codes.Unavailable, revokeCleanupUnfinished)
 	}
 
 	s.logger.InfoContext(ctx, "agent identity revoked",
@@ -211,4 +279,25 @@ func (s *DaemonServer) serviceAccountInTenantScope(ctx context.Context, tenantID
 		pageToken = resp.NextPageToken
 	}
 	return false, nil
+}
+
+// existingTuples splits tuples into the ones that are stored and the ones that are
+// absent, with ReadTuples. Each tuple is read by its full key.
+func existingTuples(ctx context.Context, az any, tuples []authz.Tuple) (present, absent []authz.Tuple, err error) {
+	reader, ok := az.(authz.TupleReader)
+	if !ok {
+		return nil, nil, errors.New("the authorizer cannot read stored tuples")
+	}
+	for _, t := range tuples {
+		got, rerr := reader.ReadTuples(ctx, t.User, t.Relation, t.Object)
+		if rerr != nil {
+			return nil, nil, fmt.Errorf("read %s %s %s: %w", t.User, t.Relation, t.Object, rerr)
+		}
+		if len(got) > 0 {
+			present = append(present, t)
+		} else {
+			absent = append(absent, t)
+		}
+	}
+	return present, absent, nil
 }

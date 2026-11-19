@@ -253,6 +253,9 @@ type DaemonServer struct {
 	// May be nil; when nil, Agent Auth RPCs return codes.Unavailable.
 	// Added by agent-auth-fga-integration spec.
 	capabilityGrantService *capabilitygrant.CapabilityGrantService
+	// principalRevoker revokes the Capability Grant rows of a principal. The
+	// revoke of an agent identity needs it.
+	principalRevoker PrincipalRevoker
 
 	// manifestBuilder builds signed capability manifests for GetCapabilityManifest.
 	// May be nil; when nil, GetCapabilityManifest returns codes.Unavailable.
@@ -458,6 +461,24 @@ type missionDraftStoreIface interface {
 	Delete(ctx context.Context, tenantID, draftID string) error
 }
 
+// PrincipalRevoker revokes each Capability Grant row of a principal: the grants,
+// the agent rows and the hosts. *capabilitygrant.CapabilityGrantService is the
+// implementation.
+type PrincipalRevoker interface {
+	RevokePrincipal(ctx context.Context, tenantID, principalRef string) error
+	// PrincipalRevokedInTenant reports whether the tenant has revoked rows of the
+	// principal. A revoked row proves that the principal belonged to the tenant, so a
+	// retry of a revoke can finish its cleanup when no other record is left.
+	PrincipalRevokedInTenant(ctx context.Context, tenantID, principalRef string) (bool, error)
+}
+
+// WithPrincipalRevoker sets the revoker of the Capability Grant rows of a
+// principal.
+func (s *DaemonServer) WithPrincipalRevoker(r PrincipalRevoker) *DaemonServer {
+	s.principalRevoker = r
+	return s
+}
+
 // MissionQuotaChecker is the narrow interface the DaemonServer uses to enforce
 // per-tenant quotas. It is satisfied by *component.QuotaManager.
 //
@@ -519,7 +540,7 @@ type DaemonInterface interface {
 	// via Subscribe filtered on the returned ID; the per-run event channel
 	// was retired in gibson#1112 PR 3 (every observable lifecycle event
 	// flows brain → lifecycle projector → EventBus/Redis).
-	RunMission(ctx context.Context, missionDefinitionID, targetID string, variables map[string]string, memoryContinuity string) (string, error)
+	RunMission(ctx context.Context, req RunMissionData) (string, error)
 
 	// StopMission stops a running mission
 	StopMission(ctx context.Context, missionID string, force bool) error
@@ -658,6 +679,42 @@ type MissionData struct {
 	// rewind started it.
 	ParentMissionID    string
 	ParentCheckpointID string
+}
+
+// RunMissionData is the request to start one mission by reference. The gRPC
+// RunMission handler and the inbound A2A entry point both build it, and both
+// start the mission with StartMission.
+type RunMissionData struct {
+	// MissionDefinitionID names a registered mission definition.
+	MissionDefinitionID string
+	// TargetIDs are registered targets of the tenant. The first is the primary
+	// target. At least one is required.
+	TargetIDs        []string
+	Variables        map[string]string
+	MemoryContinuity string
+	// NameSuffix is appended to the name of the definition to make the name of the
+	// mission. A mission record is one per name, and a later run of the same name
+	// is a new run of that record. A caller that needs a new mission with its own
+	// targets gives a suffix that no other call gives. Empty means the name of the
+	// definition.
+	NameSuffix string
+	// CreatedBy is who started the mission. The zero value means nobody is
+	// recorded.
+	CreatedBy principal.Principal
+	// MissionID, when it is set, is the ID that the new mission record takes. The
+	// caller chose it before the start, so it can write its own record of the mission
+	// first. It must be a new ID. A start that gives the mission another ID fails.
+	MissionID string
+	// PinnedDefinitionHash, when it is set, is the hash that the definition must have
+	// when the mission loads it. A mission start that loads another definition is
+	// refused with FailedPrecondition and writes no mission record. The inbound entry
+	// point sets it from the publication, so a change between its check and the load
+	// cannot start a mission.
+	PinnedDefinitionHash string
+	// PinnedTargetHashes holds, by target ID, the hash that each target must have
+	// when the mission resolves it. A target with an entry that has another hash is
+	// refused in the same way.
+	PinnedTargetHashes map[string]string
 }
 
 // MissionEventData represents mission event data from the daemon.
@@ -1042,6 +1099,7 @@ func (s *DaemonServer) GetConversationStore() conversationStoreIface {
 // Added by agent-auth-fga-integration spec.
 func (s *DaemonServer) WithCapabilityGrantService(svc *capabilitygrant.CapabilityGrantService) *DaemonServer {
 	s.capabilityGrantService = svc
+	s.principalRevoker = svc
 	return s
 }
 
@@ -1287,6 +1345,50 @@ func isTerminalMissionEvent(me *MissionEventData) bool {
 	return st == "completed" || st == "failed"
 }
 
+// StartMission starts one mission by reference. It is the one function that
+// starts a mission for a caller: the RunMission RPC calls it, and the inbound
+// A2A entry point calls it. It enforces the per-tenant admission rules before it
+// allocates anything. A suspended tenant starts no new mission (ADR-0060, D41),
+// and a tenant over its mission or agent quota starts none either.
+func (s *DaemonServer) StartMission(ctx context.Context, req RunMissionData) (string, error) {
+	if err := s.admitMission(ctx); err != nil {
+		return "", err
+	}
+	return s.startAdmitted(ctx, req)
+}
+
+// admitMission applies the admission rules of a new mission. The RunMission RPC
+// calls it before it subscribes to events, so a refused call allocates nothing.
+func (s *DaemonServer) admitMission(ctx context.Context) error {
+	if err := s.requireActiveTenant(ctx, auth.TenantStringFromContext(ctx)); err != nil {
+		s.logger.Warn("mission submission rejected: tenant suspended", "error", err)
+		return preserveStatus(err, "tenant check failed")
+	}
+	if s.quotaManager != nil {
+		if err := s.quotaManager.CheckMissionQuota(ctx); err != nil {
+			s.logger.Warn("mission submission rejected: mission quota exceeded", "error", err)
+			return preserveStatus(err, "mission quota check failed")
+		}
+		if err := s.quotaManager.CheckAgentQuota(ctx); err != nil {
+			s.logger.Warn("mission submission rejected: agent quota exceeded", "error", err)
+			return preserveStatus(err, "agent quota check failed")
+		}
+		// Memory-quota enforcement was removed by spec
+		// plans-and-quotas-simplification (it was unenforced and the Redis
+		// key family was dead). Future memory checks ship in their own spec.
+	}
+	return nil
+}
+
+// startAdmitted starts a mission after admitMission passed.
+func (s *DaemonServer) startAdmitted(ctx context.Context, req RunMissionData) (string, error) {
+	id, err := s.daemon.RunMission(ctx, req)
+	if err != nil {
+		return "", preserveStatus(err, "failed to start mission")
+	}
+	return id, nil
+}
+
 // RunMission starts a mission by reference and streams execution events.
 // Both mission_definition_id and target_id are required; inline construction
 // and YAML paths were removed under spec mission-api-only-cleanup.
@@ -1304,38 +1406,24 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 		return status_grpc.Errorf(codes.InvalidArgument, "target_id is required")
 	}
 
-	// Enforce per-tenant quotas before any resource allocation.
-	// A suspended tenant starts no new mission (ADR-0060, D41).
-	if err := s.requireActiveTenant(stream.Context(), auth.TenantStringFromContext(stream.Context())); err != nil {
-		s.logger.Warn("mission submission rejected: tenant suspended", "error", err)
-		return err
-	}
-	if s.quotaManager != nil {
-		if err := s.quotaManager.CheckMissionQuota(stream.Context()); err != nil {
-			s.logger.Warn("mission submission rejected: mission quota exceeded", "error", err)
-			return err
-		}
-		if err := s.quotaManager.CheckAgentQuota(stream.Context()); err != nil {
-			s.logger.Warn("mission submission rejected: agent quota exceeded", "error", err)
-			return err
-		}
-		// Memory-quota enforcement was removed by spec
-		// plans-and-quotas-simplification (it was unenforced and the Redis
-		// key family was dead). Future memory checks ship in their own spec.
-	}
-
 	// Subscribe BEFORE starting the mission so no early lifecycle event can
 	// be missed; the mission ID is not known until Run returns, so the
 	// subscription is unfiltered and the loop below filters by ID
 	// (gibson#1112 PR 3 — events flow brain → lifecycle projector → bus,
 	// not through a per-run channel).
+	if err := s.admitMission(stream.Context()); err != nil {
+		return err
+	}
 	eventChan, err := s.daemon.Subscribe(stream.Context(), nil, "")
 	if err != nil {
 		s.logger.Error("failed to subscribe for mission events", "error", err)
 		return preserveStatus(err, "failed to subscribe for mission events")
 	}
 
-	missionID, err := s.daemon.RunMission(stream.Context(), req.MissionDefinitionId, req.TargetId, req.Variables, req.MemoryContinuity)
+	missionID, err := s.startAdmitted(stream.Context(), RunMissionData{
+		MissionDefinitionID: req.MissionDefinitionId, TargetIDs: []string{req.TargetId},
+		Variables: req.Variables, MemoryContinuity: req.MemoryContinuity,
+	})
 	if err != nil {
 		s.logger.Error("failed to start mission", "error", err)
 		return preserveStatus(err, "failed to start mission")

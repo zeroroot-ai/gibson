@@ -4,6 +4,7 @@
 package agentcall
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
@@ -53,5 +54,44 @@ func TestCardPathFor_IsReadByCardPathName(t *testing.T) {
 	}
 	if n, ok := CardPathName(p); !ok || n != "scout" {
 		t.Errorf("CardPathName(%q) = %q, %v", p, n, ok)
+	}
+}
+
+func TestInboundPathAgent(t *testing.T) {
+	tests := []struct {
+		path      string
+		wantAgent string
+		wantCard  bool
+		wantOK    bool
+	}{
+		{"/a2a/inbound/recon", "recon", false, true},
+		{"/a2a/inbound/recon/.well-known/agent-card.json", "recon", true, true},
+		{"/a2a/inbound/a", "a", false, true},
+		{"/a2a/inbound/", "", false, false},
+		{"/a2a/inbound/.well-known/agent-card.json", "", false, false},
+		{"/a2a/inbound/Recon", "", false, false},
+		{"/a2a/inbound/re/con", "", false, false},
+		{"/a2a/inbound/recon/extra", "", false, false},
+		{"/a2a/inbound/recon#x", "", false, false},
+		{"/a2a/inbound/-recon", "", false, false},
+		{"/a2a/inbound/" + strings.Repeat("a", 64), "", false, false},
+		{"/agents/recon/.well-known/agent-card.json", "", false, false},
+		{"/", "", false, false},
+	}
+	for _, tt := range tests {
+		agent, card, ok := InboundPathAgent(tt.path)
+		if agent != tt.wantAgent || card != tt.wantCard || ok != tt.wantOK {
+			t.Errorf("InboundPathAgent(%q) = %q, %v, %v; want %q, %v, %v",
+				tt.path, agent, card, ok, tt.wantAgent, tt.wantCard, tt.wantOK)
+		}
+	}
+}
+
+func TestIsInboundPath(t *testing.T) {
+	if !IsInboundPath("/a2a/inbound/recon") {
+		t.Error("the inbound path is not inbound")
+	}
+	if IsInboundPath("/agents/recon") {
+		t.Error("IsInboundPath accepted a path off the prefix")
 	}
 }

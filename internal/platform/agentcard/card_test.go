@@ -6,6 +6,7 @@ package agentcard
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -75,5 +76,29 @@ func TestBuild_DefaultsAndRefusals(t *testing.T) {
 	}
 	if _, err := Build(component.ComponentInfo{Kind: "agent", Name: "a"}, " "); err == nil {
 		t.Fatal("an empty gateway URL must fail")
+	}
+}
+
+func TestBuildInbound_NamesTheCapabilityGrantOfTheCaller(t *testing.T) {
+	info := component.ComponentInfo{Kind: "agent", Name: "recon", Version: "1.0.0"}
+	card, err := BuildInbound(info, "https://edge.example/a2a/inbound/recon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := card.SupportedInterfaces[0].URL; got != "https://edge.example/a2a/inbound/recon" {
+		t.Fatalf("interface URL = %q", got)
+	}
+	scheme, ok := card.SecuritySchemes[GrantScheme].(a2a.APIKeySecurityScheme)
+	if !ok || scheme.Name != GrantHeader {
+		t.Fatalf("security schemes = %+v", card.SecuritySchemes)
+	}
+	if scheme.Description == "" || strings.Contains(scheme.Description, "task grant") {
+		t.Fatalf("the scheme describes the wrong credential: %q", scheme.Description)
+	}
+	if _, err := BuildInbound(component.ComponentInfo{Kind: "tool", Name: "x"}, "https://e"); !errors.Is(err, ErrNotAnAgent) {
+		t.Fatalf("a tool has no card: %v", err)
+	}
+	if _, err := BuildInbound(info, " "); err == nil {
+		t.Fatal("an empty URL must be refused")
 	}
 }

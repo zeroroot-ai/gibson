@@ -1,0 +1,182 @@
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
+
+// InboundMissionService publishes mission definitions for inbound A2A calls
+// (epic gibson#1367, gibson#1408).
+//
+// An outside A2A client can call one agent name that a tenant admin published.
+// The record names the mission definition that a call starts and the targets
+// that the admin approved. The definition fixes the budget and the scope. A
+// message can only narrow the targets, and it can change nothing else.
+//
+// The right to call a published definition is an FGA grant from one enrolled
+// agent identity to the definition. No default grant exists. The dashboard makes
+// the identity with CreateAgentIdentity, and then it calls GrantInboundCaller.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "buf/validate/validate.proto";
+import "gibson/auth/v1/options.proto";
+import "google/protobuf/timestamp.proto";
+
+service InboundMissionService {
+  // PublishInboundMission marks one mission definition as published for inbound
+  // calls under one agent name. The agent must be an agent node of the
+  // definition. Each target must belong to the tenant. A second call with the
+  // same fields changes nothing. A second call with the same agent and other
+  // fields is refused with ALREADY_EXISTS: unpublish it first. A call with the
+  // same agent, definition and targets pins the current state again, so an admin
+  // can publish again after a change.
+  rpc PublishInboundMission(PublishInboundMissionRequest) returns (PublishInboundMissionResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListInboundMissions returns each published definition of the tenant.
+  rpc ListInboundMissions(ListInboundMissionsRequest) returns (ListInboundMissionsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // UnpublishInboundMission removes the mark and each caller grant of it.
+  rpc UnpublishInboundMission(UnpublishInboundMissionRequest) returns (UnpublishInboundMissionResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GrantInboundCaller lets one agent identity of the tenant call a published
+  // definition. It is idempotent.
+  rpc GrantInboundCaller(GrantInboundCallerRequest) returns (GrantInboundCallerResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // RevokeInboundCaller removes the grant of GrantInboundCaller. It is idempotent.
+  rpc RevokeInboundCaller(RevokeInboundCallerRequest) returns (RevokeInboundCallerResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListInboundCallers returns the agent identities that may call one published
+  // definition.
+  rpc ListInboundCallers(ListInboundCallersRequest) returns (ListInboundCallersResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// InboundMissionEntry is one published mission definition.
+message InboundMissionEntry {
+  // agent is the name that the outside client addresses.
+  string agent = 1;
+  string mission_definition_id = 2;
+  // target_ids are the approved targets.
+  repeated string target_ids = 3;
+  string published_by = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // stale is true when the definition or an approved target is not what the admin
+  // approved at publish: it changed or it was deleted. A call to a stale
+  // publication starts no mission, and its Task is rejected. The admin publishes
+  // again to approve the new state.
+  bool stale = 6;
+  // stale_reason says what changed. It is empty when stale is false.
+  string stale_reason = 7;
+  // max_active_missions is the most missions of this publication that run or wait
+  // at one time.
+  int32 max_active_missions = 8;
+}
+
+message PublishInboundMissionRequest {
+  // agent is a DNS label. It is the name in the URL of the Agent Card.
+  string agent = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+  string mission_definition_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 255 }];
+  // target_ids are the IDs of targets of the tenant. At least one is required.
+  repeated string target_ids = 3 [(buf.validate.field).repeated = { min_items: 1, max_items: 100 }];
+  // max_active_missions is the most missions of this publication that run or wait
+  // at one time. It is required and it has no default. A call with 0 or no value is
+  // refused. A message over the limit gets a rejected Task and starts no mission.
+  int32 max_active_missions = 4 [(buf.validate.field).int32 = { gte: 1, lte: 10000 }];
+}
+
+message PublishInboundMissionResponse {
+  InboundMissionEntry entry = 1;
+}
+
+message ListInboundMissionsRequest {
+  // page_size is the largest number of entries on one page. Zero means the
+  // server default. The server also caps it.
+  int32 page_size = 1;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+
+message ListInboundMissionsResponse {
+  repeated InboundMissionEntry entries = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+}
+
+message UnpublishInboundMissionRequest {
+  string agent = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+}
+
+message UnpublishInboundMissionResponse {}
+
+message GrantInboundCallerRequest {
+  string agent = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+  // identity_id is the typed principal id of an agent identity of the tenant, as
+  // CreateAgentIdentity returns it: "agent_principal:<id>". An id with no type
+  // prefix is refused.
+  string identity_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 255 }];
+}
+
+message GrantInboundCallerResponse {}
+
+message RevokeInboundCallerRequest {
+  string agent = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+  string identity_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 255 }];
+}
+
+message RevokeInboundCallerResponse {}
+
+message ListInboundCallersRequest {
+  string agent = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+  int32 page_size = 2;
+  string page_token = 3 [(buf.validate.field).string = { max_len: 1024 }];
+}
+
+message ListInboundCallersResponse {
+  // identity_ids are typed principal ids, "agent_principal:<id>".
+  repeated string identity_ids = 1;
+  string next_page_token = 2;
+}

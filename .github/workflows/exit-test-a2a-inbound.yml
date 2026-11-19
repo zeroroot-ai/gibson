@@ -1,0 +1,190 @@
+# ----------------------------------------------------------------------------
+# The A2A inbound exit test (epic gibson#1367, slice gibson#1413).
+#
+# In plain words: an outside A2A client calls a Gibson agent through the Edge. The
+# call starts a mission with approved targets, and the Task holds the findings of
+# that mission. The call does not cross the Agent gateway. The client is small. It
+# signs each call with the Capability Grant JWT of an enrolled agent identity.
+#
+# The steps:
+#   1. The kind bring-up of the AAIF exit tests (the action aaif-exit-cluster).
+#      The chart must be the branch with the inbound route and the inbound
+#      listener of the daemon (epic/a2a-inbound) until it merges. Start the run by
+#      dispatch with the input charts-ref.
+#   2. The test TestA2AInbound runs in the cluster as a Job. It proves the ten
+#      points of the epic, one subtest for each (tests/e2e/a2a_inbound_test.go).
+#
+# ADR-0080: NEVER on pull_request and never on a schedule. It needs a live cluster.
+# It runs on main and on dispatch.
+# ----------------------------------------------------------------------------
+name: exit-test-a2a-inbound
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/server/a2aserver/**'
+      - 'internal/server/daemon/a2a_*.go'
+      - 'internal/server/daemon/inbound_mission_*.go'
+      - 'internal/server/daemon/api/inbound_mission_service.go'
+      - 'internal/server/extauthz/**'
+      - 'internal/platform/inboundmissionstore/**'
+      - 'internal/platform/agentcard/**'
+      - 'internal/platform/capabilitygrant/keys.go'
+      - 'internal/platform/authz/model.fga'
+      - 'tests/e2e/a2a_inbound_test.go'
+      - 'tests/e2e/helpers/**'
+      - '.github/actions/aaif-exit-cluster/**'
+      - '.github/scripts/run-e2e-job.sh'
+      - '.github/workflows/exit-test-a2a-inbound.yml'
+  workflow_dispatch:
+    inputs:
+      charts-ref:
+        description: The ref of zeroroot-ai/charts to install. Use epic/a2a-inbound until it merges.
+        required: false
+        default: main
+
+# One run at a time, and a run that started finishes (gibson#151).
+concurrency:
+  group: exit-test-a2a-inbound-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CHARTS_ROOT: ${{ github.workspace }}/charts
+  NS: gibson
+  RELEASE: gibson
+  CLUSTER: gibson
+  NODE: gibson-control-plane
+  E2E_OUT: ${{ github.workspace }}/e2e-out
+
+jobs:
+  a2a-inbound:
+    name: an outside A2A client starts a mission and reads its findings
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout gibson
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: gibson
+
+      # hosted is private, so the checkout needs the org read PAT.
+      - name: Checkout hosted
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/hosted
+          path: hosted
+          token: ${{ secrets.GH_PAT_PLATFORM_RO }}
+
+      - name: Checkout charts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/charts
+          ref: ${{ inputs.charts-ref || 'main' }}
+          path: charts
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v5
+        with:
+          go-version-file: gibson/go.mod
+          cache-dependency-path: gibson/go.sum
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v3.16.2
+
+      - name: Install kind + kubectl
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          install_only: true
+
+      - name: Install terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # A full platform on kind opens more inotify instances than the runner
+      # allows. The limits go up before the cluster starts (gibson#1331).
+      - name: Raise the inotify limits
+        uses: zeroroot-ai/.github/.github/actions/raise-inotify-limits@78606607ff7c6192237bb05b4610af6bbe16e8ee # v0.22.0
+
+      - name: Stand up the cluster with the images of the checkout
+        uses: ./gibson/.github/actions/aaif-exit-cluster
+        with:
+          ghcr-ro-pat: ${{ secrets.GHCR_RO_PAT }}
+          with-kvm: "false"
+          image-tag: a2a-inbound
+
+      # The inbound route must exist on the Edge before the test sends a call. A
+      # chart with no route fails here with its name, and not as a timeout in the
+      # test. The route is the prefix /a2a/inbound/. The daemon listens for it on
+      # the address of GIBSON_A2A_INBOUND_ADDR and accepts the Edge identity only.
+      - name: The inbound route and the inbound listener exist
+        run: |
+          set -euo pipefail
+          if ! kubectl -n "$NS" get configmap -o yaml | grep -q '/a2a/inbound/'; then
+            echo "::error::no Edge configuration names the route /a2a/inbound/. Is charts-ref the branch with the inbound route?"
+            exit 1
+          fi
+          daemon_env=$(kubectl -n "$NS" get pod -l app.kubernetes.io/component=daemon \
+            -o jsonpath='{.items[0].spec.containers[*].env[*].name}')
+          for name in GIBSON_A2A_INBOUND_ADDR GIBSON_A2A_INBOUND_EDGE_SVID GIBSON_A2A_INBOUND_PUBLIC_URL; do
+            case " $daemon_env " in
+              *" $name "*) ;;
+              *) echo "::error::the daemon has no $name. Is charts-ref the branch with the inbound listener?"; exit 1;;
+            esac
+          done
+
+      # The test dials the Edge as an outside client does. The Job reaches Envoy by
+      # its Service and names the api host in SNI and :authority, so no pod needs
+      # the public name in DNS. The settings go in an env file that reaches the Job
+      # through a Secret.
+      - name: The A2A inbound exit test
+        env:
+          E2E_RUNNER_ENV_FILE: ${{ runner.temp }}/a2a-inbound.env
+        run: |
+          set -euo pipefail
+          mkdir -p "$E2E_OUT"
+          api_origin=$(kubectl -n "$NS" get configmap gibson-domains -o jsonpath='{.data.apiOrigin}')
+          edge_ca=$(kubectl -n "$NS" get secret gibson-envoy-tls -o jsonpath='{.data.ca\.crt}')
+          if [ -z "$api_origin" ] || [ -z "$edge_ca" ]; then
+            echo "::error::the test needs gibson-domains apiOrigin and the ca.crt of gibson-envoy-tls; one is missing"
+            exit 1
+          fi
+          api_port=$(printf '%s' "$api_origin" | sed -n 's#^https://[^:/]*:\([0-9]*\).*#\1#p')
+          {
+            printf 'GIBSON_URL=%s\n' "$api_origin"
+            printf 'GIBSON_EDGE_ADDR=gibson-envoy.%s.svc.cluster.local:%s\n' "$NS" "${api_port:-443}"
+            printf 'GIBSON_EDGE_CA_PEM_B64=%s\n' "$edge_ca"
+          } > "$E2E_RUNNER_ENV_FILE"
+          set -o pipefail
+          gibson/.github/scripts/run-e2e-job.sh gibson-e2e-a2a-inbound 'TestA2AInbound$' 40m \
+            2>&1 | tee "$E2E_OUT/a2a-inbound.log"
+
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: a2a-inbound-${{ github.run_id }}
+          path: ${{ github.workspace }}/e2e-out
+          if-no-files-found: ignore
+
+      # always(), not failure(): a job that hits timeout-minutes is cancelled,
+      # and a cancelled job skips failure() steps.
+      - name: Argo bringup diagnostics
+        if: always()
+        working-directory: gibson
+        run: bash scripts/ci/dump-bringup-diagnostics.sh
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=ext-authz --tail=300 || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=5000 \
+            | grep -iE 'a2a|inbound|published|mission' | tail -200 || true
+          kubectl -n "$NS" logs deploy/gibson-envoy -c envoy --since=30m 2>/dev/null \
+            | grep -i 'a2a/inbound' | tail -50 || true

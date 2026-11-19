@@ -49,6 +49,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto/providers"
+	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
@@ -474,6 +475,12 @@ type daemonImpl struct {
 	agentSkills agentskillstore.Store
 	// outsideAgents is the outside agent store. registerOutsideAgent sets it.
 	outsideAgents outsideagentstore.Store
+	// daemonServer is the gRPC service of the daemon. buildGRPCServer sets it. The
+	// inbound A2A entry point starts its missions with it.
+	daemonServer *api.DaemonServer
+	// inboundMissions is the store of the mission definitions published for inbound
+	// A2A calls. registerInboundMission sets it.
+	inboundMissions inboundmissionstore.Store
 	// sharedAgentSkills is the operator source of Agent Skills. registerAgentSkill
 	// sets it.
 	sharedAgentSkills *SharedAgentSkills
@@ -1720,6 +1727,19 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	go func() {
 		if serveErr := a2aSys.Serve(ctx); serveErr != nil {
 			d.logger.Error(ctx, "A2A listener error", "error", serveErr)
+		}
+	}()
+
+	// The inbound A2A listener has its own port (epic gibson#1367). Only the Edge
+	// can call it.
+	a2aInboundSys, err := d.buildA2AInboundServer()
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to build inbound A2A listener: %w", err)
+	}
+	go func() {
+		if serveErr := a2aInboundSys.Serve(ctx); serveErr != nil {
+			d.logger.Error(ctx, "inbound A2A listener error", "error", serveErr)
 		}
 	}()
 

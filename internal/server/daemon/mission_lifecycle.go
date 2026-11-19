@@ -87,11 +87,11 @@ func (d *daemonImpl) ensureMissionManager() error {
 // It returns the started mission's ID; callers observe the run by
 // subscribing to the event stream filtered on that ID (the per-run event
 // channel was retired in gibson#1112 PR 3).
-func (d *daemonImpl) RunMissionWithManager(ctx context.Context, missionDefinitionID, targetID string, variables map[string]string, memoryContinuity string) (string, error) {
+func (d *daemonImpl) RunMissionWithManager(ctx context.Context, req api.RunMissionData) (string, error) {
 	d.logger.Info(ctx, "RunMission called",
-		"mission_definition_id", missionDefinitionID,
-		"target_id", targetID,
-		"memory_continuity", memoryContinuity,
+		"mission_definition_id", req.MissionDefinitionID,
+		"target_ids", req.TargetIDs,
+		"memory_continuity", req.MemoryContinuity,
 	)
 
 	// Initialize mission manager if not already done
@@ -101,20 +101,20 @@ func (d *daemonImpl) RunMissionWithManager(ctx context.Context, missionDefinitio
 	}
 
 	// Delegate to mission manager
-	missionID, err := d.missionManager.Run(ctx, missionDefinitionID, targetID, variables, memoryContinuity)
+	missionID, err := d.missionManager.Run(ctx, req)
 	if err != nil {
 		d.logger.Error(ctx, "failed to start mission",
 			"error", err,
-			"mission_definition_id", missionDefinitionID,
-			"target_id", targetID,
+			"mission_definition_id", req.MissionDefinitionID,
+			"target_ids", req.TargetIDs,
 		)
 		return "", err
 	}
 
 	d.logger.Info(ctx, "mission started successfully",
 		"mission_id", missionID,
-		"mission_definition_id", missionDefinitionID,
-		"target_id", targetID,
+		"mission_definition_id", req.MissionDefinitionID,
+		"target_ids", req.TargetIDs,
 	)
 	return missionID, nil
 }

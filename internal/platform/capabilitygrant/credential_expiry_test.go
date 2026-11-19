@@ -15,6 +15,7 @@ package capabilitygrant
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -80,16 +81,30 @@ func TestAgentKeyDescriptor_WithholdsALapsedAgentsKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "lapsed")
 }
 
+// expectCapabilityNames answers the read of every active capability name of the
+// principal.
+func expectCapabilityNames(m *mockedService, names ...string) {
+	rows := sqlmock.NewRows([]string{"capability_name"})
+	for _, n := range names {
+		rows.AddRow(n)
+	}
+	m.mock.ExpectQuery("JOIN capability_grant_agents a ON a.id = g.agent_id").
+		WithArgs("acme", "agent_principal:acct-1").
+		WillReturnRows(rows)
+}
+
 func TestAgentKeyDescriptor_ServesAnAgentInsideItsLifetime(t *testing.T) {
 	m := newMockedService(t)
 	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
 		WithArgs("agt_1").
 		WillReturnRows(agentRowExpiring("agt_1", "acme", time.Now().Add(time.Hour)))
+	expectCapabilityNames(m)
 
 	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
 
 	require.NoError(t, err)
 	assert.Contains(t, string(body), `"tenant":"acme"`)
+	assert.NotContains(t, string(body), "capabilities", "an agent with no bit lists none")
 }
 
 func TestAgentKeyDescriptor_ServesAnAgentWithNoRecordedExpiry(t *testing.T) {
@@ -97,11 +112,54 @@ func TestAgentKeyDescriptor_ServesAnAgentWithNoRecordedExpiry(t *testing.T) {
 	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
 		WithArgs("agt_1").
 		WillReturnRows(agentRowExpiring("agt_1", "acme", nil))
+	expectCapabilityNames(m)
 
 	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
 
 	require.NoError(t, err)
 	assert.Contains(t, string(body), `"principal":"agent_principal:acct-1"`)
+}
+
+func TestAgentKeyDescriptor_ListsTheOriginateCeiling(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
+		WithArgs("agt_1").
+		WillReturnRows(agentRowExpiring("agt_1", "acme", nil))
+	expectCapabilityNames(m, "mission:originate")
+
+	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
+
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"capabilities":["mission:originate"]`)
+}
+
+// The descriptor lists every active capability name, so ext-authz sees any extra
+// capability at call time and can refuse the caller.
+func TestAgentKeyDescriptor_ListsEveryActiveCapability(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
+		WithArgs("agt_1").
+		WillReturnRows(agentRowExpiring("agt_1", "acme", nil))
+	expectCapabilityNames(m, "mission:originate", "tool:invoke", "mission:delegate")
+
+	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
+
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"capabilities":["mission:originate","tool:invoke","mission:delegate"]`)
+}
+
+func TestAgentKeyDescriptor_RefusesWhenTheGrantReadFails(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
+		WithArgs("agt_1").
+		WillReturnRows(agentRowExpiring("agt_1", "acme", nil))
+	m.mock.ExpectQuery("JOIN capability_grant_agents a ON a.id = g.agent_id").
+		WillReturnError(errors.New("db down"))
+
+	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
+
+	require.ErrorContains(t, err, "read the capabilities")
+	assert.Nil(t, body)
 }
 
 // ---------------------------------------------------------------------------
@@ -186,4 +244,21 @@ func TestStore_EveryTenantFacingStatementNamesTheTenant(t *testing.T) {
 			assert.Contains(t, normaliseSQL(rec.all()), tc.fragment)
 		})
 	}
+}
+
+func TestPrincipalRevokedInTenant(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("EXISTS (SELECT 1 FROM capability_grant_agents WHERE tenant_id = $1").
+		WithArgs("acme", "agent_principal:acct-1").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	revoked, err := m.svc.PrincipalRevokedInTenant(context.Background(), "acme", "agent_principal:acct-1")
+	require.NoError(t, err)
+	assert.True(t, revoked)
+
+	_, err = m.svc.PrincipalRevokedInTenant(context.Background(), "", "agent_principal:acct-1")
+	require.Error(t, err, "the tenant is required")
+
+	m.mock.ExpectQuery("capability_grant_agents").WillReturnError(errors.New("db down"))
+	_, err = m.svc.PrincipalRevokedInTenant(context.Background(), "acme", "agent_principal:acct-1")
+	require.ErrorContains(t, err, "db down")
 }

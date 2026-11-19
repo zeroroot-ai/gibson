@@ -12,6 +12,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
@@ -28,6 +30,37 @@ type fakeAuthorizer struct {
 	listUsersErr error
 	checks       []checkRecord
 	writes       []authz.Tuple // tuples captured by Write
+	stored       []authz.Tuple // tuples that ReadTuples returns
+	deleted      []authz.Tuple // tuples captured by Delete
+	readErr      error
+	deleteErr    error
+	exactReadErr error // fails the read of one exact object only
+}
+
+// ReadTuples returns the stored tuples that match the filter. An empty filter
+// field is a wildcard. A bare type filter ("type:") matches each object of the type.
+func (a *fakeAuthorizer) ReadTuples(_ context.Context, user, relation, object string) ([]authz.Tuple, error) {
+	// OpenFGA refuses a Read with no object, and a Read with a user needs an object
+	// type at least.
+	if object == "" {
+		return nil, errors.New("fake OpenFGA: a Read needs an object or an object type")
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.readErr != nil {
+		return nil, a.readErr
+	}
+	if a.exactReadErr != nil && !strings.HasSuffix(object, ":") {
+		return nil, a.exactReadErr // a read of one object, not of a type
+	}
+	var out []authz.Tuple
+	for _, t := range a.stored {
+		if (user == "" || t.User == user) && (relation == "" || t.Relation == relation) &&
+			(object == "" || t.Object == object || (strings.HasSuffix(object, ":") && strings.HasPrefix(t.Object, object))) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 type checkRecord struct {
@@ -75,7 +108,15 @@ func (a *fakeAuthorizer) Write(_ context.Context, tuples []authz.Tuple) error {
 	a.writes = append(a.writes, tuples...)
 	return nil
 }
-func (a *fakeAuthorizer) Delete(_ context.Context, _ []authz.Tuple) error { return nil }
+func (a *fakeAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.deleteErr != nil {
+		return a.deleteErr
+	}
+	a.deleted = append(a.deleted, tuples...)
+	return nil
+}
 
 // writtenTuples returns a copy of all tuples captured by Write.
 func (a *fakeAuthorizer) writtenTuples() []authz.Tuple {

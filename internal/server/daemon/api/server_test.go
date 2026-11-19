@@ -25,7 +25,7 @@ type mockDaemon struct {
 	listToolsFn               func(ctx context.Context) ([]ToolInfoInternal, error)
 	listPluginsFn             func(ctx context.Context) ([]PluginInfoInternal, error)
 	queryPluginFn             func(ctx context.Context, name, method string, params map[string]any) (any, error)
-	runMissionFn              func(ctx context.Context, missionDefinitionID, targetID string, variables map[string]string, memoryContinuity string) (string, error)
+	runMissionFn              func(ctx context.Context, req RunMissionData) (string, error)
 	stopMissionFn             func(ctx context.Context, missionID string, force bool) error
 	listMissionsFn            func(ctx context.Context, activeOnly bool, statusFilter, namePattern string, limit, offset int) ([]MissionData, int, error)
 	subscribeFn               func(ctx context.Context, eventTypes []string, missionID string) (<-chan EventData, error)
@@ -86,9 +86,9 @@ func (m *mockDaemon) QueryPlugin(ctx context.Context, name, method string, param
 	return nil, nil
 }
 
-func (m *mockDaemon) RunMission(ctx context.Context, missionDefinitionID, targetID string, variables map[string]string, memoryContinuity string) (string, error) {
+func (m *mockDaemon) RunMission(ctx context.Context, req RunMissionData) (string, error) {
 	if m.runMissionFn != nil {
-		return m.runMissionFn(ctx, missionDefinitionID, targetID, variables, memoryContinuity)
+		return m.runMissionFn(ctx, req)
 	}
 	return "", nil
 }
@@ -354,7 +354,7 @@ var _ = mission.MissionStatusSubmitted
 func TestRunMission_ClientDisconnectIsNotAnError(t *testing.T) {
 	events := make(chan EventData) // never written, never closed
 	daemon := &mockDaemon{
-		runMissionFn: func(context.Context, string, string, map[string]string, string) (string, error) {
+		runMissionFn: func(context.Context, RunMissionData) (string, error) {
 			return "m-disconnect", nil
 		},
 		subscribeFn: func(context.Context, []string, string) (<-chan EventData, error) {

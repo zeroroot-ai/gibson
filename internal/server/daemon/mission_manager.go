@@ -29,6 +29,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 // targetStoreLookup is the target read surface used by mission resolution.
@@ -433,14 +435,22 @@ func (m *missionManager) claimActive(tenant auth.TenantID, missionID string, am 
 	return nil
 }
 
-// Run starts a mission by reference and returns an event channel for progress
-// updates. Missions are invoked by reference only — the mission definition and
-// target must already be registered. File-path / inline-YAML invocation was
-// removed under spec mission-api-only-cleanup.
-func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID string, variables map[string]string, memoryContinuity string) (string, error) {
+// Run starts a mission by reference and returns the ID of the mission. Missions
+// are invoked by reference only — the mission definition and targets must already
+// be registered. File-path / inline-YAML invocation was removed under spec
+// mission-api-only-cleanup.
+//
+// The first target is the primary target. The others join the target set of the
+// mission, and each one must belong to the calling tenant. The mission record is
+// one per name, so a request with a new NameSuffix creates a new mission with
+// exactly the targets of the request.
+func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (string, error) {
+	missionDefinitionID := req.MissionDefinitionID
+	variables := req.Variables
+	memoryContinuity := req.MemoryContinuity
 	m.logger.Info("starting mission",
 		"mission_definition_id", missionDefinitionID,
-		"target_id", targetID,
+		"target_count", len(req.TargetIDs),
 		"variables", len(variables),
 		"memory_continuity", memoryContinuity,
 	)
@@ -448,9 +458,10 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	if missionDefinitionID == "" {
 		return "", errors.New("mission_definition_id is required")
 	}
-	if targetID == "" {
+	if len(req.TargetIDs) == 0 || req.TargetIDs[0] == "" {
 		return "", errors.New("target_id is required")
 	}
+	targetID := req.TargetIDs[0]
 
 	// Load mission definition from the calling tenant's store. A run with no
 	// tenant on its context is refused, not run as the system tenant.
@@ -471,6 +482,12 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	def, err := m.loadRunDefinition(ctx, defStore, missionDefinitionID)
 	if err != nil {
 		return "", err
+	}
+	// The pin is checked on the definition that this start loaded, before the
+	// target binding, the reservation of the budget and the write of the record. A
+	// definition that changed after the publication check is refused here.
+	if pinErr := checkDefinitionPin(def, req.PinnedDefinitionHash); pinErr != nil {
+		return "", pinErr
 	}
 
 	m.logger.Debug("mission definition loaded",
@@ -497,8 +514,15 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	if err != nil {
 		return "", err
 	}
+	if err := checkTargetPin(req.PinnedTargetHashes, targetID, target); err != nil {
+		return "", err
+	}
 	resolvedTargetID := target.ID
 	targetRef := runTargetRef(target)
+	additionalTargetIDs, err := m.resolveExtraTargets(ctx, req)
+	if err != nil {
+		return "", err
+	}
 	m.logger.Debug("resolved target", "target_id", resolvedTargetID, "target_ref", targetRef)
 
 	// Bind the definition's {{target.*}} placeholders to this target, now that
@@ -540,36 +564,14 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	}
 
 	// Find or create stable mission record (one per mission name)
-	now := mission.NewUnixTimeNow()
-	missionTemplate := &mission.Mission{
-		ID:                    types.NewID(),          // Template ID, may be replaced by existing
-		TenantID:              callingTenant.String(), // required: ListMissions filters by tenant
-		Name:                  def.GetName(),
-		Description:           def.GetDescription(),
-		Status:                mission.MissionStatusSubmitted,
-		MissionDefinitionID:   types.ID(def.GetId()),
-		MissionDefinitionJSON: string(definitionJSON),
-		TargetID:              resolvedTargetID,
-		MemoryContinuity:      memoryContinuity,
-		CreatedAt:             now,
-		UpdatedAt:             now,
-		FindingsCount:         0,
-		Metrics: &mission.MissionMetrics{
-			TotalNodes:     len(def.GetNodes()),
-			CompletedNodes: 0,
-		},
-		Metadata: make(map[string]any),
-	}
-
-	// Store variables in metadata
-	if len(variables) > 0 {
-		missionTemplate.Metadata["variables"] = variables
-	}
-
-	// Store target URL/reference in metadata for agent context injection
-	// This preserves the original target reference (URL or name) separate from TargetID
-	if targetRef != "" {
-		missionTemplate.Metadata["target_ref"] = targetRef
+	missionTemplate := newRunTemplate(callingTenant, def, string(definitionJSON), req, resolvedTargetID,
+		additionalTargetIDs, targetRef)
+	if req.MissionID != "" {
+		id, idErr := types.ParseID(req.MissionID)
+		if idErr != nil {
+			return "", fmt.Errorf("invalid mission ID %q: %w", req.MissionID, idErr)
+		}
+		missionTemplate.ID = id
 	}
 
 	// Acquire the mission store for this tenant (callingTenant resolved above).
@@ -585,6 +587,65 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	}
 
 	return m.startRun(ctx, callingTenant, missionRecord, def)
+}
+
+// checkTargetPin refuses a target whose hash is not the pinned one. A target with
+// no pin is not checked.
+func checkTargetPin(pins map[string]string, id string, t *types.Target) error {
+	want, ok := pins[id]
+	if !ok {
+		return nil
+	}
+	got, err := targetHash(t)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return grpcstatus.Error(grpccodes.FailedPrecondition, "an approved target changed after it was published")
+	}
+	return nil
+}
+
+// newRunTemplate builds the mission record that Run finds or creates. The name
+// is the name of the definition and the suffix of the request. The record holds
+// the target set of the request and the creator of the request. The run
+// variables and the reference of the primary target go in the metadata.
+func newRunTemplate(
+	tenant auth.TenantID, def *missionpb.MissionDefinition, definitionJSON string, req api.RunMissionData,
+	targetID types.ID, additionalTargetIDs []types.ID, targetRef string,
+) *mission.Mission {
+	now := mission.NewUnixTimeNow()
+	m := &mission.Mission{
+		ID:                    types.NewID(),   // Template ID, may be replaced by existing
+		TenantID:              tenant.String(), // required: ListMissions filters by tenant
+		Name:                  def.GetName() + req.NameSuffix,
+		Description:           def.GetDescription(),
+		Status:                mission.MissionStatusSubmitted,
+		MissionDefinitionID:   types.ID(def.GetId()),
+		MissionDefinitionJSON: definitionJSON,
+		TargetID:              targetID,
+		AdditionalTargetIDs:   additionalTargetIDs,
+		CreatedBy:             req.CreatedBy,
+		MemoryContinuity:      req.MemoryContinuity,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+		FindingsCount:         0,
+		Metrics: &mission.MissionMetrics{
+			TotalNodes:     len(def.GetNodes()),
+			CompletedNodes: 0,
+		},
+		Metadata: make(map[string]any),
+	}
+	// Store variables in metadata
+	if len(req.Variables) > 0 {
+		m.Metadata["variables"] = req.Variables
+	}
+	// Store target URL/reference in metadata for agent context injection
+	// This preserves the original target reference (URL or name) separate from TargetID
+	if targetRef != "" {
+		m.Metadata["target_ref"] = targetRef
+	}
+	return m
 }
 
 // RunExisting starts a mission the store already holds, bound to that mission's
@@ -790,9 +851,24 @@ func (m *missionManager) startRun(
 // loadRunDefinition loads a mission definition by friendly name, falling back
 // to an ID-based lookup across all definitions (the caller may supply either).
 func (m *missionManager) loadRunDefinition(ctx context.Context, defStore mission.MissionStore, missionDefinitionID string) (*missionpb.MissionDefinition, error) {
-	def, err := defStore.GetDefinition(ctx, missionDefinitionID)
+	def, err := findMissionDefinition(ctx, defStore, missionDefinitionID)
 	if err != nil {
 		m.logger.Error("failed to load mission definition", "error", err, "mission_definition_id", missionDefinitionID)
+		return nil, err
+	}
+	return def, nil
+}
+
+// errMissionDefinitionNotFound marks a definition that the tenant does not have.
+var errMissionDefinitionNotFound = errors.New("mission definition not found")
+
+// findMissionDefinition loads a mission definition by friendly name, falling
+// back to an ID-based lookup across all definitions. Mission start and the
+// publish of a definition for inbound calls use it, so both find a definition
+// the same way.
+func findMissionDefinition(ctx context.Context, defStore mission.MissionStore, missionDefinitionID string) (*missionpb.MissionDefinition, error) {
+	def, err := defStore.GetDefinition(ctx, missionDefinitionID)
+	if err != nil {
 		return nil, fmt.Errorf("failed to load mission definition %s: %w", missionDefinitionID, err)
 	}
 	if def == nil {
@@ -807,7 +883,7 @@ func (m *missionManager) loadRunDefinition(ctx context.Context, defStore mission
 			}
 		}
 		if def == nil {
-			return nil, fmt.Errorf("mission definition not found: %s", missionDefinitionID)
+			return nil, fmt.Errorf("%w: %s", errMissionDefinitionNotFound, missionDefinitionID)
 		}
 	}
 	return def, nil
@@ -1753,4 +1829,38 @@ func withDeciderSlotPin(mc harness.MissionContext, def *missionpb.MissionDefinit
 	return mc.WithNodeSlotOverrides(map[string]*agent.SlotConfig{
 		deciderSlot: {Provider: pin.Provider, Model: pin.Model},
 	})
+}
+
+// checkDefinitionPin refuses a definition whose hash is not the pinned one. An
+// empty pin means the start has no pin.
+func checkDefinitionPin(def *missionpb.MissionDefinition, pinned string) error {
+	if pinned == "" {
+		return nil
+	}
+	got, err := definitionHash(def)
+	if err != nil {
+		return err
+	}
+	if got != pinned {
+		return grpcstatus.Error(grpccodes.FailedPrecondition, "the mission definition changed after it was published")
+	}
+	return nil
+}
+
+// resolveExtraTargets resolves the targets after the first one. Each gets the same
+// ownership check and the same pin check as the primary target. A target of another
+// tenant is not found.
+func (m *missionManager) resolveExtraTargets(ctx context.Context, req api.RunMissionData) ([]types.ID, error) {
+	var ids []types.ID
+	for _, id := range req.TargetIDs[1:] {
+		extra, err := resolveTargetUUID(ctx, m.targetStore, id, resolveTargetCallerTenant(ctx))
+		if err != nil {
+			return nil, err
+		}
+		if err := checkTargetPin(req.PinnedTargetHashes, id, extra); err != nil {
+			return nil, err
+		}
+		ids = append(ids, extra.ID)
+	}
+	return ids, nil
 }
