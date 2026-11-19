@@ -295,6 +295,10 @@ type DaemonServer struct {
 	modelLister       modelLister
 	providerListCache *providerListCache
 	listCacheOnce     sync.Once
+	// routeWait and routeInterval set the wait of a provider test for a new
+	// route. Zero means providerRouteWait and providerRouteInterval. A test sets
+	// short values.
+	routeWait, routeInterval time.Duration
 
 	// modelGateInvalidator is called from Grant/Revoke so that the
 	// next slot resolution picks up the new grant state within

@@ -483,12 +483,19 @@ type recordingLister struct {
 	targets []modelclient.Target
 	models  []modelclient.ModelEntry
 	err     error
-	calls   int
+	// errs are answered first, one for each call, before err and models.
+	errs  []error
+	calls int
 }
 
 func (r *recordingLister) Models(_ context.Context, c modelclient.Caller, t modelclient.Target) ([]modelclient.ModelEntry, error) {
 	r.calls++
 	r.callers, r.targets = append(r.callers, c), append(r.targets, t)
+	if len(r.errs) > 0 {
+		err := r.errs[0]
+		r.errs = r.errs[1:]
+		return nil, err
+	}
 	return r.models, r.err
 }
 
@@ -529,11 +536,57 @@ func TestTestProvider_AFailedCallIsAnAnswerAndNotAnError(t *testing.T) {
 		rec := &recordingLister{err: &modelclient.APIError{Status: status, Body: "x"}}
 		s := serverWithStore(t, savedProviderStore())
 		s.modelLister = rec
+		s.routeWait, s.routeInterval = 30*time.Millisecond, 10*time.Millisecond
 		resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Name: "p"})
 		require.NoError(t, err)
 		assert.False(t, resp.Ok)
 		assert.Contains(t, resp.Error, want)
 	}
+}
+
+// A user saves a provider and tests it at once. The route exists some seconds
+// later, so the first calls get 404. The test waits and then answers with the
+// models. Only a test waits: the health poll and the list read the state now.
+func TestTestProvider_WaitsForTheRouteOfANewProvider(t *testing.T) {
+	notReady := &modelclient.APIError{Status: http.StatusNotFound, Body: "route not found"}
+	rec := &recordingLister{models: []modelclient.ModelEntry{{ID: "a"}}, errs: []error{notReady, notReady}}
+	s := serverWithStore(t, savedProviderStore())
+	s.modelLister = rec
+	s.routeWait, s.routeInterval = 5*time.Second, 5*time.Millisecond
+	resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Name: "p"})
+	require.NoError(t, err)
+	assert.True(t, resp.Ok, resp.Error)
+	assert.Equal(t, 3, rec.calls, "two 404 answers, then the list")
+}
+
+func TestListProviderModels_DoesNotWaitForTheRoute(t *testing.T) {
+	notReady := &modelclient.APIError{Status: http.StatusNotFound, Body: "route not found"}
+	rec := &recordingLister{err: notReady}
+	s := serverWithStore(t, savedProviderStore())
+	s.modelLister = rec
+	s.routeWait, s.routeInterval = 5*time.Second, 5*time.Millisecond
+	resp, err := s.ListProviderModels(tenantCtx("acme"), &tenantv1.ListProviderModelsRequest{Name: "p"})
+	require.NoError(t, err)
+	assert.False(t, resp.Ok)
+	assert.Equal(t, 1, rec.calls)
+}
+
+func TestWaitForRoute_NamesTheWaitWhenTheRouteNeverAppears(t *testing.T) {
+	notReady := &modelclient.APIError{Status: http.StatusNotFound, Body: "route not found"}
+	_, err := waitForRoute(context.Background(), 40*time.Millisecond, 5*time.Millisecond,
+		func() ([]modelclient.ModelEntry, error) { return nil, notReady })
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not appear within 40ms")
+	var api *modelclient.APIError
+	require.ErrorAs(t, err, &api, "the answer of the gateway stays in the chain")
+	assert.True(t, api.NoRoute())
+
+	refused := &modelclient.APIError{Status: http.StatusForbidden}
+	calls := 0
+	_, err = waitForRoute(context.Background(), time.Second, time.Millisecond,
+		func() ([]modelclient.ModelEntry, error) { calls++; return nil, refused })
+	require.Error(t, err)
+	assert.Equal(t, 1, calls, "a refusal is not retried")
 }
 
 func TestListProviderModels_CachesAGoodListAndDropsItOnUpdate(t *testing.T) {

@@ -13,6 +13,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"sync"
@@ -30,6 +31,16 @@ import (
 // providerListTimeout bounds one model list call, so a hung provider does not pin
 // the handler.
 const providerListTimeout = 15 * time.Second
+
+// providerRouteWait bounds the wait of a provider test for the route of a new
+// provider. The tenant operator renders the route from a pull of the provider
+// records every 30 seconds, and the render takes some seconds more. A user saves
+// a provider and tests it by name at once (dashboard#372), so the test waits for
+// the route instead of showing "route not found".
+const (
+	providerRouteWait     = 45 * time.Second
+	providerRouteInterval = time.Second
+)
 
 // providerListCacheTTL is how long a successful list stays valid for one
 // provider of one tenant.
@@ -106,13 +117,55 @@ func (s *DaemonServer) listSavedProvider(
 	if err != nil {
 		return nil, 0, err
 	}
-	callCtx, cancel := context.WithTimeout(ctx, providerListTimeout)
-	defer cancel()
+	list := func() ([]modelclient.ModelEntry, error) {
+		callCtx, cancel := context.WithTimeout(ctx, providerListTimeout)
+		defer cancel()
+		return s.modelLister.Models(callCtx,
+			modelclient.Caller{Tenant: tenantID, Purpose: purpose, Initiator: initiator},
+			modelclient.Target{Tenant: tenantID, Provider: name})
+	}
 	start := time.Now()
-	models, err := s.modelLister.Models(callCtx,
-		modelclient.Caller{Tenant: tenantID, Purpose: purpose, Initiator: initiator},
-		modelclient.Target{Tenant: tenantID, Provider: name})
+	var models []modelclient.ModelEntry
+	if purpose == modelcall.PurposeProviderProbe {
+		// A test follows a save. Only a test waits for the route. The health poll
+		// and the list read the state now and do not wait.
+		wait, interval := s.routeWait, s.routeInterval
+		if wait <= 0 {
+			wait = providerRouteWait
+		}
+		if interval <= 0 {
+			interval = providerRouteInterval
+		}
+		models, err = waitForRoute(ctx, wait, interval, list)
+	} else {
+		models, err = list()
+	}
 	return models, time.Since(start).Milliseconds(), err
+}
+
+// waitForRoute calls list again while the gateway answers "no route" (404). Any
+// other result returns at once. When the deadline passes it returns the last
+// error with the time that it waited, so the user sees that the route did not
+// appear, and not only a 404.
+func waitForRoute(
+	ctx context.Context, deadline, interval time.Duration, list func() ([]modelclient.ModelEntry, error),
+) ([]modelclient.ModelEntry, error) {
+	timeout := time.NewTimer(deadline)
+	defer timeout.Stop()
+	for {
+		models, err := list()
+		var api *modelclient.APIError
+		if err == nil || !errors.As(err, &api) || !api.NoRoute() {
+			return models, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("wait for the route of the provider: %w", ctx.Err())
+		case <-timeout.C:
+			return nil, fmt.Errorf("the route of the provider did not appear within %s: %w", deadline, err)
+		case <-time.After(interval):
+		}
+	}
 }
 
 // gatewayErrorClass maps an error of the gateway to the error class of the
