@@ -57,8 +57,9 @@ service WorldService {
     };
   }
 
-  // GetLlmCall returns one call's full detail including its transcript (prompt
-  // messages + completion) — the conversation-view source (gibson#755). ListLlmCalls
+  // GetLlmCall returns one call's full detail including its Open Responses
+  // record (request items and output items) — the conversation-view source
+  // (gibson#755, dashboard#373). ListLlmCalls
   // stays metadata-only so a busy World's list response is not transcript-heavy.
   rpc GetLlmCall(GetLlmCallRequest) returns (GetLlmCallResponse) {
     option (gibson.auth.v1.authz) = {
@@ -364,23 +365,46 @@ message ListLlmCallsResponse {
   string next_page_token = 2;
 }
 
-// LlmMessage is one prompt message in an LlmCall transcript.
-message LlmMessage {
-  string role = 1;
-  string content = 2;
-}
-
-// LlmCallDetail is a single call's full record: the LlmCallView metadata plus the
-// transcript (prompt messages + assistant completion).
+// LlmCallDetail is the full record of one model call: the metadata of the
+// LlmCallView and the Open Responses record of the call, read from the gateway
+// trace (ADR-0172, ADR-0173). The record of a call is immutable.
+//
+// Each element of request_items and output_items is one Open Responses item as
+// JSON text, in the form that the Timeline stores. The strings of an item are
+// redacted by the redaction policy of the tenant when the event is folded. A
+// reader parses each element and shows it by its "type".
 message LlmCallDetail {
+  // The old transcript fields. Nothing writes them after the cutover to the
+  // gateway trace (no outside users: ADR-0027).
+  reserved 7, 8;
+  reserved "messages", "completion";
+
   string call_id = 1;
   string run_id = 2;
   string model = 3;
   string scope_id = 4;
+  // The input and the output token counts of the call. A failed call has 0.
   int32 prompt_tokens = 5;
   int32 completion_tokens = 6;
-  repeated LlmMessage messages = 7;
-  string completion = 8;
+
+  // The input items of the request, in order.
+  repeated string request_items = 9;
+  // The output items of the reply, in order. A failed call has none.
+  repeated string output_items = 10;
+  // The model provider that the gateway used, for example "openai".
+  string provider = 11;
+  // The HTTP status that the gateway answered. 0 means unknown. A status of 400
+  // or more is a failed call.
+  int32 http_status = 12;
+  int32 cache_read_tokens = 13;
+  int32 cache_write_tokens = 14;
+  // The cost in US dollars as a decimal string, from the gateway trace only.
+  // Empty means that the trace has no price for the model: show "Unknown". It is
+  // never "0" for an unpriced model.
+  string cost = 15;
+  // The text of the reply of a failed call (a status of 400 or more). Empty for
+  // a call that worked.
+  string error_text = 16;
 }
 
 message GetLlmCallRequest {

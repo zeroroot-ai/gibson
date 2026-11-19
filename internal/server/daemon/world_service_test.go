@@ -5,8 +5,10 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,10 +101,13 @@ func TestWorldService_GetLlmCall(t *testing.T) {
 	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	reg.For("acme").Submit(brain.LlmCallObserved{
-		CallID:     "c1",
-		Model:      "claude-haiku-4-5",
-		Messages:   []brain.LlmMessage{{Role: "user", Content: "scan the host"}},
-		Completion: "running nmap",
+		CallID: "c1", Model: "claude-haiku-4-5", Provider: "anthropic", HTTPStatus: 200,
+		PromptTokens: 12, CompletionTokens: 3, CacheReadTokens: 4, CacheWriteTokens: 5, Cost: "0.0021",
+		RequestItems: 1,
+		Items: []json.RawMessage{
+			json.RawMessage(`{"type":"message","role":"user","content":"scan the host"}`),
+			json.RawMessage(`{"type":"message","role":"assistant","content":"running nmap"}`),
+		},
 	})
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
@@ -120,8 +125,13 @@ func TestWorldService_GetLlmCall(t *testing.T) {
 		t.Fatal("GetLlmCall returned no call")
 	}
 	call := resp.Call
-	if len(call.Messages) != 1 || call.Messages[0].Content != "scan the host" || call.Completion != "running nmap" {
-		t.Fatalf("transcript not returned: %+v", call)
+	if len(call.RequestItems) != 1 || !strings.Contains(call.RequestItems[0], "scan the host") ||
+		len(call.OutputItems) != 1 || !strings.Contains(call.OutputItems[0], "running nmap") {
+		t.Fatalf("record not returned: %+v", call)
+	}
+	if call.Provider != "anthropic" || call.HttpStatus != 200 || call.PromptTokens != 12 || call.CompletionTokens != 3 ||
+		call.CacheReadTokens != 4 || call.CacheWriteTokens != 5 || call.Cost != "0.0021" {
+		t.Fatalf("metadata not returned: %+v", call)
 	}
 
 	// Unknown call id -> NotFound.
@@ -848,4 +858,53 @@ func TestWorldService_HistoryErrorIsUnavailable(t *testing.T) {
 	require.Equal(t, codes.Unavailable, status.Code(err))
 	_, err = srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 1})
 	require.Equal(t, codes.Unavailable, status.Code(err))
+}
+
+// llmCallDetail splits the items at RequestItems and maps each field.
+func TestLlmCallDetail_Mapping(t *testing.T) {
+	item := func(s string) json.RawMessage { return json.RawMessage(s) }
+
+	t.Run("a call that worked, with no cost", func(t *testing.T) {
+		d := llmCallDetail(brain.LlmCallSnapshot{
+			CallID: "c1", Model: "m", Provider: "openai", HTTPStatus: 200, PromptTokens: 7, CompletionTokens: 2,
+			RequestItems: 2,
+			Items:        []json.RawMessage{item(`{"a":1}`), item(`{"b":2}`), item(`{"c":3}`)},
+		})
+		if len(d.RequestItems) != 2 || len(d.OutputItems) != 1 || d.OutputItems[0] != `{"c":3}` {
+			t.Fatalf("items = %v / %v", d.RequestItems, d.OutputItems)
+		}
+		if d.Cost != "" {
+			t.Fatalf("cost = %q, want empty (unknown)", d.Cost)
+		}
+		if d.PromptTokens != 7 || d.CompletionTokens != 2 || d.Provider != "openai" || d.HttpStatus != 200 {
+			t.Fatalf("detail = %+v", d)
+		}
+	})
+
+	t.Run("a failed call has request items, a status, error text and no tokens", func(t *testing.T) {
+		d := llmCallDetail(brain.LlmCallSnapshot{
+			CallID: "c2", Model: "m", HTTPStatus: 503, ErrorText: "connection timed out",
+			RequestItems: 1, Items: []json.RawMessage{item(`{"type":"message"}`)},
+		})
+		if len(d.RequestItems) != 1 || len(d.OutputItems) != 0 {
+			t.Fatalf("items = %v / %v", d.RequestItems, d.OutputItems)
+		}
+		if d.HttpStatus != 503 || d.ErrorText != "connection timed out" || d.PromptTokens != 0 || d.CompletionTokens != 0 {
+			t.Fatalf("detail = %+v", d)
+		}
+	})
+
+	t.Run("a record with no split has request items only", func(t *testing.T) {
+		d := llmCallDetail(brain.LlmCallSnapshot{CallID: "c3", Items: []json.RawMessage{item(`{"a":1}`)}})
+		if len(d.RequestItems) != 1 || len(d.OutputItems) != 0 {
+			t.Fatalf("items = %v / %v", d.RequestItems, d.OutputItems)
+		}
+	})
+
+	t.Run("a record with no items gives empty lists", func(t *testing.T) {
+		d := llmCallDetail(brain.LlmCallSnapshot{CallID: "c4"})
+		if len(d.RequestItems) != 0 || len(d.OutputItems) != 0 {
+			t.Fatalf("items = %v / %v", d.RequestItems, d.OutputItems)
+		}
+	})
 }

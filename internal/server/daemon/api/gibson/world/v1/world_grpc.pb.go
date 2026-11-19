@@ -58,8 +58,9 @@ type WorldServiceClient interface {
 	// model + token data folded into the World, the replacement for the retired
 	// Langfuse trace/cost views.
 	ListLlmCalls(ctx context.Context, in *ListLlmCallsRequest, opts ...grpc.CallOption) (*ListLlmCallsResponse, error)
-	// GetLlmCall returns one call's full detail including its transcript (prompt
-	// messages + completion) — the conversation-view source (gibson#755). ListLlmCalls
+	// GetLlmCall returns one call's full detail including its Open Responses
+	// record (request items and output items) — the conversation-view source
+	// (gibson#755, dashboard#373). ListLlmCalls
 	// stays metadata-only so a busy World's list response is not transcript-heavy.
 	GetLlmCall(ctx context.Context, in *GetLlmCallRequest, opts ...grpc.CallOption) (*GetLlmCallResponse, error)
 	// GetTimeline returns the tenant's domain-event Timeline — the Scroller scrubs
@@ -301,8 +302,9 @@ type WorldServiceServer interface {
 	// model + token data folded into the World, the replacement for the retired
 	// Langfuse trace/cost views.
 	ListLlmCalls(context.Context, *ListLlmCallsRequest) (*ListLlmCallsResponse, error)
-	// GetLlmCall returns one call's full detail including its transcript (prompt
-	// messages + completion) — the conversation-view source (gibson#755). ListLlmCalls
+	// GetLlmCall returns one call's full detail including its Open Responses
+	// record (request items and output items) — the conversation-view source
+	// (gibson#755, dashboard#373). ListLlmCalls
 	// stays metadata-only so a busy World's list response is not transcript-heavy.
 	GetLlmCall(context.Context, *GetLlmCallRequest) (*GetLlmCallResponse, error)
 	// GetTimeline returns the tenant's domain-event Timeline — the Scroller scrubs
