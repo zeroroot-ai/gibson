@@ -5,8 +5,6 @@ package component
 
 import (
 	"context"
-
-	"github.com/zeroroot-ai/gibson/internal/platform/capname"
 )
 
 // capCheckCall records one ActiveGrantID call, so a test can assert what the
@@ -50,9 +48,4 @@ type countingRegistry struct {
 func (r *countingRegistry) Discover(_ context.Context, _, _, _ string) ([]ComponentInfo, error) {
 	r.discoverCalls++
 	return nil, nil
-}
-
-// grantedChecker grants the one capability that the mission tests need.
-func grantedChecker() *mockCapabilityChecker {
-	return &mockCapabilityChecker{granted: map[string]bool{capname.MissionDelegate: true}}
 }

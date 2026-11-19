@@ -119,10 +119,6 @@ func (r *RedisWorkContextRegistry) WorkMaxTokensPerCall(ctx context.Context, wor
 	return int32(n), nil //nolint:gosec // bound from an int32 at enqueue
 }
 
-// slotPinKey is the context key of the slot pin that the completion RPCs hand
-// to the LLM adapter.
-type slotPinKey struct{}
-
 // nodeSlotPin returns the pin of slot for the work item workID.
 //
 // The caller has claimed the work item (claimedWorkOwner), and owner is the

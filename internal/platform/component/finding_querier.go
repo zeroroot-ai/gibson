@@ -121,8 +121,8 @@ func (q *PoolFindingQuerier) query(
 		query.Severities = []string{filter.Severity}
 	}
 	if filter.MissionID != "" {
-		missionID, err := types.ParseID(filter.MissionID)
-		if err != nil {
+		missionID, isUUID := parseMissionFilter(filter.MissionID)
+		if !isUUID {
 			// No finding has a mission ID that is not a UUID. The answer is none.
 			return []byte("[]"), nil
 		}
@@ -195,4 +195,11 @@ func decodeFindingFilter(filterJSON []byte) (findingFilter, error) {
 		return filter, fmt.Errorf("finding querier: decode filter: %w", err)
 	}
 	return filter, nil
+}
+
+// parseMissionFilter reads the mission ID of a filter. It reports false when
+// the text is not a UUID.
+func parseMissionFilter(raw string) (types.ID, bool) {
+	id, err := types.ParseID(raw)
+	return id, err == nil
 }
