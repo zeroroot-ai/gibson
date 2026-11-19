@@ -34,7 +34,7 @@ type ConnBoundMissionStore struct {
 }
 
 // TenantRecorder ties a mission to its tenant in the authorization store. The
-// tuple (tenant:<tenant>, belongs_to, mission:<id>) is what a grant of an Agent
+// tuple (the tenant, belongs_to, the mission) is what a grant of an Agent
 // Skill or an outside agent to a mission checks, and what the viewer and admin
 // relations of a mission derive from.
 //
@@ -81,9 +81,6 @@ func (s *ConnBoundMissionStore) recordTenant(ctx context.Context, id types.ID) e
 // worth a second error. The context is detached because the failed write may be
 // the cancellation of the caller.
 func (s *ConnBoundMissionStore) forgetNewTenant(ctx context.Context, id types.ID) {
-	if s.recorder == nil {
-		return
-	}
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	_ = s.recorder.Forget(fctx, s.tenant, id)

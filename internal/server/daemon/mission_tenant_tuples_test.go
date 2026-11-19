@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"github.com/alicebob/miniredis/v2"
 	"log/slog"
 	"testing"
 
@@ -57,7 +58,7 @@ func testDaemon(rdb *redis.Client, fga *fakeAuthorizer) *daemonImpl {
 
 // RunMission and the inbound A2A start: a mission found or created by name.
 func TestMissionTenantTuple_RunByName(t *testing.T) {
-	rdb, _ := missiontest.NewClient(t)
+	rdb, _ := newJSONFakeClient(t)
 	fga := &fakeAuthorizer{}
 	m := &missionManager{pool: &mockPool{conn: &datapool.Conn{Redis: rdb}}, logger: slog.New(slog.DiscardHandler),
 		recorderFn: testDaemon(rdb, fga).missionTenantRecorder}
@@ -77,7 +78,7 @@ func TestMissionTenantTuple_RunByName(t *testing.T) {
 // RunExisting, rewind and a child that an agent starts: a record saved through
 // the store of the manager.
 func TestMissionTenantTuple_SavedThroughTheManagerStore(t *testing.T) {
-	rdb, _ := missiontest.NewClient(t)
+	rdb, _ := newJSONFakeClient(t)
 	fga := &fakeAuthorizer{}
 	m := &missionManager{pool: &mockPool{conn: &datapool.Conn{Redis: rdb}}, logger: slog.New(slog.DiscardHandler),
 		recorderFn: testDaemon(rdb, fga).missionTenantRecorder}
@@ -97,7 +98,7 @@ func TestMissionTenantTuple_SavedThroughTheManagerStore(t *testing.T) {
 // The create call of the dashboard (CreateMission) builds its store with the
 // daemon function.
 func TestMissionTenantTuple_CreateMission(t *testing.T) {
-	rdb, _ := missiontest.NewClient(t)
+	rdb, _ := newJSONFakeClient(t)
 	fga := &fakeAuthorizer{}
 	d := testDaemon(rdb, fga)
 	m := newTenantMission("dashboard-create")
@@ -110,7 +111,7 @@ func TestMissionTenantTuple_CreateMission(t *testing.T) {
 // The harness creates a mission for an agent (and the component service does
 // the same through the adapter).
 func TestMissionTenantTuple_HarnessCreate(t *testing.T) {
-	rdb, _ := missiontest.NewClient(t)
+	rdb, _ := newJSONFakeClient(t)
 	fga := &fakeAuthorizer{}
 	a := &missionHarnessAdapter{daemon: testDaemon(rdb, fga)}
 
@@ -129,7 +130,7 @@ func TestMissionTenantTuple_HarnessCreate(t *testing.T) {
 // A child mission that an agent originates is saved through the store of the
 // component mission manager.
 func TestMissionTenantTuple_Originate(t *testing.T) {
-	rdb, _ := missiontest.NewClient(t)
+	rdb, _ := newJSONFakeClient(t)
 	fga := &fakeAuthorizer{}
 	cm := newComponentMissionManager(testDaemon(rdb, fga))
 
@@ -147,7 +148,7 @@ func TestMissionTenantTuple_Originate(t *testing.T) {
 
 // The failure rule: a failed tuple write creates no mission, on each path.
 func TestMissionTenantTuple_AFailedWriteCreatesNoMission(t *testing.T) {
-	rdb, docs := missiontest.NewClient(t)
+	rdb, docs := newJSONFakeClient(t)
 	fga := &fakeAuthorizer{writeErr: errors.New("fga down")}
 	d := testDaemon(rdb, fga)
 
@@ -179,4 +180,14 @@ func TestMissionTenantTuple_ForgetOnDelete(t *testing.T) {
 	if len(fga.removed) != 1 || fga.removed[0] != authz.MissionBelongsToTuple("acme", id.String()) {
 		t.Fatalf("removed = %+v", fga.removed)
 	}
+}
+
+// newJSONFakeClient returns a client on a miniredis server with the JSON
+// commands of the mission store answered by missiontest.
+func newJSONFakeClient(t *testing.T) (*redis.Client, *missiontest.Docs) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	return rdb, missiontest.Attach(rdb)
 }

@@ -296,10 +296,12 @@ func (m *missionManager) missionStoreFor(ctx context.Context, tenant auth.Tenant
 
 // tenantRecorder returns the recorder of the manager, or nil.
 func (m *missionManager) tenantRecorder() mission.TenantRecorder {
-	if m.recorderFn == nil {
-		return nil
+	// A manager with no function has no recorder, and the store that it builds
+	// then fails when it creates a mission (mission.ErrNoTenantRecorder).
+	if m.recorderFn != nil {
+		return m.recorderFn()
 	}
-	return m.recorderFn()
+	return nil
 }
 
 // runStoreFor acquires a per-tenant Conn from the pool and returns a

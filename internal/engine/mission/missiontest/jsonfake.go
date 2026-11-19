@@ -11,27 +11,23 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"testing"
 
-	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-// NewClient returns a Redis client for ConnBoundMissionStore. The store keeps a
-// mission with the JSON commands of the RedisJSON module, which miniredis does
-// not know. The client answers JSON.SET, JSON.GET and JSON.DEL from a map and
-// sends every other command to a miniredis server. It needs no Redis Stack, so a
-// test of the creation paths of a mission runs on any machine.
-func NewClient(t *testing.T) (*redis.Client, *Docs) {
-	t.Helper()
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
+// Attach makes rdb answer JSON.SET, JSON.GET and JSON.DEL from a map, and EXISTS
+// for the documents in it. ConnBoundMissionStore keeps a mission with the JSON
+// commands of the RedisJSON module, which miniredis does not know. Every other
+// command goes to the server of rdb, so rdb points at a miniredis server. The
+// test builds that client itself, because production code may not construct a
+// Redis client outside the datapool, and a test file may. A test of the creation
+// paths of a mission then needs no Redis Stack.
+func Attach(rdb *redis.Client) *Docs {
 	docs := &Docs{docs: map[string]string{}}
 	rdb.AddHook(docs)
-	return rdb, docs
+	return docs
 }
 
 // Docs holds the JSON documents that the fake keeps.

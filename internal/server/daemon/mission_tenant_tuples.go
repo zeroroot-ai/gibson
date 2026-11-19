@@ -44,10 +44,10 @@ func (r missionTenantTuples) Forget(ctx context.Context, tenant string, id types
 // a mission (mission.ErrNoTenantRecorder), so a daemon with no authorizer starts
 // no mission. The daemon starts with an authorizer in every deployment.
 func (d *daemonImpl) missionTenantRecorder() mission.TenantRecorder {
-	if d.authorizer == nil {
-		return nil
+	if d.authorizer != nil {
+		return missionTenantTuples{az: d.authorizer}
 	}
-	return missionTenantTuples{az: d.authorizer}
+	return nil
 }
 
 // newMissionStore returns the store that creates missions of a tenant. Each

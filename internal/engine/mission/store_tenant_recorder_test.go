@@ -6,6 +6,8 @@ package mission_test
 import (
 	"context"
 	"errors"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -46,7 +48,7 @@ func (f *fakeRecorder) Forget(_ context.Context, tenant string, id types.ID) err
 
 func newRecordingStore(t *testing.T) (*mission.ConnBoundMissionStore, *fakeRecorder, *missiontest.Docs) {
 	t.Helper()
-	rdb, docs := missiontest.NewClient(t)
+	rdb, docs := newJSONFakeClient(t)
 	rec := &fakeRecorder{tuples: map[string]bool{}, docs: docs}
 	return mission.NewConnBoundMissionStore(rdb).WithTenantRecorder(rec, "acme"), rec, docs
 }
@@ -96,7 +98,7 @@ func TestFindOrCreateByName_RecordsANewMissionAndRepairsAnExistingOne(t *testing
 }
 
 func TestFindOrCreateByName_ARunByNameRepairsAMissionWithNoTuple(t *testing.T) {
-	rdb, docs := missiontest.NewClient(t)
+	rdb, docs := newJSONFakeClient(t)
 	ctx := context.Background()
 	old := missiontest.NewRecorder()
 	m := newMission("made-before")
@@ -142,7 +144,7 @@ func TestDelete_RemovesTheTenantTuple(t *testing.T) {
 // A store that creates a mission with no recorder fails, so a call site that
 // forgets the recorder meets the error in its first test.
 func TestStoreWithNoRecorderRefusesToCreateOrDelete(t *testing.T) {
-	rdb, docs := missiontest.NewClient(t)
+	rdb, docs := newJSONFakeClient(t)
 	store := mission.NewConnBoundMissionStore(rdb)
 	ctx := context.Background()
 
@@ -193,4 +195,14 @@ func TestAFailedTupleWriteIsMarked(t *testing.T) {
 	rec.err = errors.New("tuple not found in the store")
 	err := store.Save(context.Background(), newMission("marked"))
 	require.ErrorIs(t, err, mission.ErrTenantRecordFailed)
+}
+
+// newJSONFakeClient returns a client on a miniredis server with the JSON
+// commands of the mission store answered by missiontest.
+func newJSONFakeClient(t *testing.T) (*redis.Client, *missiontest.Docs) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	return rdb, missiontest.Attach(rdb)
 }
