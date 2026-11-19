@@ -184,17 +184,48 @@ func TestCanonicalJSONHash_IgnoresSpacingAndKeyOrder(t *testing.T) {
 // A golden value fixes the canonical form. A change of the form changes every
 // pin, so it must fail this test and be a decision.
 func TestDefinitionHash_Golden(t *testing.T) {
+	node := inboundAgentNode("n1", "recon")
+	// A double with an integral value. protojson writes it as 12.
+	node.RetryPolicy = &missionpb.RetryPolicy{MaxRetries: 3, Multiplier: 12.0}
 	def := &missionpb.MissionDefinition{
 		Id:   "00000000-0000-0000-0000-000000000001",
 		Name: "golden",
-		// Number fields (an int32 and a double) are part of the pin. Their encoding
-		// must not depend on the encoder either.
-		Constraints: &missionpb.MissionConstraints{MaxFindings: 100, MaxCost: 12.5},
-		Nodes:       map[string]*missionpb.MissionNode{"n1": inboundAgentNode("n1", "recon")},
+		// Number fields are part of the pin: an int32, a double of 1e21, and an int64
+		// above 2^53 (protojson writes an int64 as a string). Their encoding must not
+		// depend on the encoder either.
+		Constraints: &missionpb.MissionConstraints{MaxFindings: 100, MaxCost: 1e21, MaxTokens: 9007199254740993},
+		Nodes:       map[string]*missionpb.MissionNode{"n1": node},
 	}
 	got, err := definitionHash(def)
 	require.NoError(t, err)
-	assert.Equal(t, "69a1b4f0bef3b37bb30b8e0913d516d131585ad241a7f18cae0da6a1cf10eb85", got)
+	assert.Equal(t, "9bbb0170d25ae5408f56789968a5486147a935c26d432852c8cb0de53fa08eeb", got)
+}
+
+// The same value in other spellings gives one hash: 12, 12.0 and 1.2e1 are one number
+// to the canonical form only when the encoder wrote the same text. The pin compares the
+// hash of the stored definition with the hash of the definition that a start loaded, and
+// both come from MarshalDefinitionJSON of the same message, so the text is the same.
+// This test pins what the canonical form does with the spellings of one double.
+func TestCanonicalJSONHash_NumberSpellings(t *testing.T) {
+	a, err := canonicalJSONHash([]byte(`{"m":12}`))
+	require.NoError(t, err)
+	b, err := canonicalJSONHash([]byte(`{"m":12.0}`))
+	require.NoError(t, err)
+	assert.Equal(t, a, b, "12 and 12.0 are one number")
+	c, err := canonicalJSONHash([]byte(`{"m":1.2e1}`))
+	require.NoError(t, err)
+	assert.Equal(t, a, c, "1.2e1 is the same number as 12")
+	big1, err := canonicalJSONHash([]byte(`{"m":1e21}`))
+	require.NoError(t, err)
+	big2, err := canonicalJSONHash([]byte(`{"m":1.0E+21}`))
+	require.NoError(t, err)
+	assert.Equal(t, big1, big2, "1e21 in two spellings")
+	// An int64 is a string in protojson, so it keeps every digit.
+	i1, err := canonicalJSONHash([]byte(`{"t":"9007199254740993"}`))
+	require.NoError(t, err)
+	i2, err := canonicalJSONHash([]byte(`{"t":"9007199254740992"}`))
+	require.NoError(t, err)
+	assert.NotEqual(t, i1, i2)
 }
 
 func TestTargetHash_Golden(t *testing.T) {

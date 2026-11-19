@@ -78,11 +78,13 @@ func definitionHash(def *missionpb.MissionDefinition) (string, error) {
 	return canonicalJSONHash(raw)
 }
 
-// canonicalJSONHash hashes the canonical form of a JSON text: the keys sorted and
-// no space. Two texts of the same value give the same hash.
+// canonicalJSONHash hashes the canonical form of a JSON text: the keys sorted, no
+// space, and one text for one number. Two texts of the same value give the same hash.
 func canonicalJSONHash(raw []byte) (string, error) {
+	// A number is decoded as a float64, so the same value has one text: 12, 12.0 and
+	// 1.2e1 are all 12. protojson writes an int64 as a string, so no number in the
+	// text is above 2^53, and the float64 keeps every digit of it.
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
 	var value any
 	if err := dec.Decode(&value); err != nil {
 		return "", fmt.Errorf("decode the definition: %w", err)
