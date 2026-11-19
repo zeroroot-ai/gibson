@@ -38,7 +38,7 @@ func (c *Client) Models(ctx context.Context, caller Caller, target Target) ([]Mo
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("modelclient: read the model list: %w", err)

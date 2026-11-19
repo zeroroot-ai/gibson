@@ -169,7 +169,7 @@ func (c *Client) send(
 		return nil, fmt.Errorf("modelclient: send to the gateway: %w", err)
 	}
 	if resp.StatusCode/100 != 2 {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBytes))
 		return nil, &APIError{Status: resp.StatusCode, Body: strings.TrimSpace(string(b))}
 	}
@@ -192,7 +192,7 @@ func (c *Client) Respond(ctx context.Context, caller Caller, target Target, req 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("modelclient: read the reply: %w", err)

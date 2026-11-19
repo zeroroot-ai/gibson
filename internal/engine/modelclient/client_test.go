@@ -182,7 +182,7 @@ func TestStream_TextAndFinalResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	var text strings.Builder
 	var final *Response
 	for s.Next() {
@@ -214,7 +214,7 @@ func TestStream_FailureEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	for s.Next() {
 	}
 	var f *ResponseFailure
