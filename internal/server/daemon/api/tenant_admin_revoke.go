@@ -25,9 +25,14 @@ import (
 )
 
 // revokeCleanupUnfinished is the message when the FGA cleanup of a revoke fails. The
-// revoke of the identity is done and its access is blocked. A retry only finishes
-// the cleanup.
-const revokeCleanupUnfinished = "the identity is revoked and its access is blocked, but the cleanup of its permission tuples did not finish. Retry the revoke to finish the cleanup"
+// revoke of the identity is done. Only the inbound A2A route reads the key descriptor
+// fresh for each call (VerifyFresh). The other routes use the descriptor cache of
+// ext-authz, so a revoked identity can still use them until that entry ends. A retry
+// only finishes the cleanup. A revoke that takes effect at once on every route needs
+// a revocation marker that ext-authz reads on each call, for example a Redis key that
+// the daemon sets and that the replay store of ext-authz already reaches. That is a
+// follow-up and not part of this change.
+const revokeCleanupUnfinished = "the identity is revoked: it is blocked on the inbound A2A route now, and on every other route when the key cache of ext-authz ends (5 minutes by default, EXT_AUTHZ_CGJWT_DESCRIPTOR_TTL). The cleanup of its permission tuples did not finish. Retry the revoke to finish the cleanup"
 
 // RevokeAgentIdentity permanently revokes a machine identity.
 // Idempotent: a second call after success returns codes.NotFound.
@@ -129,8 +134,9 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 	}
 
 	// Revoke the Capability Grant rows of the principal first. A revoked agent row
-	// has no key descriptor, so the signed token of the principal fails at once,
-	// and the principal can start no mission. The call is safe to repeat. When it
+	// has no key descriptor, so the signed token of the principal fails on the
+	// inbound A2A route at once (it reads the descriptor fresh for each call), and on
+	// every other route when the descriptor cache of ext-authz ends. The call is safe to repeat. When it
 	// fails, nothing else is revoked, and the caller can retry. A revoke ends the
 	// access of the identity. The missions that it started continue, as after an
 	// unpublish, and a tenant admin can stop them in the dashboard.

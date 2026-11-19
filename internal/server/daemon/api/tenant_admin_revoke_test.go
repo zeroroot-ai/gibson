@@ -370,7 +370,9 @@ func TestRevokeAgentIdentity_AFailedFGACleanupIsUnavailable(t *testing.T) {
 				&tenantpb.RevokeAgentIdentityRequest{PrincipalId: "agent_principal:some-uuid"})
 
 			assert.Equal(t, codes.Unavailable, status.Code(err))
-			assert.Contains(t, status.Convert(err).Message(), "access is blocked")
+			msg := status.Convert(err).Message()
+			assert.Contains(t, msg, "blocked on the inbound A2A route now")
+			assert.Contains(t, msg, "5 minutes by default")
 		})
 	}
 }
