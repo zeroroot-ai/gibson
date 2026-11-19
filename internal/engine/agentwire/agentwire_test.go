@@ -64,6 +64,14 @@ func TestBuildMessage_RoundTripsThroughTheSDKWithTheExtensionMetadata(t *testing
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		t.Fatalf("the payload is not an a2a message: %v", err)
 	}
+	checkMessageHeader(t, msg, task)
+	checkEnvelope(t, msg, task)
+	checkSDKReadsTask(t, &msg, task)
+}
+
+// checkMessageHeader checks the ids, the role and the text of the message.
+func checkMessageHeader(t *testing.T, msg a2a.Message, task agent.Task) {
+	t.Helper()
 	if string(msg.TaskID) != task.ID.String() {
 		t.Errorf("task id = %q, want %q", msg.TaskID, task.ID)
 	}
@@ -76,7 +84,11 @@ func TestBuildMessage_RoundTripsThroughTheSDKWithTheExtensionMetadata(t *testing
 	if got := msg.Parts[0].Text(); got != task.Goal {
 		t.Errorf("text = %q, want the goal %q", got, task.Goal)
 	}
+}
 
+// checkEnvelope checks the Gibson extension of the message.
+func checkEnvelope(t *testing.T, msg a2a.Message, task agent.Task) {
+	t.Helper()
 	env := decodeEnvelope(t, msg)
 	if env.MissionRunID != "run-7" || env.AgentRunID != "agent-run-3" || env.RunNumber != 2 || env.JobID != "job-1" {
 		t.Errorf("run context = %+v", env.RunContext)
@@ -102,9 +114,13 @@ func TestBuildMessage_RoundTripsThroughTheSDKWithTheExtensionMetadata(t *testing
 			t.Errorf("metadata[%s] = %v, want %v", k, env.Metadata[k], want)
 		}
 	}
+}
 
-	// The SDK reads the same payload back as the Task of an agent author.
-	got, err := sdkagent.TaskFromMessage(&msg)
+// checkSDKReadsTask checks that the SDK reads the same payload back as the
+// Task of an agent author.
+func checkSDKReadsTask(t *testing.T, msg *a2a.Message, task agent.Task) {
+	t.Helper()
+	got, err := sdkagent.TaskFromMessage(msg)
 	if err != nil {
 		t.Fatalf("the SDK refused the message: %v", err)
 	}

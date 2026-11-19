@@ -83,27 +83,39 @@ func FoldStream(format Format, body string) (json.RawMessage, error) {
 	}
 }
 
+// anthropicEvent is the data of one event of a Messages stream.
+type anthropicEvent struct {
+	Type         string         `json:"type"`
+	Index        int            `json:"index"`
+	Message      map[string]any `json:"message"`
+	ContentBlock map[string]any `json:"content_block"`
+	Delta        map[string]any `json:"delta"`
+	Usage        map[string]any `json:"usage"`
+}
+
+// anthropicFold holds the parts of a Messages reply while the events arrive.
+type anthropicFold struct {
+	msg     map[string]any
+	blocks  map[int]map[string]any
+	partial map[int]*strings.Builder
+	usage   map[string]any
+}
+
 // foldAnthropicStream rebuilds a Messages reply from message_start,
 // content_block_start, content_block_delta, content_block_stop and
 // message_delta events.
 func foldAnthropicStream(events []sseEvent) (json.RawMessage, error) {
-	msg := map[string]any{}
-	blocks := map[int]map[string]any{}
-	partial := map[int]*strings.Builder{}
-	usage := map[string]any{}
-
+	f := &anthropicFold{
+		msg:     map[string]any{},
+		blocks:  map[int]map[string]any{},
+		partial: map[int]*strings.Builder{},
+		usage:   map[string]any{},
+	}
 	for _, ev := range events {
 		if ev.data == "" || ev.data == "[DONE]" {
 			continue
 		}
-		var d struct {
-			Type         string         `json:"type"`
-			Index        int            `json:"index"`
-			Message      map[string]any `json:"message"`
-			ContentBlock map[string]any `json:"content_block"`
-			Delta        map[string]any `json:"delta"`
-			Usage        map[string]any `json:"usage"`
-		}
+		var d anthropicEvent
 		if err := json.Unmarshal([]byte(ev.data), &d); err != nil {
 			return nil, fmt.Errorf("llmtrace: decode stream event %q: %w", ev.name, err)
 		}
@@ -111,55 +123,71 @@ func foldAnthropicStream(events []sseEvent) (json.RawMessage, error) {
 		if typ == "" {
 			typ = ev.name
 		}
-		switch typ {
-		case "message_start":
-			for k, v := range d.Message {
-				if k != "content" && k != "usage" {
-					msg[k] = v
-				}
-			}
-			for k, v := range asMap(d.Message["usage"]) {
-				usage[k] = v
-			}
-		case "content_block_start":
-			blocks[d.Index] = d.ContentBlock
-		case "content_block_delta":
-			b := blocks[d.Index]
-			if b == nil {
-				b = map[string]any{}
-				blocks[d.Index] = b
-			}
-			switch d.Delta["type"] {
-			case "text_delta":
-				b["text"] = str(b["text"]) + str(d.Delta["text"])
-			case "thinking_delta":
-				b["thinking"] = str(b["thinking"]) + str(d.Delta["thinking"])
-			case "signature_delta":
-				b["signature"] = str(d.Delta["signature"])
-			case "input_json_delta":
-				if partial[d.Index] == nil {
-					partial[d.Index] = &strings.Builder{}
-				}
-				partial[d.Index].WriteString(str(d.Delta["partial_json"]))
-			}
-		case "message_delta":
-			for k, v := range d.Delta {
-				msg[k] = v
-			}
-			for k, v := range d.Usage {
-				usage[k] = v
+		f.apply(typ, d)
+	}
+	return f.reply()
+}
+
+// apply adds one event to the reply.
+func (f *anthropicFold) apply(typ string, d anthropicEvent) {
+	switch typ {
+	case "message_start":
+		for k, v := range d.Message {
+			if k != "content" && k != "usage" {
+				f.msg[k] = v
 			}
 		}
+		for k, v := range asMap(d.Message["usage"]) {
+			f.usage[k] = v
+		}
+	case "content_block_start":
+		f.blocks[d.Index] = d.ContentBlock
+	case "content_block_delta":
+		f.applyBlockDelta(d)
+	case "message_delta":
+		for k, v := range d.Delta {
+			f.msg[k] = v
+		}
+		for k, v := range d.Usage {
+			f.usage[k] = v
+		}
 	}
-	idx := make([]int, 0, len(blocks))
-	for i := range blocks {
+}
+
+// applyBlockDelta adds the delta of a content block to the block.
+func (f *anthropicFold) applyBlockDelta(d anthropicEvent) {
+	b := f.blocks[d.Index]
+	if b == nil {
+		b = map[string]any{}
+		f.blocks[d.Index] = b
+	}
+	switch d.Delta["type"] {
+	case "text_delta":
+		b["text"] = str(b["text"]) + str(d.Delta["text"])
+	case "thinking_delta":
+		b["thinking"] = str(b["thinking"]) + str(d.Delta["thinking"])
+	case "signature_delta":
+		b["signature"] = str(d.Delta["signature"])
+	case "input_json_delta":
+		if f.partial[d.Index] == nil {
+			f.partial[d.Index] = &strings.Builder{}
+		}
+		f.partial[d.Index].WriteString(str(d.Delta["partial_json"]))
+	}
+}
+
+// reply orders the blocks, decodes the tool input of each block, and encodes
+// the whole reply.
+func (f *anthropicFold) reply() (json.RawMessage, error) {
+	idx := make([]int, 0, len(f.blocks))
+	for i := range f.blocks {
 		idx = append(idx, i)
 	}
 	sort.Ints(idx)
 	content := make([]any, 0, len(idx))
 	for _, i := range idx {
-		b := blocks[i]
-		if p, ok := partial[i]; ok {
+		b := f.blocks[i]
+		if p, ok := f.partial[i]; ok {
 			var input any
 			if err := json.Unmarshal([]byte(p.String()), &input); err != nil {
 				return nil, fmt.Errorf("llmtrace: the tool input of block %d is not JSON: %w", i, err)
@@ -168,35 +196,43 @@ func foldAnthropicStream(events []sseEvent) (json.RawMessage, error) {
 		}
 		content = append(content, b)
 	}
-	msg["content"] = content
-	msg["usage"] = usage
-	out, err := json.Marshal(msg)
+	f.msg["content"] = content
+	f.msg["usage"] = f.usage
+	out, err := json.Marshal(f.msg)
 	if err != nil {
 		return nil, fmt.Errorf("llmtrace: encode the folded reply: %w", err)
 	}
 	return out, nil
 }
 
+// responsesEvent is the data of one event of an Open Responses stream.
+type responsesEvent struct {
+	Type        string         `json:"type"`
+	OutputIndex int            `json:"output_index"`
+	Item        map[string]any `json:"item"`
+	Delta       string         `json:"delta"`
+	Arguments   string         `json:"arguments"`
+	Response    map[string]any `json:"response"`
+}
+
+// responsesFold holds the parts of an Open Responses reply while the events
+// arrive.
+type responsesFold struct {
+	items map[int]map[string]any
+	base  map[string]any
+	final map[string]any
+}
+
 // foldResponsesStream rebuilds an Open Responses reply. The response.completed
 // event holds the whole response. Without it, the items come from the
 // output_item events and the deltas.
 func foldResponsesStream(events []sseEvent) (json.RawMessage, error) {
-	items := map[int]map[string]any{}
-	var base map[string]any
-	var final map[string]any
-
+	f := &responsesFold{items: map[int]map[string]any{}}
 	for _, ev := range events {
 		if ev.data == "" || ev.data == "[DONE]" {
 			continue
 		}
-		var d struct {
-			Type        string         `json:"type"`
-			OutputIndex int            `json:"output_index"`
-			Item        map[string]any `json:"item"`
-			Delta       string         `json:"delta"`
-			Arguments   string         `json:"arguments"`
-			Response    map[string]any `json:"response"`
-		}
+		var d responsesEvent
 		if err := json.Unmarshal([]byte(ev.data), &d); err != nil {
 			return nil, fmt.Errorf("llmtrace: decode stream event %q: %w", ev.name, err)
 		}
@@ -204,44 +240,55 @@ func foldResponsesStream(events []sseEvent) (json.RawMessage, error) {
 		if typ == "" {
 			typ = ev.name
 		}
-		switch typ {
-		case "response.created", "response.in_progress":
-			base = d.Response
-		case "response.output_item.added", "response.output_item.done":
-			if d.Item != nil {
-				items[d.OutputIndex] = d.Item
-			}
-		case "response.output_text.delta":
-			it := items[d.OutputIndex]
-			if it == nil {
-				it = map[string]any{"type": "message", "role": "assistant"}
-				items[d.OutputIndex] = it
-			}
-			appendText(it, d.Delta)
-		case "response.function_call_arguments.delta":
-			if it := items[d.OutputIndex]; it != nil {
-				it["arguments"] = str(it["arguments"]) + d.Delta
-			}
-		case "response.completed", "response.incomplete", "response.failed":
-			final = d.Response
-		}
+		f.apply(typ, d)
 	}
-	resp := final
+	return f.reply()
+}
+
+// apply adds one event to the reply.
+func (f *responsesFold) apply(typ string, d responsesEvent) {
+	switch typ {
+	case "response.created", "response.in_progress":
+		f.base = d.Response
+	case "response.output_item.added", "response.output_item.done":
+		if d.Item != nil {
+			f.items[d.OutputIndex] = d.Item
+		}
+	case "response.output_text.delta":
+		it := f.items[d.OutputIndex]
+		if it == nil {
+			it = map[string]any{"type": "message", "role": "assistant"}
+			f.items[d.OutputIndex] = it
+		}
+		appendText(it, d.Delta)
+	case "response.function_call_arguments.delta":
+		if it := f.items[d.OutputIndex]; it != nil {
+			it["arguments"] = str(it["arguments"]) + d.Delta
+		}
+	case "response.completed", "response.incomplete", "response.failed":
+		f.final = d.Response
+	}
+}
+
+// reply picks the whole response, fills its output from the items when the
+// response has none, and encodes it.
+func (f *responsesFold) reply() (json.RawMessage, error) {
+	resp := f.final
 	if resp == nil {
-		resp = base
+		resp = f.base
 	}
 	if resp == nil {
 		resp = map[string]any{"object": "response"}
 	}
-	if out, _ := resp["output"].([]any); len(out) == 0 && len(items) > 0 {
-		idx := make([]int, 0, len(items))
-		for i := range items {
+	if out, _ := resp["output"].([]any); len(out) == 0 && len(f.items) > 0 {
+		idx := make([]int, 0, len(f.items))
+		for i := range f.items {
 			idx = append(idx, i)
 		}
 		sort.Ints(idx)
 		list := make([]any, 0, len(idx))
 		for _, i := range idx {
-			list = append(list, items[i])
+			list = append(list, f.items[i])
 		}
 		resp["output"] = list
 	}

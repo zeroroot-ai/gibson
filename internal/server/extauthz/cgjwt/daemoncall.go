@@ -67,6 +67,36 @@ func (v *Verifier) VerifyDaemonCall(ctx context.Context, token string) (DaemonCa
 	if v.replay == nil {
 		return DaemonCall{}, fmt.Errorf("%w: no replay store is configured", ErrReplayStateUnavailable)
 	}
+	parsed, claims, err := v.parseDaemonCall(ctx, token, kid)
+	if err != nil {
+		return DaemonCall{}, err
+	}
+	out, exp, err := checkDaemonCallClaims(parsed, claims)
+	if err != nil {
+		return DaemonCall{}, err
+	}
+	jti := claimString(claims, "jti")
+	if jti == "" {
+		return DaemonCall{}, fmt.Errorf("%w: no jti", ErrMalformed)
+	}
+	ttl, live := replayTTL(exp, time.Now())
+	if !live {
+		return DaemonCall{}, fmt.Errorf("%w: expired during verification", ErrExpired)
+	}
+	first, err := v.replay.Admit(ctx, kid, jti, ttl)
+	if err != nil {
+		return DaemonCall{}, fmt.Errorf("%w: kid %s: %w", ErrReplayStateUnavailable, kid, err)
+	}
+	if !first {
+		return DaemonCall{}, fmt.Errorf("%w: kid %s jti %s already used", ErrReplayed, kid, jti)
+	}
+	return out, nil
+}
+
+// parseDaemonCall checks the signature, the issuer, the audience and the
+// times of a daemon call grant. It returns the token and its claims, and it
+// maps each failure to the error of this package.
+func (v *Verifier) parseDaemonCall(ctx context.Context, token, kid string) (*jwt.Token, jwt.MapClaims, error) {
 	claims := jwt.MapClaims{}
 	parser := jwt.NewParser(
 		jwt.WithValidMethods([]string{"EdDSA"}),
@@ -86,59 +116,59 @@ func (v *Verifier) VerifyDaemonCall(ctx context.Context, token string) (DaemonCa
 	if err != nil {
 		switch {
 		case errors.Is(err, jwt.ErrTokenExpired):
-			return DaemonCall{}, fmt.Errorf("%w: %w", ErrExpired, err)
+			return nil, nil, fmt.Errorf("%w: %w", ErrExpired, err)
 		case errors.Is(err, jwt.ErrTokenSignatureInvalid):
-			return DaemonCall{}, fmt.Errorf("%w: %w", ErrSignature, err)
+			return nil, nil, fmt.Errorf("%w: %w", ErrSignature, err)
 		case errors.Is(err, ErrUnknownKey):
-			return DaemonCall{}, fmt.Errorf("verify the daemon call grant: %w", err)
+			return nil, nil, fmt.Errorf("verify the daemon call grant: %w", err)
 		}
-		return DaemonCall{}, fmt.Errorf("%w: %w", ErrMalformed, err)
+		return nil, nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
+	return parsed, claims, nil
+}
+
+// checkDaemonCallClaims checks the claims of a parsed daemon call grant. It
+// returns the grant and the time at which it expires.
+func checkDaemonCallClaims(parsed *jwt.Token, claims jwt.MapClaims) (DaemonCall, time.Time, error) {
 	for _, name := range forbiddenDaemonCallClaims {
 		if _, present := claims[name]; present {
-			return DaemonCall{}, fmt.Errorf("%w: a daemon call grant holds no %s claim", ErrMalformed, name)
+			return DaemonCall{}, time.Time{}, fmt.Errorf("%w: a daemon call grant holds no %s claim", ErrMalformed, name)
 		}
 	}
-	str := func(name string) string { s, _ := claims[name].(string); return s }
 	iat, err := parsed.Claims.GetIssuedAt()
 	exp, expErr := parsed.Claims.GetExpirationTime()
 	if err != nil || iat == nil || expErr != nil || exp == nil {
-		return DaemonCall{}, fmt.Errorf("%w: iat and exp are required", ErrMalformed)
+		return DaemonCall{}, time.Time{}, fmt.Errorf("%w: iat and exp are required", ErrMalformed)
 	}
 	if exp.Sub(iat.Time) > modelcall.DaemonCallMaxLifetime {
-		return DaemonCall{}, fmt.Errorf("%w: the lifetime is over %s", ErrExpired, modelcall.DaemonCallMaxLifetime)
+		return DaemonCall{}, time.Time{},
+			fmt.Errorf("%w: the lifetime is over %s", ErrExpired, modelcall.DaemonCallMaxLifetime)
 	}
 	out := DaemonCall{
-		Tenant: str("tenant"), Purpose: str(modelcall.ClaimPurpose), Route: str(modelcall.ClaimRoute),
-		Initiator: str(modelcall.InitiatorClaim), Subject: str("sub"),
+		Tenant: claimString(claims, "tenant"), Purpose: claimString(claims, modelcall.ClaimPurpose),
+		Route: claimString(claims, modelcall.ClaimRoute), Initiator: claimString(claims, modelcall.InitiatorClaim),
+		Subject: claimString(claims, "sub"),
 	}
 	wantRoute, ok := modelcall.PurposeRoute(out.Purpose)
 	switch {
 	case !ok:
-		return DaemonCall{}, fmt.Errorf("%w: %q is not a purpose", ErrMalformed, out.Purpose)
+		return DaemonCall{}, time.Time{}, fmt.Errorf("%w: %q is not a purpose", ErrMalformed, out.Purpose)
 	case out.Route != wantRoute:
-		return DaemonCall{}, fmt.Errorf("%w: the purpose %s has the route %s", ErrMalformed, out.Purpose, wantRoute)
+		return DaemonCall{}, time.Time{},
+			fmt.Errorf("%w: the purpose %s has the route %s", ErrMalformed, out.Purpose, wantRoute)
 	case out.Tenant == "":
-		return DaemonCall{}, fmt.Errorf("%w: no tenant", ErrMalformed)
+		return DaemonCall{}, time.Time{}, fmt.Errorf("%w: no tenant", ErrMalformed)
 	case out.Subject != modelcall.DaemonSubject(out.Purpose):
-		return DaemonCall{}, fmt.Errorf("%w: the subject does not match the purpose", ErrMalformed)
+		return DaemonCall{}, time.Time{}, fmt.Errorf("%w: the subject does not match the purpose", ErrMalformed)
 	case out.Purpose == modelcall.PurposeChat && !strings.HasPrefix(out.Initiator, "user:"):
-		return DaemonCall{}, fmt.Errorf("%w: a chat grant needs the initiator", ErrMalformed)
+		return DaemonCall{}, time.Time{}, fmt.Errorf("%w: a chat grant needs the initiator", ErrMalformed)
 	}
-	jti := str("jti")
-	if jti == "" {
-		return DaemonCall{}, fmt.Errorf("%w: no jti", ErrMalformed)
-	}
-	ttl, live := replayTTL(exp.Time, time.Now())
-	if !live {
-		return DaemonCall{}, fmt.Errorf("%w: expired during verification", ErrExpired)
-	}
-	first, err := v.replay.Admit(ctx, kid, jti, ttl)
-	if err != nil {
-		return DaemonCall{}, fmt.Errorf("%w: kid %s: %w", ErrReplayStateUnavailable, kid, err)
-	}
-	if !first {
-		return DaemonCall{}, fmt.Errorf("%w: kid %s jti %s already used", ErrReplayed, kid, jti)
-	}
-	return out, nil
+	return out, exp.Time, nil
+}
+
+// claimString returns a claim that is a string, and an empty string for any
+// other claim.
+func claimString(claims jwt.MapClaims, name string) string {
+	s, _ := claims[name].(string)
+	return s
 }
