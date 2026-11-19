@@ -846,10 +846,11 @@ func main() {
 	// runtime; the tenant-operator stays the single FGA writer in the
 	// operator plane. ADR-0067, gibson#1548.
 	if err := (&controller.ConnectorInstanceAuthzReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		FGA:    fgaClient,
-		Audit:  sagaAudit,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		FGA:      fgaClient,
+		Audit:    sagaAudit,
+		Recorder: mgr.GetEventRecorder("connector-authz"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "ConnectorInstanceAuthz")
 		os.Exit(1)

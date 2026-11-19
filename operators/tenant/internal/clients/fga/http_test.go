@@ -221,3 +221,23 @@ func TestDelete_ARealErrorStaysAnError(t *testing.T) {
 		t.Fatal("a 404 on delete must be an error")
 	}
 }
+
+// OpenFGA answers 404 for a store that does not exist and for a model that does
+// not exist. Only the store code means that the tuples are gone.
+func TestHTTPClient_ClassifiesA404ByItsCode(t *testing.T) {
+	tuple := fga.Tuple{User: "user:a", Relation: "member", Object: "tenant:t"}
+	answer := func(code string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"code":"` + code + `","message":"not found"}`))
+		}
+	}
+	err := newHTTPClient(t, answer("store_id_not_found")).Delete(context.Background(), []fga.Tuple{tuple})
+	if !errors.Is(err, fga.ErrStoreNotFound) || !errors.Is(err, clients.ErrNotFound) {
+		t.Fatalf("a missing store: err = %v, want ErrStoreNotFound and ErrNotFound", err)
+	}
+	err = newHTTPClient(t, answer("latest_authorization_model_not_found")).Delete(context.Background(), []fga.Tuple{tuple})
+	if errors.Is(err, fga.ErrStoreNotFound) || !errors.Is(err, clients.ErrNotFound) {
+		t.Fatalf("a missing model: err = %v, want ErrNotFound and not ErrStoreNotFound", err)
+	}
+}

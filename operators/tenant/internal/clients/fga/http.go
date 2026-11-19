@@ -342,6 +342,13 @@ func (c *HTTPClient) doJSON(ctx context.Context, path string, body any, out any)
 	}
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
+		// OpenFGA answers 404 for a store that does not exist and for a model
+		// that does not exist. A tuple that does not exist is no 404: a delete
+		// sets on_missing to ignore. Only the store code says the store is gone,
+		// and with the store gone its tuples are gone too (ErrStoreNotFound).
+		if fgaErrorCode(raw) == fgaStoreNotFoundCode {
+			return fmt.Errorf("fga %d: %w: %w", resp.StatusCode, ErrStoreNotFound, clients.ErrNotFound)
+		}
 		return fmt.Errorf("fga %d: %w", resp.StatusCode, clients.ErrNotFound)
 	case resp.StatusCode == http.StatusConflict:
 		return fmt.Errorf("fga %d: %w", resp.StatusCode, clients.ErrAlreadyExists)
@@ -383,4 +390,23 @@ func containsAny(s string, subs []string) bool {
 		}
 	}
 	return false
+}
+
+// ErrStoreNotFound marks a 404 of OpenFGA whose code is store_id_not_found: the
+// store does not exist, so no tuple of it exists either. A 404 for the model
+// (latest_authorization_model_not_found) does not carry it: the store and its
+// tuples are still there.
+var ErrStoreNotFound = errors.New("fga: the store does not exist")
+
+const fgaStoreNotFoundCode = "store_id_not_found"
+
+// fgaErrorCode reads the code of an OpenFGA error body, or "".
+func fgaErrorCode(raw []byte) string {
+	var e struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return ""
+	}
+	return e.Code
 }

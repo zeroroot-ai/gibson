@@ -169,9 +169,10 @@ func (r *TenantGrantsReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 // reconcileGrantsDelete deletes the tenant's FGA tuples via the idempotent
-// Deprovision path, then removes the finalizer. Deprovision is best-effort: a
-// NotFound is treated as success (already gone) by the provisioner itself, and
-// any other error keeps the finalizer so the controller retries with backoff.
+// Deprovision path, then removes the finalizer. The client ignores a tuple that
+// is already gone. A 404 for the store means its tuples are gone, and the
+// finalizer completes. Any other error, a 404 for the model included, keeps the
+// finalizer so the controller retries with backoff.
 func (r *TenantGrantsReconciler) reconcileGrantsDelete(ctx context.Context, tg *gibsonv1alpha1.TenantGrants) (ctrl.Result, error) {
 	log := logf.FromContext(ctx).WithValues("tenantgrants", tg.Name, "phase", "delete")
 
@@ -187,7 +188,15 @@ func (r *TenantGrantsReconciler) reconcileGrantsDelete(ctx context.Context, tg *
 	if r.Provisioner != nil {
 		ev := audit.ObjectEvent(audit.ActionGrantsDeprovision, tg, nil)
 		if err := r.Audit.Change(ctx, ev, func() error {
-			if err := r.Provisioner.Deprovision(ctx, desiredTuples(tg)); err != nil && !errors.Is(err, clients.ErrNotFound) {
+			err := r.Provisioner.Deprovision(ctx, desiredTuples(tg))
+			switch {
+			case err == nil:
+			case errors.Is(err, fga.ErrStoreNotFound):
+				// With the store gone, its tuples are gone, and the finalizer
+				// may complete. A 404 for the model or any other 404 is not
+				// this case: the tuples are still there.
+				log.Info("the FGA store does not exist; its tuples are gone", "tenant", tg.Spec.TenantID)
+			default:
 				return fmt.Errorf("deprovision the grants of tenant %s: %w", tg.Spec.TenantID, err)
 			}
 			return nil

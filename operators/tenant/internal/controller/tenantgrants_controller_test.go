@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -221,8 +222,8 @@ func TestTenantGrants_FinalizerTeardown(t *testing.T) {
 	}
 }
 
-// A NotFound from Deprovision (tuples already gone) is treated as success.
-func TestTenantGrants_TeardownNotFoundIsSuccess(t *testing.T) {
+// A 404 for the STORE means its tuples are gone, so the finalizer completes.
+func TestTenantGrants_TeardownStoreNotFoundReleasesTheFinalizer(t *testing.T) {
 	scheme := setupScheme(t)
 	tg := newTenantGrants("acme-grants", "acme")
 	controllerutil.AddFinalizer(tg, gibsonv1alpha1.TenantGrantsFinalizer)
@@ -234,15 +235,41 @@ func TestTenantGrants_TeardownNotFoundIsSuccess(t *testing.T) {
 		WithObjects(tg).
 		Build()
 
-	stub := &stubGrantsProvisioner{deprovisionErr: clients.ErrNotFound}
+	stub := &stubGrantsProvisioner{deprovisionErr: fmt.Errorf("fga 404: %w: %w", fga.ErrStoreNotFound, clients.ErrNotFound)}
 	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	if _, err := reconcileTG(t, r, "acme-grants"); err != nil {
-		t.Fatalf("NotFound from deprovision must not error: %v", err)
+		t.Fatalf("a missing store must not block the teardown: %v", err)
 	}
 	var got gibsonv1alpha1.TenantGrants
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-grants"}, &got); err == nil {
 		t.Fatalf("want object gone after teardown, still present: %+v", got)
+	}
+}
+
+// Any other 404, the model for one, is not the store: the tuples are still
+// there, so the finalizer stays and the reconcile returns the error.
+func TestTenantGrants_TeardownOtherNotFoundKeepsTheFinalizer(t *testing.T) {
+	scheme := setupScheme(t)
+	tg := newTenantGrants("acme-grants", "acme")
+	controllerutil.AddFinalizer(tg, gibsonv1alpha1.TenantGrantsFinalizer)
+	now := metav1.Now()
+	tg.DeletionTimestamp = &now
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&gibsonv1alpha1.TenantGrants{}).
+		WithObjects(tg).
+		Build()
+
+	stub := &stubGrantsProvisioner{deprovisionErr: fmt.Errorf("fga 404: %w", clients.ErrNotFound)}
+	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
+
+	if _, err := reconcileTG(t, r, "acme-grants"); err == nil {
+		t.Fatal("a 404 that is not the store must be an error")
+	}
+	var got gibsonv1alpha1.TenantGrants
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-grants"}, &got); err != nil {
+		t.Fatalf("the object must stay with its finalizer: %v", err)
 	}
 }
 
