@@ -31,6 +31,7 @@ type fakeAuthorizer struct {
 	checks       []checkRecord
 	writes       []authz.Tuple // tuples captured by Write
 	stored       []authz.Tuple // tuples that ReadTuples returns
+	deleted      []authz.Tuple // tuples captured by Delete
 	readErr      error
 }
 
@@ -102,7 +103,12 @@ func (a *fakeAuthorizer) Write(_ context.Context, tuples []authz.Tuple) error {
 	a.writes = append(a.writes, tuples...)
 	return nil
 }
-func (a *fakeAuthorizer) Delete(_ context.Context, _ []authz.Tuple) error { return nil }
+func (a *fakeAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.deleted = append(a.deleted, tuples...)
+	return nil
+}
 
 // writtenTuples returns a copy of all tuples captured by Write.
 func (a *fakeAuthorizer) writtenTuples() []authz.Tuple {

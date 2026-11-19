@@ -9,6 +9,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -47,22 +49,22 @@ func TestRevokeAgentIdentity_HappyPath(t *testing.T) {
 	}
 }
 
-func TestRevokeAgentIdentity_NotFound(t *testing.T) {
+// A retry after an earlier call deleted the IdP account and failed to clean FGA
+// finds the account gone. The FGA cleanup still runs and the call succeeds.
+func TestRevokeAgentIdentity_ARetryFinishesTheFGACleanupWhenTheIdPAccountIsGone(t *testing.T) {
 	fakeidp := &fakeIDPClient{
-		deleteFn: func(_ context.Context, _ string) error {
-			return idp.ErrNotFound
-		},
+		deleteFn: func(_ context.Context, _ string) error { return idp.ErrNotFound },
 	}
-	az := newFakeAuthorizer().allow("tenant:acme", "belongs_to", "agent_principal:missing-id")
+	az := newFakeAuthorizer().allow("tenant:acme", "belongs_to", "agent_principal:gone-id")
+	az.stored = []authz.Tuple{{User: "tenant:acme", Relation: "belongs_to", Object: "agent_principal:gone-id"}}
 	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az).WithPrincipalRevoker(&fakePrincipalRevoker{})
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
 
-	_, err := srv.RevokeAgentIdentity(ctx, &tenantpb.RevokeAgentIdentityRequest{
-		PrincipalId: "agent_principal:missing-id",
-	})
-	if status.Code(err) != codes.NotFound {
-		t.Errorf("got code %v, want NotFound", status.Code(err))
-	}
+	_, err := srv.RevokeAgentIdentity(ctx, &tenantpb.RevokeAgentIdentityRequest{PrincipalId: "agent_principal:gone-id"})
+
+	require.NoError(t, err)
+	assert.Contains(t, az.deleted, authz.Tuple{User: "tenant:acme", Relation: "belongs_to", Object: "agent_principal:gone-id"},
+		"the FGA cleanup runs when the IdP account is already gone")
 }
 
 // TestRevokeAgentIdentity_OrphanInTenantScope: an identity whose FGA tuples

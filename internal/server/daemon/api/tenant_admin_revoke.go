@@ -133,23 +133,25 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 		return nil, status_grpc.Error(codes.Internal, "failed to list the inbound grants of the identity")
 	}
 
-	// Delete the service account from the IdP.
+	// Delete the service account from the IdP. An account that is already gone is
+	// the state of a retry after an earlier call deleted it and failed to clean FGA.
+	// The cleanup below then still runs, so a retry finishes the revoke.
 	if err := s.idpAdminClient.DeleteServiceAccount(ctx, accountID); err != nil {
-		if s.tenantAdminAuditWriter != nil {
-			failed := revoked
-			failed.Decision = "deny"
-			s.tenantAdminAuditWriter.Log(failed)
+		if !errors.Is(err, idp.ErrNotFound) {
+			if s.tenantAdminAuditWriter != nil {
+				failed := revoked
+				failed.Decision = "deny"
+				s.tenantAdminAuditWriter.Log(failed)
+			}
+			s.logger.ErrorContext(ctx, "RevokeAgentIdentity: IdP delete failed",
+				slog.String("tenant_id", tenantID),
+				slog.String("account_id", accountID),
+				slog.String("error", err.Error()),
+			)
+			return nil, status_grpc.Error(codes.Internal, "failed to revoke identity in identity provider")
 		}
-		if errors.Is(err, idp.ErrNotFound) {
-			// Already deleted — idempotent NotFound.
-			return nil, status_grpc.Error(codes.NotFound, "principal not found or already revoked")
-		}
-		s.logger.ErrorContext(ctx, "RevokeAgentIdentity: IdP delete failed",
-			slog.String("tenant_id", tenantID),
-			slog.String("account_id", accountID),
-			slog.String("error", err.Error()),
-		)
-		return nil, status_grpc.Error(codes.Internal, "failed to revoke identity in identity provider")
+		s.logger.InfoContext(ctx, "RevokeAgentIdentity: the IdP account is already deleted, the FGA cleanup continues",
+			slog.String("tenant_id", tenantID), slog.String("account_id", accountID))
 	}
 
 	// Delete all FGA tuples where this principal appears (authorizer is
