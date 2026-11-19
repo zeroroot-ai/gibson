@@ -185,13 +185,16 @@ func TestCanonicalJSONHash_IgnoresSpacingAndKeyOrder(t *testing.T) {
 // pin, so it must fail this test and be a decision.
 func TestDefinitionHash_Golden(t *testing.T) {
 	def := &missionpb.MissionDefinition{
-		Id:    "00000000-0000-0000-0000-000000000001",
-		Name:  "golden",
-		Nodes: map[string]*missionpb.MissionNode{"n1": inboundAgentNode("n1", "recon")},
+		Id:   "00000000-0000-0000-0000-000000000001",
+		Name: "golden",
+		// Number fields (an int32 and a double) are part of the pin. Their encoding
+		// must not depend on the encoder either.
+		Constraints: &missionpb.MissionConstraints{MaxFindings: 100, MaxCost: 12.5},
+		Nodes:       map[string]*missionpb.MissionNode{"n1": inboundAgentNode("n1", "recon")},
 	}
 	got, err := definitionHash(def)
 	require.NoError(t, err)
-	assert.Equal(t, "2f4f0d5e66d6dfcd2b4776229b4274386b85edadbd442ed0c61d66c81399686a", got)
+	assert.Equal(t, "69a1b4f0bef3b37bb30b8e0913d516d131585ad241a7f18cae0da6a1cf10eb85", got)
 }
 
 func TestTargetHash_Golden(t *testing.T) {
