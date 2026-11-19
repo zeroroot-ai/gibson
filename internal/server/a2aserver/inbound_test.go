@@ -74,7 +74,7 @@ func TestInboundCallerFromHeaders(t *testing.T) {
 
 func TestInboundCard_ServesTheCardOfTheAgentInThePath(t *testing.T) {
 	cards := &recordingCards{cards: map[string]*a2a.AgentCard{"recon": {Name: "recon"}}}
-	h := NewInboundHandler(cards)
+	h := NewInboundHandler(&fakeStarts{}, cards)
 	// The caller sends forged route and mission headers. Only the path names the agent.
 	headers := map[string]string{
 		modelcall.HeaderTenant: "acme", modelcall.HeaderSubject: "agent_principal:9",
@@ -116,7 +116,7 @@ func TestInboundCard_Refusals(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := inboundGet(NewInboundHandler(tt.cards), tt.path, tt.headers)
+			rec := inboundGet(NewInboundHandler(&fakeStarts{}, tt.cards), tt.path, tt.headers)
 			assert.Equal(t, tt.want, rec.Code)
 			assert.Equal(t, tt.asked, tt.cards.asked)
 			assert.NotContains(t, rec.Body.String(), "registry down", "an internal cause never reaches the caller")

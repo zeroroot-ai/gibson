@@ -103,7 +103,12 @@ func (d *daemonImpl) buildA2AInboundServer(ctx context.Context) (*httpSubsystem,
 	if err != nil {
 		return nil, err
 	}
-	handler := a2aserver.NewInboundHandler(publishedCards{published: d.inboundMissions, registry: d.compRegistry, baseURL: baseURL})
+	if d.daemonServer == nil {
+		return nil, fmt.Errorf("%s: the daemon server is not available", label)
+	}
+	runs := &inboundRuns{published: d.inboundMissions, starter: d.daemonServer}
+	handler := a2aserver.NewInboundHandler(runs,
+		publishedCards{published: d.inboundMissions, registry: d.compRegistry, baseURL: baseURL})
 	lis, err := listenTLS(label, addr, tlsCfg)
 	if err != nil {
 		return nil, err

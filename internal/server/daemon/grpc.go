@@ -718,6 +718,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Create and register daemon service.
 	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
+	d.daemonServer = daemonSvc
 	// The list RPCs take their page token signers from the one key source.
 	// The daemon builds the page keys once. Every paged service takes its
 	// signers from them.

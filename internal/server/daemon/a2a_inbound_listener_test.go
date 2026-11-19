@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
 	"github.com/zeroroot-ai/gibson/internal/server/a2aserver"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
 
 // fakePublished answers Get from a map and records each question.
@@ -87,6 +89,7 @@ func inboundListenerDaemon(t *testing.T, mutate func(d *daemonImpl)) *daemonImpl
 	return a2aListenerDaemon(t, func(d *daemonImpl) {
 		d.inboundMissions = publishedFor("recon")
 		d.compRegistry = cardRegistry{}
+		d.daemonServer = api.NewDaemonServer(nil, nil, nil)
 		if mutate != nil {
 			mutate(d)
 		}
@@ -113,6 +116,8 @@ func TestBuildA2AInboundServer_RefusesAnIncompleteSetup(t *testing.T) {
 			"not available"},
 		{"no component registry", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.compRegistry = nil },
 			"not available"},
+		{"no daemon server", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.daemonServer = nil },
+			"the daemon server is not available"},
 		{"no SPIFFE config", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.config.Auth.SPIFFE = nil },
 			"SPIFFE is not configured"},
 		{"another trust domain", "spiffe://other.org/platform/envoy", "127.0.0.1:0", publicURL, nil, "not in the trust domain"},
@@ -162,4 +167,16 @@ func TestBuildA2AInboundServer_ServesThePublishedCardAndNothingElse(t *testing.T
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "https://edge.example/a2a/inbound/recon", "the trailing slash of the URL is trimmed")
 	assert.Equal(t, http.StatusNotFound, get("/a2a/inbound/scanner/.well-known/agent-card.json").Code)
+
+	// A message to an agent with no published definition gets a rejected Task.
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":` +
+		`{"messageId":"m","role":"ROLE_USER","parts":[{"text":"scan"}]}}}`
+	req := httptest.NewRequest(http.MethodPost, "/a2a/inbound/scanner", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-gibson-tenant", "acme")
+	req.Header.Set("x-gibson-subject", "agent_principal:9")
+	rpc := httptest.NewRecorder()
+	sub.srv.Handler.ServeHTTP(rpc, req)
+	assert.Equal(t, http.StatusOK, rpc.Code)
+	assert.Contains(t, rpc.Body.String(), "TASK_STATE_REJECTED")
 }

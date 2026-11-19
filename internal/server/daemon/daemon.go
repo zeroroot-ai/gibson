@@ -475,6 +475,9 @@ type daemonImpl struct {
 	agentSkills agentskillstore.Store
 	// outsideAgents is the outside agent store. registerOutsideAgent sets it.
 	outsideAgents outsideagentstore.Store
+	// daemonServer is the gRPC service of the daemon. buildGRPCServer sets it. The
+	// inbound A2A entry point starts its missions with it.
+	daemonServer *api.DaemonServer
 	// inboundMissions is the store of the mission definitions published for inbound
 	// A2A calls. registerInboundMission sets it.
 	inboundMissions inboundmissionstore.Store

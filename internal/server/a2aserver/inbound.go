@@ -7,8 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
@@ -60,11 +64,75 @@ func inboundCallFrom(ctx context.Context) (InboundCaller, string, bool) {
 	return v.caller, v.agent, ok
 }
 
-// NewInboundHandler returns the HTTP handler of the inbound listener. The Agent
-// Card of a published agent is at
-// "/a2a/inbound/<agent>/.well-known/agent-card.json".
-func NewInboundHandler(cards Cards) http.Handler {
+// InboundStart is one message to a published agent.
+type InboundStart struct {
+	Caller InboundCaller
+	// Agent is the agent of the path.
+	Agent string
+	// Message is the A2A message of the caller. Its text is the task input. Its
+	// target list comes from a data part (TargetsOf).
+	Message *a2a.Message
+}
+
+// InboundRuns starts the missions that inbound A2A messages ask for. Each method
+// acts only on a mission that the same caller started.
+type InboundRuns interface {
+	// Start starts a new mission from the definition that the tenant published
+	// under the agent name, and it returns the Task of the mission. A message that
+	// the policy refuses gets a Task in the state rejected, and no mission starts.
+	Start(ctx context.Context, req InboundStart) (*a2a.Task, error)
+}
+
+// inboundRPC is the a2asrv.RequestHandler of the inbound listener. It serves
+// SendMessage. Every other method is not supported.
+type inboundRPC struct {
+	UnsupportedMethods
+	runs InboundRuns
+}
+
+var _ a2asrv.RequestHandler = (*inboundRPC)(nil)
+
+func (h *inboundRPC) callOf(ctx context.Context) (InboundCaller, string, error) {
+	c, agent, ok := inboundCallFrom(ctx)
+	if !ok {
+		return InboundCaller{}, "", a2a.ErrUnauthenticated
+	}
+	return c, agent, nil
+}
+
+// SendMessage starts a mission for the published agent in the path.
+func (h *inboundRPC) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
+	c, agent, err := h.callOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req == nil || req.Message == nil || len(req.Message.Parts) == 0 {
+		return nil, fmt.Errorf("%w: the request holds no message", a2a.ErrInvalidParams)
+	}
+	task, err := h.runs.Start(ctx, InboundStart{Caller: c, Agent: agent, Message: req.Message})
+	if err != nil {
+		return nil, MapError(err)
+	}
+	return task, nil
+}
+
+// GetTask is not served yet.
+func (h *inboundRPC) GetTask(context.Context, *a2a.GetTaskRequest) (*a2a.Task, error) {
+	return nil, a2a.ErrUnsupportedOperation
+}
+
+// CancelTask is not served yet.
+func (h *inboundRPC) CancelTask(context.Context, *a2a.CancelTaskRequest) (*a2a.Task, error) {
+	return nil, a2a.ErrUnsupportedOperation
+}
+
+// NewInboundHandler returns the HTTP handler of the inbound listener. The JSON-RPC
+// endpoint of a published agent is at "/a2a/inbound/<agent>". The Agent Card of
+// it is at "/a2a/inbound/<agent>/.well-known/agent-card.json".
+func NewInboundHandler(runs InboundRuns, cards Cards) http.Handler {
 	mux := http.NewServeMux()
+	rpc := a2asrv.NewJSONRPCHandler(&inboundRPC{runs: runs})
+	mux.Handle("POST "+agentcall.InboundPrefix+"{agent}", inboundMiddleware(rpc))
 	mux.Handle("GET "+agentcall.InboundPrefix+"{agent}"+agentcall.CardPath, inboundMiddleware(inboundCardHandler(cards)))
 	return mux
 }
