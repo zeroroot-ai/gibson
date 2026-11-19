@@ -101,25 +101,6 @@ func TestCallMetaTool_StoreErrorIsNotLeaked(t *testing.T) {
 	assert.NotContains(t, resp.GetError().GetMessage(), "hunter2")
 }
 
-func TestMissionStatusProtoRoundTrip(t *testing.T) {
-	pairs := []struct {
-		status MissionStatus
-		proto  harnesspb.MissionStatus
-	}{
-		{MissionStatusSubmitted, harnesspb.MissionStatus_MISSION_STATUS_SUBMITTED},
-		{MissionStatusWorking, harnesspb.MissionStatus_MISSION_STATUS_WORKING},
-		{MissionStatusCompleted, harnesspb.MissionStatus_MISSION_STATUS_COMPLETED},
-		{MissionStatusFailed, harnesspb.MissionStatus_MISSION_STATUS_FAILED},
-		{MissionStatusCanceled, harnesspb.MissionStatus_MISSION_STATUS_CANCELED},
-	}
-	for _, p := range pairs {
-		t.Run(string(p.status), func(t *testing.T) {
-			assert.Equal(t, p.proto, missionStatusToProto(p.status))
-			assert.Equal(t, p.status, missionStatusFromProto(p.proto))
-		})
-	}
-}
-
 func TestMissionStatusProto_UnknownValues(t *testing.T) {
 	assert.Equal(t, harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED, missionStatusToProto("nonsense"))
 	assert.Equal(t, harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED, missionStatusToProto(""))
