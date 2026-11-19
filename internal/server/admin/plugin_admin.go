@@ -213,10 +213,6 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *t
 		return nil, err
 	}
 
-	// Atomic rebind: delete old tuple, write new tuple in a single FGA
-	// batch where supported. For our v1 we issue Delete first then Write —
-	// a partial failure leaves the binding revoked, which is fail-safe
-	// (the plugin loses access rather than gaining unintended access).
 	oldTuple := authz.Tuple{
 		User:     principal,
 		Relation: "can_resolve",
@@ -227,17 +223,37 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *t
 		Relation: "can_resolve",
 		Object:   authz.SecretObject(tenant.String(), req.GetNewExistingRef()),
 	}
-	// Delete of an absent tuple is a no-op, so it no longer says whether the
-	// declared name was bound. An edit of a name that was never bound is
-	// NotFound and writes no grant.
-	if err := s.requireStoredTuple(ctx, oldTuple, req.GetDeclaredName()); err != nil {
+
+	// The edit is safe to repeat. It writes the new tuple FIRST, then deletes the
+	// old one, then tells the plugin. A failure after any step leaves a state
+	// that a repeat of the call finishes: the new tuple is written once, the
+	// delete of an absent tuple is a no-op, and a duplicate event only makes the
+	// plugin drop its cached copy again.
+	//
+	// A delete reports nothing for an absent tuple, so the edit reads both
+	// tuples. NotFound is for a name that has neither tuple: the install never
+	// bound it. An old tuple that is gone with the new one present is an edit
+	// that stopped before the event, and the repeat sends the event.
+	oldBound, err := s.tupleStored(ctx, oldTuple)
+	if err != nil {
 		return nil, err
 	}
-	if err := s.authzr.Delete(ctx, []authz.Tuple{oldTuple}); err != nil {
-		return nil, status.Errorf(codes.Internal, "delete old tuple: %v", err)
+	newBound, err := s.tupleStored(ctx, newTuple)
+	if err != nil {
+		return nil, err
 	}
-	if err := s.authzr.Write(ctx, []authz.Tuple{newTuple}); err != nil {
-		return nil, status.Errorf(codes.Internal, "write new tuple: %v", err)
+	if !oldBound && !newBound {
+		return nil, status.Errorf(codes.NotFound, "the install has no binding for %q", req.GetDeclaredName())
+	}
+	if !newBound {
+		if err := s.authzr.Write(ctx, []authz.Tuple{newTuple}); err != nil {
+			return nil, status.Errorf(codes.Internal, "write new tuple: %v", err)
+		}
+	}
+	if oldBound && oldTuple != newTuple {
+		if err := s.authzr.Delete(ctx, []authz.Tuple{oldTuple}); err != nil {
+			return nil, status.Errorf(codes.Internal, "delete old tuple (the new binding is written, repeat the call): %v", err)
+		}
 	}
 	// The declared name now resolves to another value: the plugin drops its
 	// cached copy on secret_rotated.
@@ -249,17 +265,28 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *t
 	return &tenantv1.EditPluginSecretBindingResponse{}, nil
 }
 
-// requireStoredTuple returns NotFound when the binding tuple is not stored.
-func (s *PluginsAdminServer) requireStoredTuple(ctx context.Context, tuple authz.Tuple, declaredName string) error {
+// tupleStored reports whether the tuple is stored. A delete or a write of a
+// tuple that is absent or present reports nothing, so a caller that must know
+// reads it.
+func (s *PluginsAdminServer) tupleStored(ctx context.Context, tuple authz.Tuple) (bool, error) {
 	reader, ok := s.authzr.(authz.TupleReader)
 	if !ok {
-		return status.Errorf(codes.Internal, "authorizer %T cannot read stored tuples", s.authzr)
+		return false, status.Errorf(codes.Internal, "authorizer %T cannot read stored tuples", s.authzr)
 	}
 	stored, err := reader.ReadTuples(ctx, tuple.User, tuple.Relation, tuple.Object)
 	if err != nil {
-		return status.Errorf(codes.Internal, "read the binding: %v", err)
+		return false, status.Errorf(codes.Internal, "read the binding: %v", err)
 	}
-	if len(stored) == 0 {
+	return len(stored) > 0, nil
+}
+
+// requireStoredTuple returns NotFound when the binding tuple is not stored.
+func (s *PluginsAdminServer) requireStoredTuple(ctx context.Context, tuple authz.Tuple, declaredName string) error {
+	bound, err := s.tupleStored(ctx, tuple)
+	if err != nil {
+		return err
+	}
+	if !bound {
 		return status.Errorf(codes.NotFound, "the install has no binding for %q", declaredName)
 	}
 	return nil
@@ -319,15 +346,24 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 		return nil, status.Errorf(codes.Internal, "delete tuple: %v", err)
 	}
 
-	// Tell the running plugin. The tuple is already gone, so a failed publish
-	// leaves the plugin denied on its next resolve and holding its cache until
-	// the operator retries; Unavailable asks for that retry (gibson#154).
+	// Tell the running plugin. The tuple is already gone, so the plugin is denied
+	// on its next resolve, and the event makes it drop its cached copy
+	// (gibson#154). A failed publish puts the binding back, below.
 	if err := s.events.Publish(ctx, tenant.String(), principal, componentevents.Event{
 		Type: componentevents.TypeSecretAccessRevoked, SecretName: req.GetDeclaredName(),
 		Reason: "binding revoked by a tenant admin", OccurredAt: s.now().UTC(),
 	}); err != nil {
 		failed()
-		return nil, status.Errorf(codes.Unavailable, "binding revoked but the plugin was not told; retry: %v", err)
+		// Put the binding back. With the tuple gone, a repeat of the call would
+		// read NotFound and the plugin would never hear of the revoke. With the
+		// tuple back, the state is the one before the call, and the repeat
+		// deletes it and sends the event.
+		if rerr := s.authzr.Write(ctx, []authz.Tuple{tuple}); rerr != nil {
+			return nil, status.Errorf(codes.Internal,
+				"binding revoked, the plugin was not told (%v), and the binding could not be put back (%v): the plugin keeps its cached secret until it restarts",
+				err, rerr)
+		}
+		return nil, status.Errorf(codes.Unavailable, "the plugin was not told, so the binding is unchanged; retry: %v", err)
 	}
 
 	return &tenantv1.RevokePluginSecretBindingResponse{}, nil

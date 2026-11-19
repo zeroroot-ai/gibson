@@ -6,6 +6,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -53,7 +54,11 @@ type fakeAuthorizer struct {
 	writes    [][]authz.Tuple
 	deletes   [][]authz.Tuple
 	failWrite bool
-	listObjs  map[string][]string // user -> objects
+	// failWrites makes the next n writes fail, then writes work again.
+	failWrites int
+	// failDelete makes every delete fail.
+	failDelete bool
+	listObjs   map[string][]string // user -> objects
 	// stored holds the tuples that ReadTuples answers with. A test seeds the
 	// bindings that exist.
 	stored []authz.Tuple
@@ -86,12 +91,30 @@ func (f *fakeAuthorizer) Write(_ context.Context, tuples []authz.Tuple) error {
 	if f.failWrite {
 		return errors.New("write-failure")
 	}
+	if f.failWrites > 0 {
+		f.failWrites--
+		return errors.New("write-failure")
+	}
 	f.writes = append(f.writes, tuples)
+	for _, w := range tuples {
+		have := false
+		for _, t := range f.stored {
+			if t == w {
+				have = true
+			}
+		}
+		if !have {
+			f.stored = append(f.stored, w)
+		}
+	}
 	return nil
 }
 func (f *fakeAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failDelete {
+		return errors.New("delete-failure")
+	}
 	f.deletes = append(f.deletes, tuples)
 	for _, d := range tuples {
 		kept := f.stored[:0:0]
@@ -250,7 +273,7 @@ func TestRevokePluginSecretBinding_RefusesAnInstallItCannotAddress(t *testing.T)
 	}
 }
 
-func TestEditPluginSecretBinding_DeletesThenWrites(t *testing.T) {
+func TestEditPluginSecretBinding_WritesThenDeletes(t *testing.T) {
 	srv, reg, az, _ := newPluginsTestServer(t)
 	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p", PrincipalRef: "plugin_principal:p"}
 	az.stored = []authz.Tuple{{User: "plugin_principal:p", Relation: "can_resolve", Object: authz.SecretObject("acme", "cred:db")}}
@@ -432,5 +455,134 @@ func TestNewPluginsAdminServer_RequiresEvents(t *testing.T) {
 	cfg := PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, Authorizer: &fakeAuthorizer{}, BootstrapAuditor: &fakeAuditor{}}
 	if _, err := NewPluginsAdminServer(cfg); err == nil {
 		t.Fatal("a plugins admin with no event publisher must not construct")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Partial failures and their repeat. Each operation can stop after a step, and
+// the repeat of the call must finish it. Before this the new read of the stored
+// tuple made the repeat of a revoke NotFound, so the plugin never heard of it.
+// ---------------------------------------------------------------------------
+
+func newEditFixture(t *testing.T) (*PluginsAdminServer, *fakeAuthorizer, *recordingPublisher, context.Context) {
+	t.Helper()
+	srv, reg, az, _ := newPluginsTestServer(t)
+	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p", PrincipalRef: "plugin_principal:p"}
+	az.bind("plugin_principal:p", "cred:db", "acme")
+	pub := &recordingPublisher{}
+	srv.events = pub
+	return srv, az, pub, ctxWithTenant(t, "acme")
+}
+
+func editReq() *tenantv1.EditPluginSecretBindingRequest {
+	return &tenantv1.EditPluginSecretBindingRequest{InstallId: "i1", DeclaredName: "cred:db", NewExistingRef: "cred:db_v2"}
+}
+
+func isBound(az *fakeAuthorizer, secret string) bool {
+	for _, t := range az.stored {
+		if t.Object == authz.SecretObject("acme", secret) {
+			return true
+		}
+	}
+	return false
+}
+
+// The new tuple fails to write: the old binding stays, and the repeat works.
+func TestEditPluginSecretBinding_RepeatAfterTheNewWriteFailed(t *testing.T) {
+	srv, az, pub, ctx := newEditFixture(t)
+	az.failWrites = 1
+	if _, err := srv.EditPluginSecretBinding(ctx, editReq()); status.Code(err) != codes.Internal {
+		t.Fatalf("want Internal, got %v", err)
+	}
+	if !isBound(az, "cred:db") || isBound(az, "cred:db_v2") || len(pub.events) != 0 {
+		t.Fatalf("a failed write must leave the old binding alone: %+v", az.stored)
+	}
+	if _, err := srv.EditPluginSecretBinding(ctx, editReq()); err != nil {
+		t.Fatalf("the repeat: %v", err)
+	}
+	if isBound(az, "cred:db") || !isBound(az, "cred:db_v2") || len(pub.events) != 1 {
+		t.Fatalf("after the repeat: stored %+v, events %d", az.stored, len(pub.events))
+	}
+}
+
+// The delete of the old tuple fails after the new write: both are bound, and the
+// repeat deletes the old one and tells the plugin.
+func TestEditPluginSecretBinding_RepeatAfterTheDeleteFailed(t *testing.T) {
+	srv, az, pub, ctx := newEditFixture(t)
+	az.failDelete = true
+	if _, err := srv.EditPluginSecretBinding(ctx, editReq()); status.Code(err) != codes.Internal {
+		t.Fatalf("want Internal, got %v", err)
+	}
+	if !isBound(az, "cred:db_v2") {
+		t.Fatal("the new tuple is written first")
+	}
+	az.failDelete = false
+	if _, err := srv.EditPluginSecretBinding(ctx, editReq()); err != nil {
+		t.Fatalf("the repeat: %v", err)
+	}
+	if isBound(az, "cred:db") || len(pub.events) != 1 {
+		t.Fatalf("after the repeat: stored %+v, events %d", az.stored, len(pub.events))
+	}
+}
+
+// The publish fails after the delete and the write. The old tuple is gone. The
+// repeat must not read NotFound: it sends the event.
+func TestEditPluginSecretBinding_RepeatAfterThePublishFailed(t *testing.T) {
+	srv, az, pub, ctx := newEditFixture(t)
+	srv.events = &recordingPublisher{err: errors.New("redis down")}
+	if _, err := srv.EditPluginSecretBinding(ctx, editReq()); status.Code(err) != codes.Unavailable {
+		t.Fatalf("want Unavailable, got %v", err)
+	}
+	if isBound(az, "cred:db") || !isBound(az, "cred:db_v2") {
+		t.Fatalf("stored %+v", az.stored)
+	}
+	srv.events = pub
+	if _, err := srv.EditPluginSecretBinding(ctx, editReq()); err != nil {
+		t.Fatalf("the repeat after a failed publish must finish the edit: %v", err)
+	}
+	if len(pub.events) != 1 || pub.events[0].ev.Type != componentevents.TypeSecretRotated {
+		t.Fatalf("the repeat must tell the plugin: %+v", pub.events)
+	}
+}
+
+// The publish fails after the delete of the tuple. The binding is put back, so
+// the repeat finds it, deletes it and tells the plugin.
+func TestRevokePluginSecretBinding_RepeatAfterThePublishFailed(t *testing.T) {
+	srv, reg, az, au := newPluginsTestServer(t)
+	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
+	az.bind("plugin_principal:github", "cred:db", "acme")
+	srv.events = &recordingPublisher{err: errors.New("redis down")}
+	ctx := ctxWithTenant(t, "acme")
+	req := &tenantv1.RevokePluginSecretBindingRequest{InstallId: "abc", DeclaredName: "cred:db"}
+
+	if _, err := srv.RevokePluginSecretBinding(ctx, req); status.Code(err) != codes.Unavailable {
+		t.Fatalf("want Unavailable, got %v", err)
+	}
+	if !isBound(az, "cred:db") {
+		t.Fatal("a revoke that could not tell the plugin must leave the binding, or the repeat reads NotFound")
+	}
+	pub := &recordingPublisher{}
+	srv.events = pub
+	if _, err := srv.RevokePluginSecretBinding(ctx, req); err != nil {
+		t.Fatalf("the repeat: %v", err)
+	}
+	if isBound(az, "cred:db") || len(pub.events) != 1 || pub.events[0].ev.Type != componentevents.TypeSecretAccessRevoked {
+		t.Fatalf("after the repeat: stored %+v, events %+v", az.stored, pub.events)
+	}
+	if len(au.events) < 3 {
+		t.Fatalf("audit events = %+v", au.events)
+	}
+}
+
+// When the binding cannot be put back, the error says the plugin was not told.
+func TestRevokePluginSecretBinding_ThePutBackFails(t *testing.T) {
+	srv, reg, az, _ := newPluginsTestServer(t)
+	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
+	az.bind("plugin_principal:github", "cred:db", "acme")
+	srv.events = &recordingPublisher{err: errors.New("redis down")}
+	az.failWrites = 1
+	_, err := srv.RevokePluginSecretBinding(ctxWithTenant(t, "acme"), &tenantv1.RevokePluginSecretBindingRequest{InstallId: "abc", DeclaredName: "cred:db"})
+	if status.Code(err) != codes.Internal || !strings.Contains(err.Error(), "could not be put back") {
+		t.Fatalf("want Internal that names the put back, got %v", err)
 	}
 }
