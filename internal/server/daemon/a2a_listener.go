@@ -24,6 +24,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	"github.com/zeroroot-ai/gibson/internal/server/a2aserver"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 )
 
 // The environment of the A2A listener (gibson#1400).
@@ -70,9 +71,12 @@ func (s *httpSubsystem) Serve(ctx context.Context) error {
 }
 
 // registryCards builds the Agent Card of an agent from the component registry.
+// The interface URL of the card is the A2A endpoint on the public Agent gateway,
+// the same URL that ResolveAgent gives (GatewayInfo.URLFor), so it has the prefix
+// that the Edge routes.
 type registryCards struct {
-	registry   component.ComponentRegistry
-	gatewayURL string
+	registry component.ComponentRegistry
+	gateway  component.GatewayInfo
 }
 
 var _ a2aserver.Cards = registryCards{}
@@ -87,7 +91,7 @@ func (c registryCards) Card(ctx context.Context, tenant, name string) (*a2a.Agen
 	if len(instances) == 0 {
 		return nil, a2aserver.ErrNoCard
 	}
-	card, err := agentcard.Build(instances[0], c.gatewayURL)
+	card, err := agentcard.Build(instances[0], c.gateway.URLFor(agentcall.RouteA2A))
 	if err != nil {
 		return nil, fmt.Errorf("build the card of agent %s: %w", name, err)
 	}
@@ -137,7 +141,7 @@ func (d *daemonImpl) buildA2AServer(ctx context.Context) (*httpSubsystem, error)
 		}
 		return d.brainExecutor.jobs()
 	})
-	handler := a2aserver.NewHandler(runs, registryCards{registry: d.compRegistry, gatewayURL: d.publicGateways.agent.URL})
+	handler := a2aserver.NewHandler(runs, registryCards{registry: d.compRegistry, gateway: d.publicGateways.agent})
 
 	tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(gateway))
 	tlsCfg.MinVersion = tls.VersionTLS13
