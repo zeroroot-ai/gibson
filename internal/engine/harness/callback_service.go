@@ -1294,7 +1294,7 @@ func (s *HarnessCallbackService) ToolResults(req *harnesspb.ToolResultsRequest, 
 		// The id is the one that QueueToolWork recorded for this input.
 		toolCallID := queuedToolCallID(jobID, result.Index)
 		protoResult := &harnesspb.ToolResultsResponse{
-			Index:      int32(result.Index),
+			Index:      boundedInt32(result.Index),
 			ToolCallId: toolCallID,
 		}
 

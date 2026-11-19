@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 	"time"
 
@@ -286,7 +287,7 @@ func (s *graphServer) GetFindingCounts(
 	if req.GetGroupBy() == graphpb.FindingCountGroupBy_CATEGORY {
 		by = "category"
 	}
-	window := time.Duration(req.GetTimeWindowSeconds()) * time.Second
+	window := windowOf(req.GetTimeWindowSeconds())
 	buckets, err := store.CountBy(qctx, tenant.String(), by, window)
 	if err != nil {
 		s.logger.WarnContext(ctx, "GetFindingCounts: query failed",
@@ -645,7 +646,7 @@ func (s *graphServer) GetFindings(
 
 	return &graphpb.GetFindingsResponse{
 		Findings:      pbFindings,
-		Total:         uint64(total),
+		Total:         findingTotal(total),
 		Truncated:     truncated,
 		NextPageToken: pagetoken.Next(pageOffset, limit, len(pbFindings), total),
 	}, nil
@@ -673,3 +674,22 @@ func findingProperties(f finding.EnhancedFinding) map[string]string {
 }
 
 var _ graphpb.GraphServiceServer = (*graphServer)(nil)
+
+// windowOf turns a count of seconds into a duration. A count that a duration
+// cannot hold gives the longest duration, and never wraps to a negative one.
+func windowOf(seconds uint64) time.Duration {
+	const maxSeconds = uint64(math.MaxInt64 / int64(time.Second))
+	if seconds > maxSeconds {
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// findingTotal turns the count of matching findings into the unsigned field of
+// the response. A count is never negative, so a negative value gives zero.
+func findingTotal(total int) uint64 {
+	if total < 0 {
+		return 0
+	}
+	return uint64(total)
+}

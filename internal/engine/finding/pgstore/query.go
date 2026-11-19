@@ -275,7 +275,7 @@ func (s *Store) CountBy(ctx context.Context, tenantID, by string, window time.Du
 		if err := rows.Scan(&label, &n); err != nil {
 			return nil, fmt.Errorf("finding store: scan count: %w", err)
 		}
-		out = append(out, Bucket{Label: label, Count: uint64(n)})
+		out = append(out, Bucket{Label: label, Count: rowCount(n)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("finding store: count findings: %w", err)
@@ -308,10 +308,19 @@ GROUP BY day`, days)
 		if err := rows.Scan(&day, &n); err != nil {
 			return nil, fmt.Errorf("finding store: scan day count: %w", err)
 		}
-		out[day] = uint64(n)
+		out[day] = rowCount(n)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("finding store: count findings by day: %w", err)
 	}
 	return out, nil
+}
+
+// rowCount turns the result of count(*) into an unsigned number. A count is
+// never negative, so a negative value gives zero and never wraps.
+func rowCount(n int64) uint64 {
+	if n < 0 {
+		return 0
+	}
+	return uint64(n)
 }
