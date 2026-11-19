@@ -4,7 +4,6 @@
 package api
 
 import (
-	"google.golang.org/grpc/status"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
