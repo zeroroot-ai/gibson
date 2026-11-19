@@ -20,6 +20,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/queue"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
@@ -1479,11 +1480,18 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 				},
 			}, nil
 		}
+		// The cause can name the database. It stays in the log, and the agent
+		// gets a fixed message.
 		s.logger.Error("finding submission failed", "error", err)
+		message := "the finding could not be stored. Try again"
+		var notProvisioned *datapool.NotProvisionedError
+		if errors.As(err, &notProvisioned) {
+			message = "the data plane of the tenant is not ready, so the finding was not stored"
+		}
 		return &harnesspb.SubmitFindingResponse{
 			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: message,
 			},
 		}, nil
 	}

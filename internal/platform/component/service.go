@@ -33,6 +33,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
@@ -1708,6 +1709,15 @@ func (s *ComponentServiceServer) SubmitFinding(
 				slog.String("work_id", req.WorkId),
 				slog.String("error", err.Error()),
 			)
+			// The cause stays in the log. The agent gets a fixed message.
+			var notProvisioned *datapool.NotProvisionedError
+			switch {
+			case errors.As(err, &notProvisioned):
+				return nil, status.Error(codes.FailedPrecondition,
+					"the data plane of the tenant is not ready, so the finding was not stored")
+			case errors.Is(err, ErrFindingNotStored):
+				return nil, status.Error(codes.Unavailable, "the finding could not be stored. Try again")
+			}
 			return nil, status.Errorf(codes.Internal, "failed to store finding: %v", err)
 		}
 

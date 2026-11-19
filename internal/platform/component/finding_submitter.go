@@ -53,6 +53,11 @@ type WorldFindingSink func(ctx context.Context, tenant string, finding finding.E
 // and a finding with no submitter is not recorded.
 var ErrNoSubmitterIdentity = errors.New("finding submitter: no verified caller identity in context")
 
+// ErrFindingNotStored reports a finding that the per-tenant store did not
+// write. The error chain holds the cause, for the log. A caller never sends the
+// cause to the agent.
+var ErrFindingNotStored = errors.New("finding submitter: the finding was not stored")
+
 // GraphRAGFindingSubmitter implements FindingSubmitter by routing findings to:
 //  1. The per-tenant finding store (via the data-plane Pool), for tenant-scoped writes.
 //  2. The GraphRAG knowledge graph via FindingGraphBridge.StoreAsync (fire-and-forget).
@@ -355,7 +360,7 @@ func (s *GraphRAGFindingSubmitter) persistFinding(
 	}
 	store := pgstore.New(func() datapool.Pool { return s.pool })
 	if err := store.Store(ctx, tenant, enhanced); err != nil {
-		return fmt.Errorf("finding submitter: store the finding: %w", err)
+		return fmt.Errorf("%w: %w", ErrFindingNotStored, err)
 	}
 	s.logger.DebugContext(ctx, "finding submitter: finding stored in per-tenant store",
 		slog.String("tenant", tenant),

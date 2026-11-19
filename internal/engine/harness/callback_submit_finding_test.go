@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -219,6 +221,37 @@ func TestSubmitFinding_EvidenceOverTheLimitIsInvalidArgument(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp.GetError())
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, resp.GetError().GetCode())
+}
+
+// A store failure reaches the agent as a fixed message. The cause, which can
+// name the database, stays in the log.
+func TestSubmitFinding_AStoreFailureGivesAFixedMessage(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cause error
+		want  string
+	}{
+		"connection down": {errors.New("dial tcp 10.0.0.9:5432: connection refused"), "could not be stored"},
+		"not provisioned": {&datapool.NotProvisionedError{Tenant: "acme", Reason: "status.dataPlane not ready"},
+			"data plane of the tenant is not ready"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := &submitFindingHarness{
+				submitProofMockHarness: submitProofMockHarness{missionID: "mission-A", tenantID: "acme"},
+				submitErr:              types.WrapError(ErrHarnessInvalidConfig, "failed to submit finding", tc.cause),
+			}
+			svc := newSubmitFindingService(t, h, nil)
+			ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+			resp, err := svc.SubmitFinding(ctx, submitFindingRequest("mission-A", nil))
+
+			require.NoError(t, err)
+			require.NotNil(t, resp.GetError())
+			assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, resp.GetError().GetCode())
+			assert.Contains(t, resp.GetError().GetMessage(), tc.want)
+			assert.NotContains(t, resp.GetError().GetMessage(), "10.0.0.9")
+			assert.NotContains(t, resp.GetError().GetMessage(), "dataPlane")
+		})
+	}
 }
 
 // evidenceCapturingEngine records the evidence that a proof hands to the
