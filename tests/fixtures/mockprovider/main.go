@@ -30,6 +30,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -278,6 +279,11 @@ func serveResponses(w http.ResponseWriter, body []byte) {
 // defaultDimensions is the vector length when the request names none.
 const defaultDimensions = 3
 
+// maxDimensions is the longest vector that the mock builds. A request for a
+// longer vector gets an error, so a request cannot set the size of an
+// allocation.
+const maxDimensions = 8192
+
 func serveEmbeddings(w http.ResponseWriter, body []byte) {
 	req := parse(body)
 	count := 1
@@ -288,6 +294,10 @@ func serveEmbeddings(w http.ResponseWriter, body []byte) {
 	dims := req.Dimensions
 	if dims <= 0 {
 		dims = defaultDimensions
+	}
+	if dims > maxDimensions {
+		http.Error(w, "dimensions is over the limit of "+strconv.Itoa(maxDimensions), http.StatusBadRequest)
+		return
 	}
 	data := make([]map[string]any, 0, count)
 	for i := range count {

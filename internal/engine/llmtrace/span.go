@@ -235,6 +235,9 @@ func attrString(a map[string]any, k string) string {
 	return s
 }
 
+// attrInt reads an attribute as an integer. The callers convert the value to
+// int, so a text value is parsed with the size of an int. A value that does not
+// fit gives zero.
 func attrInt(a map[string]any, k string) int64 {
 	switch v := a[k].(type) {
 	case int64:
@@ -244,7 +247,7 @@ func attrInt(a map[string]any, k string) int64 {
 	case float64:
 		return int64(v)
 	case string:
-		n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 0)
 		return n
 	}
 	return 0
