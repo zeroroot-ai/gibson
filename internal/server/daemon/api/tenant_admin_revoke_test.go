@@ -344,3 +344,27 @@ func TestRevokeAgentIdentity_AnAbsentTupleDoesNotFailTheBatch(t *testing.T) {
 		t.Errorf("the grant was not deleted: %v", rec.deleted)
 	}
 }
+
+// The revoke of the identity is done before the FGA cleanup. A cleanup that fails
+// returns Unavailable, so the admin retries. A retry only finishes the cleanup.
+func TestRevokeAgentIdentity_AFailedFGACleanupIsUnavailable(t *testing.T) {
+	tests := map[string]func(*fakeAuthorizer){
+		"the tuple read fails":   func(a *fakeAuthorizer) { a.exactReadErr = errors.New("fga down") },
+		"the tuple delete fails": func(a *fakeAuthorizer) { a.deleteErr = errors.New("fga down") },
+	}
+	for name, fail := range tests {
+		t.Run(name, func(t *testing.T) {
+			az := newFakeAuthorizer().allow("tenant:acme", "belongs_to", "agent_principal:some-uuid")
+			az.stored = []authz.Tuple{{User: "tenant:acme", Relation: "belongs_to", Object: "agent_principal:some-uuid"}}
+			srv := newTestDaemonServer(t).WithIdPAdminClient(&fakeIDPClient{}).WithAuthorizer(az).
+				WithPrincipalRevoker(&fakePrincipalRevoker{})
+			fail(az)
+
+			_, err := srv.RevokeAgentIdentity(ctxWithTenantAdmin(context.Background(), "acme", "user-admin"),
+				&tenantpb.RevokeAgentIdentityRequest{PrincipalId: "agent_principal:some-uuid"})
+
+			assert.Equal(t, codes.Unavailable, status.Code(err))
+			assert.Contains(t, status.Convert(err).Message(), "access is blocked")
+		})
+	}
+}

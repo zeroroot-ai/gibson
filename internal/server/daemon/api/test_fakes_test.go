@@ -33,6 +33,8 @@ type fakeAuthorizer struct {
 	stored       []authz.Tuple // tuples that ReadTuples returns
 	deleted      []authz.Tuple // tuples captured by Delete
 	readErr      error
+	deleteErr    error
+	exactReadErr error // fails the read of one exact object only
 }
 
 // ReadTuples returns the stored tuples that match the filter. An empty filter
@@ -47,6 +49,9 @@ func (a *fakeAuthorizer) ReadTuples(_ context.Context, user, relation, object st
 	defer a.mu.RUnlock()
 	if a.readErr != nil {
 		return nil, a.readErr
+	}
+	if a.exactReadErr != nil && !strings.HasSuffix(object, ":") {
+		return nil, a.exactReadErr // a read of one object, not of a type
 	}
 	var out []authz.Tuple
 	for _, t := range a.stored {
@@ -106,6 +111,9 @@ func (a *fakeAuthorizer) Write(_ context.Context, tuples []authz.Tuple) error {
 func (a *fakeAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.deleteErr != nil {
+		return a.deleteErr
+	}
 	a.deleted = append(a.deleted, tuples...)
 	return nil
 }

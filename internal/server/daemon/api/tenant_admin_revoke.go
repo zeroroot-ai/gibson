@@ -24,6 +24,11 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
+// revokeCleanupUnfinished is the message when the FGA cleanup of a revoke fails. The
+// revoke of the identity is done and its access is blocked. A retry only finishes
+// the cleanup.
+const revokeCleanupUnfinished = "the identity is revoked and its access is blocked, but the cleanup of its permission tuples did not finish. Retry the revoke to finish the cleanup"
+
 // RevokeAgentIdentity permanently revokes a machine identity.
 // Idempotent: a second call after success returns codes.NotFound.
 // Cross-tenant: a call for a principal owned by another tenant returns
@@ -179,23 +184,22 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 	// Only the tuples that exist are deleted, and the absent ones are logged.
 	present, absent, rerr := existingTuples(ctx, s.authorizer, tuplesToDelete)
 	if rerr != nil {
-		s.logger.WarnContext(ctx, "RevokeAgentIdentity: FGA tuple read failed (IdP revocation succeeded)",
+		s.logger.ErrorContext(ctx, "RevokeAgentIdentity: FGA tuple read failed (the revoke itself is done)",
 			slog.String("tenant_id", tenantID), slog.String("principal_id", req.PrincipalId), slog.String("error", rerr.Error()))
-		present = nil
+		return nil, status_grpc.Error(codes.Unavailable, revokeCleanupUnfinished)
 	}
 	if len(absent) > 0 {
 		s.logger.InfoContext(ctx, "RevokeAgentIdentity: tuples already absent",
 			slog.String("principal_id", req.PrincipalId), slog.Int("count", len(absent)))
 	}
 	if derr := s.authorizer.Delete(ctx, present); derr != nil {
-		// Non-fatal: log but don't fail the RPC. The IdP revocation already
-		// happened; FGA cleanup can be retried manually.
-		s.logger.WarnContext(ctx, "RevokeAgentIdentity: FGA tuple cleanup failed (IdP revocation succeeded)",
+		s.logger.ErrorContext(ctx, "RevokeAgentIdentity: FGA tuple cleanup failed (the revoke itself is done)",
 			slog.String("tenant_id", tenantID),
 			slog.String("principal_id", req.PrincipalId),
 			slog.Int("tuples_left", len(present)),
 			slog.String("error", derr.Error()),
 		)
+		return nil, status_grpc.Error(codes.Unavailable, revokeCleanupUnfinished)
 	}
 
 	s.logger.InfoContext(ctx, "agent identity revoked",
