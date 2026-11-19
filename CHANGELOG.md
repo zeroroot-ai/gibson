@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.164.0](https://github.com/zeroroot-ai/gibson/compare/v0.163.5...v0.164.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* move model and agent traffic to agentgateway, Open Responses and A2A ([#1414](https://github.com/zeroroot-ai/gibson/issues/1414))
+
+### Features
+
+* move model and agent traffic to agentgateway, Open Responses and A2A ([#1414](https://github.com/zeroroot-ai/gibson/issues/1414)) ([82f84fa](https://github.com/zeroroot-ai/gibson/commit/82f84fa4fa27714ca69fa6b5ea84f02f379efa19))
+
+
+### Bug Fixes
+
+* **deps:** move golang.org/x/net to v0.62.0 ([#1417](https://github.com/zeroroot-ai/gibson/issues/1417)) ([eafaa5e](https://github.com/zeroroot-ai/gibson/commit/eafaa5e3c9737c1216a90efa0d6df91ae30cdacf))
+* **deps:** move golang.org/x/net to v0.62.0 for CVE-2026-78661 ([eafaa5e](https://github.com/zeroroot-ai/gibson/commit/eafaa5e3c9737c1216a90efa0d6df91ae30cdacf))
+
 ## [0.163.5](https://github.com/zeroroot-ai/gibson/compare/v0.163.4...v0.163.5) (2026-11-04)
 
 

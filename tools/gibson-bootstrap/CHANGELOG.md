@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.6.1...gibson-bootstrap-v2.0.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* move model and agent traffic to agentgateway, Open Responses and A2A ([#1414](https://github.com/zeroroot-ai/gibson/issues/1414))
+
+### Features
+
+* move model and agent traffic to agentgateway, Open Responses and A2A ([#1414](https://github.com/zeroroot-ai/gibson/issues/1414)) ([82f84fa](https://github.com/zeroroot-ai/gibson/commit/82f84fa4fa27714ca69fa6b5ea84f02f379efa19))
+
 ## [1.6.1](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.6.0...gibson-bootstrap-v1.6.1) (2026-10-25)
 
 
