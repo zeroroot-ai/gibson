@@ -84,18 +84,32 @@ var _ a2aserver.Cards = registryCards{}
 // Card returns the card of the first live instance of the agent that the tenant
 // can see. A name with no instance has no card.
 func (c registryCards) Card(ctx context.Context, tenant, name string) (*a2a.AgentCard, error) {
-	instances, err := c.registry.Discover(ctx, tenant, "agent", name)
+	info, err := agentCardInfo(ctx, c.registry, tenant, name)
 	if err != nil {
-		return nil, fmt.Errorf("discover agent %s: %w", name, err)
+		return nil, err
 	}
-	if len(instances) == 0 {
-		return nil, a2aserver.ErrNoCard
-	}
-	card, err := agentcard.Build(instances[0], c.gateway.URLFor(agentcall.RouteA2A))
+	card, err := agentcard.Build(info, c.gateway.URLFor(agentcall.RouteA2A))
 	if err != nil {
 		return nil, fmt.Errorf("build the card of agent %s: %w", name, err)
 	}
 	return card, nil
+}
+
+// agentCardInfo returns the catalog entry of the first live instance of an agent
+// that the tenant can see. A name with no instance has no card, and the error
+// is a2aserver.ErrNoCard. The card of a gateway call and the card of an inbound
+// call come from the same entry.
+func agentCardInfo(
+	ctx context.Context, registry component.ComponentRegistry, tenant, name string,
+) (component.ComponentInfo, error) {
+	instances, err := registry.Discover(ctx, tenant, "agent", name)
+	if err != nil {
+		return component.ComponentInfo{}, fmt.Errorf("discover agent %s: %w", name, err)
+	}
+	if len(instances) == 0 {
+		return component.ComponentInfo{}, a2aserver.ErrNoCard
+	}
+	return instances[0], nil
 }
 
 // buildA2AServer builds the A2A listener (gibson#1400). It has its own port.
@@ -119,15 +133,9 @@ func (d *daemonImpl) buildA2AServer() (*httpSubsystem, error) {
 	if d.brainRegistry == nil || d.brainExecutor == nil {
 		return nil, errors.New("A2A listener: the brain is not available")
 	}
-	if d.config.Auth.SPIFFE == nil || d.config.Auth.SPIFFE.WorkloadAPISocket == "" {
-		return nil, errors.New("A2A listener: the gateway identity needs SPIFFE mTLS, and SPIFFE is not configured")
-	}
-	if td := d.spiffeTrustDomain(); !gateway.MemberOf(td) {
-		return nil, fmt.Errorf("A2A listener: %s is not in the trust domain %s", svid, td)
-	}
-	x509Source, ok := d.spiffeX509Source.(*workloadapi.X509Source)
-	if !ok || x509Source == nil {
-		return nil, fmt.Errorf("A2A listener: the SPIFFE X.509 source is not open (got %T)", d.spiffeX509Source)
+	tlsCfg, err := d.peerTLSConfig("A2A listener", gateway)
+	if err != nil {
+		return nil, err
 	}
 	if d.publicGateways.agent.URL == "" {
 		return nil, errors.New("A2A listener: the public URL of the Agent gateway is not set")
@@ -143,20 +151,52 @@ func (d *daemonImpl) buildA2AServer() (*httpSubsystem, error) {
 	})
 	handler := a2aserver.NewHandler(runs, registryCards{registry: d.compRegistry, gateway: d.publicGateways.agent})
 
-	tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(gateway))
-	tlsCfg.MinVersion = tls.VersionTLS13
+	lis, err := listenTLS("A2A listener", addr, tlsCfg)
+	if err != nil {
+		return nil, err
+	}
+	return d.newHTTPSubsystem(handler, lis), nil
+}
+
+// peerTLSConfig builds the TLS config of an A2A listener. The config accepts the
+// one SPIFFE ID of the peer and no other. It needs SPIFFE mTLS, a peer inside the
+// trust domain of the install, and an open X.509 source.
+func (d *daemonImpl) peerTLSConfig(label string, peer spiffeid.ID) (*tls.Config, error) {
+	if d.config.Auth.SPIFFE == nil || d.config.Auth.SPIFFE.WorkloadAPISocket == "" {
+		return nil, fmt.Errorf("%s: the peer identity needs SPIFFE mTLS, and SPIFFE is not configured", label)
+	}
+	if td := d.spiffeTrustDomain(); !peer.MemberOf(td) {
+		return nil, fmt.Errorf("%s: %s is not in the trust domain %s", label, peer, td)
+	}
+	x509Source, ok := d.spiffeX509Source.(*workloadapi.X509Source)
+	if !ok || x509Source == nil {
+		return nil, fmt.Errorf("%s: the SPIFFE X.509 source is not open (got %T)", label, d.spiffeX509Source)
+	}
+	cfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(peer))
+	cfg.MinVersion = tls.VersionTLS13
+	return cfg, nil
+}
+
+// listenTLS listens on addr and serves TLS with the config.
+func listenTLS(label, addr string, cfg *tls.Config) (net.Listener, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("A2A listener: listen on %s: %w", addr, err)
+		return nil, fmt.Errorf("%s: listen on %s: %w", label, addr, err)
 	}
+	return tls.NewListener(lis, cfg), nil
+}
+
+// newHTTPSubsystem wraps a handler and a listener in the lifecycle of an A2A
+// listener.
+func (d *daemonImpl) newHTTPSubsystem(handler http.Handler, lis net.Listener) *httpSubsystem {
 	return &httpSubsystem{
 		srv: &http.Server{
 			Handler:           handler,
 			ReadHeaderTimeout: 10 * time.Second,
 			MaxHeaderBytes:    64 << 10,
 		},
-		listener:            tls.NewListener(lis, tlsCfg),
+		listener:            lis,
 		logger:              d.logger,
 		gracefulStopTimeout: 10 * time.Second,
-	}, nil
+	}
 }

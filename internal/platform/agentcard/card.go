@@ -38,6 +38,20 @@ var ErrNotAnAgent = errors.New("agent card: the catalog entry is not an agent")
 // The card skills are A2A AgentSkill entries of the card. They are not Agent
 // Skills in the SKILL.md format.
 func Build(info component.ComponentInfo, gatewayURL string) (*a2a.AgentCard, error) {
+	return build(info, gatewayURL, "The task grant of the caller. The Agent gateway checks it for each call.")
+}
+
+// BuildInbound builds the A2A Agent Card of a published agent for an outside
+// caller (epic gibson#1367). inboundURL is the public Edge URL of the agent. The
+// card says that a caller signs each call with the Capability Grant JWT of its
+// enrolled agent identity and sends it in the header x-capability-grant. Only
+// that credential is accepted.
+func BuildInbound(info component.ComponentInfo, inboundURL string) (*a2a.AgentCard, error) {
+	return build(info, inboundURL, "The Capability Grant JWT of an enrolled agent identity, signed for the "+
+		"path of the call. It carries the ceiling mission:originate. Gibson accepts no other credential.")
+}
+
+func build(info component.ComponentInfo, gatewayURL, schemeDescription string) (*a2a.AgentCard, error) {
 	if info.Kind != "agent" {
 		return nil, ErrNotAnAgent
 	}
@@ -60,7 +74,7 @@ func Build(info component.ComponentInfo, gatewayURL string) (*a2a.AgentCard, err
 		DefaultOutputModes:  outputModes,
 		SecuritySchemes: a2a.NamedSecuritySchemes{
 			GrantScheme: a2a.APIKeySecurityScheme{
-				Description: "The task grant of the caller. The Agent gateway checks it for each call.",
+				Description: schemeDescription,
 				Location:    a2a.APIKeySecuritySchemeLocationHeader,
 				Name:        GrantHeader,
 			},
