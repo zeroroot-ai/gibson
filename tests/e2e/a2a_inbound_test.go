@@ -402,8 +402,11 @@ func TestA2AInbound(t *testing.T) {
 	caller, callerID := f.provision(t, "inbound-e2e-caller", ceiling)
 	f.grant(t, callerID)
 	noGrant, _ := f.provision(t, "inbound-e2e-nogrant", ceiling)
-	noCeiling, noCeilingID := f.provision(t, "inbound-e2e-noceiling", nil)
-	f.grant(t, noCeilingID)
+	// An identity with no ceiling is never granted. The grant API refuses an identity
+	// that is not a caller identity, and the capabilities of an identity with no
+	// ceiling come from its relations. ext-authz checks the ceiling before the daemon
+	// reads any grant, so the 403 below is the ceiling check alone.
+	noCeiling, _ := f.provision(t, "inbound-e2e-noceiling", nil)
 	revoked, revokedID := f.provision(t, "inbound-e2e-revoked", ceiling)
 	f.grant(t, revokedID)
 
