@@ -163,7 +163,7 @@ func TestTenantFromCtx_ExplicitSystemTenantStillWorks(t *testing.T) {
 func TestMissionManager_TenantlessCallsAreRefused(t *testing.T) {
 	calls := map[string]func(context.Context, *missionManager) error{
 		"Run": func(ctx context.Context, m *missionManager) error {
-			_, err := m.Run(ctx, "some-definition", "550e8400-e29b-41d4-a716-446655440000", nil, "")
+			_, err := m.Run(ctx, api.RunMissionData{MissionDefinitionID: "some-definition", TargetIDs: []string{"550e8400-e29b-41d4-a716-446655440000"}})
 			return err
 		},
 		"Pause": func(ctx context.Context, m *missionManager) error {

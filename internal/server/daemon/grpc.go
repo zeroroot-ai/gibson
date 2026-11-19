@@ -2467,8 +2467,8 @@ func (d *daemonImpl) QueryPlugin(ctx context.Context, name, method string, _ map
 // RunMission starts a mission by reference and returns an event channel.
 // The mission definition and target must already be registered — inline
 // construction and YAML paths were removed under spec mission-api-only-cleanup.
-func (d *daemonImpl) RunMission(ctx context.Context, missionDefinitionID, targetID string, variables map[string]string, memoryContinuity string) (string, error) {
-	return d.RunMissionWithManager(ctx, missionDefinitionID, targetID, variables, memoryContinuity)
+func (d *daemonImpl) RunMission(ctx context.Context, req api.RunMissionData) (string, error) {
+	return d.RunMissionWithManager(ctx, req)
 }
 
 // StopMission stops a running mission.

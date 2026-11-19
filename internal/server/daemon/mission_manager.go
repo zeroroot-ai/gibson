@@ -433,14 +433,22 @@ func (m *missionManager) claimActive(tenant auth.TenantID, missionID string, am 
 	return nil
 }
 
-// Run starts a mission by reference and returns an event channel for progress
-// updates. Missions are invoked by reference only — the mission definition and
-// target must already be registered. File-path / inline-YAML invocation was
-// removed under spec mission-api-only-cleanup.
-func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID string, variables map[string]string, memoryContinuity string) (string, error) {
+// Run starts a mission by reference and returns the ID of the mission. Missions
+// are invoked by reference only — the mission definition and targets must already
+// be registered. File-path / inline-YAML invocation was removed under spec
+// mission-api-only-cleanup.
+//
+// The first target is the primary target. The others join the target set of the
+// mission, and each one must belong to the calling tenant. The mission record is
+// one per name, so a request with a new NameSuffix creates a new mission with
+// exactly the targets of the request.
+func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (string, error) {
+	missionDefinitionID := req.MissionDefinitionID
+	variables := req.Variables
+	memoryContinuity := req.MemoryContinuity
 	m.logger.Info("starting mission",
 		"mission_definition_id", missionDefinitionID,
-		"target_id", targetID,
+		"target_count", len(req.TargetIDs),
 		"variables", len(variables),
 		"memory_continuity", memoryContinuity,
 	)
@@ -448,9 +456,10 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	if missionDefinitionID == "" {
 		return "", errors.New("mission_definition_id is required")
 	}
-	if targetID == "" {
+	if len(req.TargetIDs) == 0 || req.TargetIDs[0] == "" {
 		return "", errors.New("target_id is required")
 	}
+	targetID := req.TargetIDs[0]
 
 	// Load mission definition from the calling tenant's store. A run with no
 	// tenant on its context is refused, not run as the system tenant.
@@ -499,6 +508,16 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	}
 	resolvedTargetID := target.ID
 	targetRef := runTargetRef(target)
+	// The other targets get the same ownership check as the primary one. A target
+	// of another tenant is not found.
+	var additionalTargetIDs []types.ID
+	for _, id := range req.TargetIDs[1:] {
+		extra, extraErr := resolveTargetUUID(ctx, m.targetStore, id, resolveTargetCallerTenant(ctx))
+		if extraErr != nil {
+			return "", extraErr
+		}
+		additionalTargetIDs = append(additionalTargetIDs, extra.ID)
+	}
 	m.logger.Debug("resolved target", "target_id", resolvedTargetID, "target_ref", targetRef)
 
 	// Bind the definition's {{target.*}} placeholders to this target, now that
@@ -540,37 +559,8 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	}
 
 	// Find or create stable mission record (one per mission name)
-	now := mission.NewUnixTimeNow()
-	missionTemplate := &mission.Mission{
-		ID:                    types.NewID(),          // Template ID, may be replaced by existing
-		TenantID:              callingTenant.String(), // required: ListMissions filters by tenant
-		Name:                  def.GetName(),
-		Description:           def.GetDescription(),
-		Status:                mission.MissionStatusSubmitted,
-		MissionDefinitionID:   types.ID(def.GetId()),
-		MissionDefinitionJSON: string(definitionJSON),
-		TargetID:              resolvedTargetID,
-		MemoryContinuity:      memoryContinuity,
-		CreatedAt:             now,
-		UpdatedAt:             now,
-		FindingsCount:         0,
-		Metrics: &mission.MissionMetrics{
-			TotalNodes:     len(def.GetNodes()),
-			CompletedNodes: 0,
-		},
-		Metadata: make(map[string]any),
-	}
-
-	// Store variables in metadata
-	if len(variables) > 0 {
-		missionTemplate.Metadata["variables"] = variables
-	}
-
-	// Store target URL/reference in metadata for agent context injection
-	// This preserves the original target reference (URL or name) separate from TargetID
-	if targetRef != "" {
-		missionTemplate.Metadata["target_ref"] = targetRef
-	}
+	missionTemplate := newRunTemplate(callingTenant, def, string(definitionJSON), req, resolvedTargetID,
+		additionalTargetIDs, targetRef)
 
 	// Acquire the mission store for this tenant (callingTenant resolved above).
 	mStore, mStoreRelease, mStoreErr := m.missionStoreFor(ctx, callingTenant)
@@ -585,6 +575,48 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	}
 
 	return m.startRun(ctx, callingTenant, missionRecord, def)
+}
+
+// newRunTemplate builds the mission record that Run finds or creates. The name
+// is the name of the definition and the suffix of the request. The record holds
+// the target set of the request and the creator of the request. The run
+// variables and the reference of the primary target go in the metadata.
+func newRunTemplate(
+	tenant auth.TenantID, def *missionpb.MissionDefinition, definitionJSON string, req api.RunMissionData,
+	targetID types.ID, additionalTargetIDs []types.ID, targetRef string,
+) *mission.Mission {
+	now := mission.NewUnixTimeNow()
+	m := &mission.Mission{
+		ID:                    types.NewID(),   // Template ID, may be replaced by existing
+		TenantID:              tenant.String(), // required: ListMissions filters by tenant
+		Name:                  def.GetName() + req.NameSuffix,
+		Description:           def.GetDescription(),
+		Status:                mission.MissionStatusSubmitted,
+		MissionDefinitionID:   types.ID(def.GetId()),
+		MissionDefinitionJSON: definitionJSON,
+		TargetID:              targetID,
+		AdditionalTargetIDs:   additionalTargetIDs,
+		CreatedBy:             req.CreatedBy,
+		MemoryContinuity:      req.MemoryContinuity,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+		FindingsCount:         0,
+		Metrics: &mission.MissionMetrics{
+			TotalNodes:     len(def.GetNodes()),
+			CompletedNodes: 0,
+		},
+		Metadata: make(map[string]any),
+	}
+	// Store variables in metadata
+	if len(req.Variables) > 0 {
+		m.Metadata["variables"] = req.Variables
+	}
+	// Store target URL/reference in metadata for agent context injection
+	// This preserves the original target reference (URL or name) separate from TargetID
+	if targetRef != "" {
+		m.Metadata["target_ref"] = targetRef
+	}
+	return m
 }
 
 // RunExisting starts a mission the store already holds, bound to that mission's

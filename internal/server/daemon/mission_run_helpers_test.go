@@ -16,6 +16,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -600,18 +601,18 @@ func TestRun_PreflightRefusals(t *testing.T) {
 	mm := helperMM()
 	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 
-	if _, err := mm.Run(ctx, "", "t", nil, ""); err == nil || !strings.Contains(err.Error(), "mission_definition_id is required") {
+	if _, err := mm.Run(ctx, api.RunMissionData{TargetIDs: []string{"t"}}); err == nil || !strings.Contains(err.Error(), "mission_definition_id is required") {
 		t.Errorf("empty definition ID: got %v", err)
 	}
-	if _, err := mm.Run(ctx, "def", "", nil, ""); err == nil || !strings.Contains(err.Error(), "target_id is required") {
+	if _, err := mm.Run(ctx, api.RunMissionData{MissionDefinitionID: "def"}); err == nil || !strings.Contains(err.Error(), "target_id is required") {
 		t.Errorf("empty target ID: got %v", err)
 	}
 	// No tenant on the context: refused, never run as the system tenant.
-	if _, err := mm.Run(context.Background(), "def", "t", nil, ""); err == nil {
+	if _, err := mm.Run(context.Background(), api.RunMissionData{MissionDefinitionID: "def", TargetIDs: []string{"t"}}); err == nil {
 		t.Error("tenant-less context must be refused")
 	}
 	// Tenant present but no pool: missionStoreFor yields a nil store.
-	if _, err := mm.Run(ctx, "def", "t", nil, ""); err == nil || !strings.Contains(err.Error(), "mission store not initialized") {
+	if _, err := mm.Run(ctx, api.RunMissionData{MissionDefinitionID: "def", TargetIDs: []string{"t"}}); err == nil || !strings.Contains(err.Error(), "mission store not initialized") {
 		t.Errorf("nil store: got %v", err)
 	}
 }
