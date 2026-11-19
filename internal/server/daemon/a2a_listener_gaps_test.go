@@ -140,7 +140,8 @@ func TestBuildA2AServer_RefusesAnIncompleteSetup(t *testing.T) {
 		mutate  func(d *daemonImpl)
 		wantErr string
 	}{
-		{"no address", svid, "", nil, "GIBSON_A2A_ADDR is not"},
+		{"no gateway identity", "  ", "127.0.0.1:0", nil, "GIBSON_A2A_GATEWAY_SVID is not set"},
+		{"no address", svid, "", nil, "GIBSON_A2A_ADDR is not set"},
 		{"the identity is not a SPIFFE ID", "not-an-id", "127.0.0.1:0", nil, "is not a SPIFFE ID"},
 		{"no brain registry", svid, "127.0.0.1:0", func(d *daemonImpl) { d.brainRegistry = nil }, "the brain is not available"},
 		{"no brain executor", svid, "127.0.0.1:0", func(d *daemonImpl) { d.brainExecutor = nil }, "the brain is not available"},
@@ -158,7 +159,7 @@ func TestBuildA2AServer_RefusesAnIncompleteSetup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(EnvA2AGatewaySVID, tt.svid)
 			t.Setenv(EnvA2AAddr, tt.addr)
-			sub, err := a2aListenerDaemon(t, tt.mutate).buildA2AServer(context.Background())
+			sub, err := a2aListenerDaemon(t, tt.mutate).buildA2AServer()
 			require.Error(t, err)
 			assert.Nil(t, sub)
 			assert.Contains(t, err.Error(), tt.wantErr)
@@ -166,17 +167,10 @@ func TestBuildA2AServer_RefusesAnIncompleteSetup(t *testing.T) {
 	}
 }
 
-func TestBuildA2AServer_IsOffWithoutAGatewayIdentity(t *testing.T) {
-	t.Setenv(EnvA2AGatewaySVID, "  ")
-	sub, err := a2aListenerDaemon(t, nil).buildA2AServer(context.Background())
-	require.NoError(t, err)
-	assert.Nil(t, sub)
-}
-
 func TestBuildA2AServer_ListensWhenTheSetupIsComplete(t *testing.T) {
 	t.Setenv(EnvA2AGatewaySVID, "spiffe://example.org/platform/agentgateway")
 	t.Setenv(EnvA2AAddr, "127.0.0.1:0")
-	sub, err := a2aListenerDaemon(t, nil).buildA2AServer(context.Background())
+	sub, err := a2aListenerDaemon(t, nil).buildA2AServer()
 	require.NoError(t, err)
 	require.NotNil(t, sub)
 	defer func() { _ = sub.listener.Close() }()
@@ -191,7 +185,7 @@ func TestBuildA2AServer_TheRunsReadTheJobStoreOfTheExecutorForEachCall(t *testin
 	t.Setenv(EnvA2AGatewaySVID, "spiffe://example.org/platform/agentgateway")
 	t.Setenv(EnvA2AAddr, "127.0.0.1:0")
 	d := a2aListenerDaemon(t, nil)
-	sub, err := d.buildA2AServer(context.Background())
+	sub, err := d.buildA2AServer()
 	require.NoError(t, err)
 	defer func() { _ = sub.listener.Close() }()
 

@@ -57,7 +57,8 @@ func TestBuildTraceServer_RefusesAnIncompleteSetup(t *testing.T) {
 		wantErr string
 	}{
 		{"no brain registry", svid, "127.0.0.1:0", func(d *daemonImpl) { d.brainRegistry = nil }, "the brain registry is not available"},
-		{"no address", svid, "", nil, "GIBSON_TRACE_GRPC_ADDR is not"},
+		{"no collector identity", " ", "127.0.0.1:0", nil, "GIBSON_TRACE_COLLECTOR_SVID is not set"},
+		{"no address", svid, "", nil, "GIBSON_TRACE_GRPC_ADDR is not set"},
 		{"the identity is not a SPIFFE ID", "nope", "127.0.0.1:0", nil, "is not a SPIFFE ID"},
 		{"no SPIFFE config", svid, "127.0.0.1:0", func(d *daemonImpl) { d.config.Auth.SPIFFE = nil }, "SPIFFE is not configured"},
 		{"another trust domain", "spiffe://other.org/platform/collector", "127.0.0.1:0", nil, "not in the trust domain"},
@@ -73,7 +74,7 @@ func TestBuildTraceServer_RefusesAnIncompleteSetup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(api.EnvTraceCollectorSVID, tt.svid)
 			t.Setenv(EnvTraceGRPCAddr, tt.addr)
-			sub, err := traceDaemon(t, tt.mutate).buildTraceServer(context.Background())
+			sub, err := traceDaemon(t, tt.mutate).buildTraceServer()
 			require.Error(t, err)
 			assert.Nil(t, sub)
 			assert.Contains(t, err.Error(), tt.wantErr)
@@ -81,18 +82,10 @@ func TestBuildTraceServer_RefusesAnIncompleteSetup(t *testing.T) {
 	}
 }
 
-func TestBuildTraceServer_IsOffWithoutACollectorIdentity(t *testing.T) {
-	t.Setenv(api.EnvTraceCollectorSVID, " ")
-	sub, err := traceDaemon(t, nil).buildTraceServer(context.Background())
-	require.NoError(t, err)
-	assert.Nil(t, sub)
-	assert.Empty(t, traceCollectorSVIDFromEnv())
-}
-
 func TestBuildTraceServer_ListensWhenTheSetupIsComplete(t *testing.T) {
 	t.Setenv(api.EnvTraceCollectorSVID, "spiffe://example.org/platform/collector")
 	t.Setenv(EnvTraceGRPCAddr, "127.0.0.1:0")
-	sub, err := traceDaemon(t, nil).buildTraceServer(context.Background())
+	sub, err := traceDaemon(t, nil).buildTraceServer()
 	require.NoError(t, err)
 	require.NotNil(t, sub)
 	defer func() { _ = sub.listener.Close() }()

@@ -100,17 +100,17 @@ func (c registryCards) Card(ctx context.Context, tenant, name string) (*a2a.Agen
 
 // buildA2AServer builds the A2A listener (gibson#1400). It has its own port.
 // The TLS layer accepts the one SPIFFE ID of the Agent gateway and no other
-// peer. With no gateway identity configured the daemon starts no listener, and
-// the result is nil.
-func (d *daemonImpl) buildA2AServer(ctx context.Context) (*httpSubsystem, error) {
+// peer. The listener is required. A missing setting stops the daemon at start.
+func (d *daemonImpl) buildA2AServer() (*httpSubsystem, error) {
 	svid := strings.TrimSpace(os.Getenv(EnvA2AGatewaySVID))
 	if svid == "" {
-		d.logger.Info(ctx, "no Agent gateway identity is configured; the A2A listener is off", "env", EnvA2AGatewaySVID)
-		return nil, nil
+		return nil, fmt.Errorf("A2A listener: %s is not set. Set it to the SPIFFE ID of the Agent gateway",
+			EnvA2AGatewaySVID)
 	}
 	addr := strings.TrimSpace(os.Getenv(EnvA2AAddr))
 	if addr == "" {
-		return nil, fmt.Errorf("A2A listener: %s is set and %s is not", EnvA2AGatewaySVID, EnvA2AAddr)
+		return nil, fmt.Errorf("A2A listener: %s is not set. Set it to the listen address, for example \":8443\"",
+			EnvA2AAddr)
 	}
 	gateway, err := spiffeid.FromString(svid)
 	if err != nil {

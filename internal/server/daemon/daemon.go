@@ -1699,33 +1699,29 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	}()
 
 	// The OTLP trace listener has its own port (gibson#1390).
-	traceSys, err := d.buildTraceServer(ctx)
+	traceSys, err := d.buildTraceServer()
 	if err != nil {
 		d.stopServices(ctx)
 		return fmt.Errorf("failed to build trace listener: %w", err)
 	}
-	if traceSys != nil {
-		go func() {
-			if serveErr := traceSys.Serve(ctx); serveErr != nil {
-				d.logger.Error(ctx, "trace listener error", "error", serveErr)
-			}
-		}()
-	}
+	go func() {
+		if serveErr := traceSys.Serve(ctx); serveErr != nil {
+			d.logger.Error(ctx, "trace listener error", "error", serveErr)
+		}
+	}()
 
 	// The A2A listener has its own port (gibson#1400). Only the Agent gateway
 	// can call it.
-	a2aSys, err := d.buildA2AServer(ctx)
+	a2aSys, err := d.buildA2AServer()
 	if err != nil {
 		d.stopServices(ctx)
 		return fmt.Errorf("failed to build A2A listener: %w", err)
 	}
-	if a2aSys != nil {
-		go func() {
-			if serveErr := a2aSys.Serve(ctx); serveErr != nil {
-				d.logger.Error(ctx, "A2A listener error", "error", serveErr)
-			}
-		}()
-	}
+	go func() {
+		if serveErr := a2aSys.Serve(ctx); serveErr != nil {
+			d.logger.Error(ctx, "A2A listener error", "error", serveErr)
+		}
+	}()
 
 	// Start health server
 	// Health port defaults to 8080, can be overridden via config or GIBSON_HEALTH_PORT env var

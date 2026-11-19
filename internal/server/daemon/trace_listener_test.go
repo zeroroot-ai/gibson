@@ -88,13 +88,14 @@ func TestTraceListener_LimitsAreSeparate(t *testing.T) {
 	}
 }
 
-// With no collector identity, the daemon builds no listener.
-func TestBuildTraceServer_NoIdentityNoListener(t *testing.T) {
+// The trace listener is required. With no collector identity, the daemon does
+// not start.
+func TestBuildTraceServer_NoIdentityStopsTheDaemon(t *testing.T) {
 	t.Setenv(api.EnvTraceCollectorSVID, "")
 	d := &daemonImpl{logger: minimalCfgLogger()}
-	sys, err := d.buildTraceServer(context.Background())
-	if err != nil || sys != nil {
-		t.Fatalf("buildTraceServer = %v, %v, want nil, nil", sys, err)
+	sys, err := d.buildTraceServer()
+	if err == nil || sys != nil || !strings.Contains(err.Error(), api.EnvTraceCollectorSVID) {
+		t.Fatalf("buildTraceServer = %v, %v, want an error that names %s", sys, err, api.EnvTraceCollectorSVID)
 	}
 }
 
@@ -103,7 +104,7 @@ func TestBuildTraceServer_RefusesAnIncompleteConfig(t *testing.T) {
 	t.Setenv(api.EnvTraceCollectorSVID, "spiffe://example.org/platform/otel-collector")
 	t.Setenv(EnvTraceGRPCAddr, "")
 	d := &daemonImpl{logger: minimalCfgLogger()}
-	if _, err := d.buildTraceServer(context.Background()); err == nil {
+	if _, err := d.buildTraceServer(); err == nil {
 		t.Fatal("no registry and no address was accepted")
 	}
 }

@@ -4,7 +4,6 @@
 package daemon
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -52,21 +51,21 @@ func traceCollectorSVIDFromEnv() string {
 // buildTraceServer builds the OTLP trace listener (gibson#1390, ADR-0172). It
 // has its own port and its own server. The TLS layer accepts the one SPIFFE ID
 // of the collector and no other peer. The server holds the trace service and no
-// other service. With no collector identity configured, the daemon starts no
-// listener and accepts no span, and the result is nil.
-func (d *daemonImpl) buildTraceServer(ctx context.Context) (*grpcSubsystem, error) {
+// other service. The listener is required. A missing setting stops the daemon
+// at start.
+func (d *daemonImpl) buildTraceServer() (*grpcSubsystem, error) {
 	svid := traceCollectorSVIDFromEnv()
 	if svid == "" {
-		d.logger.Info(ctx, "no trace collector identity is configured; the trace listener is off",
-			"env", api.EnvTraceCollectorSVID)
-		return nil, nil
-	}
-	if d.brainRegistry == nil {
-		return nil, errors.New("trace listener: the brain registry is not available")
+		return nil, fmt.Errorf("trace listener: %s is not set. Set it to the SPIFFE ID of the trace collector",
+			api.EnvTraceCollectorSVID)
 	}
 	addr := strings.TrimSpace(os.Getenv(EnvTraceGRPCAddr))
 	if addr == "" {
-		return nil, fmt.Errorf("trace listener: %s is set and %s is not", api.EnvTraceCollectorSVID, EnvTraceGRPCAddr)
+		return nil, fmt.Errorf("trace listener: %s is not set. Set it to the listen address, for example \":4317\"",
+			EnvTraceGRPCAddr)
+	}
+	if d.brainRegistry == nil {
+		return nil, errors.New("trace listener: the brain registry is not available")
 	}
 	collector, err := spiffeid.FromString(svid)
 	if err != nil {
