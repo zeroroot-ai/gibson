@@ -176,11 +176,11 @@ func toolResultText(v any) (string, error) {
 	case string:
 		return c, nil
 	case []any:
-		var out string
+		var out strings.Builder
 		for _, b := range c {
-			out += str(asMap(b)["text"])
+			out.WriteString(str(asMap(b)["text"]))
 		}
-		return out, nil
+		return out.String(), nil
 	case nil:
 		return "", nil
 	}

@@ -5,6 +5,7 @@ package harness
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -91,7 +92,7 @@ func convertSchemaFieldToSDK(f schema.JSON) *types.JSONSchema {
 func StructuredSchema(schemaType any) (schemaName string, schemaJSON json.RawMessage, err error) {
 	t := reflect.TypeOf(schemaType)
 	if t == nil {
-		return "", nil, fmt.Errorf("schema type cannot be nil")
+		return "", nil, errors.New("schema type cannot be nil")
 	}
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()

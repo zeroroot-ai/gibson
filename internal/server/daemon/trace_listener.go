@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -61,7 +62,7 @@ func (d *daemonImpl) buildTraceServer(ctx context.Context) (*grpcSubsystem, erro
 		return nil, nil
 	}
 	if d.brainRegistry == nil {
-		return nil, fmt.Errorf("trace listener: the brain registry is not available")
+		return nil, errors.New("trace listener: the brain registry is not available")
 	}
 	addr := strings.TrimSpace(os.Getenv(EnvTraceGRPCAddr))
 	if addr == "" {
@@ -72,7 +73,7 @@ func (d *daemonImpl) buildTraceServer(ctx context.Context) (*grpcSubsystem, erro
 		return nil, fmt.Errorf("trace listener: %s is not a SPIFFE ID: %w", api.EnvTraceCollectorSVID, err)
 	}
 	if d.config.Auth.SPIFFE == nil || d.config.Auth.SPIFFE.WorkloadAPISocket == "" {
-		return nil, fmt.Errorf("trace listener: the collector identity needs SPIFFE mTLS, and SPIFFE is not configured")
+		return nil, errors.New("trace listener: the collector identity needs SPIFFE mTLS, and SPIFFE is not configured")
 	}
 	if td := d.spiffeTrustDomain(); !collector.MemberOf(td) {
 		return nil, fmt.Errorf("trace listener: %s is not in the trust domain %s", svid, td)
@@ -92,7 +93,7 @@ func (d *daemonImpl) buildTraceServer(ctx context.Context) (*grpcSubsystem, erro
 	// The platform budget counts the usage of each model call. The trace receiver
 	// is its one feed, so the listener does not start without the budget.
 	if d.budgetEnforcer == nil || d.stateClient == nil {
-		return nil, fmt.Errorf("trace listener: the platform budget is not wired, and no usage could be recorded")
+		return nil, errors.New("trace listener: the platform budget is not wired, and no usage could be recorded")
 	}
 	coltrace.RegisterTraceServiceServer(srv, api.NewTraceReceiver(
 		svid, d.brainRegistry, d.logger.WithComponent("trace-receiver").Slog()).

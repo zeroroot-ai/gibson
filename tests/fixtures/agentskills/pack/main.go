@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -52,7 +53,7 @@ func run() error {
 	flag.Var(&sets, "set", "a replacement in the form KEY=value. Repeat the flag for more.")
 	flag.Parse()
 	if *dir == "" || *repo == "" {
-		return fmt.Errorf("both -dir and -repo are required")
+		return errors.New("both -dir and -repo are required")
 	}
 	replacements := map[string]string{}
 	for _, s := range sets {

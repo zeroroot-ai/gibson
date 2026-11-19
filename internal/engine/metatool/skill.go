@@ -153,7 +153,7 @@ func skillFileArg(args map[string]any) (string, error) {
 	}
 	file, ok := raw.(string)
 	if !ok {
-		return "", fmt.Errorf("metatool: the file argument must be a string")
+		return "", errors.New("metatool: the file argument must be a string")
 	}
 	if file == "" {
 		return "", nil

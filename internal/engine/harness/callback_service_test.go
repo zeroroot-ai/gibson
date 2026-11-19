@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -509,8 +510,8 @@ func (m *mockHarnessWithResolver) ListTools() []ToolDescriptor {
 	return nil
 }
 
-func (m *mockHarnessWithResolver) DelegateToAgent(ctx context.Context, agentName string, task agent.Task) (agent.Result, error) {
-	return agent.Result{}, fmt.Errorf("not implemented")
+func (m *mockHarnessWithResolver) DelegateToAgent(_ context.Context, agentName string, task agent.Task) (agent.Result, error) {
+	return agent.Result{}, errors.New("not implemented")
 }
 
 func (m *mockHarnessWithResolver) ListAgents() []AgentDescriptor {
