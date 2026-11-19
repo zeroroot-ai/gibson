@@ -27,6 +27,7 @@ func TestReadTuples_RefusesAnUnderSpecifiedFilter(t *testing.T) {
 		{"nothing at all", "", "", ""},
 		{"user only", "tenant:acme", "", ""},
 		{"relation only", "", "parent", ""},
+		{"user and relation with no object type", "user:a", "granted_caller", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := f.ReadTuples(context.Background(), tc.user, tc.relation, tc.object)

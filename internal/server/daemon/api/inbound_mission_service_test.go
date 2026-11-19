@@ -16,8 +16,10 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/capname"
 	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -648,4 +650,44 @@ func TestGrantInboundCaller_DeletesAGrantWhenTheRecordWentAway(t *testing.T) {
 	g.fga.deleteErr = errInboundBoom
 	_, err = g.svc.GrantInboundCaller(g.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
 	assert.Equal(t, codes.Internal, code(err))
+}
+
+// The real sequence: CreateAgentIdentity with the ceiling mission:originate, then
+// GrantInboundCaller. The base tuples that CreateAgentIdentity writes (membership
+// of the tenant and execute on the system backplane) are not grants, so the grant
+// succeeds. One extra grant makes the identity a refused one.
+func TestGrantInboundCaller_AfterCreateAgentIdentity(t *testing.T) {
+	create := func(t *testing.T, grants []*tenantpb.ComponentGrant) (string, []authz.Tuple) {
+		t.Helper()
+		az := newFakeAuthorizer()
+		srv := newTestDaemonServer(t).WithIdPAdminClient(&fakeIDPClient{}).WithAuthorizer(az).
+			WithTenantAdminAuditWriter(&fakeAuditWriter{})
+		resp, err := srv.CreateAgentIdentity(ctxWithTenantAdmin(context.Background(), "acme", "user-admin"),
+			&tenantpb.CreateAgentIdentityRequest{
+				Name: "caller", Kind: tenantpb.PrincipalKind_PRINCIPAL_KIND_AGENT,
+				CapabilityCeiling: []string{capname.MissionOriginate}, ComponentGrants: grants,
+			})
+		require.NoError(t, err)
+		return resp.GetPrincipalId(), az.writtenTuples()
+	}
+	for name, tc := range map[string]struct {
+		grants []*tenantpb.ComponentGrant
+		want   codes.Code
+	}{
+		"no extra grant": {nil, codes.OK},
+		"one extra grant": {[]*tenantpb.ComponentGrant{{Relation: "direct_execute", ComponentRef: "component:agent/other"}},
+			codes.FailedPrecondition},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ref, written := create(t, tc.grants)
+			f := publishedFixture(t)
+			f.fga.allow("tenant:acme", "belongs_to", ref)
+			f.fga.stored = written
+			f.identities.names = nil
+
+			_, err := f.svc.GrantInboundCaller(f.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: ref})
+
+			assert.Equal(t, tc.want, code(err), "%v", err)
+		})
+	}
 }

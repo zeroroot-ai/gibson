@@ -11,6 +11,7 @@
 package api
 
 import (
+	"errors"
 	"context"
 	"strings"
 	"sync"
@@ -36,6 +37,11 @@ type fakeAuthorizer struct {
 // ReadTuples returns the stored tuples that match the filter. An empty filter
 // field is a wildcard. A bare type filter ("type:") matches each object of the type.
 func (a *fakeAuthorizer) ReadTuples(_ context.Context, user, relation, object string) ([]authz.Tuple, error) {
+	// OpenFGA refuses a Read with no object, and a Read with a user needs an object
+	// type at least.
+	if object == "" {
+		return nil, errors.New("fake OpenFGA: a Read needs an object or an object type")
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	if a.readErr != nil {

@@ -50,9 +50,11 @@ type TupleReader interface {
 
 // ReadTuples implements TupleReader against OpenFGA's Read API.
 func (f *fgaAuthorizer) ReadTuples(ctx context.Context, user, relation, object string) ([]Tuple, error) {
-	if object == "" && (user == "" || relation == "") {
+	// OpenFGA refuses a Read with a user and no object. The object may be a bare
+	// type ("team:").
+	if object == "" {
 		return nil, newInvalidArgumentError(
-			fmt.Sprintf("ReadTuples: user=%q relation=%q object=%q — with no object filter, both user and relation are required",
+			fmt.Sprintf("ReadTuples: user=%q relation=%q object=%q — an object or an object type is required",
 				user, relation, object),
 		)
 	}
