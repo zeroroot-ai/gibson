@@ -69,10 +69,10 @@ func TestFindingError(t *testing.T) {
 	assert.Equal(t, "[store_failed] write: disk full", withCause.Error())
 	assert.Equal(t, "[invalid_finding] no title", plain.Error())
 	assert.Equal(t, cause, withCause.Unwrap())
-	assert.NoError(t, plain.Unwrap())
+	require.NoError(t, plain.Unwrap())
 	require.ErrorIs(t, withCause, cause)
 
-	assert.ErrorIs(t, withCause, &FindingError{Code: ErrorStoreFailed}, "the code selects the match")
-	assert.NotErrorIs(t, withCause, &FindingError{Code: ErrorExportFailed})
+	require.ErrorIs(t, withCause, &FindingError{Code: ErrorStoreFailed}, "the code selects the match")
+	require.NotErrorIs(t, withCause, &FindingError{Code: ErrorExportFailed})
 	assert.False(t, withCause.Is(errors.New("other")), "an error of another type never matches")
 }

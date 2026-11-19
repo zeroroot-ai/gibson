@@ -54,8 +54,11 @@ func TestCallMetaTool_RefusesBeforeAnyDispatch(t *testing.T) {
 			wantMsg: "meta-tools are not wired",
 		},
 		{
-			name:    "no run ID",
-			svc:     func(t *testing.T) *HarnessCallbackService { return wiredService(t, authzLookupStub{}) },
+			name: "no run ID",
+			svc: func(t *testing.T) *HarnessCallbackService {
+				t.Helper()
+				return wiredService(t, authzLookupStub{})
+			},
 			runID:   "",
 			wantErr: commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 			wantMsg: "needs the work item of a mission run",
@@ -63,6 +66,7 @@ func TestCallMetaTool_RefusesBeforeAnyDispatch(t *testing.T) {
 		{
 			name: "no authz state for the run",
 			svc: func(t *testing.T) *HarnessCallbackService {
+				t.Helper()
 				return wiredService(t, authzLookupStub{err: ErrRunNotFound})
 			},
 			runID:   "run-1",
@@ -72,6 +76,7 @@ func TestCallMetaTool_RefusesBeforeAnyDispatch(t *testing.T) {
 		{
 			name: "the run belongs to another tenant",
 			svc: func(t *testing.T) *HarnessCallbackService {
+				t.Helper()
 				return wiredService(t, authzLookupStub{state: &RunAuthzState{TenantID: "other"}})
 			},
 			runID:   "run-1",

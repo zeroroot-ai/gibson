@@ -213,7 +213,7 @@ func TestFind_NoFilterHasNoWhere(t *testing.T) {
 	assert.Equal(t, []any{100, 0}, db.log[1].args)
 }
 
-func evidenceRowFor(id string, tier int16, call *string, typeName, title string, meta string) []any {
+func evidenceRowFor(id string, tier int16, call *string, typeName, title, meta string) []any {
 	return []any{id, tier, call, typeName, title, "content of " + title, []byte(meta)}
 }
 
