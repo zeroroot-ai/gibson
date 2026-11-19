@@ -357,7 +357,8 @@ func TestResolveAgent_TheEdgePrefixMatchesTheEndpointAndTheCard(t *testing.T) {
 	resp, err := env.svc.ResolveAgent(ctx, &componentpb.ResolveAgentRequest{WorkId: "work-1", Name: "recon-agent"})
 	require.NoError(t, err)
 	assert.Equal(t, "https://api.localhost.zeroroot.ai:443/gateway/agent/", resp.GetGatewayUrl())
-	assert.Equal(t, "https://api.localhost.zeroroot.ai:443/gateway/agent/.well-known/agent-card.json", resp.GetAgentCardUrl())
+	assert.Equal(t, "https://api.localhost.zeroroot.ai:443/gateway/agent/.well-known/agent-card.json",
+		resp.GetAgentCardUrl())
 	for _, u := range []string{resp.GetGatewayUrl(), resp.GetAgentCardUrl()} {
 		assert.True(t, strings.Contains(u, modelcall.EdgeAgentPrefix), "%s must match the Edge prefix", u)
 	}

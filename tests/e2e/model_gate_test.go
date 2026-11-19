@@ -417,7 +417,8 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 		revokeTenantProviderGrant(t, ctx, access, modelGateProvider)
 		revokeTenantProviderGrant(t, ctx, access, modelGateUngrantedProvider)
 		require.False(t, tenantHoldsProviderGrant(t, ctx, access), "the tenant grant is gone")
-		require.False(t, tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedProvider), "the grant on the second provider is gone")
+		require.False(t, tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedProvider),
+			"the grant on the second provider is gone")
 
 		_, errsBefore := probe.counts()
 		defID := createProbeMissionDefinition(t, ctx, clients.Daemon, "model-gate-exit-revoked")

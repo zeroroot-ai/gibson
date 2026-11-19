@@ -147,7 +147,8 @@ func TestEngine_SubmitAndWait_EndsWithAnError(t *testing.T) {
 	// No Run loop: the tick never applies the event.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if err := e.SubmitAndWait(ctx, AgentToolCallObserved{ToolCallID: "a", MissionID: "m1"}); !errors.Is(err, context.DeadlineExceeded) {
+	err = e.SubmitAndWait(ctx, AgentToolCallObserved{ToolCallID: "a", MissionID: "m1"})
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want a deadline error", err)
 	}
 	e.stop(errors.New("test stop"))
