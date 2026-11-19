@@ -266,8 +266,18 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	// the two never disagree about who submitted what under which mission.
 	enhanced := finding.NewEnhancedFinding(baseFinding, missionID, submitter.agentName)
 
-	// Step 6: Acquire a per-tenant Conn and persist the finding.
-	s.persistFinding(ctx, tenant, workID, enhanced)
+	// Step 6: Acquire a per-tenant Conn and persist the finding. Postgres is the
+	// one home of the fields and the evidence of the finding. A failed write
+	// fails the submit before the World hears of the finding.
+	if err := s.persistFinding(ctx, tenant, enhanced); err != nil {
+		s.logger.ErrorContext(ctx, "finding submitter: failed to store finding",
+			slog.String("tenant", tenant),
+			slog.String("work_id", workID),
+			slog.String("finding_id", findingID.String()),
+			slog.String("error", err.Error()),
+		)
+		return "", err
+	}
 
 	// Step 7: route the finding into the World; the graph projector (sole writer)
 	// materializes the :Finding node from it (ADR-0107, gibson#837). The mission id
@@ -329,46 +339,30 @@ func (s *GraphRAGFindingSubmitter) resolveSubmitter(ctx context.Context, tenant 
 }
 
 // persistFinding writes the finding to the findings table of the database of
-// the tenant. Errors are logged as warnings. The finding ID is still returned
-// to the caller.
+// the tenant. A daemon with no pool skips the write. Any write error, including
+// a tenant that is not provisioned, is returned.
 func (s *GraphRAGFindingSubmitter) persistFinding(
 	ctx context.Context,
-	tenant, workID string,
+	tenant string,
 	enhanced finding.EnhancedFinding,
-) {
-	findingID := enhanced.ID
-	missionID := enhanced.MissionID
+) error {
 	if s.pool == nil {
 		s.logger.WarnContext(ctx, "finding submitter: pool not configured; finding not persisted to store",
 			slog.String("tenant", tenant),
-			slog.String("finding_id", findingID.String()),
+			slog.String("finding_id", enhanced.ID.String()),
 		)
-		return
+		return nil
 	}
-
 	store := pgstore.New(func() datapool.Pool { return s.pool })
 	if err := store.Store(ctx, tenant, enhanced); err != nil {
-		var npErr *datapool.NotProvisionedError
-		if errors.As(err, &npErr) {
-			s.logger.WarnContext(ctx, "finding submitter: tenant not provisioned; finding not persisted",
-				slog.String("tenant", tenant),
-				slog.String("finding_id", findingID.String()),
-			)
-			return
-		}
-		s.logger.WarnContext(ctx, "finding submitter: failed to store finding; continuing",
-			slog.String("tenant", tenant),
-			slog.String("work_id", workID),
-			slog.String("finding_id", findingID.String()),
-			slog.String("error", err.Error()),
-		)
-		return
+		return fmt.Errorf("finding submitter: store the finding: %w", err)
 	}
 	s.logger.DebugContext(ctx, "finding submitter: finding stored in per-tenant store",
 		slog.String("tenant", tenant),
-		slog.String("finding_id", findingID.String()),
-		slog.String("mission_id", missionID.String()),
+		slog.String("finding_id", enhanced.ID.String()),
+		slog.String("mission_id", enhanced.MissionID.String()),
 	)
+	return nil
 }
 
 // resolveMissionID looks up the missionID associated with a work item from the
