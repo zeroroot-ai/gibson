@@ -65,7 +65,12 @@ on:
       - 'operators/tenant/internal/controller/catalog_plugin_controller.go'
       - '.github/scripts/run-e2e-job.sh'
       - '.github/workflows/exit-test-tool-dispatch.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      charts-ref:
+        description: The ref of zeroroot-ai/charts to install.
+        required: false
+        default: main
 
 # One run at a time, and a run that started finishes. With cancel-in-progress
 # the merge queue cancelled every run before its cluster stood up (three in a
@@ -129,6 +134,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zeroroot-ai/charts
+          ref: ${{ inputs.charts-ref || 'main' }}
           path: charts
 
       - name: Set up Go

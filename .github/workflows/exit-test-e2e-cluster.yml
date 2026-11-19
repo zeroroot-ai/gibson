@@ -41,7 +41,12 @@ on:
       - '.github/scripts/run-e2e-job.sh'
       - '.github/scripts/e2e-suite-verdict.sh'
       - '.github/workflows/exit-test-e2e-cluster.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      charts-ref:
+        description: The ref of zeroroot-ai/charts to install.
+        required: false
+        default: main
 
 # One run at a time, and a run that started finishes (gibson#151).
 concurrency:
@@ -101,6 +106,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zeroroot-ai/charts
+          ref: ${{ inputs.charts-ref || 'main' }}
           path: charts
 
       - name: Set up Go
