@@ -12,7 +12,10 @@
 #   2. The runner packs each Agent Skill folder of tests/fixtures/agentskills as
 #      an OCI image and pushes it to ghcr.io by digest. The daemon pulls from
 #      there. The pull uses the token of this run, which the test stores as a
-#      tenant secret.
+#      tenant secret. A local run needs a registry with HTTPS, a public address
+#      and a pull by digest. A plain HTTP registry in the kind network fails,
+#      because the puller of a tenant refuses plain HTTP and private addresses.
+#      See tests/fixtures/agentskills/README.md.
 #   3. TestAgentSkills runs in the cluster as a Job.
 #   4. The script of the probe Agent Skill names the pod of the daemon, which is a
 #      host outside the egress limit of a sandbox. The test runs that command with
