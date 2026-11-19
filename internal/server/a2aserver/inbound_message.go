@@ -25,7 +25,7 @@ var ErrAmbiguousTargets = fmt.Errorf("%w: the message holds more than one target
 // outside the publication, a definition or a target that changed or was deleted, a
 // publication over its limit, a tenant that is suspended, a tenant over its quota,
 // and an agent that is not published.
-//
+
 // TargetsOf reads the target list of an inbound message (epic gibson#1367). It
 // reads data parts only. It never reads a text part, a file part or the metadata
 // of a part, so no text of a message can add a target. present is false when no

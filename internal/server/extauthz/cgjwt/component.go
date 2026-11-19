@@ -263,6 +263,21 @@ func (v *ComponentVerifier) VerifyFresh(ctx context.Context, token, method strin
 	return v.verify(ctx, token, method, true)
 }
 
+// checkDescriptor refuses a descriptor that is not active, and a descriptor that
+// is not a component key.
+func checkDescriptor(kid string, desc cachedDescriptor) error {
+	if desc.status != "active" {
+		componentRejectedTotal.WithLabelValues("inactive").Inc()
+		return fmt.Errorf("%w: kid %s status %q", ErrUnknownKey, kid, desc.status)
+	}
+	if desc.principal == "" || desc.tenant == "" {
+		// A component kid must carry a principal+tenant binding; a bare key
+		// document (the daemon's own dispatch kid) is not a component.
+		return fmt.Errorf("%w: kid %s is not a component key", ErrUnknownKey, kid)
+	}
+	return nil
+}
+
 func (v *ComponentVerifier) verify(ctx context.Context, token, method string, fresh bool) (ComponentIdentity, error) {
 	// Peek the header for kid + typ without trusting the signature yet.
 	kid, typ, err := peekHeader(token)
@@ -280,14 +295,8 @@ func (v *ComponentVerifier) verify(ctx context.Context, token, method string, fr
 	if err != nil {
 		return ComponentIdentity{}, fmt.Errorf("%w: kid %s: %w", ErrUnknownKey, kid, err)
 	}
-	if desc.status != "active" {
-		componentRejectedTotal.WithLabelValues("inactive").Inc()
-		return ComponentIdentity{}, fmt.Errorf("%w: kid %s status %q", ErrUnknownKey, kid, desc.status)
-	}
-	if desc.principal == "" || desc.tenant == "" {
-		// A component kid must carry a principal+tenant binding; a bare key
-		// document (the daemon's own dispatch kid) is not a component.
-		return ComponentIdentity{}, fmt.Errorf("%w: kid %s is not a component key", ErrUnknownKey, kid)
+	if err := checkDescriptor(kid, desc); err != nil {
+		return ComponentIdentity{}, err
 	}
 
 	parseOpts := []jwt.ParserOption{

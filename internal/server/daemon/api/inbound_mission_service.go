@@ -328,11 +328,12 @@ func (s *InboundMissionService) UnpublishInboundMission(
 	}
 	// The tuples go first. A failure here leaves the record in place, and the
 	// caller can retry.
-	tuples := []authz.Tuple{{User: "tenant:" + tenant, Relation: "owner", Object: object}}
 	grants, err := s.grantTuples(ctx, object)
 	if err != nil {
 		return nil, status_grpc.Error(codes.Internal, rpc+": "+err.Error())
 	}
+	tuples := make([]authz.Tuple, 0, 1+len(grants))
+	tuples = append(tuples, authz.Tuple{User: "tenant:" + tenant, Relation: "owner", Object: object})
 	if err := s.fga.Delete(ctx, append(tuples, grants...)); err != nil {
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the tuples: %v", rpc, err))
 	}
@@ -453,10 +454,7 @@ func (s *InboundMissionService) ListInboundCallers(
 	if err != nil {
 		return nil, status_grpc.Error(codes.Internal, rpc+": "+err.Error())
 	}
-	ids := make([]string, 0, len(users))
-	for _, u := range users {
-		ids = append(ids, u)
-	}
+	ids := append(make([]string, 0, len(users)), users...)
 	// The key of a grant is its identity id, which is unique.
 	ids, next := pagetoken.Page(page, ids, func(id string) string { return id })
 	return &tenantv1.ListInboundCallersResponse{IdentityIds: ids, NextPageToken: next}, nil

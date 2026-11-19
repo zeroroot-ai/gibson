@@ -538,7 +538,7 @@ func TestGrantInboundCaller_RefusesAnIdentityThatIsNotACallerIdentity(t *testing
 		setup func(f *inboundFixture)
 		want  codes.Code
 	}{
-		{"a caller identity", func(f *inboundFixture) {}, codes.OK},
+		{"a caller identity", func(*inboundFixture) {}, codes.OK},
 		{"an identity that has not enrolled", func(f *inboundFixture) { f.identities.names = nil }, codes.OK},
 		{"the same grant again", func(f *inboundFixture) {
 			f.fga.stored = []authz.Tuple{{User: ref, Relation: "granted_caller", Object: reconObject}}

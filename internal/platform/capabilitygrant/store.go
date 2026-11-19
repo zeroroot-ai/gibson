@@ -948,7 +948,7 @@ ORDER BY g.capability_name`
 	if err != nil {
 		return nil, fmt.Errorf("capabilitygrant: ActiveCapabilityNames %q: %w", principalRef, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var name string

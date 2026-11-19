@@ -719,7 +719,7 @@ func TestInboundRuns_MissionFinishedReadsTheWorld(t *testing.T) {
 // The read stops when the size passes the limit. It does not load the findings
 // that remain.
 func TestPGMissionFindings_StopsReadingWhenTheSizePassesTheLimit(t *testing.T) {
-	var all []finding.EnhancedFinding
+	all := make([]finding.EnhancedFinding, 0, 10)
 	for range 10 {
 		all = append(all, finding.EnhancedFinding{Finding: agent.Finding{
 			ID: types.NewID(), Evidence: []*typespb.Evidence{{Content: strings.Repeat("A", 100)}},

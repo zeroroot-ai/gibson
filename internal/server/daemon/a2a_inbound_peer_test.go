@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -121,7 +122,7 @@ func TestInboundListener_RefusesAPeerThatIsNotTheEdge(t *testing.T) {
 		require.NoError(t, rerr)
 		resp, derr := hc.Do(req)
 		if derr != nil {
-			return derr
+			return fmt.Errorf("get: %w", derr)
 		}
 		_ = resp.Body.Close()
 		return nil
