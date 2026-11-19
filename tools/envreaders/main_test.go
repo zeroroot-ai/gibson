@@ -60,6 +60,24 @@ func TestNamesInSource_RealReads(t *testing.T) {
 	}
 }
 
+// TestNamesInSource_ClosureOverAGetenvParameter is the failing fixture of the
+// tenant operator (operators/tenant/cmd/model_gateway_config.go): a closure
+// reads a name through the getenv parameter of the function that holds it, and
+// the function calls the closure with a constant.
+func TestNamesInSource_ClosureOverAGetenvParameter(t *testing.T) {
+	src := "package main\n" +
+		"const envA = \"CLOSURE_OVER_A\"\n" +
+		"const envB = \"CLOSURE_OVER_B\"\n" +
+		"func cfg(getenv func(string) string) string {\n" +
+		"\tread := func(name string) string { return getenv(name) }\n" +
+		"\treturn read(envA) + read(envB)\n" +
+		"}\n"
+	want := []string{"CLOSURE_OVER_A", "CLOSURE_OVER_B"}
+	if got := names(src); !reflect.DeepEqual(got, want) {
+		t.Fatalf("names = %v\nwant    %v", got, want)
+	}
+}
+
 // TestNamesInSource_NotARead is the failing fixture of gibson#1128: a name
 // that no env read reaches is not a reader. gibson#1125 used time.RFC1123Z
 // in a Date header, and the guard listed RFC1123Z as an env var. An error

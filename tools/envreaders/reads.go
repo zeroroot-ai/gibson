@@ -250,7 +250,7 @@ func (s *source) newScope(file *scope, ft *ast.FuncType, body *ast.BlockStmt) *s
 				}
 				switch r := n.Rhs[i].(type) {
 				case *ast.FuncLit:
-					if s.readsParam(file, r.Type, r.Body) {
+					if s.readsParam(file, sc, r.Type, r.Body) {
 						sc.locals[id.Name] = true
 					}
 				case *ast.SelectorExpr:
@@ -266,8 +266,15 @@ func (s *source) newScope(file *scope, ft *ast.FuncType, body *ast.BlockStmt) *s
 }
 
 // readsParam reports whether a closure passes its parameter 0 to an env read.
-func (s *source) readsParam(file *scope, ft *ast.FuncType, body *ast.BlockStmt) bool {
+// The closure sees the local readers of the function that holds it: a getenv
+// parameter, or another closure.
+func (s *source) readsParam(file, outer *scope, ft *ast.FuncType, body *ast.BlockStmt) bool {
 	sc := s.newScope(file, ft, nil)
+	for name := range outer.locals {
+		if _, shadowed := sc.params[name]; !shadowed {
+			sc.locals[name] = true
+		}
+	}
 	found := false
 	s.eachRead(body, sc, func(arg ast.Expr) {
 		if id, ok := arg.(*ast.Ident); ok {
