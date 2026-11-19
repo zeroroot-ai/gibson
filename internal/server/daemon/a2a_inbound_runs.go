@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -422,7 +424,17 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 	// Parallel reads of one mission build the result once and share it. The build
 	// does not stop when one reader leaves, because the other readers use it. It stops
 	// after the build timeout. Each reader leaves when its own context ends.
-	ch := r.flight.DoChan(key, func() (any, error) {
+	ch := r.flight.DoChan(key, func() (val any, err error) {
+		// singleflight re-raises a panic of the function in a new goroutine, and
+		// nothing can recover it there. The panic becomes an error here, so one bad
+		// finding cannot stop the daemon.
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.ErrorContext(ctx, "inbound result build panicked",
+					"mission", m.ID, "panic", fmt.Sprint(rec), "stack", string(debug.Stack()))
+				val, err = inboundResult{}, fmt.Errorf("the result of mission %s could not be built", m.ID)
+			}
+		}()
 		if res, ok := r.results.get(key); ok {
 			return res, nil
 		}

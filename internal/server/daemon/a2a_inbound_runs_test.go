@@ -594,6 +594,31 @@ func TestInboundRuns_ALeavingReaderKeepsItsPermitUntilTheBuildEnds(t *testing.T)
 	}, 5*time.Second, 10*time.Millisecond, "the permit goes back after the build ends")
 }
 
+// panickingFindings stands for a finding that makes the build panic.
+type panickingFindings struct{}
+
+func (panickingFindings) ReadFindings(context.Context, string, types.ID, func(finding.EnhancedFinding) error) error {
+	panic("malformed finding")
+}
+
+// A panic in a build becomes an error. singleflight would raise it again in a goroutine
+// that nothing can recover, and the daemon would stop.
+func TestInboundRuns_APanicInABuildBecomesAnError(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.end(brain.MissionCompleted)
+	f.runs.findings = panickingFindings{}
+	f.runs.gate = newResultGate(1, 1, 1)
+
+	_, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
+
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "malformed finding", "the panic text stays in the log")
+	release, ok := f.runs.gate.acquire("acme", ownerCaller.Subject)
+	assert.True(t, ok, "the failed build gave its permit back")
+	release()
+}
+
 // A reader whose context ends leaves at once. The build goes on for the others.
 func TestInboundRuns_AReaderLeavesWhenItsContextEnds(t *testing.T) {
 	f := newTaskFixture(t)
