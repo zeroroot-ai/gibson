@@ -87,7 +87,8 @@ type deciderModels interface {
 type brainExecutor struct {
 	registry component.ComponentDiscovery
 	logger   *slog.Logger
-	// gate returns the mission gate of a tenant, or nil when none is installed.
+	// gate returns the mission gate of a tenant. A tenant with no gate gets
+	// noMissionGate.
 	// Dispatch waits on it before it starts a work item, so the gate tuple that
 	// ext-authz reads is confirmed before the work item gets a task grant.
 	gate func(tenant string) missionGateAwaiter
@@ -120,6 +121,7 @@ func newBrainExecutor(registry component.ComponentDiscovery, logger *slog.Logger
 		registry: registry,
 		logger:   logger,
 		bindings: map[string]*missionBinding{},
+		gate:     func(string) missionGateAwaiter { return noMissionGate{} },
 	}
 }
 
@@ -164,16 +166,12 @@ func (b *brainExecutor) get(missionID string) (*missionBinding, bool) {
 // gateway at once. ext-authz refuses the call of a mission whose gate is not
 // open, so the gate comes first. The error says why the work item cannot start.
 func (b *brainExecutor) awaitMissionGate(ctx context.Context, eng *brain.Engine, req brain.DispatchRequest) error {
-	if b.gate == nil || req.MissionID == "" {
-		return nil
-	}
-	gate := b.gate(eng.World.Tenant)
-	if gate == nil {
+	if req.MissionID == "" {
 		return nil
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, missionGateAwaitTimeout)
 	defer cancel()
-	return gate.AwaitOpen(waitCtx, req.MissionID)
+	return b.gate(eng.World.Tenant).AwaitOpen(waitCtx, req.MissionID)
 }
 
 // Dispatch (brain.Dispatcher) launches the work off the tick and reports back via

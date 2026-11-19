@@ -291,6 +291,13 @@ type missionGateAwaiter interface {
 	AwaitOpen(ctx context.Context, mission string) error
 }
 
+// noMissionGate is the gate of a tenant that has none installed. It waits for
+// nothing. ext-authz refuses each call of a mission with no gate tuple, so a work
+// item that starts then is refused at the gateway (fail closed).
+type noMissionGate struct{}
+
+func (noMissionGate) AwaitOpen(context.Context, string) error { return nil }
+
 // InstallMissionGate registers the mission gate tap on a tenant engine and
 // returns it. It is called once for each engine, from brain.Registry.OnEngine,
 // before the tick loop starts.
