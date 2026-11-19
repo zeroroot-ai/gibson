@@ -133,13 +133,13 @@ func TestOutsideAgentService_BackendFailuresAreMapped(t *testing.T) {
 			}, codes.Internal},
 		{"grant: the record is not there", func(s *faultOutsideStore) { s.getErr = outsideagentstore.ErrNotFound }, nil,
 			func(s *OutsideAgentService, ctx context.Context) error {
-				s.fga.(*faultSkillFGA).recordingAuthorizer.allow("tenant:acme", "belongs_to", "mission:m1")
+				s.fga.(*faultSkillFGA).allow("tenant:acme", "belongs_to", "mission:m1")
 				_, err := s.GrantOutsideAgent(ctx, &tenantv1.GrantOutsideAgentRequest{Name: agent, MissionId: "m1"})
 				return err
 			}, codes.NotFound},
 		{"grant: the grant cannot be written", nil, func(f *faultSkillFGA) { f.writeErr = errSkillBackend },
 			func(s *OutsideAgentService, ctx context.Context) error {
-				s.fga.(*faultSkillFGA).recordingAuthorizer.allow("tenant:acme", "belongs_to", "mission:m1")
+				s.fga.(*faultSkillFGA).allow("tenant:acme", "belongs_to", "mission:m1")
 				_, err := s.GrantOutsideAgent(ctx, &tenantv1.GrantOutsideAgentRequest{Name: agent, MissionId: "m1"})
 				return err
 			}, codes.Internal},
@@ -171,7 +171,6 @@ func TestOutsideAgentService_BackendFailuresAreMapped(t *testing.T) {
 
 func TestOutsideAgentService_RefusesACallWithNoTenantOrABadName(t *testing.T) {
 	svc, f := faultyOutsideService(t, nil, nil)
-	anon := context.Background()
 	const bad = "Not_A_Label"
 	calls := map[string]func(ctx context.Context, name string) error{
 		"Register": func(ctx context.Context, name string) error {
@@ -205,9 +204,9 @@ func TestOutsideAgentService_RefusesACallWithNoTenantOrABadName(t *testing.T) {
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, codes.PermissionDenied, code(call(anon, "scout")), "no tenant")
+			assert.Equal(t, codes.PermissionDenied, code(call(t.Context(), "scout")), "no tenant")
 			if name != "List" {
-				assert.Equal(t, codes.InvalidArgument, code(call(f.ctx, bad)), "a bad name")
+				assertBadNameRefused(f.ctx, t, call, bad)
 			}
 		})
 	}

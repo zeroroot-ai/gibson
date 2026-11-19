@@ -119,7 +119,7 @@ func TestGetFinding_PoolFailuresKeepTheirClass(t *testing.T) {
 }
 
 func TestFindingFiltersToQuery(t *testing.T) {
-	assert.Zero(t, len(tenantv1FindingFiltersToQuery(nil).Severities), "no filters")
+	assert.Empty(t, tenantv1FindingFiltersToQuery(nil).Severities, "no filters")
 
 	q := tenantv1FindingFiltersToQuery(&tenantv1.FindingFilters{
 		Severity: []string{"high", "critical"}, Search: "login", Type: []string{"sqli", "xss"}, MissionId: "m1",

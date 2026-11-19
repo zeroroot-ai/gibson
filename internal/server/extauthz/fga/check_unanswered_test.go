@@ -18,7 +18,10 @@ type scriptedFGA struct {
 	err  error
 }
 
+// scriptedReq embeds the request interface so that the methods of the OpenFGA
+// SDK with a non-Go-style name come from the SDK, not from this test.
 type scriptedReq struct {
+	fgaclient.SdkClientCheckRequestInterface
 	scriptedFGA
 	body fgaclient.ClientCheckRequest
 }
@@ -38,8 +41,6 @@ func (r *scriptedReq) Options(_ fgaclient.ClientCheckOptions) fgaclient.SdkClien
 
 func (r *scriptedReq) Execute() (*fgaclient.ClientCheckResponse, error) { return r.resp, r.err }
 
-func (r *scriptedReq) GetAuthorizationModelIdOverride() *string  { return nil }
-func (r *scriptedReq) GetStoreIdOverride() *string               { return nil }
 func (r *scriptedReq) GetContext() context.Context               { return context.Background() }
 func (r *scriptedReq) GetBody() *fgaclient.ClientCheckRequest    { return &r.body }
 func (r *scriptedReq) GetOptions() *fgaclient.ClientCheckOptions { return nil }

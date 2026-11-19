@@ -208,7 +208,7 @@ func TestAgentSkillService_BackendFailuresGiveAnInternalError(t *testing.T) {
 		{"grant: the grant cannot be written", nil, func(f *faultSkillFGA) { f.writeErr = errSkillBackend },
 			func(s *AgentSkillService, ctx context.Context) error {
 				f := s.fga.(*faultSkillFGA)
-				f.recordingAuthorizer.allow("tenant:acme", "belongs_to", "agent_principal:x")
+				f.allow("tenant:acme", "belongs_to", "agent_principal:x")
 				_, err := s.GrantAgentSkill(ctx, &tenantv1.GrantAgentSkillRequest{Name: "a", SubjectKind: agent, SubjectId: "x"})
 				return err
 			}, codes.Internal},
@@ -231,7 +231,6 @@ func TestAgentSkillService_BackendFailuresGiveAnInternalError(t *testing.T) {
 // Each call needs the tenant of the caller and a valid Agent Skill name.
 func TestAgentSkillService_RefusesACallWithNoTenantOrABadName(t *testing.T) {
 	svc, f := faultySkillService(t, nil, nil)
-	anon := context.Background()
 	agent := tenantv1.AgentSkillSubjectKind_AGENT_SKILL_SUBJECT_KIND_AGENT
 	const bad = "Not A Name"
 	calls := map[string]func(ctx context.Context, name string) error{
@@ -274,9 +273,9 @@ func TestAgentSkillService_RefusesACallWithNoTenantOrABadName(t *testing.T) {
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, codes.PermissionDenied, code(call(anon, "a")), "no tenant")
+			assert.Equal(t, codes.PermissionDenied, code(call(t.Context(), "a")), "no tenant")
 			if name != "ListShared" {
-				assert.Equal(t, codes.InvalidArgument, code(call(f.ctx, bad)), "a bad name")
+				assertBadNameRefused(f.ctx, t, call, bad)
 			}
 		})
 	}
@@ -336,4 +335,10 @@ func TestNewAgentSkillService_NeedsEachDependency(t *testing.T) {
 			assert.Nil(t, svc)
 		})
 	}
+}
+
+// assertBadNameRefused checks that a call refuses a name that is not valid.
+func assertBadNameRefused(ctx context.Context, t *testing.T, call func(context.Context, string) error, bad string) {
+	t.Helper()
+	assert.Equal(t, codes.InvalidArgument, code(call(ctx, bad)), "a bad name")
 }
