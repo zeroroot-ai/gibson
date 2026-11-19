@@ -531,7 +531,7 @@ func TestInboundRuns_ABuildThatHangsStopsAtTheTimeout(t *testing.T) {
 	f.startMission(ownerRef)
 	f.end(brain.MissionCompleted)
 	f.runs.findings = &hangingFindings{started: make(chan struct{})}
-	f.runs.gate = newResultGate(1, 1)
+	f.runs.gate = newResultGate(1, 1, 1)
 	f.runs.buildTimeout = 50 * time.Millisecond
 
 	_, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
@@ -573,7 +573,7 @@ func TestInboundRuns_AReaderLeavesWhenItsContextEnds(t *testing.T) {
 func TestInboundRuns_CancelBuildsNoResult(t *testing.T) {
 	f := newTaskFixture(t)
 	f.startMission(ownerRef)
-	f.runs.gate = newResultGate(1, 1)
+	f.runs.gate = newResultGate(1, 1, 1)
 	hold, ok := f.runs.gate.acquire("acme", ownerCaller.Subject)
 	require.True(t, ok)
 	defer hold()
@@ -998,7 +998,7 @@ func TestInboundRuns_ATaskIsFoundOnlyThroughThePathOfItsAgent(t *testing.T) {
 }
 
 func TestResultGate_BoundsTheResultsPerTenantAndPerCaller(t *testing.T) {
-	g := newResultGate(3, 2)
+	g := newResultGate(100, 3, 2)
 	r1, ok := g.acquire("acme", "a")
 	require.True(t, ok)
 	r2, ok := g.acquire("acme", "a")
@@ -1019,7 +1019,7 @@ func TestResultGate_BoundsTheResultsPerTenantAndPerCaller(t *testing.T) {
 	assert.True(t, ok, "a permit that was given back is free")
 	r2()
 	r3()
-	assert.Equal(t, 1, newResultGate(0, 0).tenantMax, "a bound under 1 is 1")
+	assert.Equal(t, 1, newResultGate(0, 0, 0).tenantMax, "a bound under 1 is 1")
 	var none *resultGate
 	_, ok = none.acquire("acme", "a")
 	assert.True(t, ok, "a nil gate bounds nothing")
@@ -1030,7 +1030,7 @@ func TestInboundRuns_ParallelReadsOfOneMissionBuildTheResultOnce(t *testing.T) {
 	f := newTaskFixture(t)
 	f.startMission(ownerRef)
 	f.end(brain.MissionCompleted)
-	f.runs.gate = newResultGate(16, 16)
+	f.runs.gate = newResultGate(100, 16, 16)
 	gate := make(chan struct{})
 	f.runs.findings = blockingFindings{inner: f.findings, wait: gate}
 
@@ -1074,7 +1074,7 @@ func TestInboundRuns_ABusyDaemonAnswersARetryableErrorAndTheResponseGivesThePerm
 	f := newTaskFixture(t)
 	f.startMission(ownerRef)
 	f.end(brain.MissionCompleted)
-	f.runs.gate = newResultGate(1, 1)
+	f.runs.gate = newResultGate(1, 1, 1)
 
 	firstCtx, respond := a2aserver.WithResponseHooks(context.Background())
 	_, err := f.runs.Task(firstCtx, ownerCaller, "recon", a2a.TaskID(f.mission))
@@ -1103,4 +1103,19 @@ func TestEnvLimit(t *testing.T) {
 		_, err = envLimit("X_LIMIT", 4)
 		require.ErrorContains(t, err, "X_LIMIT", bad)
 	}
+}
+
+// The gate bounds the results across all tenants, so many tenants with slow readers
+// cannot hold many large results.
+func TestResultGate_BoundsAllTenantsTogether(t *testing.T) {
+	g := newResultGate(2, 5, 5)
+	r1, ok := g.acquire("acme", "a")
+	require.True(t, ok)
+	_, ok = g.acquire("globex", "b")
+	require.True(t, ok)
+	_, ok = g.acquire("initech", "c")
+	assert.False(t, ok, "the global bound is full, though no tenant is at its own bound")
+	r1()
+	_, ok = g.acquire("initech", "c")
+	assert.True(t, ok, "a permit that was given back is free")
 }

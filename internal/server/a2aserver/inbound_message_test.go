@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/stretchr/testify/assert"
@@ -88,6 +89,8 @@ type fakeStarts struct {
 	asked      []InboundCaller
 	askedByID  []a2a.TaskID
 	askedAgent []string
+	// resultSize, when set, makes Task set the write deadline for a result of this size.
+	resultSize int64
 }
 
 func (f *fakeStarts) Start(_ context.Context, req InboundStart) (*a2a.Task, error) {
@@ -95,7 +98,10 @@ func (f *fakeStarts) Start(_ context.Context, req InboundStart) (*a2a.Task, erro
 	return f.task, f.err
 }
 
-func (f *fakeStarts) Task(_ context.Context, c InboundCaller, agent string, id a2a.TaskID) (*a2a.Task, error) {
+func (f *fakeStarts) Task(ctx context.Context, c InboundCaller, agent string, id a2a.TaskID) (*a2a.Task, error) {
+	if f.resultSize > 0 {
+		ExtendWriteDeadline(ctx, f.resultSize)
+	}
 	f.asked, f.askedByID, f.askedAgent = append(f.asked, c), append(f.askedByID, id), append(f.askedAgent, agent)
 	return f.task, f.err
 }
@@ -470,6 +476,57 @@ func TestInboundRPC_ResultShapePerMethod(t *testing.T) {
 			assert.Equal(t, tt.wrapped, hasTask, rec.Body.String())
 			_, hasStatus := r.Result["status"]
 			assert.Equal(t, !tt.wrapped, hasStatus, rec.Body.String())
+		})
+	}
+}
+
+func TestWriteTimeoutFor(t *testing.T) {
+	tests := []struct {
+		size int64
+		want time.Duration
+	}{
+		{0, InboundWriteFloor},
+		{1, InboundWriteFloor + InboundWritePerMiB},
+		{1 << 20, InboundWriteFloor + InboundWritePerMiB},
+		{(1 << 20) + 1, InboundWriteFloor + 2*InboundWritePerMiB},
+		{50 << 20, InboundWriteFloor + 50*InboundWritePerMiB},
+		{10 << 30, InboundWriteMax},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, WriteTimeoutFor(tt.size), "size %d", tt.size)
+	}
+}
+
+// deadlineRecorder records the write deadlines that a handler sets.
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (d *deadlineRecorder) SetWriteDeadline(t time.Time) error {
+	d.deadlines = append(d.deadlines, t)
+	return nil
+}
+
+// Every inbound response has a write deadline, and a result sets a longer one for
+// its size.
+func TestInboundMiddleware_SetsTheWriteDeadline(t *testing.T) {
+	headers := map[string]string{"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"}
+	task := &a2a.Task{ID: "m-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted}}
+	for name, size := range map[string]int64{"no result": 0, "a result of 20 MiB": 20 << 20} {
+		t.Run(name, func(t *testing.T) {
+			h := NewInboundHandler(&fakeStarts{task: task, resultSize: size}, &recordingCards{}, allowGrants)
+			req := httptest.NewRequest(http.MethodPost, "/a2a/inbound/recon", strings.NewReader(getBody))
+			for k, v := range headers {
+				req.Header.Set(k, v)
+			}
+			rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+			before := time.Now()
+			h.ServeHTTP(rec, req)
+
+			require.NotEmpty(t, rec.deadlines, "the response has a write deadline")
+			last := rec.deadlines[len(rec.deadlines)-1]
+			assert.WithinDuration(t, before.Add(WriteTimeoutFor(size)), last, 5*time.Second)
 		})
 	}
 }

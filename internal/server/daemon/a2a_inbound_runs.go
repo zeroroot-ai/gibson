@@ -407,6 +407,7 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 	a2aserver.AfterResponse(ctx, release)
 	key := c.Tenant + "/" + m.ID
 	if res, ok := r.results.get(key); ok {
+		a2aserver.ExtendWriteDeadline(ctx, int64(res.size))
 		return withResult(t, res), nil
 	}
 	// Parallel reads of one mission build the result once and share it. The build
@@ -442,6 +443,7 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 		v = out.Val
 	}
 	res, _ := v.(inboundResult)
+	a2aserver.ExtendWriteDeadline(ctx, int64(res.size))
 	return withResult(t, res), nil
 }
 
@@ -455,23 +457,25 @@ func (r *inboundRuns) buildTimeoutOrDefault() time.Duration {
 	return inboundResultBuildTimeout
 }
 
-// resultGate bounds the results that are in work for one tenant and for one caller.
-// A permit is taken without waiting, so a busy daemon answers at once.
+// resultGate bounds the results that are in work for the daemon, for one tenant and
+// for one caller. A permit is taken without waiting, so a busy daemon answers at
+// once.
 type resultGate struct {
-	mu                   sync.Mutex
-	tenantMax, callerMax int
-	tenants, callers     map[string]int
+	mu                              sync.Mutex
+	globalMax, tenantMax, callerMax int
+	global                          int
+	tenants, callers                map[string]int
 }
 
-// newResultGate returns a gate with the two bounds. A bound under 1 is 1.
-func newResultGate(tenantMax, callerMax int) *resultGate {
+// newResultGate returns a gate with the three bounds. A bound under 1 is 1.
+func newResultGate(globalMax, tenantMax, callerMax int) *resultGate {
 	return &resultGate{
-		tenantMax: max(tenantMax, 1), callerMax: max(callerMax, 1),
+		globalMax: max(globalMax, 1), tenantMax: max(tenantMax, 1), callerMax: max(callerMax, 1),
 		tenants: map[string]int{}, callers: map[string]int{},
 	}
 }
 
-// acquire takes one permit for the tenant and one for the caller. It returns the
+// acquire takes one global permit, one for the tenant and one for the caller. It returns the
 // function that gives both back, or false when either bound is full. The function
 // is safe to call more than one time.
 func (g *resultGate) acquire(tenant, caller string) (release func(), ok bool) {
@@ -481,9 +485,10 @@ func (g *resultGate) acquire(tenant, caller string) (release func(), ok bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	ck := tenant + "/" + caller
-	if g.tenants[tenant] >= g.tenantMax || g.callers[ck] >= g.callerMax {
+	if g.global >= g.globalMax || g.tenants[tenant] >= g.tenantMax || g.callers[ck] >= g.callerMax {
 		return nil, false
 	}
+	g.global++
 	g.tenants[tenant]++
 	g.callers[ck]++
 	var once sync.Once
@@ -491,6 +496,7 @@ func (g *resultGate) acquire(tenant, caller string) (release func(), ok bool) {
 		once.Do(func() {
 			g.mu.Lock()
 			defer g.mu.Unlock()
+			g.global--
 			g.tenants[tenant]--
 			if g.tenants[tenant] == 0 {
 				delete(g.tenants, tenant)

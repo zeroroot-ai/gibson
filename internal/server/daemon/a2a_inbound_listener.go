@@ -33,6 +33,9 @@ const (
 	// EnvA2AInboundEdgeSVID is the SPIFFE ID of the Edge. It is the only peer
 	// that the listener accepts.
 	EnvA2AInboundEdgeSVID = "GIBSON_A2A_INBOUND_EDGE_SVID"
+	// EnvA2AInboundResultGlobalLimit is the most results that the daemon builds or
+	// sends at one time for all tenants. The default is 16.
+	EnvA2AInboundResultGlobalLimit = "GIBSON_A2A_INBOUND_RESULT_GLOBAL_LIMIT"
 	// EnvA2AInboundResultTenantLimit is the most results that the daemon builds or
 	// sends at one time for one tenant. The default is 4.
 	EnvA2AInboundResultTenantLimit = "GIBSON_A2A_INBOUND_RESULT_TENANT_LIMIT"
@@ -140,6 +143,10 @@ func (d *daemonImpl) buildA2AInboundServer() (*httpSubsystem, error) {
 	if d.brainRegistry == nil || d.pool == nil {
 		return nil, fmt.Errorf("%s: the brain and the data pool are not available", label)
 	}
+	globalLimit, err := envLimit(EnvA2AInboundResultGlobalLimit, 16)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", label, err)
+	}
 	tenantLimit, err := envLimit(EnvA2AInboundResultTenantLimit, 4)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", label, err)
@@ -149,7 +156,7 @@ func (d *daemonImpl) buildA2AInboundServer() (*httpSubsystem, error) {
 		return nil, fmt.Errorf("%s: %w", label, err)
 	}
 	runs := &inboundRuns{
-		gate:      newResultGate(tenantLimit, callerLimit),
+		gate:      newResultGate(globalLimit, tenantLimit, callerLimit),
 		published: d.inboundMissions, source: &inboundMissionSource{pool: d.pool, targets: d.targetStore},
 		starter: d.daemonServer, registry: d.brainRegistry,
 		findings: pgMissionFindings{store: pgstore.New(func() datapool.Pool { return d.pool })},

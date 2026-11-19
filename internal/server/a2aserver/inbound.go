@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
@@ -37,7 +38,42 @@ const MaxInboundRequestBytes = 1 << 20
 var ErrBusy = errors.New("a2a: too many results are in work for this caller, retry later")
 
 // responseHooks are functions that run after the response of a request is written.
-type responseHooks struct{ fns []func() }
+type responseHooks struct {
+	fns []func()
+	// rc sets the write deadline of the response. It is nil outside a real request.
+	rc *http.ResponseController
+}
+
+// The write deadline of an inbound response. A response has InboundWriteFloor to
+// write. A result adds InboundWritePerMiB for each MiB of its size, up to
+// InboundWriteMax. A reader that is slower than this loses the response, and its
+// permits go back. The Edge route must allow at least InboundWriteMax.
+const (
+	InboundWriteFloor  = 30 * time.Second
+	InboundWritePerMiB = 10 * time.Second
+	InboundWriteMax    = 10 * time.Minute
+)
+
+// WriteTimeoutFor returns the time to write a result of size bytes.
+func WriteTimeoutFor(size int64) time.Duration {
+	mib := (size + (1 << 20) - 1) >> 20
+	if mib > int64(InboundWriteMax/InboundWritePerMiB) {
+		return InboundWriteMax
+	}
+	return min(InboundWriteFloor+time.Duration(mib)*InboundWritePerMiB, InboundWriteMax)
+}
+
+// ExtendWriteDeadline sets the write deadline of the response of ctx for a result
+// of size bytes. It does nothing for a context that is not the context of an inbound
+// request.
+func ExtendWriteDeadline(ctx context.Context, size int64) {
+	h, ok := ctx.Value(hooksKey{}).(*responseHooks)
+	if !ok || h.rc == nil {
+		return
+	}
+	// A writer that cannot set a deadline keeps the deadline of the server.
+	_ = h.rc.SetWriteDeadline(time.Now().Add(WriteTimeoutFor(size)))
+}
 
 type hooksKey struct{}
 
@@ -302,6 +338,13 @@ func inboundMiddleware(next http.Handler) http.Handler {
 		req.Body = http.MaxBytesReader(w, req.Body, MaxInboundRequestBytes)
 		hooked, done := WithResponseHooks(req.Context())
 		defer done()
+		// The write of a response is bounded. A result sets a longer deadline for its
+		// size (ExtendWriteDeadline).
+		rc := http.NewResponseController(w)
+		if h, ok := hooked.Value(hooksKey{}).(*responseHooks); ok {
+			h.rc = rc
+		}
+		_ = rc.SetWriteDeadline(time.Now().Add(InboundWriteFloor))
 		next.ServeHTTP(w, req.WithContext(context.WithValue(hooked, inboundCtxKey{}, inboundCall{caller: c, agent: agent})))
 	})
 }
