@@ -217,7 +217,7 @@ func TestA2ACall_AgentCardNeedsOnlyTheRightToSeeTheAgent(t *testing.T) {
 
 // Each refusal has a test, with its counter reason.
 func TestA2ACall_Refusals(t *testing.T) {
-	t.Parallel()
+	// Not parallel: the test reads a process-wide counter before and after a call.
 	good := func(t *testing.T, mock *modelFGA) (*EnvoyAuthzServer, string) {
 		srv, priv := a2aServer(t, mock)
 		return srv, mintA2AGrant(t, priv, modelTenant, "mission-1", "task-1", a2aGrantRoutes)

@@ -87,7 +87,7 @@ func TestEdgeForward_TheSameGrantPassesAtTheGateway(t *testing.T) {
 // A daemon call grant never comes through the Edge. The class refuses it and
 // writes no replay record, so the grant still works at the gateway.
 func TestEdgeForward_ADaemonCallGrantIsRefusedWithoutAReplayRecord(t *testing.T) {
-	t.Parallel()
+	// Not parallel: the test reads a process-wide counter before and after a call.
 	srv, priv, _ := dcServer(t)
 	g := signDC(t, priv, modelcall.DaemonCallTokenType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
 	before := testutil.ToFloat64(extauthzEdgeForwardDeniedTotal.WithLabelValues(forwardDenyDaemonCall))

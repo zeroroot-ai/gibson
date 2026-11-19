@@ -80,7 +80,7 @@ func TestPeer_ModelCallNeedsTheGatewayIdentity(t *testing.T) {
 // A2A endpoint nor an Agent Card is refused with the reason "path"
 // (a2a_call_test.go has the tests of the A2A calls that are served).
 func TestPeer_AnA2APathFromTheGatewayIsRefused(t *testing.T) {
-	t.Parallel()
+	// Not parallel: the test reads a process-wide counter before and after a call.
 	srv, grant, _ := buildPeerServer(t, []string{gatewaySVID})
 	before := testutil.ToFloat64(extauthzA2ACallDeniedTotal.WithLabelValues(a2aDenyPath))
 	req := modelRequest("/a2a/agent", modelTenant, modelProvider, "", grant, nil)
