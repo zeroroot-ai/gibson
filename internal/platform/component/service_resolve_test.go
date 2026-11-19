@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -361,6 +360,6 @@ func TestResolveAgent_TheEdgePrefixMatchesTheEndpointAndTheCard(t *testing.T) {
 	assert.Equal(t, "https://api.localhost.zeroroot.ai:443/gateway/agent/agents/recon-agent/.well-known/agent-card.json",
 		resp.GetAgentCardUrl())
 	for _, u := range []string{resp.GetGatewayUrl(), resp.GetAgentCardUrl()} {
-		assert.True(t, strings.Contains(u, modelcall.EdgeAgentPrefix), "%s must match the Edge prefix", u)
+		assert.Contains(t, u, modelcall.EdgeAgentPrefix, "%s must match the Edge prefix", u)
 	}
 }

@@ -336,12 +336,10 @@ func TestResolveSlot_APinNeverFallsBack(t *testing.T) {
 	slot := agent.NewSlotDefinition("primary", "primary", true)
 
 	_, err := mgr.ResolveSlot(context.Background(), slot, &agent.SlotConfig{Provider: "nomodel"})
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "no saved default model")
+	require.ErrorContains(t, err, "no saved default model")
 
 	_, err = mgr.ResolveSlot(context.Background(), slot, &agent.SlotConfig{Provider: "ghost"})
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "not found")
+	require.ErrorContains(t, err, "not found")
 
 	picked, err := mgr.ResolveSlot(context.Background(), slot, &agent.SlotConfig{Provider: "anthropic"})
 	require.NoError(t, err)

@@ -239,6 +239,6 @@ func TestCheckHost(t *testing.T) {
 		require.ErrorAs(t, err, &blocked, host)
 		assert.Equal(t, "use a public host", blocked.Hint)
 	}
-	assert.Error(t, netguard.CheckHost(ctx, r, "unknown.example", "h"), "a failed lookup refuses")
+	require.Error(t, netguard.CheckHost(ctx, r, "unknown.example", "h"), "a failed lookup refuses")
 	assert.Error(t, netguard.CheckHost(ctx, r, "empty.example", "h"), "no address refuses")
 }

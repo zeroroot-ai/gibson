@@ -82,7 +82,7 @@ func TestSubmitFinding_RecordedToolCallBecomesTier1Evidence(t *testing.T) {
 	item := h.submitted[0].Evidence[0]
 	assert.Equal(t, typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, item.GetTier())
 	assert.Equal(t, "call-1", item.GetToolCallId())
-	assert.Equal(t, `{"status":302,"location":"http://evil"}`, item.GetContent())
+	assert.JSONEq(t, `{"status":302,"location":"http://evil"}`, item.GetContent())
 }
 
 // TestSubmitFinding_TypedContentNeverReplacesRecordedContent is the failing
@@ -264,7 +264,7 @@ func TestProofAndFindingHoldTheSameEvidenceForOneToolCall(t *testing.T) {
 
 	assert.True(t, proto.Equal(engine.captured[0], findingHarness.submitted[0].Evidence[0]),
 		"proof item %v differs from finding item %v", engine.captured[0], findingHarness.submitted[0].Evidence[0])
-	assert.Equal(t, `{"status_code":200,"body":"admin panel"}`, engine.captured[0].GetContent())
+	assert.JSONEq(t, `{"status_code":200,"body":"admin panel"}`, engine.captured[0].GetContent())
 }
 
 func TestValidateFinding_UsesTheOneConversion(t *testing.T) {

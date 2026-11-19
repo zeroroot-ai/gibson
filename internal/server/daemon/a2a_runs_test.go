@@ -12,7 +12,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -201,8 +200,7 @@ func TestA2ARuns_CancelStopsARunOnce(t *testing.T) {
 
 	// A run in a final state cannot be canceled again.
 	_, err = cl.CancelTask(context.Background(), &a2a.CancelTaskRequest{ID: task.ID})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, a2a.ErrTaskNotCancelable), "got %v", err)
+	require.ErrorIs(t, err, a2a.ErrTaskNotCancelable)
 }
 
 // CancelTask stops the dispatch of a run that is running. The dispatch tracks
@@ -246,8 +244,7 @@ func TestA2ARuns_TheDepthLimitRefusesTheNextRun(t *testing.T) {
 	// The caller at the end of the chain is at the limit. Its message is refused.
 	deep := env.client(a2aTestCall(a2aserver.TaskIDOf(ids[len(ids)-1]), "scout", ""))
 	_, err := send(t, deep, "", "one more")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, a2a.ErrUnauthorized)
+	require.ErrorIs(t, err, a2a.ErrUnauthorized)
 	assert.Contains(t, err.Error(), "delegation_depth_exceeded")
 
 	// The caller one step up is below the limit. Its message is accepted.
@@ -322,8 +319,7 @@ func TestA2ARuns_AMessageToAnAgentCannotContinueATask(t *testing.T) {
 	cl := env.client(a2aTestCall("node-task", "scout", ""))
 
 	_, err := send(t, cl, "some-task", "next")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, a2a.ErrInvalidParams)
+	require.ErrorIs(t, err, a2a.ErrInvalidParams)
 }
 
 func TestA2ARuns_ARunOfAnotherMissionIsNotFound(t *testing.T) {
@@ -339,12 +335,10 @@ func TestA2ARuns_ARunOfAnotherMissionIsNotFound(t *testing.T) {
 	stranger := env.client(other)
 
 	_, err = stranger.GetTask(context.Background(), &a2a.GetTaskRequest{ID: task.ID})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, a2a.ErrTaskNotFound)
+	require.ErrorIs(t, err, a2a.ErrTaskNotFound)
 
 	_, err = stranger.CancelTask(context.Background(), &a2a.CancelTaskRequest{ID: task.ID})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, a2a.ErrTaskNotFound)
+	require.ErrorIs(t, err, a2a.ErrTaskNotFound)
 
 	// The owner is not affected by the attempt.
 	got, err := owner.GetTask(context.Background(), &a2a.GetTaskRequest{ID: task.ID})
@@ -369,19 +363,16 @@ func TestA2ARuns_ARunOfAnotherTenantIsNotFound(t *testing.T) {
 			env.reg.For("evil").Tick()
 		}
 		_, err = stranger.GetTask(context.Background(), &a2a.GetTaskRequest{ID: task.ID})
-		require.Error(t, err)
-		assert.ErrorIs(t, err, a2a.ErrTaskNotFound, "folded=%v", folded)
+		require.ErrorIs(t, err, a2a.ErrTaskNotFound, "folded=%v", folded)
 
 		_, err = stranger.CancelTask(context.Background(), &a2a.CancelTaskRequest{ID: task.ID})
-		require.Error(t, err)
-		assert.ErrorIs(t, err, a2a.ErrTaskNotFound, "folded=%v", folded)
+		require.ErrorIs(t, err, a2a.ErrTaskNotFound, "folded=%v", folded)
 	}
 
 	// A message from the other tenant cannot start a run in the mission of the
 	// first one: that mission is not known in its World.
 	_, err = send(t, stranger, "", "hello")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, a2a.ErrUnauthorized)
+	require.ErrorIs(t, err, a2a.ErrUnauthorized)
 }
 
 func TestA2ARuns_AMissionThatIsNotRunningRefusesAMessage(t *testing.T) {
@@ -390,8 +381,7 @@ func TestA2ARuns_AMissionThatIsNotRunningRefusesAMessage(t *testing.T) {
 	cl := env.client(a2aTestCall("node-task", "scout", ""))
 
 	_, err := send(t, cl, "", "scan the host")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, a2a.ErrUnauthorized)
+	require.ErrorIs(t, err, a2a.ErrUnauthorized)
 }
 
 // mustBinding returns the binding of the test mission.

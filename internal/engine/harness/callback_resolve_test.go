@@ -142,7 +142,7 @@ func TestCallbackResolveModel_Refusals(t *testing.T) {
 	_, err = svc.ResolveModel(testCtxWithTenant(), &harnesspb.ResolveModelRequest{
 		Context: &harnesspb.ContextInfo{MissionId: "no-such-mission", AgentName: "recon-agent"}, Slot: "primary",
 	})
-	assert.Error(t, err, "a run with no registered harness")
+	require.Error(t, err, "a run with no registered harness")
 	assert.Zero(t, sm.calls, "no refusal reached the slot manager before the checks")
 }
 

@@ -289,7 +289,7 @@ func TestStore_GetRoundTripsAndReportsNotFound(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, f.ID, got.ID)
 	assert.Equal(t, f.MissionID, got.MissionID)
-	assert.Equal(t, 7.5, got.RiskScore)
+	assert.InDelta(t, 7.5, got.RiskScore, 1e-9)
 	assert.Equal(t, "recon", got.AgentName)
 
 	_, err = s.Get(context.Background(), "acme", types.NewID())

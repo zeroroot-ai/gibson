@@ -101,7 +101,7 @@ func TestDiscoveryResultReachesTheGraphThroughTheProjector(t *testing.T) {
 	require.Len(t, store.stored, 1, "the finding is written to Postgres")
 	assert.Equal(t, node.ID, store.stored[0].ID.String(), "the graph node and the row have one ID")
 	assert.Equal(t, tenant, store.tenants[0])
-	assert.NoError(t, store.stored[0].ID.Validate(), "the ID is a UUID")
+	require.NoError(t, store.stored[0].ID.Validate(), "the ID is a UUID")
 	assert.Equal(t, "Directory listing enabled", node.Title)
 	assert.Equal(t, "192.0.2.10", node.Address,
 		"a host-parented finding must carry the host's coordinate")

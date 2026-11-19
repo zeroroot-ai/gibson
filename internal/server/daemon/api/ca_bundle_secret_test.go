@@ -147,8 +147,8 @@ func TestCheckProviderCABundle(t *testing.T) {
 	assert.NoError(t, srv.checkProviderCABundle(tctx, input(nil)), "no field")
 	assert.NoError(t, srv.checkProviderCABundle(tctx, input(map[string]string{cabundle.Field: " "})), "blank field")
 	assert.NoError(t, srv.checkProviderCABundle(tctx, input(map[string]string{cabundle.Field: "ca"})))
-	assert.Error(t, srv.checkProviderCABundle(tctx, input(map[string]string{cabundle.Field: "not-ca"})))
-	assert.Error(t, srv.checkProviderCABundle(tctx, input(map[string]string{cabundle.Field: "missing"})))
+	require.Error(t, srv.checkProviderCABundle(tctx, input(map[string]string{cabundle.Field: "not-ca"})))
+	require.Error(t, srv.checkProviderCABundle(tctx, input(map[string]string{cabundle.Field: "missing"})))
 	assert.Error(t, newPendingServer().checkProviderCABundle(tctx, input(map[string]string{cabundle.Field: "ca"})),
 		"no secret store")
 }
