@@ -34,6 +34,8 @@ type memInboundStore struct {
 	publishErr  error
 	listErr     error
 	deleteErr   error
+	// readsInLock counts the reads that go through the reader of a lock.
+	readsInLock int
 }
 
 func (m *memInboundStore) Publish(
@@ -104,7 +106,7 @@ func (m *memInboundStore) Owner(context.Context, string, string) (owner, agent s
 }
 
 // WithIdentityLock runs fn while it holds a lock of the identity, as the database does.
-func (m *memInboundStore) WithIdentityLock(_ context.Context, _, identity string, fn func() error) error {
+func (m *memInboundStore) WithIdentityLock(_ context.Context, tenant, identity string, fn func(inboundmissionstore.Reader) error) error {
 	m.lockMu.Lock()
 	l, ok := m.locks[identity]
 	if !ok {
@@ -117,7 +119,18 @@ func (m *memInboundStore) WithIdentityLock(_ context.Context, _, identity string
 	m.lockMu.Unlock()
 	l.Lock()
 	defer l.Unlock()
-	return fn()
+	return fn(memReader{m: m, tenant: tenant})
+}
+
+// memReader reads the memory store as the reader of a transaction does.
+type memReader struct {
+	m      *memInboundStore
+	tenant string
+}
+
+func (r memReader) Get(ctx context.Context, agent string) (*inboundmissionstore.Entry, error) {
+	r.m.readsInLock++
+	return r.m.Get(ctx, r.tenant, agent)
 }
 
 func (m *memInboundStore) Delete(_ context.Context, _, agent string) error {
@@ -798,4 +811,17 @@ func TestPublishInboundMission_ANewPublicationDeletesTheStaleGrantsOfTheName(t *
 	h.fga.deleteErr = errInboundBoom
 	_, err = h.svc.PublishInboundMission(h.ctx, pub("recon", "def-1", goodTarget))
 	assert.Equal(t, codes.Internal, code(err))
+}
+
+// The grant reads the publication through the reader of the identity lock, so the
+// read runs in the same transaction and the call holds one connection.
+func TestGrantInboundCaller_ReadsThePublicationThroughTheLockReader(t *testing.T) {
+	f := publishedFixture(t)
+	f.fga.allow("tenant:acme", "belongs_to", "agent_principal:a1")
+	before := f.store.readsInLock
+
+	_, err := f.svc.GrantInboundCaller(f.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
+
+	require.NoError(t, err)
+	assert.Equal(t, before+1, f.store.readsInLock)
 }

@@ -435,8 +435,8 @@ func (s *InboundMissionService) GrantInboundCaller(
 	// The check of the sole grant and the write are one step for the identity. Two
 	// parallel grants of one identity run one after the other, so the second one
 	// sees the first and is refused.
-	err = s.store.WithIdentityLock(ctx, tenant, subject, func() error {
-		return s.grantLocked(ctx, tenant, req.GetAgent(), subject, object)
+	err = s.store.WithIdentityLock(ctx, tenant, subject, func(r inboundmissionstore.Reader) error {
+		return s.grantLocked(ctx, r, tenant, req.GetAgent(), subject, object)
 	})
 	if err != nil {
 		return nil, grantStatus(rpc, err)
@@ -576,7 +576,9 @@ func grantStatus(rpc string, err error) error {
 
 // grantLocked checks the sole grant and writes the grant. The caller holds the lock
 // of the identity.
-func (s *InboundMissionService) grantLocked(ctx context.Context, tenant, agent, subject, object string) error {
+func (s *InboundMissionService) grantLocked(
+	ctx context.Context, r inboundmissionstore.Reader, tenant, agent, subject, object string,
+) error {
 	const rpc = "GrantInboundCaller"
 	if err := s.requireSoleGrant(ctx, tenant, subject, object); err != nil {
 		return err
@@ -588,7 +590,7 @@ func (s *InboundMissionService) grantLocked(ctx context.Context, tenant, agent, 
 	// The record may have gone between the first check and the write. A grant to a
 	// publication that is gone would come back with the next publish of the name, so
 	// the grant is deleted and the call fails.
-	if _, err := s.store.Get(ctx, tenant, agent); err != nil {
+	if _, err := r.Get(ctx, agent); err != nil {
 		if derr := s.fga.Delete(ctx, []authz.Tuple{grant}); derr != nil {
 			return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the orphan grant: %v", rpc, derr))
 		}

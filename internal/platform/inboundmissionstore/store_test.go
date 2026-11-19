@@ -502,21 +502,21 @@ func TestWithIdentityLock_RunsTheFunctionUnderAnAdvisoryLockOfTheIdentity(t *tes
 	db := &fakeDB{exec: okExec}
 	ran := false
 
-	err := newStore(db).WithIdentityLock(context.Background(), "acme", "agent_principal:9", func() error { ran = true; return nil })
+	err := newStore(db).WithIdentityLock(context.Background(), "acme", "agent_principal:9", func(Reader) error { ran = true; return nil })
 
 	require.NoError(t, err)
 	assert.True(t, ran)
 	assert.Contains(t, db.seen[0], "pg_advisory_xact_lock", "the lock comes before the function")
 
-	err = newStore(db).WithIdentityLock(context.Background(), "acme", "x", func() error { return errBoom })
+	err = newStore(db).WithIdentityLock(context.Background(), "acme", "x", func(Reader) error { return errBoom })
 	require.ErrorIs(t, err, errBoom)
 	fail := &fakeDB{exec: func(string) (int64, error) { return 0, errBoom }}
 	ran = false
-	err = newStore(fail).WithIdentityLock(context.Background(), "acme", "x", func() error { ran = true; return nil })
+	err = newStore(fail).WithIdentityLock(context.Background(), "acme", "x", func(Reader) error { ran = true; return nil })
 	require.ErrorIs(t, err, errBoom)
 	assert.False(t, ran, "the function does not run without the lock")
 	require.ErrorIs(t, newStore(&fakeDB{forErr: errBoom}).WithIdentityLock(context.Background(), "acme", "x",
-		func() error { return nil }), errBoom)
+		func(Reader) error { return nil }), errBoom)
 }
 
 // Two publishes of one name run one after the other, because each takes a lock on
@@ -551,4 +551,22 @@ func TestPublish_TheHookRunsOnlyForANewRowUnderTheLockOfTheName(t *testing.T) {
 	failed := &fakeDB{queryRow: stored, exec: okExec}
 	_, err := newStore(failed).Publish(context.Background(), "acme", e, func(context.Context) error { return errBoom })
 	require.ErrorIs(t, err, errBoom, "a failed hook fails the publish, and the transaction undoes the insert")
+}
+
+// The function of the lock reads through the reader of the transaction. It takes no
+// second connection from the pool.
+func TestWithIdentityLock_TheReaderRunsInTheSameTransaction(t *testing.T) {
+	e := sample()
+	db := &fakeDB{exec: okExec, queryRow: func(string) datapool.Row { return fakeRow{values: rowOf(e)} }}
+
+	var got *Entry
+	err := newStore(db).WithIdentityLock(context.Background(), "acme", "agent_principal:9", func(r Reader) error {
+		var gerr error
+		got, gerr = r.Get(context.Background(), "recon")
+		return gerr
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "recon", got.Agent)
+	assert.Equal(t, 1, db.released, "the lock and the read share one connection")
 }

@@ -100,8 +100,33 @@ type Store interface {
 	Owner(ctx context.Context, tenant, missionID string) (owner, agent string, err error)
 	// WithIdentityLock runs fn while it holds a lock on one identity in the database
 	// of the tenant. Two calls for the same identity run one after the other, also
-	// on two replicas. The lock ends when fn returns.
-	WithIdentityLock(ctx context.Context, tenant, identity string, fn func() error) error
+	// on two replicas. The lock ends when fn returns. fn reads the store through the
+	// reader that it gets. The reader runs in the same transaction, so fn holds one
+	// connection and not two.
+	WithIdentityLock(ctx context.Context, tenant, identity string, fn func(r Reader) error) error
+}
+
+// Reader reads published entries inside a transaction.
+type Reader interface {
+	// Get returns one entry, or ErrNotFound.
+	Get(ctx context.Context, agent string) (*Entry, error)
+}
+
+type txReader struct{ q datapool.SQL }
+
+func (r txReader) Get(ctx context.Context, agent string) (*Entry, error) {
+	return getEntry(ctx, r.q, agent)
+}
+
+func getEntry(ctx context.Context, q datapool.SQL, agent string) (*Entry, error) {
+	e, err := scanEntry(q.QueryRow(ctx, `SELECT `+columns+` FROM inbound_missions WHERE agent = $1`, agent))
+	if errors.Is(err, datapool.ErrNoRows) {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, agent)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("inboundmissionstore: get %s: %w", agent, err)
+	}
+	return e, nil
 }
 
 type conn interface {
@@ -269,14 +294,7 @@ func (s *postgresStore) Get(ctx context.Context, tenant, agent string) (*Entry, 
 		return nil, fmt.Errorf("inbound mission store: acquire conn: %w", err)
 	}
 	defer c.Release()
-	e, err := scanEntry(c.SQL().QueryRow(ctx, `SELECT `+columns+` FROM inbound_missions WHERE agent = $1`, agent))
-	if errors.Is(err, datapool.ErrNoRows) {
-		return nil, fmt.Errorf("%w: %s", ErrNotFound, agent)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("inboundmissionstore: get %s: %w", agent, err)
-	}
-	return e, nil
+	return getEntry(ctx, c.SQL(), agent)
 }
 
 func (s *postgresStore) Delete(ctx context.Context, tenant, agent string) error {
@@ -411,7 +429,7 @@ func (s *postgresStore) Owner(ctx context.Context, tenant, missionID string) (ow
 	return owner, agent, nil
 }
 
-func (s *postgresStore) WithIdentityLock(ctx context.Context, tenant, identity string, fn func() error) error {
+func (s *postgresStore) WithIdentityLock(ctx context.Context, tenant, identity string, fn func(r Reader) error) error {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
 		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
@@ -421,7 +439,7 @@ func (s *postgresStore) WithIdentityLock(ctx context.Context, tenant, identity s
 		if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "inbound-identity:"+identity); err != nil {
 			return fmt.Errorf("lock the identity %s: %w", identity, err)
 		}
-		return fn()
+		return fn(txReader{q: q})
 	})
 	if err != nil {
 		return fmt.Errorf("inbound identity lock %s: %w", identity, err)
