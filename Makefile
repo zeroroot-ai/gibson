@@ -650,7 +650,9 @@ check-env-readers:
 # in one of seven repositories (gibson#502, ADR-0094 layer 5). The fixture runs
 # on every PR; the measurement needs the six other checkouts and runs on dispatch
 # (.github/workflows/proto-field-consumers.yml). Locally:
-#   CONSUMER_ROOTS=". ../sdk ../adk ../gibson-executor ../setec ../dashboard ../sdk-ts" make check-proto-field-consumers
+#   bash scripts/proto-field-consumer-roots.sh <clone directory>
+# prints the value for CONSUMER_ROOTS. Then:
+#   CONSUMER_ROOTS="<that value>" make check-proto-field-consumers
 .PHONY: check-proto-field-consumers-fixture
 check-proto-field-consumers-fixture:
 	@bash scripts/__tests__/check-proto-field-consumers.test.sh
