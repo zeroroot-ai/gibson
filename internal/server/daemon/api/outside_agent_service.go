@@ -104,7 +104,7 @@ func ValidateOutsideAgentURL(ctx context.Context, r netguard.Resolver, raw strin
 		return nil, errors.New("the URL must not hold a query or a fragment")
 	}
 	if err := netguard.CheckHost(ctx, r, u.Hostname(), outsideAgentAddressHint); err != nil {
-		logHostRefused(ctx, "ValidateOutsideAgentURL", u.Hostname(), err)
+		logHostRefused(ctx, "ValidateOutsideAgentURL", err)
 		return nil, fmt.Errorf("the URL host is refused: %w", err)
 	}
 	return u, nil
@@ -383,9 +383,9 @@ func (s *OutsideAgentService) ListOutsideAgentGrants(
 
 // logHostRefused writes the detail of a refused host to the daemon log. The error
 // that goes to the client holds the fixed text only.
-func logHostRefused(ctx context.Context, where, host string, err error) {
+func logHostRefused(ctx context.Context, where string, err error) {
 	var refused *netguard.HostRefusedError
 	if errors.As(err, &refused) {
-		slog.WarnContext(ctx, "host refused", "where", where, "host", host, "detail", refused.Detail())
+		slog.WarnContext(ctx, "host refused", "where", where, "detail", refused.Detail())
 	}
 }

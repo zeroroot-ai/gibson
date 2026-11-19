@@ -433,7 +433,7 @@ func (s *DaemonServer) checkProviderBaseURL(ctx context.Context, in *tenantv1.Pr
 		return nil
 	}
 	if err := netguard.CheckHost(ctx, s.modelEndpointResolver, u.Hostname(), netguard.LLMEndpointHint); err != nil {
-		logHostRefused(ctx, "model provider base URL", u.Hostname(), err)
+		logHostRefused(ctx, "model provider base URL", err)
 		return fmt.Errorf("%s host is refused: %w", fieldBaseURL, err)
 	}
 	return nil
