@@ -162,6 +162,16 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.tenant.v1.TenantService/ExportFindings":        true,
 			"/gibson.world.v1.WorldService/GetTimeline":             true,
 			"/gibson.world.v1.WorldService/GetLlmCall":              true,
+			// The A2A inbound exit test (tests/e2e/a2a_inbound_test.go, epic
+			// gibson#1367). The runner publishes a mission definition for inbound
+			// calls as the tenant admin, grants and revokes a caller identity, and
+			// unpublishes. It counts the missions of the tenant before and after a
+			// refused call, to show that the refusal started none.
+			"/gibson.tenant.v1.InboundMissionService/PublishInboundMission":   true,
+			"/gibson.tenant.v1.InboundMissionService/UnpublishInboundMission": true,
+			"/gibson.tenant.v1.InboundMissionService/GrantInboundCaller":      true,
+			"/gibson.tenant.v1.InboundMissionService/RevokeInboundCaller":     true,
+			"/gibson.daemon.v1.DaemonService/ListMissions":                    true,
 		},
 	}
 }
