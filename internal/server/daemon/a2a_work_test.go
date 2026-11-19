@@ -26,8 +26,9 @@ func TestA2ATaskID_AMissionNodeGetsAFreshIDAndA2AWorkGetsAStableOne(t *testing.T
 	assert.NotEqual(t, first, second, "a mission node keeps a fresh id for each dispatch")
 
 	req := brain.DispatchRequest{WorkID: "w1", ParentID: "parent"}
-	assert.Equal(t, a2aTaskID(req), a2aTaskID(req))
-	assert.EqualValues(t, a2aserver.TaskIDOf("w1"), a2aTaskID(req))
+	stableFirst, stableSecond := a2aTaskID(req), a2aTaskID(req)
+	assert.Equal(t, stableFirst, stableSecond, "A2A work keeps one id for each dispatch")
+	assert.EqualValues(t, a2aserver.TaskIDOf("w1"), stableFirst)
 }
 
 func TestBrainExecutor_TrackWorkCancelsOnlyA2AWork(t *testing.T) {
@@ -43,7 +44,7 @@ func TestBrainExecutor_TrackWorkCancelsOnlyA2AWork(t *testing.T) {
 	ctx, release = b.trackWork(parent, brain.DispatchRequest{WorkID: "w1", ParentID: "p"})
 	require.NoError(t, ctx.Err())
 	assert.True(t, b.CancelWork("w1"), "the running item is found")
-	assert.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
 
 	release()
 	assert.False(t, b.CancelWork("w1"), "a released item is gone")
@@ -156,7 +157,7 @@ func TestDispatchBankTurn_ATurnThatDoesNotEndStopsAtItsBound(t *testing.T) {
 
 	_, err = b.dispatchBankTurn(context.Background(), &missionBinding{tenant: "acme"}, req)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Contains(t, err.Error(), "wait for the turn of job")
 }
 

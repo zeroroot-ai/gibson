@@ -91,7 +91,7 @@ type brainExecutor struct {
 	// noMissionGate.
 	// Dispatch waits on it before it starts a work item, so the gate tuple that
 	// ext-authz reads is confirmed before the work item gets a task grant.
-	gate func(tenant string) missionGateAwaiter
+	gate func(tenant string) MissionGateAwaiter
 	// cancels holds the cancel function of each running A2A work item, by work
 	// id. CancelWork calls it. A mission node has no entry, because only an A2A
 	// CancelTask cancels a single item.
@@ -121,7 +121,7 @@ func newBrainExecutor(registry component.ComponentDiscovery, logger *slog.Logger
 		registry: registry,
 		logger:   logger,
 		bindings: map[string]*missionBinding{},
-		gate:     func(string) missionGateAwaiter { return noMissionGate{} },
+		gate:     func(string) MissionGateAwaiter { return noMissionGate{} },
 	}
 }
 

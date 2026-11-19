@@ -112,7 +112,6 @@ func TestSeedSharedAgentSkillGate_FailuresAreReported(t *testing.T) {
 	shared, _ := loadSharedAgentSkills(context.Background(), []config.SharedAgentSkillConfig{
 		{Name: "web-recon", Reference: "r@sha256:a"},
 	}, okPuller, discardLog())
-	retire := []string{"agent_skill:_shared/retired"}
 
 	tests := []struct {
 		name    string
@@ -121,14 +120,14 @@ func TestSeedSharedAgentSkillGate_FailuresAreReported(t *testing.T) {
 	}{
 		{"the list fails", &failingGateFGA{listErr: boom}, "list platform_enabled"},
 		{"the write fails", &failingGateFGA{writeErr: boom}, "write 1 tuples"},
-		{"the delete fails", &failingGateFGA{gateFGA: gateFGA{existing: append(retire, "agent_skill:_shared/web-recon")}, deleteErr: boom},
+		{"the delete fails", &failingGateFGA{gateFGA: gateFGA{existing: []string{"agent_skill:_shared/retired", "agent_skill:_shared/web-recon"}}, deleteErr: boom},
 			"delete 1 tuples"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := seedSharedAgentSkillGate(context.Background(), tt.fga, shared, discardLog())
 			require.Error(t, err)
-			assert.ErrorIs(t, err, boom)
+			require.ErrorIs(t, err, boom)
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}

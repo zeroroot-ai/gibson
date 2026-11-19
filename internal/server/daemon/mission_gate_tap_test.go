@@ -399,7 +399,7 @@ func TestBrainExecutor_DispatchWaitsForTheGate(t *testing.T) {
 	<-g.started
 
 	b := newBrainExecutor(nil, slog.New(slog.DiscardHandler))
-	b.gate = func(string) missionGateAwaiter { return tap }
+	b.gate = func(string) MissionGateAwaiter { return tap }
 	b.register("m1", &missionBinding{ctx: context.Background(), runID: "r1", eng: eng, slot: "primary"})
 
 	eng.Submit(brain.WorkDispatched{ID: "w1", MissionID: "m1", RunID: "r1", ItemKind: "bogus", Target: "x"})
@@ -430,7 +430,7 @@ func TestBrainExecutor_DispatchFailsTheWorkWhenTheGateCannotOpen(t *testing.T) {
 	eng.Tick()
 
 	b := newBrainExecutor(nil, slog.New(slog.DiscardHandler))
-	b.gate = func(string) missionGateAwaiter { return tap }
+	b.gate = func(string) MissionGateAwaiter { return tap }
 	b.register("m1", &missionBinding{ctx: context.Background(), runID: "r1", eng: eng, slot: "primary"})
 	eng.Submit(brain.WorkDispatched{ID: "w1", MissionID: "m1", RunID: "r1", ItemKind: "agent", Target: "x"})
 	eng.Tick()

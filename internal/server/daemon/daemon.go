@@ -2534,7 +2534,7 @@ func requireSPIFFETrustDomain(configured string, envoy spiffeid.ID) error {
 
 // missionGateOf returns the mission gate of a tenant, or noMissionGate when the
 // gate is not installed for it.
-func (d *daemonImpl) missionGateOf(tenant string) missionGateAwaiter {
+func (d *daemonImpl) missionGateOf(tenant string) MissionGateAwaiter {
 	if v, ok := d.missionGates.Load(tenant); ok {
 		if tap, ok := v.(*missionGateTap); ok {
 			return tap

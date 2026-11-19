@@ -43,13 +43,13 @@ func TestA2ARuns_ATenantWithNoWorldIsRefusedAndNotFound(t *testing.T) {
 	_, err := runs.Start(ctx, a2aserver.StartRequest{
 		Caller: a2aTestCaller1(), Route: a2aserver.Route{Agent: "scout"}, Message: msg,
 	})
-	assert.ErrorIs(t, err, a2aserver.ErrRefused)
+	require.ErrorIs(t, err, a2aserver.ErrRefused)
 
 	_, err = runs.Task(ctx, a2aTestCaller1(), "t1")
-	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+	require.ErrorIs(t, err, a2aserver.ErrNotFound)
 
 	_, err = runs.Cancel(ctx, a2aTestCaller1(), "t1")
-	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+	require.ErrorIs(t, err, a2aserver.ErrNotFound)
 }
 
 func TestA2ARuns_AMissionThatIsNotInTheWorldIsRefused(t *testing.T) {

@@ -5,7 +5,6 @@ package daemon
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -77,7 +76,7 @@ func TestBuildTraceServer_RefusesAnIncompleteSetup(t *testing.T) {
 			sub, err := traceDaemon(t, tt.mutate).buildTraceServer(context.Background())
 			require.Error(t, err)
 			assert.Nil(t, sub)
-			assert.True(t, strings.Contains(err.Error(), tt.wantErr), "error = %v, want one that holds %q", err, tt.wantErr)
+			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }

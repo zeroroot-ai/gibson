@@ -25,14 +25,19 @@ import (
 func withErrorDetailInterceptors(
 	unary grpc.UnaryServerInterceptor, stream grpc.StreamServerInterceptor,
 ) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
-	wrappedUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		resp, err := unary(ctx, req, info, handler)
-		return resp, withErrorDetail(err)
-	}
 	wrappedStream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		return withErrorDetail(stream(srv, ss, info, handler))
 	}
-	return wrappedUnary, wrappedStream
+	return withUnaryErrorDetail(unary), wrappedStream
+}
+
+// withUnaryErrorDetail adds the ErrorDetail to each error of a unary interceptor.
+// A server with no stream method uses it alone.
+func withUnaryErrorDetail(unary grpc.UnaryServerInterceptor) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		resp, err := unary(ctx, req, info, handler)
+		return resp, withErrorDetail(err)
+	}
 }
 
 // withErrorDetail returns err with one ErrorDetail in its status details. A

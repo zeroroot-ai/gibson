@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -44,7 +45,7 @@ func TestRegistryCards_Failures(t *testing.T) {
 	assert.Contains(t, err.Error(), "discover agent scout")
 
 	_, err = registryCards{registry: kindRegistry{}, gateway: gw}.Card(ctx, "acme", "scout")
-	assert.ErrorIs(t, err, a2aserver.ErrNoCard, "an agent with no instance has no card")
+	require.ErrorIs(t, err, a2aserver.ErrNoCard, "an agent with no instance has no card")
 
 	notAnAgent := kindRegistry{instances: []component.ComponentInfo{{Kind: "tool", Name: "scout"}}}
 	_, err = registryCards{registry: notAnAgent, gateway: gw}.Card(ctx, "acme", "scout")
@@ -52,7 +53,7 @@ func TestRegistryCards_Failures(t *testing.T) {
 	assert.Contains(t, err.Error(), "build the card of agent scout")
 }
 
-func serveOn(t *testing.T, handler http.Handler, drain time.Duration) (*httpSubsystem, string) {
+func serveOn(t *testing.T, handler http.Handler, drain time.Duration) (sub *httpSubsystem, addr string) {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -94,7 +95,7 @@ func TestHTTPSubsystem_ServeClosesWhenTheDrainTimesOut(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
-	sub, addr := serveOn(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	sub, addr := serveOn(t, http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		close(started)
 		<-release
 	}), 10*time.Millisecond)
@@ -160,7 +161,7 @@ func TestBuildA2AServer_RefusesAnIncompleteSetup(t *testing.T) {
 			sub, err := a2aListenerDaemon(t, tt.mutate).buildA2AServer(context.Background())
 			require.Error(t, err)
 			assert.Nil(t, sub)
-			assert.True(t, strings.Contains(err.Error(), tt.wantErr), "error = %v, want one that holds %q", err, tt.wantErr)
+			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }
@@ -230,6 +231,12 @@ type recordedResponse struct {
 	body   strings.Builder
 }
 
-func (r *recordedResponse) Header() http.Header         { return r.header }
-func (r *recordedResponse) Write(b []byte) (int, error) { return r.body.Write(b) }
-func (r *recordedResponse) WriteHeader(int)             {}
+func (r *recordedResponse) Header() http.Header { return r.header }
+func (r *recordedResponse) Write(b []byte) (int, error) {
+	n, err := r.body.Write(b)
+	if err != nil {
+		return n, fmt.Errorf("record the body: %w", err)
+	}
+	return n, nil
+}
+func (r *recordedResponse) WriteHeader(int) {}

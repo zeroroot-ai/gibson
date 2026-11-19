@@ -134,7 +134,7 @@ func missionIDOf(ev brain.Event) string {
 // state change and its write would leave a wrong tuple for ever. The sweep
 // closes that gap. A mission that is only submitted is not active for a model
 // call, and it gets no tuple: an absent tuple refuses the call.
-func (t *missionGateTap) sweep() {
+func (t *missionGateTap) sweep(ctx context.Context) {
 	snapshot := t.eng.World.MissionSnapshot()
 	t.mu.Lock()
 	for _, m := range snapshot {
@@ -149,7 +149,7 @@ func (t *missionGateTap) sweep() {
 	}
 	t.mu.Unlock()
 	if start {
-		go t.drain()
+		go t.drain(ctx)
 	}
 }
 
@@ -199,11 +199,11 @@ func (t *missionGateTap) apply(ev brain.Event) {
 	}
 	t.mu.Unlock()
 	if start {
-		go t.drain()
+		go t.drain(t.ctx)
 	}
 }
 
-func (t *missionGateTap) drain() {
+func (t *missionGateTap) drain(ctx context.Context) {
 	for {
 		t.mu.Lock()
 		if len(t.queue) == 0 {
@@ -214,18 +214,18 @@ func (t *missionGateTap) drain() {
 		w := t.queue[0]
 		t.queue = t.queue[1:]
 		t.mu.Unlock()
-		t.write(w)
+		t.write(ctx, w)
 	}
 }
 
 // write sends one value to FGA with a few attempts. When all fail, it keeps the
 // error for the waiters and forgets the value, so the next event of the mission
 // writes again.
-func (t *missionGateTap) write(w missionGateWrite) {
+func (t *missionGateTap) write(ctx context.Context, w missionGateWrite) {
 	var err error
 	for attempt := 1; attempt <= missionGateAttempts; attempt++ {
-		ctx, cancel := context.WithTimeout(t.ctx, missionGateWriteTimeout)
-		err = t.writer.SetMissionGate(ctx, t.tenant, w.mission, w.active)
+		wctx, cancel := context.WithTimeout(ctx, missionGateWriteTimeout)
+		err = t.writer.SetMissionGate(wctx, t.tenant, w.mission, w.active)
 		cancel()
 		if err == nil {
 			t.logger.Debug("mission gate written", "mission", w.mission, "active", w.active)
@@ -290,8 +290,8 @@ func (t *missionGateTap) AwaitOpen(ctx context.Context, mission string) error {
 	}
 }
 
-// missionGateAwaiter is what the brain executor needs of the gate.
-type missionGateAwaiter interface {
+// MissionGateAwaiter is what the brain executor needs of the gate.
+type MissionGateAwaiter interface {
 	AwaitOpen(ctx context.Context, mission string) error
 }
 
@@ -305,12 +305,14 @@ func (noMissionGate) AwaitOpen(context.Context, string) error { return nil }
 // InstallMissionGate registers the mission gate tap on a tenant engine and
 // returns it as the gate that the brain executor waits on. It is called once
 // for each engine, from brain.Registry.OnEngine, before the tick loop starts.
-func InstallMissionGate(ctx context.Context, tenant string, eng *brain.Engine, writer missionGateWriter, logger *slog.Logger) missionGateAwaiter {
+func InstallMissionGate(ctx context.Context, tenant string, eng *brain.Engine, writer missionGateWriter, logger *slog.Logger) MissionGateAwaiter {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	// The writes outlive the caller on purpose: the tap lives as long as the engine.
+	bg := context.WithoutCancel(ctx)
 	tap := &missionGateTap{
-		ctx:     context.WithoutCancel(ctx),
+		ctx:     bg,
 		tenant:  tenant,
 		eng:     eng,
 		writer:  writer,
@@ -319,7 +321,7 @@ func InstallMissionGate(ctx context.Context, tenant string, eng *brain.Engine, w
 		states:  map[string]*gateState{},
 		notify:  make(chan struct{}),
 	}
-	tap.sweep()
+	tap.sweep(bg)
 	eng.Subscribe(tap.apply)
 	return tap
 }

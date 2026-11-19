@@ -83,10 +83,7 @@ func (d *daemonImpl) buildTraceServer(ctx context.Context) (*grpcSubsystem, erro
 		return nil, fmt.Errorf("trace listener: the SPIFFE X.509 source is not open (got %T)", d.spiffeX509Source)
 	}
 
-	unaryRecovery, err := d.traceRecovery()
-	if err != nil {
-		return nil, fmt.Errorf("trace listener: recovery interceptor: %w", err)
-	}
+	unaryRecovery := d.traceRecovery()
 	tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(collector))
 	opts := append(traceServerOptions(unaryRecovery), grpc.Creds(credentials.NewTLS(tlsCfg)))
 	srv := grpc.NewServer(opts...)
@@ -115,7 +112,6 @@ func (d *daemonImpl) buildTraceServer(ctx context.Context) (*grpcSubsystem, erro
 // traceRecovery returns the unary interceptor that recovers a panic of the
 // trace service. The trace server has no stream method, so it drops the stream
 // interceptor.
-func (d *daemonImpl) traceRecovery() (grpc.UnaryServerInterceptor, error) {
-	unary, _, err := panicRecoveryInterceptors(d.logger.Slog(), nil)
-	return unary, err
+func (d *daemonImpl) traceRecovery() grpc.UnaryServerInterceptor {
+	return withUnaryErrorDetail(unaryPanicRecovery(d.logger.Slog(), nil))
 }

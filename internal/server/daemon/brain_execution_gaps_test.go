@@ -64,7 +64,7 @@ func TestDecide_Failures(t *testing.T) {
 
 func TestAwaitMissionGate_AWorkItemWithNoMissionNeedsNoGate(t *testing.T) {
 	b := newBrainExecutor(nil, slog.Default())
-	b.gate = func(string) missionGateAwaiter {
+	b.gate = func(string) MissionGateAwaiter {
 		t.Fatal("the gate was read for a work item with no mission")
 		return nil
 	}
