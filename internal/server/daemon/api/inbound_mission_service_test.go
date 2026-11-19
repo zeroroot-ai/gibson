@@ -950,3 +950,18 @@ func withPublication(e inboundmissionstore.Entry, id string) inboundmissionstore
 	e.PublicationID = id
 	return e
 }
+
+// The owner tuple is written inside the publish, under the lock of the name. A write
+// that fails undoes the publish, so no record exists with no owner tuple. Without this
+// the tuple was written after the commit, and an unpublish in the gap left a tuple with
+// no record.
+func TestPublishInboundMission_TheOwnerTupleIsPartOfThePublish(t *testing.T) {
+	f := newInboundFixture(t)
+	f.fga.writeErr = errInboundBoom
+
+	_, err := f.svc.PublishInboundMission(f.ctx, pub("recon", "def-1", goodTarget))
+
+	assert.Equal(t, codes.Internal, code(err))
+	_, stored := f.store.entries["recon"]
+	assert.False(t, stored, "the failed owner write leaves no record")
+}

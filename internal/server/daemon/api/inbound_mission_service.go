@@ -255,7 +255,8 @@ func publishTargets(rpc string, req *tenantv1.PublishInboundMissionRequest) ([]s
 }
 
 // PublishInboundMission saves the mark and writes the owner tuple of the object.
-// The tuple goes after the store, so a retry after a failure is safe.
+// The tuple is written inside the publish transaction, under the lock of the agent
+// name, so an unpublish cannot leave an owner tuple with no record.
 func (s *InboundMissionService) PublishInboundMission(
 	ctx context.Context, req *tenantv1.PublishInboundMissionRequest,
 ) (*tenantv1.PublishInboundMissionResponse, error) {
@@ -304,12 +305,20 @@ func (s *InboundMissionService) PublishInboundMission(
 	entry, err := s.store.Publish(ctx, tenant, inboundmissionstore.Entry{
 		Agent: req.GetAgent(), DefinitionID: def.ID, DefinitionHash: def.Hash, TargetIDs: targets, TargetHashes: hashes, MaxActive: req.GetMaxActiveMissions(),
 		PublishedBy: publishedBy,
-	}, func(ctx context.Context) error { return s.deleteStaleGrants(ctx, object) })
+	}, func(ctx context.Context) error {
+		// The owner tuple is written here, under the lock of the name, so an unpublish
+		// cannot run between the commit and the write and leave a tuple with no record.
+		// A failure undoes the insert.
+		if err := s.deleteStaleGrants(ctx, object); err != nil {
+			return err
+		}
+		if err := s.fga.Write(ctx, []authz.Tuple{{User: "tenant:" + tenant, Relation: "owner", Object: object}}); err != nil {
+			return fmt.Errorf("write the owner tuple: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, inboundStatus(rpc, err)
-	}
-	if err := s.fga.Write(ctx, []authz.Tuple{{User: "tenant:" + tenant, Relation: "owner", Object: object}}); err != nil {
-		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the owner tuple: %v", rpc, err))
 	}
 	return &tenantv1.PublishInboundMissionResponse{Entry: inboundEntryProto(*entry, "")}, nil
 }
