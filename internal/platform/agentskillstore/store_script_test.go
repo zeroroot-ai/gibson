@@ -370,7 +370,7 @@ func TestLoad_Failures(t *testing.T) {
 			got, err := scrStore(tt.db).Load(context.Background(), "acme", "web-recon", "sha256:aa")
 			require.Error(t, err)
 			if tt.wantIs != nil {
-				assert.ErrorIs(t, err, tt.wantIs)
+				require.ErrorIs(t, err, tt.wantIs)
 			}
 			assert.Contains(t, err.Error(), tt.want)
 			assert.Nil(t, got)

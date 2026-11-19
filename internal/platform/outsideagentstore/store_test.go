@@ -167,7 +167,7 @@ func TestRegister_ConflictOnEachField(t *testing.T) {
 			change(&want)
 			db := &fakeDB{exec: okExec, queryRow: func(string) datapool.Row { return fakeRow{values: rowOf(stored)} }}
 			_, err := newStore(db).Register(context.Background(), "acme", want)
-			assert.ErrorIs(t, err, ErrConflict)
+			require.ErrorIs(t, err, ErrConflict)
 			assert.Equal(t, 1, db.released)
 		})
 	}
@@ -209,7 +209,7 @@ func TestList_Failures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := newStore(tt.db).List(context.Background(), "acme")
 			require.Error(t, err)
-			assert.ErrorIs(t, err, errBoom)
+			require.ErrorIs(t, err, errBoom)
 			assert.Contains(t, err.Error(), tt.want)
 			assert.Nil(t, got)
 		})
