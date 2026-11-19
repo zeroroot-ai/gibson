@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ type fakePublished struct {
 	reserveErr      error
 	reservedMission string
 	releaseErr      error
+	mu              sync.Mutex // guards events, which parallel reads write
 	events          []string
 	owners          map[string]string
 	ownerErr        error
@@ -51,6 +53,8 @@ func (f *fakePublished) Release(_ context.Context, _, slot string) error {
 }
 
 func (f *fakePublished) Finish(_ context.Context, _, missionID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.events = append(f.events, "finish:"+missionID)
 	return nil
 }

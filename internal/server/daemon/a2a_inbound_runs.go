@@ -58,6 +58,8 @@ type inboundRuns struct {
 	flight singleflight.Group
 	// gate bounds the results in work for a tenant and for a caller.
 	gate *resultGate
+	// buildTimeout bounds the build of one result. Zero means the default.
+	buildTimeout time.Duration
 	// stop ends a running mission of the tenant on the context.
 	stop func(ctx context.Context, missionID string) error
 }
@@ -407,23 +409,50 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 	if res, ok := r.results.get(key); ok {
 		return withResult(t, res), nil
 	}
-	// Parallel reads of one mission build the result once and share it.
-	v, err, _ := r.flight.Do(key, func() (any, error) {
+	// Parallel reads of one mission build the result once and share it. The build
+	// does not stop when one reader leaves, because the other readers use it. It stops
+	// after the build timeout. Each reader leaves when its own context ends.
+	ch := r.flight.DoChan(key, func() (any, error) {
 		if res, ok := r.results.get(key); ok {
 			return res, nil
 		}
-		res, err := r.buildResult(context.WithoutCancel(ctx), c.Tenant, missionID)
+		bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.buildTimeoutOrDefault())
+		defer cancel()
+		res, err := r.buildResult(bctx, c.Tenant, missionID)
 		if err != nil {
 			return inboundResult{}, err
 		}
 		r.results.put(key, res)
 		return res, nil
 	})
-	if err != nil {
-		return nil, fmt.Errorf("read the result: %w", err)
+	var v any
+	select {
+	case <-ctx.Done():
+		release()
+		return nil, fmt.Errorf("read the result: %w", ctx.Err())
+	case out := <-ch:
+		if out.Err != nil {
+			// A failed build holds no result, so its permit goes back at once.
+			release()
+			if errors.Is(out.Err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("%w: the result of mission %s is not ready", a2aserver.ErrBusy, m.ID)
+			}
+			return nil, fmt.Errorf("read the result: %w", out.Err)
+		}
+		v = out.Val
 	}
 	res, _ := v.(inboundResult)
 	return withResult(t, res), nil
+}
+
+// inboundResultBuildTimeout is the longest time to build one result.
+const inboundResultBuildTimeout = 5 * time.Minute
+
+func (r *inboundRuns) buildTimeoutOrDefault() time.Duration {
+	if r.buildTimeout > 0 {
+		return r.buildTimeout
+	}
+	return inboundResultBuildTimeout
 }
 
 // resultGate bounds the results that are in work for one tenant and for one caller.

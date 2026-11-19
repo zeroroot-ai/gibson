@@ -512,6 +512,61 @@ func TestInboundRuns_CancelEndsTheMissionOfTheCaller(t *testing.T) {
 	assert.Equal(t, "acme", tenant.String(), "the stop runs for the tenant of the caller")
 }
 
+// hangingFindings reads no finding until the context ends. It stands for a read
+// that hangs.
+type hangingFindings struct{ started chan struct{} }
+
+func (b *hangingFindings) ReadFindings(
+	ctx context.Context, _ string, _ types.ID, _ func(finding.EnhancedFinding) error,
+) error {
+	close(b.started)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// A build that never ends stops after the build timeout. The caller gets a retryable
+// error and its permit goes back at once.
+func TestInboundRuns_ABuildThatHangsStopsAtTheTimeout(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.end(brain.MissionCompleted)
+	f.runs.findings = &hangingFindings{started: make(chan struct{})}
+	f.runs.gate = newResultGate(1, 1)
+	f.runs.buildTimeout = 50 * time.Millisecond
+
+	_, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
+
+	require.ErrorIs(t, err, a2aserver.ErrBusy)
+	release, ok := f.runs.gate.acquire("acme", ownerCaller.Subject)
+	assert.True(t, ok, "the failed build gave its permit back")
+	release()
+}
+
+// A reader whose context ends leaves at once. The build goes on for the others.
+func TestInboundRuns_AReaderLeavesWhenItsContextEnds(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.end(brain.MissionCompleted)
+	blocking := &hangingFindings{started: make(chan struct{})}
+	f.runs.findings = blocking
+	f.runs.buildTimeout = 10 * time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.runs.Task(ctx, ownerCaller, "recon", a2a.TaskID(f.mission))
+		done <- err
+	}()
+	<-blocking.started
+	cancel()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reader did not leave when its context ended")
+	}
+}
+
 // A cancel answers with the status. It builds no result and writes no cache entry,
 // because the findings of a mission that is still ending are not final. A gate with
 // no free permit must not turn a stopped mission into a busy error either.
