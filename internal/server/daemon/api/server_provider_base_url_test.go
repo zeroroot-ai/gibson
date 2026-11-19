@@ -5,6 +5,8 @@ package api
 
 import (
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -100,4 +102,60 @@ func TestNewDaemonServer_HasTheModelEndpointResolver(t *testing.T) {
 	s := NewDaemonServer(nil, nil, nil)
 	assert.Equal(t, net.DefaultResolver, s.modelEndpointResolver)
 	assert.False(t, s.allowPrivateModelEndpoints)
+}
+
+// A provider that the gateway routes needs a base_url that the ModelProvider
+// CRD accepts. Without this rule the save passes, the CRD refuses the record,
+// and the provider never reconciles with no error to the user. The rule holds
+// with allow_private_llm_endpoints set.
+func TestSaveProvider_RefusesABaseURLThatTheCRDRefuses(t *testing.T) {
+	resolver := fakeOutsideResolver{"api.example": {net.ParseIP("93.184.216.34")}}
+	for _, allowPrivate := range []bool{false, true} {
+		for _, raw := range []string{
+			"http://api.example/v1",
+			"https://user:pw@api.example/v1",
+			"https://api.example/v1?key=x",
+			"https://api.example/v1#frag",
+			"https://api.example/v1?",
+		} {
+			store := &mockProviderStore{createOut: fakeProviderRecord("p")}
+			s := serverWithStore(t, store)
+			s.modelEndpointResolver = resolver
+			s.WithPrivateModelEndpoints(allowPrivate)
+			_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{Input: baseURLInput(raw)})
+			require.Error(t, err, "%s (allow private %v)", raw, allowPrivate)
+			assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+			assert.Contains(t, err.Error(), "must be an https URL")
+			assert.Nil(t, store.capturedCreateInput, "nothing is saved")
+		}
+	}
+	// A path is allowed, as the CRD allows it.
+	store := &mockProviderStore{createOut: fakeProviderRecord("p")}
+	s := serverWithStore(t, store)
+	s.modelEndpointResolver = resolver
+	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
+		Input: baseURLInput("https://api.example:8443/inference/v1"),
+	})
+	require.NoError(t, err)
+}
+
+// A type that the gateway does not route never becomes a ModelProvider, so the
+// CRD shape does not apply to it. The address check still does.
+func TestSaveProvider_AnUnroutedTypeKeepsItsURLShape(t *testing.T) {
+	store := &mockProviderStore{createOut: fakeProviderRecord("p")}
+	s := serverWithStore(t, store)
+	s.modelEndpointResolver = fakeOutsideResolver{"ollama.example": {net.ParseIP("93.184.216.34")}}
+	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{Input: &tenantv1.ProviderConfigInput{
+		Name: "local", Type: "ollama", DefaultModel: "m", DefaultModelContextWindow: 8192,
+		Credentials: map[string]string{fieldBaseURL: "http://ollama.example:11434"},
+	}})
+	require.NoError(t, err)
+}
+
+// The pattern of the save is the pattern of the CRD.
+func TestModelProviderBaseURLPattern_IsThePatternOfTheCRD(t *testing.T) {
+	crd, err := os.ReadFile(filepath.Join("..", "..", "..", "..",
+		"operators", "tenant", "config", "crd", "bases", "gibson.zeroroot.ai_modelproviders.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(crd), "pattern: "+modelProviderBaseURLPattern.String())
 }

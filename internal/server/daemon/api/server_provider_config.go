@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -395,6 +396,10 @@ func (s *DaemonServer) checkProviderCABundle(ctx context.Context, in *tenantv1.P
 	return nil
 }
 
+// modelProviderBaseURLPattern is the pattern of spec.baseURL in the
+// ModelProvider CRD (operators/tenant/api/v1alpha1). A test compares the two.
+var modelProviderBaseURLPattern = regexp.MustCompile(`^https://[^/?#@\s]+(/[^?#\s]*)?$`)
+
 // checkProviderBaseURL checks the credential field base_url of a provider at
 // save time. The model gateway calls that URL, so its host must resolve to
 // public addresses only. The check refuses a private, loopback, link-local or
@@ -413,6 +418,16 @@ func (s *DaemonServer) checkProviderBaseURL(ctx context.Context, in *tenantv1.Pr
 	}
 	if u.Hostname() == "" {
 		return fmt.Errorf("%s has no host", fieldBaseURL)
+	}
+	// A provider that the model gateway routes becomes a ModelProvider, and the
+	// CRD refuses a baseURL of another shape. The save refuses it first, so the
+	// user sees the error. A type that the gateway does not route never becomes
+	// a ModelProvider. The setting allow_private_llm_endpoints does not change
+	// the shape rule.
+	if _, skip := gatewayProviderType(providerconfig.ProviderType(in.GetType())); skip == "" &&
+		!modelProviderBaseURLPattern.MatchString(raw) {
+		return fmt.Errorf("%s must be an https URL with no user name, no query and no fragment, "+
+			"for example https://llm.example.com/v1", fieldBaseURL)
 	}
 	if s.allowPrivateModelEndpoints {
 		return nil
