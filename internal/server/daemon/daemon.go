@@ -134,6 +134,9 @@ type daemonImpl struct {
 	// WorldService read path reads through it. Lazily created at gRPC registration.
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
+	// missionGates holds the mission gate tap of each tenant engine (tenant id to
+	// *missionGateTap). The brain executor waits on it before it starts work.
+	missionGates sync.Map
 	// tenantBeliefs gives each tenant engine the belief version of its own
 	// tenant from the platform Postgres (ADR-0106, gibson#615). Held here so
 	// the mission launch path can pin the version of its tenant.
@@ -1150,6 +1153,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.modelClient = models
 	if d.brainRegistry != nil {
 		d.brainExecutor = newBrainExecutor(d.registryAdapter, d.logger.WithComponent("brain-executor").Slog())
+		d.brainExecutor.gate = d.missionGateOf
 		d.brainExecutor.models = d.modelClient
 		// A job node's jobs live in the tenant's data plane, which is built
 		// later in Start, so the store is read per dispatch (gibson#1713).
@@ -1194,13 +1198,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// created. An authorizer that cannot write a conditioned tuple leaves the
 		// tuple absent, and ext-authz then refuses each model call (fail closed).
 		d.brainRegistry.OnEngine(func(e *brain.Engine) {
-			cw, ok := d.authorizer.(authz.ConditionalWriter)
+			gw, ok := d.authorizer.(authz.MissionGateWriter)
 			if !ok {
-				d.logger.Error(ctx, "mission gate not installed: the authorizer cannot write a conditioned tuple",
+				d.logger.Error(ctx, "mission gate not installed: the authorizer cannot write the mission gate tuple",
 					"tenant", e.World.Tenant)
 				return
 			}
-			InstallMissionGate(e.World.Tenant, e, cw, d.logger.WithComponent("mission-gate").Slog())
+			d.missionGates.Store(e.World.Tenant,
+				InstallMissionGate(e.World.Tenant, e, gw, d.logger.WithComponent("mission-gate").Slog()))
 		})
 	}
 
@@ -2523,6 +2528,17 @@ func requireSPIFFETrustDomain(configured string, envoy spiffeid.ID) error {
 	}
 	if !envoy.MemberOf(td) {
 		return fmt.Errorf("GIBSON_SPIFFE_ENVOY_ID=%q is not in the configured trust domain %q", envoy.String(), configured)
+	}
+	return nil
+}
+
+// missionGateOf returns the mission gate of a tenant, or nil when the gate is not
+// installed for it.
+func (d *daemonImpl) missionGateOf(tenant string) missionGateAwaiter {
+	if v, ok := d.missionGates.Load(tenant); ok {
+		if tap, ok := v.(*missionGateTap); ok {
+			return tap
+		}
 	}
 	return nil
 }

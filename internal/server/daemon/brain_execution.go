@@ -87,6 +87,10 @@ type deciderModels interface {
 type brainExecutor struct {
 	registry component.ComponentDiscovery
 	logger   *slog.Logger
+	// gate returns the mission gate of a tenant, or nil when none is installed.
+	// Dispatch waits on it before it starts a work item, so the gate tuple that
+	// ext-authz reads is confirmed before the work item gets a task grant.
+	gate func(tenant string) missionGateAwaiter
 	// cancels holds the cancel function of each running A2A work item, by work
 	// id. CancelWork calls it. A mission node has no entry, because only an A2A
 	// CancelTask cancels a single item.
@@ -155,6 +159,23 @@ func (b *brainExecutor) get(missionID string) (*missionBinding, bool) {
 	return bind, ok
 }
 
+// awaitMissionGate waits until the gate tuple of the mission is confirmed. A work
+// item of a mission gets a task grant when it starts, and its agent then calls a
+// gateway at once. ext-authz refuses the call of a mission whose gate is not
+// open, so the gate comes first. The error says why the work item cannot start.
+func (b *brainExecutor) awaitMissionGate(ctx context.Context, eng *brain.Engine, req brain.DispatchRequest) error {
+	if b.gate == nil || req.MissionID == "" {
+		return nil
+	}
+	gate := b.gate(eng.World.Tenant)
+	if gate == nil {
+		return nil
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, missionGateAwaitTimeout)
+	defer cancel()
+	return gate.AwaitOpen(waitCtx, req.MissionID)
+}
+
 // Dispatch (brain.Dispatcher) launches the work off the tick and reports back via
 // WorkCompleted. Agent nodes go through the mission harness's delegation path;
 // tool nodes go through its tool path, which reaches remote components over the
@@ -173,6 +194,12 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 		return
 	}
 	go func() {
+		if err := b.awaitMissionGate(bind.ctx, bind.eng, req); err != nil {
+			b.logger.Error("work item not started: the mission gate is not open",
+				"mission_id", req.MissionID, "work_id", req.WorkID, "error", err)
+			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
+			return
+		}
 		switch req.Kind {
 		case "agent":
 			// The node's declared timeout is the agent's bound. Zero stays zero:

@@ -7,31 +7,49 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
-	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
-// gateRecorder is a missionGateWriter that records each write. failNext makes
-// the next n writes fail.
-type gateRecorder struct {
-	mu       sync.Mutex
-	writes   []authz.ConditionalTuple
-	failNext int
+// gateWrite is one call of SetMissionGate.
+type gateWrite struct {
+	tenant, mission string
+	active          bool
 }
 
-func (g *gateRecorder) UpdateConditionalTuple(_ context.Context, t authz.ConditionalTuple) error {
+// gateRecorder is a missionGateWriter that records each write. failNext makes
+// the next n writes fail. When block is not nil, each write waits for it to be
+// closed before it returns, and started gets one value when a write starts.
+type gateRecorder struct {
+	mu       sync.Mutex
+	writes   []gateWrite
+	failNext int
+	block    chan struct{}
+	started  chan struct{}
+}
+
+func (g *gateRecorder) SetMissionGate(_ context.Context, tenant, mission string, active bool) error {
+	if g.started != nil {
+		select {
+		case g.started <- struct{}{}:
+		default:
+		}
+	}
+	if g.block != nil {
+		<-g.block
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.failNext > 0 {
 		g.failNext--
 		return errors.New("fga down")
 	}
-	g.writes = append(g.writes, t)
+	g.writes = append(g.writes, gateWrite{tenant: tenant, mission: mission, active: active})
 	return nil
 }
 
@@ -40,7 +58,7 @@ func (g *gateRecorder) actives() []bool {
 	defer g.mu.Unlock()
 	out := make([]bool, 0, len(g.writes))
 	for _, w := range g.writes {
-		out = append(out, w.ConditionContext[authz.ConditionParamActive].(bool))
+		out = append(out, w.active)
 	}
 	return out
 }
@@ -51,18 +69,24 @@ func (g *gateRecorder) count() int {
 	return len(g.writes)
 }
 
-func newGateEngine(t *testing.T, w missionGateWriter) *brain.Engine {
-	t.Helper()
-	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+func newGateTap(eng *brain.Engine, w missionGateWriter) *missionGateTap {
 	tap := &missionGateTap{
 		tenant:  "acme",
 		eng:     eng,
 		writer:  w,
 		logger:  slog.New(slog.DiscardHandler),
 		backoff: func(int) time.Duration { return time.Millisecond },
-		last:    map[string]bool{},
+		states:  map[string]*gateState{},
+		notify:  make(chan struct{}),
 	}
 	eng.Subscribe(tap.apply)
+	return tap
+}
+
+func newGateEngine(t *testing.T, w missionGateWriter) *brain.Engine {
+	t.Helper()
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	newGateTap(eng, w)
 	return eng
 }
 
@@ -101,9 +125,8 @@ func TestMissionGate_FollowsTheLifecycle(t *testing.T) {
 	g.mu.Lock()
 	first := g.writes[0]
 	g.mu.Unlock()
-	if first.User != "tenant:acme" || first.Relation != "active" || first.Object != "mission:m1" ||
-		first.ConditionName != "mission_active" {
-		t.Errorf("first write = %+v, want tenant:acme active mission:m1 with mission_active", first)
+	if first.tenant != "acme" || first.mission != "m1" || !first.active {
+		t.Errorf("first write = %+v, want tenant acme, mission m1, active", first)
 	}
 
 	eng.Submit(brain.MissionPauseRequested{ID: "m1", RunID: "r1"})
@@ -243,7 +266,7 @@ func TestMissionGate_SweepWritesTheTupleOfEachMission(t *testing.T) {
 	got := map[string]bool{}
 	g.mu.Lock()
 	for _, w := range g.writes {
-		got[w.Object] = w.ConditionContext[authz.ConditionParamActive].(bool)
+		got["mission:"+w.mission] = w.active
 	}
 	g.mu.Unlock()
 	want := map[string]bool{
@@ -260,4 +283,178 @@ func TestMissionGate_SweepWritesTheTupleOfEachMission(t *testing.T) {
 	if _, ok := got["mission:submitted"]; ok {
 		t.Error("the sweep wrote a tuple for a submitted mission")
 	}
+}
+
+// The gate of a new mission must be confirmed before a work item starts. A work
+// item gets its task grant when it starts, and its agent calls a gateway at
+// once. AwaitOpen blocks until the write returned. With the old order (write in
+// the background, work dispatched at once) the wait would not exist.
+func TestMissionGate_AwaitOpenWaitsForTheConfirmedWrite(t *testing.T) {
+	g := &gateRecorder{block: make(chan struct{}), started: make(chan struct{}, 1)}
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	tap := newGateTap(eng, g)
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	<-g.started // the write is on its way and is not confirmed
+
+	done := make(chan error, 1)
+	go func() { done <- tap.AwaitOpen(context.Background(), "m1") }()
+	select {
+	case err := <-done:
+		t.Fatalf("AwaitOpen returned (%v) before the write was confirmed", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(g.block)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("AwaitOpen: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("AwaitOpen did not return after the write was confirmed")
+	}
+	if g.count() != 1 {
+		t.Errorf("gate writes = %v, want the one write", g.actives())
+	}
+}
+
+// A mission whose gate cannot be written must not start work, and the error says
+// why.
+func TestMissionGate_AwaitOpenReturnsTheErrorOfAFailedWrite(t *testing.T) {
+	g := &gateRecorder{failNext: missionGateAttempts}
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	tap := newGateTap(eng, g)
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "r1"})
+	eng.Tick()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := tap.AwaitOpen(ctx, "m1")
+	if err == nil || !strings.Contains(err.Error(), "fga down") || !strings.Contains(err.Error(), "m1") {
+		t.Fatalf("AwaitOpen = %v, want an error that names the mission and the cause", err)
+	}
+}
+
+// A gate that is closed (a paused mission, an ended mission) or unknown does not
+// make a work item wait: ext-authz refuses its call, which is the right answer.
+func TestMissionGate_AwaitOpenDoesNotWaitOnAClosedGate(t *testing.T) {
+	g := &gateRecorder{}
+	eng := newGateEngine(t, g)
+	tap := newGateTap(brain.NewEngine("acme", braintest.NewMemTimelineStore()), g)
+	if err := tap.AwaitOpen(context.Background(), "unknown"); err != nil {
+		t.Fatalf("an unknown mission: %v", err)
+	}
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	waitWrites(t, g, 1)
+	eng.Submit(brain.MissionPauseRequested{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	waitWrites(t, g, 2)
+}
+
+// A resume opens the gate in the same order: the work that the resume lets run
+// waits for the confirmed write.
+func TestMissionGate_ResumeHasTheSameOrder(t *testing.T) {
+	g := &gateRecorder{}
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	tap := newGateTap(eng, g)
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	waitWrites(t, g, 1)
+	eng.Submit(brain.MissionPauseRequested{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	waitWrites(t, g, 2)
+
+	g.block = make(chan struct{})
+	g.started = make(chan struct{}, 1)
+	eng.Submit(brain.MissionResumed{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	<-g.started
+	done := make(chan error, 1)
+	go func() { done <- tap.AwaitOpen(context.Background(), "m1") }()
+	select {
+	case <-done:
+		t.Fatal("AwaitOpen returned before the write of the resume was confirmed")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(g.block)
+	if err := <-done; err != nil {
+		t.Fatalf("AwaitOpen after the resume: %v", err)
+	}
+	if got, want := g.actives(), []bool{true, false, true}; !equalBools(got, want) {
+		t.Errorf("gate values = %v, want %v", got, want)
+	}
+}
+
+// The brain executor starts no work item before the gate is open. A work item of
+// an unknown kind fails at once when it starts, so it shows when the start
+// happens.
+func TestBrainExecutor_DispatchWaitsForTheGate(t *testing.T) {
+	g := &gateRecorder{block: make(chan struct{}), started: make(chan struct{}, 1)}
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	tap := newGateTap(eng, g)
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	<-g.started
+
+	b := newBrainExecutor(nil, slog.New(slog.DiscardHandler))
+	b.gate = func(string) missionGateAwaiter { return tap }
+	b.register("m1", &missionBinding{ctx: context.Background(), runID: "r1", eng: eng, slot: "primary"})
+
+	eng.Submit(brain.WorkDispatched{ID: "w1", MissionID: "m1", RunID: "r1", ItemKind: "bogus", Target: "x"})
+	eng.Tick()
+	b.Dispatch(brain.DispatchRequest{MissionID: "m1", RunID: "r1", WorkID: "w1", Kind: "bogus", Target: "x"})
+	time.Sleep(150 * time.Millisecond)
+	eng.Tick()
+	if hasWorkCompleted(eng, "w1") {
+		t.Fatal("the work item started before the gate write was confirmed")
+	}
+	close(g.block)
+	deadline := time.Now().Add(2 * time.Second)
+	for !hasWorkCompleted(eng, "w1") {
+		if time.Now().After(deadline) {
+			t.Fatal("the work item never started after the gate was confirmed")
+		}
+		eng.Tick()
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A mission whose gate cannot be written fails its work item with the reason.
+func TestBrainExecutor_DispatchFailsTheWorkWhenTheGateCannotOpen(t *testing.T) {
+	g := &gateRecorder{failNext: missionGateAttempts}
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	tap := newGateTap(eng, g)
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "r1"})
+	eng.Tick()
+
+	b := newBrainExecutor(nil, slog.New(slog.DiscardHandler))
+	b.gate = func(string) missionGateAwaiter { return tap }
+	b.register("m1", &missionBinding{ctx: context.Background(), runID: "r1", eng: eng, slot: "primary"})
+	eng.Submit(brain.WorkDispatched{ID: "w1", MissionID: "m1", RunID: "r1", ItemKind: "agent", Target: "x"})
+	eng.Tick()
+	b.Dispatch(brain.DispatchRequest{MissionID: "m1", RunID: "r1", WorkID: "w1", Kind: "agent", Target: "x"})
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		eng.Tick()
+		for _, w := range eng.Work() {
+			if w.ID == "w1" && strings.Contains(w.Err, "gate of mission m1 could not be opened") {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the work item did not fail with the reason of the gate")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func hasWorkCompleted(eng *brain.Engine, id string) bool {
+	for _, w := range eng.Work() {
+		if w.ID == id && w.Err != "" {
+			return true
+		}
+	}
+	return false
 }
