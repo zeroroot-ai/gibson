@@ -352,7 +352,7 @@ func TestUnpublishInboundMission_Refusals(t *testing.T) {
 func TestGrantInboundCaller(t *testing.T) {
 	f := publishedFixture(t)
 	f.fga.allow("tenant:acme", "belongs_to", "agent_principal:a1")
-	_, err := f.svc.GrantInboundCaller(f.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "a1"})
+	_, err := f.svc.GrantInboundCaller(f.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
 	require.NoError(t, err)
 	assert.Contains(t, f.fga.writtenTuples(),
 		authz.Tuple{User: "agent_principal:a1", Relation: "granted_caller", Object: reconObject})
@@ -363,17 +363,17 @@ func TestGrantInboundCaller(t *testing.T) {
 		req   *tenantv1.GrantInboundCallerRequest
 		want  codes.Code
 	}{
-		{"a bad agent", nil, &tenantv1.GrantInboundCallerRequest{Agent: "Bad!", IdentityId: "a1"}, codes.InvalidArgument},
-		{"an identity id with a colon", nil, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "user:a1"},
+		{"a bad agent", nil, &tenantv1.GrantInboundCallerRequest{Agent: "Bad!", IdentityId: "agent_principal:a1"}, codes.InvalidArgument},
+		{"an identity id with no type prefix", nil, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "a1"},
 			codes.InvalidArgument},
-		{"an identity of another tenant", nil, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "x9"},
+		{"an identity of another tenant", nil, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:x9"},
 			codes.NotFound},
 		{"the tenant check fails", func(f *inboundFixture) { f.fga.checkErr = errInboundBoom },
-			&tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "a1"}, codes.Internal},
-		{"the agent is not published", nil, &tenantv1.GrantInboundCallerRequest{Agent: "other", IdentityId: "a1"},
+			&tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"}, codes.Internal},
+		{"the agent is not published", nil, &tenantv1.GrantInboundCallerRequest{Agent: "other", IdentityId: "agent_principal:a1"},
 			codes.NotFound},
 		{"the grant write fails", func(f *inboundFixture) { f.fga.writeErr = errInboundBoom },
-			&tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "a1"}, codes.Internal},
+			&tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"}, codes.Internal},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -386,13 +386,13 @@ func TestGrantInboundCaller(t *testing.T) {
 			assert.Equal(t, tt.want, code(err))
 		})
 	}
-	_, err = f.svc.GrantInboundCaller(context.Background(), &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "a1"})
+	_, err = f.svc.GrantInboundCaller(context.Background(), &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
 	assert.Equal(t, codes.PermissionDenied, code(err))
 }
 
 func TestRevokeInboundCaller(t *testing.T) {
 	f := publishedFixture(t)
-	_, err := f.svc.RevokeInboundCaller(f.ctx, &tenantv1.RevokeInboundCallerRequest{Agent: "recon", IdentityId: "a1"})
+	_, err := f.svc.RevokeInboundCaller(f.ctx, &tenantv1.RevokeInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
 	require.NoError(t, err)
 	assert.Equal(t, []authz.Tuple{{User: "agent_principal:a1", Relation: "granted_caller", Object: reconObject}},
 		f.fga.deleted)
@@ -403,10 +403,11 @@ func TestRevokeInboundCaller(t *testing.T) {
 		req   *tenantv1.RevokeInboundCallerRequest
 		want  codes.Code
 	}{
-		{"a bad agent", nil, &tenantv1.RevokeInboundCallerRequest{Agent: "Bad!", IdentityId: "a1"}, codes.InvalidArgument},
-		{"a bad identity", nil, &tenantv1.RevokeInboundCallerRequest{Agent: "recon", IdentityId: "a#1"}, codes.InvalidArgument},
+		{"a bad agent", nil, &tenantv1.RevokeInboundCallerRequest{Agent: "Bad!", IdentityId: "agent_principal:a1"}, codes.InvalidArgument},
+		{"a bad identity", nil, &tenantv1.RevokeInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a#1"}, codes.InvalidArgument},
+		{"a tool principal", nil, &tenantv1.RevokeInboundCallerRequest{Agent: "recon", IdentityId: "tool_principal:a1"}, codes.InvalidArgument},
 		{"the delete fails", func(f *inboundFixture) { f.fga.deleteErr = errInboundBoom },
-			&tenantv1.RevokeInboundCallerRequest{Agent: "recon", IdentityId: "a1"}, codes.Internal},
+			&tenantv1.RevokeInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"}, codes.Internal},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -418,7 +419,7 @@ func TestRevokeInboundCaller(t *testing.T) {
 			assert.Equal(t, tt.want, code(err))
 		})
 	}
-	_, err = f.svc.RevokeInboundCaller(context.Background(), &tenantv1.RevokeInboundCallerRequest{Agent: "recon", IdentityId: "a1"})
+	_, err = f.svc.RevokeInboundCaller(context.Background(), &tenantv1.RevokeInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
 	assert.Equal(t, codes.PermissionDenied, code(err))
 }
 
@@ -429,13 +430,13 @@ func TestListInboundCallers_PagesInMemoryOverAStableSort(t *testing.T) {
 
 	first, err := f.svc.ListInboundCallers(f.ctx, &tenantv1.ListInboundCallersRequest{Agent: "recon", PageSize: 2})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"a1", "a2"}, first.GetIdentityIds())
+	assert.Equal(t, []string{"agent_principal:a1", "agent_principal:a2"}, first.GetIdentityIds())
 	require.NotEmpty(t, first.GetNextPageToken())
 
 	second, err := f.svc.ListInboundCallers(f.ctx,
 		&tenantv1.ListInboundCallersRequest{Agent: "recon", PageSize: 2, PageToken: first.GetNextPageToken()})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"a3"}, second.GetIdentityIds())
+	assert.Equal(t, []string{"agent_principal:a3"}, second.GetIdentityIds())
 	assert.Empty(t, second.GetNextPageToken())
 
 	tests := []struct {

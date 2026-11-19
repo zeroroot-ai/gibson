@@ -96,13 +96,18 @@ func inboundObject(rpc, tenant, agent string) (string, error) {
 	return object, nil
 }
 
-// inboundIdentity checks the id of an agent identity and returns its FGA user.
+// inboundIdentity checks the id of an agent identity and returns it. The id is the
+// typed principal id that CreateAgentIdentity returns, "agent_principal:<id>", and
+// it is also the FGA user. Only an agent identity can be a caller, and the account
+// part holds no separator.
 func inboundIdentity(rpc, id string) (string, error) {
 	id = strings.TrimSpace(id)
-	if id == "" || strings.ContainsAny(id, ":#/ ") {
-		return "", status_grpc.Errorf(codes.InvalidArgument, "%s: the identity id is not valid", rpc)
+	account, fgaType, err := parsePrincipalID(id)
+	if err != nil || fgaType != "agent_principal" || account == "" || strings.ContainsAny(account, ":#/ ") {
+		return "", status_grpc.Errorf(codes.InvalidArgument,
+			"%s: the identity id must be an agent principal id, agent_principal:<id>", rpc)
 	}
-	return "agent_principal:" + id, nil
+	return id, nil
 }
 
 func inboundStatus(rpc string, err error) error {
@@ -341,7 +346,7 @@ func (s *InboundMissionService) ListInboundCallers(
 	}
 	ids := make([]string, 0, len(users))
 	for _, u := range users {
-		ids = append(ids, strings.TrimPrefix(u, "agent_principal:"))
+		ids = append(ids, u)
 	}
 	// The key of a grant is its identity id, which is unique.
 	ids, next := pagetoken.Page(page, ids, func(id string) string { return id })

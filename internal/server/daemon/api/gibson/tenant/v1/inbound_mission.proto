@@ -138,8 +138,9 @@ message UnpublishInboundMissionResponse {}
 
 message GrantInboundCallerRequest {
   string agent = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
-  // identity_id is the id of an agent identity of the tenant, with no type
-  // prefix.
+  // identity_id is the typed principal id of an agent identity of the tenant, as
+  // CreateAgentIdentity returns it: "agent_principal:<id>". An id with no type
+  // prefix is refused.
   string identity_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 255 }];
 }
 
@@ -159,6 +160,7 @@ message ListInboundCallersRequest {
 }
 
 message ListInboundCallersResponse {
+  // identity_ids are typed principal ids, "agent_principal:<id>".
   repeated string identity_ids = 1;
   string next_page_token = 2;
 }

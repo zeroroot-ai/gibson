@@ -440,8 +440,9 @@ type GrantInboundCallerRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	Agent string `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
-	// identity_id is the id of an agent identity of the tenant, with no type
-	// prefix.
+	// identity_id is the typed principal id of an agent identity of the tenant, as
+	// CreateAgentIdentity returns it: "agent_principal:<id>". An id with no type
+	// prefix is refused.
 	IdentityId string `protobuf:"bytes,2,opt,name=identity_id,json=identityId,proto3" json:"identity_id,omitempty"`
 }
 
@@ -690,6 +691,7 @@ type ListInboundCallersResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// identity_ids are typed principal ids, "agent_principal:<id>".
 	IdentityIds   []string `protobuf:"bytes,1,rep,name=identity_ids,json=identityIds,proto3" json:"identity_ids,omitempty"`
 	NextPageToken string   `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 }
