@@ -360,11 +360,13 @@ func TestPublishAgentSkill_RegistrySecret(t *testing.T) {
 	require.NoError(t, rerr)
 	assert.Equal(t, authn.Anonymous, a, "no secret name means an anonymous pull")
 
-	f.secrets.values["reg-cred"] = []byte(`{"auths":{"reg.example":{"username":"u","password":"p"}}}`)
+	// SetSecret stores a credential under "cred:<name>". The field names the
+	// secret as the dashboard shows it.
+	f.secrets.values["cred:reg-cred"] = []byte(`{"auths":{"reg.example":{"username":"u","password":"p"}}}`)
 	_, err = f.svc.PublishAgentSkill(f.ctx, &tenantv1.PublishAgentSkillRequest{
 		Name: "web-recon", Reference: skillRef, RegistrySecret: "reg-cred"})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"reg-cred"}, f.secrets.asked)
+	assert.Equal(t, []string{"cred:reg-cred"}, f.secrets.asked)
 	a, rerr = f.keychains[1].Resolve(reg)
 	require.NoError(t, rerr)
 	cfg, aerr := a.Authorization()

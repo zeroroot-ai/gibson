@@ -20,8 +20,10 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
+	tenantsecrets "github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/supplychain"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -210,11 +212,15 @@ func (s *AgentSkillService) PublishAgentSkill(
 // credential, as the bytes of a docker config. The value lives in the keychain
 // for this call and is never stored. The daemon process credential is never
 // used here, because it would lend the operator credential to a tenant.
+//
+// The field names the secret as the dashboard shows it. SetSecret stores a
+// credential under "cred:<name>", so the read uses the same rule
+// (secrets.StoredName).
 func (s *AgentSkillService) registryKeychain(ctx context.Context, rpc, secretName string) (authn.Keychain, error) {
 	if secretName == "" {
 		return authn.NewMultiKeychain(), nil
 	}
-	raw, err := s.secrets.Resolve(ctx, secretName)
+	raw, err := s.secrets.Resolve(ctx, tenantsecrets.StoredName(secretsv1.SecretCategory_SECRET_CATEGORY_CRED, secretName))
 	if err != nil {
 		return nil, status_grpc.Errorf(codes.FailedPrecondition, "%s: read the registry secret %q: %v", rpc, secretName, err)
 	}
