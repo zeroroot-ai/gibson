@@ -4,6 +4,7 @@
 package api
 
 import (
+	"google.golang.org/grpc/status"
 	"net"
 	"os"
 	"path/filepath"
@@ -49,6 +50,7 @@ func TestSaveProvider_RefusesAnInternalBaseURL(t *testing.T) {
 			require.Error(t, err)
 			assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 			assert.Nil(t, store.capturedCreateInput, "nothing is saved")
+			assertNoAddressDetail(t, err)
 
 			_, err = s.UpdateProvider(tenantCtx("acme"), &tenantv1.UpdateProviderRequest{
 				Name: "p", Input: baseURLInput(raw),
@@ -158,4 +160,15 @@ func TestModelProviderBaseURLPattern_IsThePatternOfTheCRD(t *testing.T) {
 		"operators", "tenant", "config", "crd", "bases", "gibson.zeroroot.ai_modelproviders.yaml"))
 	require.NoError(t, err)
 	assert.Contains(t, string(crd), "pattern: "+modelProviderBaseURLPattern.String())
+}
+
+// assertNoAddressDetail checks that an error for the client names no IP address, no
+// address class and no resolver. The detail goes to the daemon log.
+func assertNoAddressDetail(t *testing.T, err error) {
+	t.Helper()
+	text := status.Convert(err).Message()
+	assert.NotRegexp(t, `\d+\.\d+\.\d+\.\d+|::1`, text, "no IP address")
+	for _, word := range []string{"private address", "loopback", "link-local", "carrier-grade", "netguard", "lookup", "no such host", ":53"} {
+		assert.NotContains(t, text, word)
+	}
 }
