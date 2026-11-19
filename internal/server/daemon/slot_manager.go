@@ -207,7 +207,7 @@ func (m *DaemonSlotManager) ResolveSlot(ctx context.Context, slot agent.SlotDefi
 		// Fall back to the constraint search only when the provider is missing
 		// and the slot name set it as a preference. A provider that the user
 		// asked for, or a model below the constraints, is the answer.
-		if !(isProviderNotFoundError(err) && !hasExplicitProvider) {
+		if !isProviderNotFoundError(err) || hasExplicitProvider {
 			return harness.SlotModel{}, err
 		}
 	}

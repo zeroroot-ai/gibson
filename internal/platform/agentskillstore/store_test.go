@@ -73,7 +73,7 @@ func (c fakeConn) Release() {}
 
 type fakeConns struct{ sql *fakeSQL }
 
-func (f fakeConns) For(context.Context, string) (conn, error) { return fakeConn{sql: f.sql}, nil }
+func (f fakeConns) For(context.Context, string) (conn, error) { return fakeConn(f), nil }
 
 func newTestStore(sql *fakeSQL) *postgresStore { return &postgresStore{conns: fakeConns{sql: sql}} }
 

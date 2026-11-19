@@ -61,12 +61,10 @@ func convertSchemaFieldToSDK(f schema.JSON) *types.JSONSchema {
 		Required:    f.Required,
 	}
 
-	// Convert enum ([]string to []any)
+	// Copy the enum values.
 	if len(f.Enum) > 0 {
 		result.Enum = make([]any, len(f.Enum))
-		for i, v := range f.Enum {
-			result.Enum[i] = v
-		}
+		copy(result.Enum, f.Enum)
 	}
 
 	// Convert nested properties
@@ -94,7 +92,7 @@ func StructuredSchema(schemaType any) (schemaName string, schemaJSON json.RawMes
 	if t == nil {
 		return "", nil, errors.New("schema type cannot be nil")
 	}
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	name := t.Name()

@@ -47,7 +47,7 @@ var (
 	// format.
 	ErrInvalidFolder = errors.New("invalid Agent Skill folder")
 	// ErrOverLimit marks a folder that is over a size limit.
-	ErrOverLimit = errors.New("Agent Skill folder is over a size limit")
+	ErrOverLimit = errors.New("the Agent Skill folder is over a size limit")
 )
 
 // File is one file of the folder. Path is relative to the root of the folder

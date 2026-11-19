@@ -110,7 +110,7 @@ func (r *ModelProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if err := r.Update(ctx, &mp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("add the finalizer: %w", err)
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	if mp.Status.ObservedGeneration != mp.Generation {

@@ -25,7 +25,8 @@ func TestNewToolCallID_MintsAFreshIDWhenEmpty(t *testing.T) {
 }
 
 func TestQueuedToolCallID_IsStableAndUnique(t *testing.T) {
-	if queuedToolCallID("job-1", 0) != queuedToolCallID("job-1", 0) {
+	first, again := queuedToolCallID("job-1", 0), queuedToolCallID("job-1", 0)
+	if first != again {
 		t.Fatal("the id of one input must not change")
 	}
 	seen := map[string]bool{}

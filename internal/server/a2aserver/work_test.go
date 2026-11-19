@@ -13,7 +13,8 @@ import (
 )
 
 func TestTaskIDOf_IsStableAndUnique(t *testing.T) {
-	if TaskIDOf("w1") != TaskIDOf("w1") || TaskIDOf("w1") == TaskIDOf("w2") {
+	first, again, other := TaskIDOf("w1"), TaskIDOf("w1"), TaskIDOf("w2")
+	if first != again || first == other {
 		t.Fatal("the task id must depend on the work id only")
 	}
 }
