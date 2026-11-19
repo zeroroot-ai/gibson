@@ -123,6 +123,13 @@ runs:
     # The e2eRunner values register the ClusterSPIFFEID of the runner, allow-list
     # its SVID on the daemon, and set GIBSON_TEST_FIXTURES_ENABLED. One patch means
     # one Argo sync and one rollout of each component.
+    #
+    # gateway.inClusterProviders opens the network policy of the proxy to the mock
+    # provider and to no other pod. The entry matches tests/fixtures/mockprovider/
+    # mockprovider.yaml: the namespace gibson-e2e-mock, the pod label
+    # app=mock-provider, and the container port 8443 of the TLS front (not the
+    # Service port 443, and not the record port 18080). The chart owns the policy
+    # of the proxy, so the fixture has none.
     - name: Point the Argo application at the images of the checkout
       shell: bash
       working-directory: hosted
@@ -132,7 +139,7 @@ runs:
       run: |
         set -euo pipefail
         kubectl -n argocd patch application gibson --type json -p '[
-            {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n      - platform/e2e-member\n"},
+            {"op":"add","path":"/spec/source/helm/values","value":"gateway:\n  inClusterProviders:\n    - namespace: gibson-e2e-mock\n      podLabels:\n        app: mock-provider\n      ports:\n        - 8443\ngibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n      - platform/e2e-member\n"},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"'"${TAG}"'","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.digest","value":"","forceString":true}},

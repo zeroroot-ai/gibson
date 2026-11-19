@@ -8,7 +8,10 @@
 #
 #   1. Build the image and load it into kind.
 #   2. Make a CA and a certificate for the Service name of the mock.
-#   3. Apply mockprovider.yaml and wait for the rollout.
+#   3. Apply mockprovider.yaml and wait for the rollout. The names in it (the
+#      namespace gibson-e2e-mock, the label app=mock-provider and the TLS front
+#      port 8443) are the values of gateway.inClusterProviders that the action
+#      .github/actions/aaif-exit-cluster patches into the Argo application.
 #   4. Write the two URLs and the CA of the mock to the env file that
 #      run-e2e-job.sh reads.
 #

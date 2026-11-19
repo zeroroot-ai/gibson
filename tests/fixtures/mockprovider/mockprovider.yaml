@@ -2,6 +2,12 @@
 # deploy.sh applies this file after it loads the image into kind. It also makes
 # the Secret mock-provider-tls (a certificate for the Service name).
 #
+# The proxy of the model gateway reaches the mock through the chart value
+# gateway.inClusterProviders. The action .github/actions/aaif-exit-cluster sets it
+# to this namespace (gibson-e2e-mock), this pod label (app: mock-provider) and the
+# container port 8443 of the container tlsfront. Change one here and change the
+# other there. The chart owns the policy of the proxy, so this file has none.
+#
 # The provider record of the tenant names https://mock-provider.gibson-e2e-mock.svc.cluster.local.
 # The gateway reaches the TLS front on port 443. The suite reads the requests that
 # the mock recorded on port 80, which serves plain HTTP.
@@ -84,7 +90,8 @@ spec:
       targetPort: recorded
 ---
 # The gateway namespace and the namespace of the daemon and the runner may reach
-# the mock. No other pod may.
+# the mock. No other pod may. The runner reaches it because its Job has the label
+# gibson.zeroroot.ai/egress-namespaces (.github/scripts/run-e2e-job.sh).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
