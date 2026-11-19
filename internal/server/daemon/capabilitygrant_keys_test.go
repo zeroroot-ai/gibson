@@ -138,7 +138,7 @@ func TestCGKeys_PreviousDaemonKid_IsServedDuringTheRotationWindow(t *testing.T) 
 		previousKeyID: "cg-old",
 		jwks:          []byte(`{"keys":[{"kty":"OKP","kid":"cg-new"},{"kty":"OKP","kid":"cg-old"}]}`),
 	}
-	lookup := &fakeAgentKeyLookup{err: fmt.Errorf("%w: %v", capabilitygrant.ErrKeyNotAvailable, errNoSuchAgentKey)}
+	lookup := &fakeAgentKeyLookup{err: fmt.Errorf("%w: %w", capabilitygrant.ErrKeyNotAvailable, errNoSuchAgentKey)}
 	rr := getKey(t, capabilityGrantKeysHandler(minter, lookup), "cg-old")
 
 	if rr.Code != http.StatusOK {
@@ -157,7 +157,7 @@ func TestCGKeys_PreviousDaemonKid_IsServedDuringTheRotationWindow(t *testing.T) 
 // unknown kid.
 func TestCGKeys_RetiredDaemonKid_IsNotServed(t *testing.T) {
 	minter := fakeKeyMinter{keyID: "cg-new", jwks: []byte(`{"keys":[{"kty":"OKP","kid":"cg-new"}]}`)}
-	lookup := &fakeAgentKeyLookup{err: fmt.Errorf("%w: %v", capabilitygrant.ErrKeyNotAvailable, errNoSuchAgentKey)}
+	lookup := &fakeAgentKeyLookup{err: fmt.Errorf("%w: %w", capabilitygrant.ErrKeyNotAvailable, errNoSuchAgentKey)}
 	rr := getKey(t, capabilityGrantKeysHandler(minter, lookup), "cg-old")
 
 	if rr.Code != http.StatusNotFound {

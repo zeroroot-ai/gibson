@@ -57,7 +57,7 @@ func (s *CapabilityGrantService) AgentKeyDescriptor(ctx context.Context, kid str
 	}
 	pub, err := parseJWKEd25519(agent.PublicKeyJWK)
 	if err != nil {
-		return nil, fmt.Errorf("%w: parse the public key of %q: %v", ErrKeyNotAvailable, kid, err)
+		return nil, fmt.Errorf("%w: parse the public key of %q: %w", ErrKeyNotAvailable, kid, err)
 	}
 	held, err := s.store.ActiveCapabilityNames(ctx, agent.TenantID, agent.PrincipalRef)
 	if err != nil {
