@@ -66,7 +66,8 @@ var testAgentGateway = GatewayInfo{URL: "https://agents.example.test/", CAPEM: "
 func newResolveEnv(t *testing.T, slots *fakeSlotModels) *workIDEnv {
 	t.Helper()
 	env := newWorkIDEnv(t)
-	env.svc.WithSlotModelResolver(slots).WithGateways(testModelGateway, testAgentGateway)
+	env.svc.WithSlotModelResolver(slots).WithGateways(testModelGateway, testAgentGateway).
+		WithOutsideAgents(&memOutsideAgents{})
 	return env
 }
 

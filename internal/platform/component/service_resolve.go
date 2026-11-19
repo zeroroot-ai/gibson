@@ -82,11 +82,8 @@ func (s *ComponentServiceServer) WithOutsideAgents(store outsideagentstore.Store
 }
 
 // outsideAgentExists reports whether the tenant registered an outside agent of
-// this name.
+// this name. The daemon wires the store before it serves (WithOutsideAgents).
 func (s *ComponentServiceServer) outsideAgentExists(ctx context.Context, tenant, name string) (bool, error) {
-	if s.outsideAgents == nil {
-		return false, nil
-	}
 	_, err := s.outsideAgents.Get(ctx, tenant, name)
 	switch {
 	case err == nil:
