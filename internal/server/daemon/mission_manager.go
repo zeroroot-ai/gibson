@@ -29,6 +29,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 // targetStoreLookup is the target read surface used by mission resolution.
@@ -481,6 +483,18 @@ func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (strin
 	if err != nil {
 		return "", err
 	}
+	// The pin is checked on the definition that this start loaded, before the
+	// target binding, the reservation of the budget and the write of the record. A
+	// definition that changed after the publication check is refused here.
+	if req.PinnedDefinitionHash != "" {
+		got, hashErr := definitionHash(def)
+		if hashErr != nil {
+			return "", hashErr
+		}
+		if got != req.PinnedDefinitionHash {
+			return "", grpcstatus.Error(grpccodes.FailedPrecondition, "the mission definition changed after it was published")
+		}
+	}
 
 	m.logger.Debug("mission definition loaded",
 		"mission_name", def.GetName(),
@@ -506,6 +520,9 @@ func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (strin
 	if err != nil {
 		return "", err
 	}
+	if err := checkTargetPin(req.PinnedTargetHashes, targetID, target); err != nil {
+		return "", err
+	}
 	resolvedTargetID := target.ID
 	targetRef := runTargetRef(target)
 	// The other targets get the same ownership check as the primary one. A target
@@ -515,6 +532,9 @@ func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (strin
 		extra, extraErr := resolveTargetUUID(ctx, m.targetStore, id, resolveTargetCallerTenant(ctx))
 		if extraErr != nil {
 			return "", extraErr
+		}
+		if err := checkTargetPin(req.PinnedTargetHashes, id, extra); err != nil {
+			return "", err
 		}
 		additionalTargetIDs = append(additionalTargetIDs, extra.ID)
 	}
@@ -575,6 +595,23 @@ func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (strin
 	}
 
 	return m.startRun(ctx, callingTenant, missionRecord, def)
+}
+
+// checkTargetPin refuses a target whose hash is not the pinned one. A target with
+// no pin is not checked.
+func checkTargetPin(pins map[string]string, id string, t *types.Target) error {
+	want, ok := pins[id]
+	if !ok {
+		return nil
+	}
+	got, err := targetHash(t)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return grpcstatus.Error(grpccodes.FailedPrecondition, "an approved target changed after it was published")
+	}
+	return nil
 }
 
 // newRunTemplate builds the mission record that Run finds or creates. The name

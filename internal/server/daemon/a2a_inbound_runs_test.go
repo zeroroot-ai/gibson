@@ -121,6 +121,8 @@ func TestInboundRuns_StartsANewMissionWithThePublishedTargets(t *testing.T) {
 	require.Len(t, starter.started, 1)
 	got := starter.started[0]
 	assert.Equal(t, "def-1", got.MissionDefinitionID, "the definition is the published one")
+	assert.Equal(t, "hash-1", got.PinnedDefinitionHash, "the start gets the pin of the publication")
+	assert.Equal(t, map[string]string{"t1": "h1", "t2": "h2", "t3": "h3"}, got.PinnedTargetHashes)
 	assert.Equal(t, []string{"t1", "t2", "t3"}, got.TargetIDs)
 	assert.Equal(t, map[string]string{"a2a_task_input": "map the network"}, got.Variables, "the text is the task input")
 	assert.Equal(t, principal.Principal{Kind: principal.Component, ID: inboundCallerRef}, got.CreatedBy)

@@ -697,6 +697,16 @@ type RunMissionData struct {
 	// CreatedBy is who started the mission. The zero value means nobody is
 	// recorded.
 	CreatedBy principal.Principal
+	// PinnedDefinitionHash, when it is set, is the hash that the definition must have
+	// when the mission loads it. A mission start that loads another definition is
+	// refused with FailedPrecondition and writes no mission record. The inbound entry
+	// point sets it from the publication, so a change between its check and the load
+	// cannot start a mission.
+	PinnedDefinitionHash string
+	// PinnedTargetHashes holds, by target ID, the hash that each target must have
+	// when the mission resolves it. A target with an entry that has another hash is
+	// refused in the same way.
+	PinnedTargetHashes map[string]string
 }
 
 // MissionEventData represents mission event data from the daemon.

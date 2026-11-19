@@ -11,6 +11,8 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
@@ -80,4 +82,73 @@ func TestRun_RefusesATargetSetWithATargetOfAnotherTenant(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 	assert.Empty(t, mm.activeMissions, "no mission started")
+}
+
+// The pin is checked on the definition and the targets that the start loads. A
+// definition or a target that changed after the publication check is refused with
+// FailedPrecondition, before any mission record is written.
+func TestRun_RefusesADefinitionOrATargetThatDoesNotMatchItsPin(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	tenant := auth.MustNewTenantID("acme")
+	ctx := auth.WithTenant(context.Background(), tenant)
+	def := &missionpb.MissionDefinition{Id: "def-1", Name: "recon"}
+	store := mission.NewConnBoundMissionStore(rdb)
+	require.NoError(t, store.CreateDefinition(ctx, def))
+	stored, err := store.GetDefinition(ctx, "recon")
+	require.NoError(t, err)
+	goodHash, err := definitionHash(stored)
+	require.NoError(t, err)
+
+	own := &types.Target{ID: types.NewID(), TenantID: "acme", Name: "own"}
+	other := &types.Target{ID: types.NewID(), TenantID: "acme", Name: "other"}
+	ownHash, err := targetHash(own)
+	require.NoError(t, err)
+	newManager := func() *missionManager {
+		mm := helperMM()
+		mm.pool = &mockPool{conn: &datapool.Conn{Redis: rdb}}
+		mm.targetStore = &fakeTargetsByID{byID: map[types.ID]*types.Target{own.ID: own, other.ID: other}}
+		return mm
+	}
+	base := api.RunMissionData{MissionDefinitionID: "recon", TargetIDs: []string{own.ID.String(), other.ID.String()}}
+
+	tests := []struct {
+		name   string
+		mutate func(r *api.RunMissionData)
+		refuse string
+	}{
+		{"a definition that changed", func(r *api.RunMissionData) { r.PinnedDefinitionHash = "old" }, "definition changed"},
+		{"a target that changed", func(r *api.RunMissionData) {
+			r.PinnedDefinitionHash = goodHash
+			r.PinnedTargetHashes = map[string]string{own.ID.String(): "old"}
+		}, "target changed"},
+		{"an additional target that changed", func(r *api.RunMissionData) {
+			r.PinnedDefinitionHash = goodHash
+			r.PinnedTargetHashes = map[string]string{own.ID.String(): ownHash, other.ID.String(): "old"}
+		}, "target changed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mm := newManager()
+			req := base
+			tt.mutate(&req)
+
+			_, err := mm.Run(ctx, req)
+
+			require.Error(t, err)
+			assert.Equal(t, grpccodes.FailedPrecondition, grpcstatus.Code(err), "%v", err)
+			assert.Contains(t, err.Error(), tt.refuse)
+			assert.Empty(t, mm.activeMissions, "no mission started")
+		})
+	}
+
+	// A start whose pins match goes past the pin check.
+	req := base
+	req.PinnedDefinitionHash = goodHash
+	req.PinnedTargetHashes = map[string]string{own.ID.String(): ownHash}
+	_, err = newManager().Run(ctx, req)
+	if err != nil {
+		assert.NotEqual(t, grpccodes.FailedPrecondition, grpcstatus.Code(err), "the pins match: %v", err)
+	}
 }

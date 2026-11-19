@@ -266,6 +266,10 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		MissionDefinitionID: pub.DefinitionID,
 		TargetIDs:           targets,
 		Variables:           map[string]string{inboundTaskInputVariable: a2aserver.TextOf(req.Message)},
+		// The mission start compares the definition and the targets that it loads with
+		// the pin of the publication, so a change after the check above starts nothing.
+		PinnedDefinitionHash: pub.DefinitionHash,
+		PinnedTargetHashes:   pinsOf(pub, targets),
 		// Each message starts a new mission, so each one has a name of its own.
 		NameSuffix: " (a2a " + strings.ReplaceAll(uuid.NewString(), "-", "")[:12] + ")",
 		CreatedBy:  inboundPrincipal(c.Subject),
@@ -275,7 +279,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		// A tenant that is suspended or over its quota is a refusal of policy. The
 		// Task is rejected, as for any other refusal of a well formed message.
 		if code := status.Code(err); rerr == nil && (code == codes.ResourceExhausted || code == codes.FailedPrecondition) {
-			return rejectedInboundTask("the tenant cannot start a mission now: " + status.Convert(err).Message()), nil
+			return rejectedInboundTask("the mission cannot start now: " + status.Convert(err).Message()), nil
 		}
 		if rerr != nil {
 			err = errors.Join(err, rerr)
@@ -418,6 +422,15 @@ func (r *inboundRuns) Cancel(ctx context.Context, c a2aserver.InboundCaller, age
 	m.Status = brain.MissionCanceled
 	m.Reason = "canceled by " + c.Subject
 	return r.taskOf(ctx, c, m)
+}
+
+// pinsOf returns the pinned hash of each target that the mission uses.
+func pinsOf(pub *inboundmissionstore.Entry, targets []string) map[string]string {
+	out := make(map[string]string, len(targets))
+	for _, id := range targets {
+		out[id] = pub.TargetHashes[id]
+	}
+	return out
 }
 
 // inboundPrincipal is the creator that a mission records for an inbound caller.

@@ -20,6 +20,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // registerInboundMission registers gibson.tenant.v1.InboundMissionService on srv
@@ -60,6 +61,18 @@ type inboundMissionSource struct {
 
 var _ api.InboundMissionSource = (*inboundMissionSource)(nil)
 
+// definitionHash is the SHA-256 of the canonical JSON of the whole definition, so a
+// change of a node, the budget or the scope changes it. A publication pins it, and
+// the mission start compares it with the definition that it loaded.
+func definitionHash(def *missionpb.MissionDefinition) (string, error) {
+	canonical, err := mission.MarshalDefinitionJSON(def)
+	if err != nil {
+		return "", fmt.Errorf("encode the definition: %w", err)
+	}
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:]), nil
+}
+
 // Definition returns the pin of a definition: its ID, the hash of its content and
 // the agents of its agent nodes. The hash is the SHA-256 of the canonical JSON of
 // the whole definition, so a change of a node, the budget or the scope changes it.
@@ -80,12 +93,11 @@ func (s *inboundMissionSource) Definition(ctx context.Context, definitionID stri
 	if err != nil {
 		return api.InboundDefinition{}, err
 	}
-	canonical, err := mission.MarshalDefinitionJSON(def)
+	hash, err := definitionHash(def)
 	if err != nil {
-		return api.InboundDefinition{}, fmt.Errorf("encode the definition: %w", err)
+		return api.InboundDefinition{}, err
 	}
-	sum := sha256.Sum256(canonical)
-	out := api.InboundDefinition{ID: def.GetId(), Hash: hex.EncodeToString(sum[:])}
+	out := api.InboundDefinition{ID: def.GetId(), Hash: hash}
 	for _, node := range def.GetNodes() {
 		if name := node.GetAgentConfig().GetAgentName(); name != "" {
 			out.Agents = append(out.Agents, name)
