@@ -5,11 +5,14 @@ package flows
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/types"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 )
 
 // TestComponentGrantTuplesCanonicalForm pins the FGA tuple shape the
@@ -69,5 +72,26 @@ func TestWriteComponentGrantsStepWritesCanonicalTuples(t *testing.T) {
 	}
 	if got := ae.Status.GrantsAppliedCount; got != 1 {
 		t.Errorf("GrantsAppliedCount = %d, want 1", got)
+	}
+}
+
+// deleteFailsFGA answers every Delete with err and embeds stubInvokeFGA for the
+// rest of the client.
+type deleteFailsFGA struct {
+	stubInvokeFGA
+	err error
+}
+
+func (d *deleteFailsFGA) Delete(context.Context, []fga.Tuple) error { return d.err }
+
+// TestDeleteAgentFGATuplesStepFailsOnARealNotFound: the client ignores a tuple
+// that is already gone, so a not-found from Delete is a real fault such as an
+// unknown store. The step must fail and retry, not report success.
+func TestDeleteAgentFGATuplesStepFailsOnARealNotFound(t *testing.T) {
+	ae := makeEnrollmentForKind("uid-del-1", "tenant-del", gibsonv1alpha1.PrincipalKindTool)
+	step := newDeleteAgentFGAStep(EnrollmentDeps{FGA: &deleteFailsFGA{err: fmt.Errorf("fga 404: %w", clients.ErrNotFound)}})
+	done, err := step.Provision(context.Background(), ae, nil)
+	if err == nil || done {
+		t.Fatalf("Provision = (%v, %v), want (false, an error)", done, err)
 	}
 }

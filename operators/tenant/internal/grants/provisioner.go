@@ -116,15 +116,14 @@ func (p *provisioner) Provision(ctx context.Context, tuples []fga.Tuple) error {
 	return nil
 }
 
-// Deprovision deletes every tuple. A not-found is treated as success so teardown
-// is idempotent (the fga.HTTPClient already maps "tuple did not exist" to
-// ErrNotFound, but we tolerate it here too in case a caller passes a stricter
-// client).
+// Deprovision deletes every tuple. The client ignores a tuple that is already
+// gone, so teardown is idempotent. Any error that comes back is a real one,
+// such as an unknown store, and the caller must see it.
 func (p *provisioner) Deprovision(ctx context.Context, tuples []fga.Tuple) error {
 	if len(tuples) == 0 {
 		return nil
 	}
-	if err := p.client.Delete(ctx, tuples); err != nil && !p.isNotFound(err) {
+	if err := p.client.Delete(ctx, tuples); err != nil {
 		return fmt.Errorf("grants.Deprovision: delete %d tuple(s): %w", len(tuples), err)
 	}
 	return nil

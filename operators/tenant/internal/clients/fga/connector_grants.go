@@ -100,16 +100,13 @@ func DeleteLegacyConnectorInvokeTuple(ctx context.Context, fgaClient Client, cat
 	return nil
 }
 
-// DeleteConnectorComponentGrants removes the connector's component tuples.
-// Tuples are deleted one at a time: Client.Delete treats a missing tuple as
-// idempotent success per call, but a transactional batch with one missing
-// member would leave the present ones behind.
+// DeleteConnectorComponentGrants removes the connector's component tuples in
+// one batch. Client.Delete ignores a tuple that is already gone and removes the
+// present ones, so a batch with one missing member leaves nothing behind.
 func DeleteConnectorComponentGrants(ctx context.Context, fgaClient Client, catalogID, tenantID string) error {
-	for _, tuple := range ConnectorComponentTuples(catalogID, tenantID) {
-		if err := fgaClient.Delete(ctx, []Tuple{tuple}); err != nil {
-			return fmt.Errorf("fga: DeleteConnectorComponentGrants connector=%s tenant=%s: %w",
-				catalogID, tenantID, err)
-		}
+	if err := fgaClient.Delete(ctx, ConnectorComponentTuples(catalogID, tenantID)); err != nil {
+		return fmt.Errorf("fga: DeleteConnectorComponentGrants connector=%s tenant=%s: %w",
+			catalogID, tenantID, err)
 	}
 	return nil
 }
