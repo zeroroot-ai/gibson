@@ -19,7 +19,10 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 )
 
-func edge(t *testing.T) context.Context { return peerContext(t, edgeSVID) }
+func edge(t *testing.T) context.Context {
+	t.Helper()
+	return peerContext(t, edgeSVID)
+}
 
 func TestEdgeForward_AGoodGrantPassesAndSetsOnlyTheTwoIdentityHeaders(t *testing.T) {
 	t.Parallel()
@@ -115,13 +118,16 @@ func TestEdgeForward_Refusals(t *testing.T) {
 		{"no grant", func(*testing.T, *EnvoyAuthzServer, ed25519.PrivateKey) string { return "" }, nil, codes.Unauthenticated},
 		{"a garbage grant", func(*testing.T, *EnvoyAuthzServer, ed25519.PrivateKey) string { return "a.b.c" }, nil, codes.Unauthenticated},
 		{"an expired grant", func(t *testing.T, _ *EnvoyAuthzServer, p ed25519.PrivateKey) string {
+			t.Helper()
 			return mintTaskGrant(t, p, modelTenant, []string{modelcall.RouteResponses}, time.Now().Add(-time.Hour))
 		}, nil, codes.Unauthenticated},
 		{"a grant signed by another key", func(t *testing.T, _ *EnvoyAuthzServer, _ ed25519.PrivateKey) string {
+			t.Helper()
 			_, other := mustGenEd25519(t)
 			return mintModelGrant(t, other, modelTenant, []string{modelcall.RouteResponses})
 		}, nil, codes.Unauthenticated},
 		{"a component token", func(t *testing.T, _ *EnvoyAuthzServer, p ed25519.PrivateKey) string {
+			t.Helper()
 			tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{"sub": "x"})
 			tok.Header["typ"] = componentTokenType
 			tok.Header["kid"] = grantKID
@@ -165,6 +171,7 @@ func TestEdgeForward_Refusals(t *testing.T) {
 }
 
 func okGrant(t *testing.T, _ *EnvoyAuthzServer, p ed25519.PrivateKey) string {
+	t.Helper()
 	return mintModelGrant(t, p, modelTenant, []string{modelcall.RouteResponses})
 }
 

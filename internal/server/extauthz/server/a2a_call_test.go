@@ -219,6 +219,7 @@ func TestA2ACall_AgentCardNeedsOnlyTheRightToSeeTheAgent(t *testing.T) {
 func TestA2ACall_Refusals(t *testing.T) {
 	// Not parallel: the test reads a process-wide counter before and after a call.
 	good := func(t *testing.T, mock *modelFGA) (*EnvoyAuthzServer, string) {
+		t.Helper()
 		srv, priv := a2aServer(t, mock)
 		return srv, mintA2AGrant(t, priv, modelTenant, "mission-1", "task-1", a2aGrantRoutes)
 	}
@@ -229,73 +230,87 @@ func TestA2ACall_Refusals(t *testing.T) {
 		run    func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA)
 	}{
 		{"no grant", "unauthenticated", codes.Unauthenticated, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute()}
 			srv, _ := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, "", nil), mock
 		}},
 		{"the grant does not list the A2A route", "", codes.PermissionDenied, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute()}
 			srv, priv := a2aServer(t, mock)
 			g := mintA2AGrant(t, priv, modelTenant, "mission-1", "task-1", []string{modelcall.RouteResponses})
 			return srv, a2aRequest(agentcall.RouteA2A, g, nil), mock
 		}},
 		{"the grant tenant is not the route tenant", a2aDenyTenant, codes.PermissionDenied, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute()}
 			srv, g := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, g, map[string]string{modelcall.HeaderRouteTenant: "globex"}), mock
 		}},
 		{"no route tenant", a2aDenyRoute, codes.PermissionDenied, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute()}
 			srv, g := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, g, map[string]string{modelcall.HeaderRouteTenant: "-"}), mock
 		}},
 		{"no route agent", a2aDenyRoute, codes.PermissionDenied, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute()}
 			srv, g := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, g, map[string]string{agentcall.HeaderRouteAgent: "-"}), mock
 		}},
 		{"a repeated route agent", a2aDenyRoute, codes.PermissionDenied, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute()}
 			srv, g := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, g, map[string]string{agentcall.HeaderRouteAgent: "scout,other"}), mock
 		}},
 		{"a route agent that cannot be an FGA name", a2aDenyRoute, codes.PermissionDenied, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute()}
 			srv, g := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, g, map[string]string{agentcall.HeaderRouteAgent: "x/../y"}), mock
 		}},
 		{"a route bank that cannot be an FGA name", a2aDenyRoute, codes.PermissionDenied, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute()}
 			srv, g := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, g, map[string]string{agentcall.HeaderRouteBank: "b#member"}), mock
 		}},
 		{"a path that is not an A2A path", a2aDenyPath, codes.PermissionDenied, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute()}
 			srv, g := good(t, mock)
 			return srv, a2aRequest("/a2a/agent", g, nil), mock
 		}},
 		{"a grant with no mission is refused by the grant check", "", codes.Unauthenticated, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute()}
 			srv, priv := a2aServer(t, mock)
 			g := mintA2AGrant(t, priv, modelTenant, "", "", a2aGrantRoutes)
 			return srv, a2aRequest(agentcall.RouteA2A, g, nil), mock
 		}},
 		{"a mission that is not active", a2aDenyMission, codes.PermissionDenied, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute(), gateClosed: true}
 			srv, g := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, g, nil), mock
 		}},
 		{"FGA is down for the mission gate", a2aDenyFGAUnavailable, codes.Unavailable, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: allowExecute(), gateErr: errors.New("fga down")}
 			srv, g := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, g, nil), mock
 		}},
 		{"FGA denies the delegation", a2aDenyFGA, codes.PermissionDenied, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{allow: map[string]bool{}}
 			srv, g := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, g, nil), mock
 		}},
 		{"FGA is down for the delegation", a2aDenyFGAUnavailable, codes.Unavailable, func(t *testing.T) (*EnvoyAuthzServer, *authv3.CheckRequest, *modelFGA) {
+			t.Helper()
 			mock := &modelFGA{err: errors.New("fga down")}
 			srv, g := good(t, mock)
 			return srv, a2aRequest(agentcall.RouteA2A, g, nil), mock

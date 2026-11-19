@@ -78,7 +78,10 @@ func dcServer(t *testing.T) (*EnvoyAuthzServer, ed25519.PrivateKey, *modelFGA) {
 	return srv, priv, mock
 }
 
-func gw(t *testing.T) context.Context { return peerContext(t, gatewaySVID) }
+func gw(t *testing.T) context.Context {
+	t.Helper()
+	return peerContext(t, gatewaySVID)
+}
 
 func TestDaemonCall_ChatAllowedForTheInitiator(t *testing.T) {
 	t.Parallel()
@@ -178,7 +181,10 @@ func TestDaemonCall_Refusals(t *testing.T) {
 				c["iat"], c["exp"] = time.Now().Add(-2*time.Minute).Unix(), time.Now().Add(-time.Minute).Unix()
 			}), path: modelcall.RouteResponses},
 		{name: "a model path from the Edge", typ: modelcall.DaemonCallTokenType, claims: ok,
-			path: modelcall.RouteResponses, ctx: func(t *testing.T) context.Context { return peerContext(t, edgeSVID) }},
+			path: modelcall.RouteResponses, ctx: func(t *testing.T) context.Context {
+				t.Helper()
+				return peerContext(t, edgeSVID)
+			}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

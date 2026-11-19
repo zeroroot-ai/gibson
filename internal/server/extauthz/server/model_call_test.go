@@ -55,7 +55,11 @@ func (m *modelFGA) questions() []fgaclient.ClientCheckRequest {
 	return append([]fgaclient.ClientCheckRequest(nil), m.asked...)
 }
 
+// modelFGAReq answers the Check request of the OpenFGA client. It embeds the
+// interface for GetAuthorizationModelIdOverride and GetStoreIdOverride, whose
+// names the SDK fixes. The code under test never calls these two methods.
 type modelFGAReq struct {
+	fgaclient.SdkClientCheckRequestInterface
 	m    *modelFGA
 	body fgaclient.ClientCheckRequest
 }
@@ -90,8 +94,6 @@ func (r *modelFGAReq) Execute() (*fgaclient.ClientCheckResponse, error) {
 	return &fgaclient.ClientCheckResponse{CheckResponse: openfga.CheckResponse{Allowed: &v}}, nil
 }
 
-func (r *modelFGAReq) GetAuthorizationModelIdOverride() *string  { return nil }
-func (r *modelFGAReq) GetStoreIdOverride() *string               { return nil }
 func (r *modelFGAReq) GetContext() context.Context               { return context.Background() }
 func (r *modelFGAReq) GetBody() *fgaclient.ClientCheckRequest    { b := r.body; return &b }
 func (r *modelFGAReq) GetOptions() *fgaclient.ClientCheckOptions { return nil }
@@ -293,6 +295,7 @@ func TestModelCall_DenyPaths(t *testing.T) {
 			name: "FGA forbids the model and the provider",
 			fga:  &modelFGA{},
 			build: func(t *testing.T, priv ed25519.PrivateKey) *authv3.CheckRequest {
+				t.Helper()
 				g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
 				return modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil)
 			},
@@ -302,6 +305,7 @@ func TestModelCall_DenyPaths(t *testing.T) {
 			name: "a token of tenant A on the route of tenant B",
 			fga:  allowAll(),
 			build: func(t *testing.T, priv ed25519.PrivateKey) *authv3.CheckRequest {
+				t.Helper()
 				g := mintModelGrant(t, priv, "tenant-a", []string{modelcall.RouteResponses})
 				return modelRequest(modelcall.RouteResponses, "tenant-b", modelProvider, modelName1, g, nil)
 			},
@@ -312,6 +316,7 @@ func TestModelCall_DenyPaths(t *testing.T) {
 			name: "a task grant that does not list the route",
 			fga:  allowAll(),
 			build: func(t *testing.T, priv ed25519.PrivateKey) *authv3.CheckRequest {
+				t.Helper()
 				g := mintModelGrant(t, priv, modelTenant, []string{"/other.v1.S/Elsewhere"})
 				return modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil)
 			},
@@ -321,7 +326,7 @@ func TestModelCall_DenyPaths(t *testing.T) {
 		{
 			name: "no credential",
 			fga:  allowAll(),
-			build: func(t *testing.T, _ ed25519.PrivateKey) *authv3.CheckRequest {
+			build: func(_ *testing.T, _ ed25519.PrivateKey) *authv3.CheckRequest {
 				return modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, "", nil)
 			},
 			want:     codes.Unauthenticated,
@@ -331,6 +336,7 @@ func TestModelCall_DenyPaths(t *testing.T) {
 			name: "an expired grant",
 			fga:  allowAll(),
 			build: func(t *testing.T, priv ed25519.PrivateKey) *authv3.CheckRequest {
+				t.Helper()
 				g := mintTaskGrant(t, priv, modelTenant, []string{modelcall.RouteResponses}, time.Now().Add(-time.Minute))
 				return modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil)
 			},
@@ -341,6 +347,7 @@ func TestModelCall_DenyPaths(t *testing.T) {
 			name: "a grant that this daemon did not sign",
 			fga:  allowAll(),
 			build: func(t *testing.T, _ ed25519.PrivateKey) *authv3.CheckRequest {
+				t.Helper()
 				_, other := mustGenEd25519(t)
 				g := mintModelGrant(t, other, modelTenant, []string{modelcall.RouteResponses})
 				return modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil)
@@ -352,6 +359,7 @@ func TestModelCall_DenyPaths(t *testing.T) {
 			name: "a call that names no model",
 			fga:  allowAll(),
 			build: func(t *testing.T, priv ed25519.PrivateKey) *authv3.CheckRequest {
+				t.Helper()
 				g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
 				return modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, "", g, nil)
 			},
@@ -362,6 +370,7 @@ func TestModelCall_DenyPaths(t *testing.T) {
 			name: "a route that sends no tenant",
 			fga:  allowAll(),
 			build: func(t *testing.T, priv ed25519.PrivateKey) *authv3.CheckRequest {
+				t.Helper()
 				g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
 				return modelRequest(modelcall.RouteResponses, "", modelProvider, modelName1, g, nil)
 			},
@@ -372,6 +381,7 @@ func TestModelCall_DenyPaths(t *testing.T) {
 			name: "a model name that cannot form an FGA object",
 			fga:  allowAll(),
 			build: func(t *testing.T, priv ed25519.PrivateKey) *authv3.CheckRequest {
+				t.Helper()
 				g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
 				return modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, "bad name#x", g, nil)
 			},
@@ -382,6 +392,7 @@ func TestModelCall_DenyPaths(t *testing.T) {
 			name: "FGA is down",
 			fga:  &modelFGA{err: errors.New("fga down")},
 			build: func(t *testing.T, priv ed25519.PrivateKey) *authv3.CheckRequest {
+				t.Helper()
 				g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
 				return modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil)
 			},
