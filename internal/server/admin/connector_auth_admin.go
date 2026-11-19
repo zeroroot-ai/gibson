@@ -20,6 +20,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"github.com/zeroroot-ai/gibson/internal/infra/netguard"
 	"io"
 	"net/http"
 	"net/url"
@@ -212,7 +213,7 @@ func (s *ConnectorAuthAdminServer) StartConnectorAuthorization(ctx context.Conte
 	// advertises RFC 9728 metadata off it is discovered too.
 	meta, err := connectorauth.Discover(ctx, s.client, instanceURL, instanceURL)
 	if err != nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "vendor discovery failed: %v", err)
+		return nil, status.Errorf(codes.FailedPrecondition, "vendor discovery failed: %v", netguard.RedactBlocked(ctx, err))
 	}
 
 	// The catalog-driven scope belongs to a later slice; for now the vendor's
@@ -222,7 +223,7 @@ func (s *ConnectorAuthAdminServer) StartConnectorAuthorization(ctx context.Conte
 
 	reg, err := connectorauth.RegisterClient(ctx, s.client, meta.RegistrationEndpoint, redirectURI, scope)
 	if err != nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "dynamic client registration failed: %v", err)
+		return nil, status.Errorf(codes.FailedPrecondition, "dynamic client registration failed: %v", netguard.RedactBlocked(ctx, err))
 	}
 
 	pkce, err := connectorauth.GeneratePKCE()
@@ -329,7 +330,7 @@ func (s *ConnectorAuthAdminServer) FinishAuthorization(ctx context.Context, stat
 	if err != nil {
 		// The error carries the vendor's error code and never credential
 		// material (connectorauth's contract).
-		return nil, status.Errorf(codes.FailedPrecondition, "authorization-code exchange failed: %v", err)
+		return nil, status.Errorf(codes.FailedPrecondition, "authorization-code exchange failed: %v", netguard.RedactBlocked(ctx, err))
 	}
 	return s.storeAndProve(ctx, tenant, pa.Connector, grant)
 }
@@ -354,7 +355,7 @@ func (s *ConnectorAuthAdminServer) storeAndProve(ctx context.Context, tenant aut
 		// re-authorizing is the only fix either way.
 		_ = s.secrets.Delete(ctx, connectorauth.GrantSecretName(connector))
 		s.book.Clear(tenant.String(), connector)
-		return nil, status.Errorf(codes.FailedPrecondition, "grant verification failed: %v", err)
+		return nil, status.Errorf(codes.FailedPrecondition, "grant verification failed: %v", netguard.RedactBlocked(ctx, err))
 	}
 	s.book.Record(tenant.String(), connector, nil, s.now().UTC())
 	return s.buildStatus(ctx, tenant, connector), nil

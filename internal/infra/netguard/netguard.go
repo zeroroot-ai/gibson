@@ -26,7 +26,9 @@ package netguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"syscall"
@@ -267,4 +269,21 @@ func CheckHost(ctx context.Context, r Resolver, host, hint string) error {
 		}
 	}
 	return nil
+}
+
+// RedactBlocked prepares an error for an API client. When the chain holds a
+// *BlockedAddressError, the connect-time guard refused the connection. The text of
+// that error, and the text of the *net.OpError that wraps it, name the address that
+// the host resolved to. A tenant that controls the host name could read internal
+// addresses from it. RedactBlocked then writes the detail to the daemon log and
+// returns a *HostRefusedError, whose text is fixed. An error with no refusal in its
+// chain comes back unchanged. A caller that returns a dial error to a client passes
+// it through RedactBlocked first.
+func RedactBlocked(ctx context.Context, err error) error {
+	var blocked *BlockedAddressError
+	if !errors.As(err, &blocked) {
+		return err
+	}
+	slog.WarnContext(ctx, "connection refused by the egress guard", "detail", err.Error())
+	return &HostRefusedError{hint: blocked.Hint, detail: err.Error()}
 }

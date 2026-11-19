@@ -6,11 +6,14 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agentskill"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
@@ -301,7 +304,7 @@ func TestAgentSkillStatus_MapsEachClass(t *testing.T) {
 		{errSkillBackend, codes.Internal},
 	}
 	for _, tt := range tests {
-		assert.Equal(t, tt.want, code(agentSkillStatus("rpc", tt.err)), "error %v", tt.err)
+		assert.Equal(t, tt.want, code(agentSkillStatus(context.Background(), "rpc", tt.err)), "error %v", tt.err)
 	}
 	assert.Equal(t, tenantv1.AgentSkillSource_AGENT_SKILL_SOURCE_UNSPECIFIED, agentSkillSourceProto("odd"))
 }
@@ -359,4 +362,21 @@ func TestNewAgentSkillService_NeedsEachDependency(t *testing.T) {
 func assertBadNameRefused(ctx context.Context, t *testing.T, call func(context.Context, string) error, bad string) {
 	t.Helper()
 	assert.Equal(t, codes.InvalidArgument, code(call(ctx, bad)), "a bad name")
+}
+
+// The registry host of a pull comes from the tenant. The egress guard refuses an
+// internal address, and the text of its error names the address that the host
+// resolved to. The client must get a fixed text, and the address goes to the log.
+func TestAgentSkillStatus_AGuardRefusalNamesNoAddressToTheClient(t *testing.T) {
+	ref := "10.1.2.3:9/skill@sha256:" + strings.Repeat("a", 64)
+	_, err := agentskill.NewPuller().Pull(context.Background(), ref, "skill", authn.DefaultKeychain)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "10.1.2.3", "the raw error names the address, so it must not reach the client")
+
+	got := agentSkillStatus(context.Background(), "rpc", err)
+
+	assert.Equal(t, codes.InvalidArgument, code(got))
+	assertNoAddressDetail(t, got)
+	assert.Contains(t, status.Convert(got).Message(), "the host does not resolve to a public address")
+	assert.Contains(t, status.Convert(got).Message(), "must resolve to a public address", "the hint of the pull stays")
 }

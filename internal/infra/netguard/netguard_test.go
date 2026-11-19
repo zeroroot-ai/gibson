@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -256,4 +257,25 @@ func TestCheckHost(t *testing.T) {
 	empty := netguard.CheckHost(ctx, r, "empty.example", "h")
 	require.Error(t, empty, "no address refuses")
 	assert.Equal(t, failed.Error(), empty.Error(), "every refusal reads the same")
+}
+
+// A dial error wraps the guard refusal in *net.OpError and *url.Error, and both texts
+// name the address. RedactBlocked gives a client a fixed text. It leaves an error with
+// no refusal in its chain as it is.
+func TestRedactBlocked(t *testing.T) {
+	refusal := &netguard.BlockedAddressError{Addr: "10.1.2.3:443", Class: "private", Hint: "use a public host"}
+	dial := &url.Error{Op: "Get", URL: "https://tenant.example/v2/",
+		Err: &net.OpError{Op: "dial", Net: "tcp", Addr: &net.TCPAddr{IP: net.ParseIP("10.1.2.3"), Port: 443}, Err: refusal}}
+	require.Contains(t, dial.Error(), "10.1.2.3", "the raw dial error names the address")
+
+	got := netguard.RedactBlocked(context.Background(), dial)
+
+	assert.Equal(t, "the host does not resolve to a public address (use a public host)", got.Error())
+	var refused *netguard.HostRefusedError
+	require.ErrorAs(t, got, &refused)
+	assert.Contains(t, refused.Detail(), "10.1.2.3", "the detail stays for the log")
+
+	other := errors.New("the vendor answered 500")
+	assert.Equal(t, other, netguard.RedactBlocked(context.Background(), other))
+	assert.NoError(t, netguard.RedactBlocked(context.Background(), nil))
 }
