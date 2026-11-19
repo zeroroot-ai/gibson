@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package agentskillstore keeps the validated content of each published Agent
-// Skill in the per-tenant Postgres database (migration 017, epic gibson#1364).
+// Skill in the per-tenant Postgres database (migration 019, epic gibson#1364).
 //
 // A publish writes one row for each version, keyed by the digest of its OCI
 // image, and moves the current flag. A load reads these rows and never the
