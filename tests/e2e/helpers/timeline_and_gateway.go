@@ -87,6 +87,9 @@ type ObservedLlmCall struct {
 	// Cost is the cost in US dollars as a decimal string. It is empty when the
 	// gateway has no price for the model.
 	Cost string
+	// HTTPStatus is the status that the gateway answered. It is 0 when the event
+	// has none. A status of 400 or more is a failed call, which has no tokens.
+	HTTPStatus int
 	// Items is the text of each Open Responses item of the call: the input
 	// items, then the output items.
 	Items []string
@@ -98,8 +101,12 @@ var (
 	reProvider = regexp.MustCompile(`Provider:([^\s}]*)`)
 	rePrompt   = regexp.MustCompile(`PromptTokens:(\d+)`)
 	reComplete = regexp.MustCompile(`CompletionTokens:(\d+)`)
+	reStatus   = regexp.MustCompile(`HTTPStatus:(\d+)`)
 	reCost     = regexp.MustCompile(`Cost:([^\s}]*)`)
 )
+
+// Failed reports whether the gateway answered the call with an error status.
+func (c ObservedLlmCall) Failed() bool { return c.HTTPStatus >= 400 }
 
 // ParseLlmCallObserved reads an llm_call.observed event from the summary that
 // GetTimeline returns. The summary is the %+v text of the event, in which each
@@ -123,6 +130,9 @@ func ParseLlmCallObserved(summary string) (ObservedLlmCall, error) {
 	}
 	if m = reComplete.FindStringSubmatch(summary); m != nil {
 		call.CompletionTokens, _ = strconv.Atoi(m[1])
+	}
+	if m = reStatus.FindStringSubmatch(summary); m != nil {
+		call.HTTPStatus, _ = strconv.Atoi(m[1])
 	}
 	if m = reCost.FindStringSubmatch(summary); m != nil {
 		call.Cost = m[1]

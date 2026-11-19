@@ -88,3 +88,18 @@ func TestWorkDispatchedSummaryHoldsTheTargetAndTheParent(t *testing.T) {
 	root := fmt.Sprintf("%+v", &brain.WorkDispatched{ID: "w1", ItemKind: "agent", Target: "e2e-a2a-caller"})
 	require.Contains(t, root, "ParentID: ", "a root dispatch has an empty parent")
 }
+
+// A failed call holds its status. The wait for a good call skips it.
+func TestParseLlmCallObserved_ReadsTheStatusOfAFailedCall(t *testing.T) {
+	failed, err := ParseLlmCallObserved(fmt.Sprintf("%+v", brain.LlmCallObserved{
+		CallID: "c1", Completion: "route not found", HTTPStatus: 404,
+	}))
+	require.NoError(t, err)
+	require.Equal(t, 404, failed.HTTPStatus)
+	require.True(t, failed.Failed())
+
+	good, err := ParseLlmCallObserved(fmt.Sprintf("%+v", brain.LlmCallObserved{CallID: "c2", PromptTokens: 120}))
+	require.NoError(t, err)
+	require.Zero(t, good.HTTPStatus)
+	require.False(t, good.Failed())
+}

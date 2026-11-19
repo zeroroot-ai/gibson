@@ -272,6 +272,9 @@ func (s *aaifSetup) observedCalls(t *testing.T, missionID string) []helpers.Obse
 }
 
 // waitObserved waits until the Timeline of the mission holds a call that satisfies match.
+// A failed call (status 400 or more) is a record too. The first calls on a new
+// provider get 404 until the route exists, and they hold the same request items
+// as the good call, so the wait skips them.
 func (s *aaifSetup) waitObserved(
 	t *testing.T, missionID, what string, match func(helpers.ObservedLlmCall) bool,
 ) helpers.ObservedLlmCall {
@@ -280,7 +283,7 @@ func (s *aaifSetup) waitObserved(
 	helpers.Eventually(t, aaifTraceTimeout, what, func() (bool, string) {
 		calls := s.observedCalls(t, missionID)
 		for _, c := range calls {
-			if match(c) {
+			if !c.Failed() && match(c) {
 				found = c
 				return true, ""
 			}
