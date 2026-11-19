@@ -581,6 +581,13 @@ func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (strin
 	// Find or create stable mission record (one per mission name)
 	missionTemplate := newRunTemplate(callingTenant, def, string(definitionJSON), req, resolvedTargetID,
 		additionalTargetIDs, targetRef)
+	if req.MissionID != "" {
+		id, idErr := types.ParseID(req.MissionID)
+		if idErr != nil {
+			return "", fmt.Errorf("invalid mission ID %q: %w", req.MissionID, idErr)
+		}
+		missionTemplate.ID = id
+	}
 
 	// Acquire the mission store for this tenant (callingTenant resolved above).
 	mStore, mStoreRelease, mStoreErr := m.missionStoreFor(ctx, callingTenant)

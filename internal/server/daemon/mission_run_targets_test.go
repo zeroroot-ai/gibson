@@ -152,3 +152,23 @@ func TestRun_RefusesADefinitionOrATargetThatDoesNotMatchItsPin(t *testing.T) {
 		assert.NotEqual(t, grpccodes.FailedPrecondition, grpcstatus.Code(err), "the pins match: %v", err)
 	}
 }
+
+// A caller can choose the ID of the new mission record before the start. An ID that
+// is not a UUID is refused, before any record is written.
+func TestRun_RefusesAMissionIDThatIsNotAUUID(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+	require.NoError(t, mission.NewConnBoundMissionStore(rdb).CreateDefinition(ctx,
+		&missionpb.MissionDefinition{Id: "def-1", Name: "recon"}))
+	own := &types.Target{ID: types.NewID(), TenantID: "acme", Name: "own"}
+	mm := helperMM()
+	mm.pool = &mockPool{conn: &datapool.Conn{Redis: rdb}}
+	mm.targetStore = &fakeTargetsByID{byID: map[types.ID]*types.Target{own.ID: own}}
+
+	_, err := mm.Run(ctx, api.RunMissionData{MissionDefinitionID: "recon", TargetIDs: []string{own.ID.String()}, MissionID: "not-a-uuid"})
+
+	require.ErrorContains(t, err, "invalid mission ID")
+	assert.Empty(t, mm.activeMissions)
+}

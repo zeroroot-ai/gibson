@@ -40,6 +40,9 @@ type Entry struct {
 	// Agent is the name of the agent that the caller addresses. It is unique in
 	// the tenant.
 	Agent string
+	// PublicationID is new for each publication of the agent name. The count of open
+	// tasks is by publication.
+	PublicationID string
 	// DefinitionID is the ID of the mission definition that a call starts.
 	DefinitionID string
 	// DefinitionHash is the hash of the definition at publish. A call starts a
@@ -72,18 +75,20 @@ type Store interface {
 	// Delete removes one entry, or reports ErrNotFound. The tasks of the entry stay.
 	Delete(ctx context.Context, tenant, agent string) error
 	// Reserve takes one place for a new inbound mission of the publication, for the
-	// owner, and returns its slot. It locks the row of the publication, so parallel
-	// calls and more than one replica cannot go over MaxActive. isFinished tells
-	// whether a bound mission has ended, and a task whose mission has ended gives
-	// its place back. A task with no mission after grace gives its place back too.
-	// It returns ErrLimit when no place is free, and ErrNotFound when the agent is
-	// not published.
-	Reserve(ctx context.Context, tenant, agent, owner string, isFinished func(missionID string) bool,
-		grace time.Duration) (slot string, err error)
-	// Bind records the mission of a reserved slot.
-	Bind(ctx context.Context, tenant, slot, missionID string) error
+	// owner, and records the mission ID in the same step, so a running mission always
+	// has its row. It returns the slot. It locks the row of the publication, so
+	// parallel calls and more than one replica cannot go over MaxActive. known tells
+	// whether a mission exists and whether it has ended. A task whose mission has
+	// ended gives its place back, and so does a task whose mission is unknown after
+	// grace. It returns ErrLimit when no place is free, and ErrNotFound when the
+	// agent is not published.
+	Reserve(ctx context.Context, tenant, agent, owner, missionID string,
+		known func(missionID string) (exists, terminal bool), grace time.Duration) (slot string, err error)
 	// Release gives a reserved place back, for a mission that did not start.
 	Release(ctx context.Context, tenant, slot string) error
+	// Finish marks the task of a mission as ended. It changes nothing for a mission
+	// that has no task.
+	Finish(ctx context.Context, tenant, missionID string) error
 	// Owner returns the caller that started a mission and the agent of its
 	// publication, or ErrNotFound.
 	Owner(ctx context.Context, tenant, missionID string) (owner, agent string, err error)
@@ -130,7 +135,7 @@ func NewPostgresStore(pool datapool.Pool) Store {
 
 var _ Store = (*postgresStore)(nil)
 
-const columns = `agent, mission_definition_id, definition_hash, target_ids, target_hashes, max_active_missions, published_by, created_at`
+const columns = `agent, publication_id, mission_definition_id, definition_hash, target_ids, target_hashes, max_active_missions, published_by, created_at`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -139,7 +144,7 @@ type scanner interface {
 func scanEntry(row scanner) (*Entry, error) {
 	var e Entry
 	var targets, hashes string
-	if err := row.Scan(&e.Agent, &e.DefinitionID, &e.DefinitionHash, &targets, &hashes, &e.MaxActive, &e.PublishedBy, &e.CreatedAt); err != nil {
+	if err := row.Scan(&e.Agent, &e.PublicationID, &e.DefinitionID, &e.DefinitionHash, &targets, &hashes, &e.MaxActive, &e.PublishedBy, &e.CreatedAt); err != nil {
 		return nil, fmt.Errorf("scan inbound mission row: %w", err)
 	}
 	if err := json.Unmarshal([]byte(targets), &e.TargetIDs); err != nil {
@@ -181,10 +186,10 @@ func (s *postgresStore) Publish(ctx context.Context, tenant string, e Entry) (*E
 	var out *Entry
 	err = c.InTx(ctx, func(q datapool.SQL) error {
 		if _, err := q.Exec(ctx,
-			`INSERT INTO inbound_missions (agent, mission_definition_id, definition_hash, target_ids, target_hashes, max_active_missions, published_by)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7)
+			`INSERT INTO inbound_missions (agent, publication_id, mission_definition_id, definition_hash, target_ids, target_hashes, max_active_missions, published_by)
+			 VALUES ($1,$8,$2,$3,$4,$5,$6,$7)
 			 ON CONFLICT (agent) DO NOTHING`,
-			e.Agent, e.DefinitionID, e.DefinitionHash, string(targets), string(hashes), e.MaxActive, e.PublishedBy); err != nil {
+			e.Agent, e.DefinitionID, e.DefinitionHash, string(targets), string(hashes), e.MaxActive, e.PublishedBy, uuid.NewString()); err != nil {
 			return fmt.Errorf("insert: %w", err)
 		}
 		got, gerr := scanEntry(q.QueryRow(ctx, `SELECT `+columns+` FROM inbound_missions WHERE agent = $1 FOR UPDATE`, e.Agent))
@@ -274,7 +279,8 @@ func (s *postgresStore) Delete(ctx context.Context, tenant, agent string) error 
 }
 
 func (s *postgresStore) Reserve(
-	ctx context.Context, tenant, agent, owner string, isFinished func(missionID string) bool, grace time.Duration,
+	ctx context.Context, tenant, agent, owner, missionID string,
+	known func(missionID string) (exists, terminal bool), grace time.Duration,
 ) (string, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
@@ -286,31 +292,32 @@ func (s *postgresStore) Reserve(
 		// The lock on the row of the publication makes the count and the insert one
 		// step for every replica.
 		var limit int
+		var publication string
 		if err := q.QueryRow(ctx,
-			`SELECT max_active_missions FROM inbound_missions WHERE agent = $1 FOR UPDATE`, agent).Scan(&limit); err != nil {
+			`SELECT max_active_missions, publication_id FROM inbound_missions WHERE agent = $1 FOR UPDATE`,
+			agent).Scan(&limit, &publication); err != nil {
 			if errors.Is(err, datapool.ErrNoRows) {
 				return fmt.Errorf("%w: %s", ErrNotFound, agent)
 			}
 			return fmt.Errorf("lock the publication: %w", err)
 		}
-		if _, err := q.Exec(ctx,
-			`DELETE FROM inbound_tasks WHERE agent = $1 AND mission_id = '' AND finished_at IS NULL
-			 AND created_at < now() - ($2 * interval '1 second')`, agent, int64(grace/time.Second)); err != nil {
-			return fmt.Errorf("drop the lapsed reservations: %w", err)
-		}
 		rows, err := q.Query(ctx,
-			`SELECT slot, mission_id FROM inbound_tasks WHERE agent = $1 AND finished_at IS NULL AND mission_id <> ''`, agent)
+			`SELECT slot, mission_id, created_at < now() - ($2 * interval '1 second')
+			 FROM inbound_tasks WHERE publication_id = $1 AND finished_at IS NULL`,
+			publication, int64(grace/time.Second))
 		if err != nil {
 			return fmt.Errorf("read the open tasks: %w", err)
 		}
 		var ended []string
 		for rows.Next() {
 			var sl, mid string
-			if err := rows.Scan(&sl, &mid); err != nil {
+			var lapsed bool
+			if err := rows.Scan(&sl, &mid, &lapsed); err != nil {
 				rows.Close()
 				return fmt.Errorf("scan an open task: %w", err)
 			}
-			if isFinished(mid) {
+			exists, terminal := known(mid)
+			if terminal || (!exists && lapsed) {
 				ended = append(ended, sl)
 			}
 		}
@@ -325,14 +332,16 @@ func (s *postgresStore) Reserve(
 		}
 		var open int
 		if err := q.QueryRow(ctx,
-			`SELECT count(*) FROM inbound_tasks WHERE agent = $1 AND finished_at IS NULL`, agent).Scan(&open); err != nil {
+			`SELECT count(*) FROM inbound_tasks WHERE publication_id = $1 AND finished_at IS NULL`,
+			publication).Scan(&open); err != nil {
 			return fmt.Errorf("count the open tasks: %w", err)
 		}
 		if open >= limit {
 			return fmt.Errorf("%w: %s allows %d", ErrLimit, agent, limit)
 		}
 		if _, err := q.Exec(ctx,
-			`INSERT INTO inbound_tasks (slot, agent, owner) VALUES ($1,$2,$3)`, slot, agent, owner); err != nil {
+			`INSERT INTO inbound_tasks (slot, agent, publication_id, owner, mission_id) VALUES ($1,$2,$3,$4,$5)`,
+			slot, agent, publication, owner, missionID); err != nil {
 			return fmt.Errorf("insert the reservation: %w", err)
 		}
 		return nil
@@ -343,30 +352,27 @@ func (s *postgresStore) Reserve(
 	return slot, nil
 }
 
-func (s *postgresStore) Bind(ctx context.Context, tenant, slot, missionID string) error {
-	c, err := s.conns.For(ctx, tenant)
-	if err != nil {
-		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
-	}
-	defer c.Release()
-	n, err := c.SQL().Exec(ctx, `UPDATE inbound_tasks SET mission_id = $2 WHERE slot = $1 AND mission_id = ''`, slot, missionID)
-	if err != nil {
-		return fmt.Errorf("inboundmissionstore: bind %s: %w", slot, err)
-	}
-	if n == 0 {
-		return fmt.Errorf("%w: slot %s", ErrNotFound, slot)
-	}
-	return nil
-}
-
 func (s *postgresStore) Release(ctx context.Context, tenant, slot string) error {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
 		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
 	}
 	defer c.Release()
-	if _, err := c.SQL().Exec(ctx, `DELETE FROM inbound_tasks WHERE slot = $1 AND mission_id = ''`, slot); err != nil {
+	if _, err := c.SQL().Exec(ctx, `DELETE FROM inbound_tasks WHERE slot = $1`, slot); err != nil {
 		return fmt.Errorf("inboundmissionstore: release %s: %w", slot, err)
+	}
+	return nil
+}
+
+func (s *postgresStore) Finish(ctx context.Context, tenant, missionID string) error {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	if _, err := c.SQL().Exec(ctx,
+		`UPDATE inbound_tasks SET finished_at = now() WHERE mission_id = $1 AND finished_at IS NULL`, missionID); err != nil {
+		return fmt.Errorf("inboundmissionstore: finish %s: %w", missionID, err)
 	}
 	return nil
 }
@@ -378,7 +384,7 @@ func (s *postgresStore) Owner(ctx context.Context, tenant, missionID string) (ow
 	}
 	defer c.Release()
 	err = c.SQL().QueryRow(ctx,
-		`SELECT owner, agent FROM inbound_tasks WHERE mission_id = $1 AND mission_id <> ''`, missionID).Scan(&owner, &agent)
+		`SELECT owner, agent FROM inbound_tasks WHERE mission_id = $1`, missionID).Scan(&owner, &agent)
 	if errors.Is(err, datapool.ErrNoRows) {
 		return "", "", fmt.Errorf("%w: mission %s", ErrNotFound, missionID)
 	}

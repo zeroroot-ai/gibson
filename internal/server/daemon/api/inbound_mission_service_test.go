@@ -49,6 +49,7 @@ func (m *memInboundStore) Publish(
 		return &old, nil
 	}
 	e.CreatedAt = time.Unix(1, 0).UTC()
+	e.PublicationID = "pub-" + e.Agent
 	m.entries[e.Agent] = e
 	return &e, nil
 }
@@ -82,13 +83,15 @@ func (m *memInboundStore) Get(_ context.Context, _, agent string) (*inboundmissi
 }
 
 // The service uses none of the task methods.
-func (m *memInboundStore) Reserve(context.Context, string, string, string, func(string) bool, time.Duration) (string, error) {
+func (m *memInboundStore) Reserve(
+	context.Context, string, string, string, string, func(string) (bool, bool), time.Duration,
+) (string, error) {
 	return "", errors.New("not used")
 }
-func (m *memInboundStore) Bind(context.Context, string, string, string) error {
+func (m *memInboundStore) Release(context.Context, string, string) error {
 	return errors.New("not used")
 }
-func (m *memInboundStore) Release(context.Context, string, string) error {
+func (m *memInboundStore) Finish(context.Context, string, string) error {
 	return errors.New("not used")
 }
 func (m *memInboundStore) Owner(context.Context, string, string) (owner, agent string, err error) {
@@ -745,4 +748,37 @@ func TestGrantInboundCaller_ParallelGrantsOfOneIdentityGiveOneGrant(t *testing.T
 	got := []codes.Code{<-codesSeen, <-codesSeen}
 
 	assert.ElementsMatch(t, []codes.Code{codes.OK, codes.FailedPrecondition}, got)
+}
+
+// A new publication of a name starts with no grant. A grant that an earlier
+// publication left behind, for example after a failed cleanup, is deleted at publish,
+// so it never applies to the new publication. A publish that only pins again leaves
+// the grants alone.
+func TestPublishInboundMission_ANewPublicationDeletesTheStaleGrantsOfTheName(t *testing.T) {
+	f := newInboundFixture(t)
+	stale := authz.Tuple{User: "agent_principal:old", Relation: "granted_caller", Object: reconObject}
+	f.fga.stored = []authz.Tuple{stale}
+
+	_, err := f.svc.PublishInboundMission(f.ctx, pub("recon", "def-1", goodTarget))
+	require.NoError(t, err)
+	assert.Contains(t, f.fga.deleted, stale)
+	assert.NotContains(t, f.fga.stored, stale)
+
+	// The same publication again keeps a grant that an admin wrote since.
+	kept := authz.Tuple{User: "agent_principal:new", Relation: "granted_caller", Object: reconObject}
+	f.fga.stored = []authz.Tuple{kept}
+	_, err = f.svc.PublishInboundMission(f.ctx, pub("recon", "def-1", goodTarget))
+	require.NoError(t, err)
+	assert.Contains(t, f.fga.stored, kept, "a pin again leaves the grants alone")
+	assert.NotContains(t, f.fga.deleted[1:], kept)
+
+	g := newInboundFixture(t)
+	g.fga.readErr = errInboundBoom
+	_, err = g.svc.PublishInboundMission(g.ctx, pub("recon", "def-1", goodTarget))
+	assert.Equal(t, codes.Internal, code(err))
+	h := newInboundFixture(t)
+	h.fga.stored = []authz.Tuple{stale}
+	h.fga.deleteErr = errInboundBoom
+	_, err = h.svc.PublishInboundMission(h.ctx, pub("recon", "def-1", goodTarget))
+	assert.Equal(t, codes.Internal, code(err))
 }

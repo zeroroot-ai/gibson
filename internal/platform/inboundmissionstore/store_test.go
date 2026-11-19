@@ -96,7 +96,7 @@ var created = time.Date(2026, 11, 1, 10, 0, 0, 0, time.FixedZone("x", 3600))
 func rowOf(e Entry) []any {
 	targets := `["` + strings.Join(e.TargetIDs, `","`) + `"]`
 	hashes, _ := json.Marshal(e.TargetHashes)
-	return []any{e.Agent, e.DefinitionID, e.DefinitionHash, targets, string(hashes), e.MaxActive, e.PublishedBy, created}
+	return []any{e.Agent, "pub-1", e.DefinitionID, e.DefinitionHash, targets, string(hashes), e.MaxActive, e.PublishedBy, created}
 }
 
 func sample() Entry {
@@ -139,10 +139,10 @@ func TestPublish(t *testing.T) {
 		{"the agent holds another definition", otherDef, &fakeDB{exec: okExec, queryRow: stored}, "recon", ErrConflict},
 		{"the agent holds other targets", otherTargets, &fakeDB{exec: okExec, queryRow: stored}, "recon", ErrConflict},
 		{"the stored targets are not JSON", e, &fakeDB{exec: okExec, queryRow: func(string) datapool.Row {
-			return fakeRow{values: []any{"recon", "def-1", "h", "not json", "{}", int32(1), "", created}}
+			return fakeRow{values: []any{"recon", "pub-1", "def-1", "h", "not json", "{}", int32(1), "", created}}
 		}}, "decode the targets", nil},
 		{"the stored hashes are not JSON", e, &fakeDB{exec: okExec, queryRow: func(string) datapool.Row {
-			return fakeRow{values: []any{"recon", "def-1", "h", `["t1"]`, "nope", int32(1), "", created}}
+			return fakeRow{values: []any{"recon", "pub-1", "def-1", "h", `["t1"]`, "nope", int32(1), "", created}}
 		}}, "decode the target hashes", nil},
 	}
 	for _, tt := range tests {
@@ -321,15 +321,16 @@ type scriptedTx struct {
 	*fakeDB
 	limit    int
 	limitErr error
-	open     [][]any // rows of (slot, mission id) that are open
+	open     [][]any // rows of (slot, mission id, lapsed) that are open
 	count    int
 	execErr  map[string]error
 	openErr  error
 	scanErr  error
 	closed   []string
-	inserted bool
+	inserted []any
 	countErr error
 	rowsErr  error
+	countSQL string
 }
 
 func newScriptedTx(t *testing.T) *scriptedTx {
@@ -341,8 +342,9 @@ func newScriptedTx(t *testing.T) *scriptedTx {
 				if x.limitErr != nil {
 					return fakeRow{err: x.limitErr}
 				}
-				return fakeRow{values: []any{x.limit}}
+				return fakeRow{values: []any{x.limit, "pub-1"}}
 			}
+			x.countSQL = sql
 			if x.countErr != nil {
 				return fakeRow{err: x.countErr}
 			}
@@ -364,7 +366,7 @@ func newScriptedTx(t *testing.T) *scriptedTx {
 			case strings.HasPrefix(sql, "UPDATE inbound_tasks SET finished_at"):
 				x.closed = append(x.closed, sql)
 			case strings.HasPrefix(sql, "INSERT INTO inbound_tasks"):
-				x.inserted = true
+				x.inserted = append(x.inserted, sql)
 			}
 			return 1, nil
 		},
@@ -372,11 +374,11 @@ func newScriptedTx(t *testing.T) *scriptedTx {
 	return x
 }
 
-func (x *scriptedTx) reserve(finished func(string) bool) (string, error) {
-	return newStore(x.fakeDB).Reserve(context.Background(), "acme", "recon", "agent_principal:9", finished, time.Minute)
+func (x *scriptedTx) reserve(known func(string) (bool, bool)) (string, error) {
+	return newStore(x.fakeDB).Reserve(context.Background(), "acme", "recon", "agent_principal:9", "m-new", known, time.Minute)
 }
 
-func never(string) bool { return false }
+func never(string) (exists, terminal bool) { return true, false }
 
 func TestReserve_TakesAPlaceWhileTheLimitAllows(t *testing.T) {
 	x := newScriptedTx(t)
@@ -386,9 +388,10 @@ func TestReserve_TakesAPlaceWhileTheLimitAllows(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, slot)
-	assert.True(t, x.inserted)
+	assert.Len(t, x.inserted, 1)
 	assert.Equal(t, 1, x.released)
 	assert.Contains(t, x.seen[0], "FOR UPDATE", "the row of the publication is locked first")
+	assert.Contains(t, x.countSQL, "publication_id", "the count is by publication and not by agent name")
 }
 
 func TestReserve_RefusesAtTheLimitAndInsertsNothing(t *testing.T) {
@@ -399,21 +402,32 @@ func TestReserve_RefusesAtTheLimitAndInsertsNothing(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrLimit)
 	assert.Empty(t, slot)
-	assert.False(t, x.inserted)
+	assert.Empty(t, x.inserted)
 }
 
-// A mission that has ended gives its place back, so the count falls.
-func TestReserve_ClosesTheTaskOfAMissionThatEnded(t *testing.T) {
+// A mission that has ended gives its place back, and so does a mission that the
+// World does not know after the grace time. A mission that the World does not know
+// yet, inside the grace time, keeps its place.
+func TestReserve_ClosesTheTasksOfMissionsThatEndedOrAreLost(t *testing.T) {
 	x := newScriptedTx(t)
-	x.open = [][]any{{"slot-a", "m-a"}, {"slot-b", "m-b"}}
+	x.open = [][]any{{"slot-a", "m-a", false}, {"slot-b", "m-b", false}, {"slot-c", "m-c", true}, {"slot-d", "m-d", false}}
 	x.count = 1
-	asked := []string{}
+	known := func(id string) (bool, bool) {
+		switch id {
+		case "m-a":
+			return true, true // ended
+		case "m-b":
+			return true, false // running
+		case "m-c":
+			return false, false // lost, past the grace time
+		}
+		return false, false // not folded yet, inside the grace time
+	}
 
-	_, err := x.reserve(func(id string) bool { asked = append(asked, id); return id == "m-a" })
+	_, err := x.reserve(known)
 
 	require.NoError(t, err)
-	assert.Equal(t, []string{"m-a", "m-b"}, asked)
-	assert.Len(t, x.closed, 1)
+	assert.Len(t, x.closed, 2, "the ended mission and the lost mission")
 }
 
 func TestReserve_Failures(t *testing.T) {
@@ -425,12 +439,11 @@ func TestReserve_Failures(t *testing.T) {
 	}{
 		{"the agent is not published", func(x *scriptedTx) { x.limitErr = datapool.ErrNoRows }, ErrNotFound, ""},
 		{"the lock fails", func(x *scriptedTx) { x.limitErr = errBoom }, errBoom, "lock the publication"},
-		{"the lapsed reservations fail", func(x *scriptedTx) { x.execErr["DELETE FROM inbound_tasks"] = errBoom }, errBoom, "lapsed"},
 		{"the read of open tasks fails", func(x *scriptedTx) { x.openErr = errBoom }, errBoom, "read the open tasks"},
-		{"a scan fails", func(x *scriptedTx) { x.open = [][]any{{"s", "m"}}; x.scanErr = errBoom }, errBoom, "scan an open task"},
+		{"a scan fails", func(x *scriptedTx) { x.open = [][]any{{"s", "m", false}}; x.scanErr = errBoom }, errBoom, "scan an open task"},
 		{"the rows fail", func(x *scriptedTx) { x.rowsErr = errBoom }, errBoom, "read the open tasks"},
 		{"the close fails", func(x *scriptedTx) {
-			x.open = [][]any{{"s", "m"}}
+			x.open = [][]any{{"s", "m", false}}
 			x.execErr["UPDATE inbound_tasks SET finished_at"] = errBoom
 		}, errBoom, "close a task"},
 		{"the count fails", func(x *scriptedTx) { x.countErr = errBoom }, errBoom, "count"},
@@ -440,43 +453,41 @@ func TestReserve_Failures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			x := newScriptedTx(t)
 			tt.setup(x)
-			_, err := x.reserve(func(string) bool { return true })
+			_, err := x.reserve(func(string) (bool, bool) { return true, true })
 			require.ErrorIs(t, err, tt.wantIs)
 			if tt.want != "" {
 				assert.Contains(t, err.Error(), tt.want)
 			}
 		})
 	}
-	_, err := newStore(&fakeDB{forErr: errBoom}).Reserve(context.Background(), "acme", "recon", "o", never, time.Minute)
+	_, err := newStore(&fakeDB{forErr: errBoom}).Reserve(context.Background(), "acme", "recon", "o", "m", never, time.Minute)
 	require.ErrorIs(t, err, errBoom)
 }
 
-func TestBindReleaseOwner(t *testing.T) {
-	ok := &fakeDB{exec: okExec, queryRow: func(string) datapool.Row { return fakeRow{values: []any{"agent_principal:9"}} }}
-	require.NoError(t, newStore(ok).Bind(context.Background(), "acme", "slot", "m-1"))
+func TestReleaseFinishOwner(t *testing.T) {
+	ok := &fakeDB{exec: okExec, queryRow: func(string) datapool.Row { return fakeRow{values: []any{"agent_principal:9", "recon"}} }}
 	require.NoError(t, newStore(ok).Release(context.Background(), "acme", "slot"))
-	ok.queryRow = func(string) datapool.Row { return fakeRow{values: []any{"agent_principal:9", "recon"}} }
+	require.NoError(t, newStore(ok).Finish(context.Background(), "acme", "m-1"))
 	owner, agent, err := newStore(ok).Owner(context.Background(), "acme", "m-1")
 	require.NoError(t, err)
 	assert.Equal(t, "agent_principal:9", owner)
 	assert.Equal(t, "recon", agent)
+	assert.NotContains(t, ok.seen[len(ok.seen)-1], "<> ''", "the owner query needs no filter of its own")
 
-	none := &fakeDB{exec: func(string) (int64, error) { return 0, nil },
-		queryRow: func(string) datapool.Row { return fakeRow{err: datapool.ErrNoRows} }}
-	require.ErrorIs(t, newStore(none).Bind(context.Background(), "acme", "slot", "m-1"), ErrNotFound)
+	none := &fakeDB{queryRow: func(string) datapool.Row { return fakeRow{err: datapool.ErrNoRows} }}
 	_, _, err = newStore(none).Owner(context.Background(), "acme", "m-1")
 	require.ErrorIs(t, err, ErrNotFound)
 
 	bad := &fakeDB{exec: func(string) (int64, error) { return 0, errBoom },
 		queryRow: func(string) datapool.Row { return fakeRow{err: errBoom} }}
-	require.ErrorIs(t, newStore(bad).Bind(context.Background(), "acme", "s", "m"), errBoom)
 	require.ErrorIs(t, newStore(bad).Release(context.Background(), "acme", "s"), errBoom)
+	require.ErrorIs(t, newStore(bad).Finish(context.Background(), "acme", "m"), errBoom)
 	_, _, err = newStore(bad).Owner(context.Background(), "acme", "m")
 	require.ErrorIs(t, err, errBoom)
 
 	gone := &fakeDB{forErr: errBoom}
-	require.ErrorIs(t, newStore(gone).Bind(context.Background(), "acme", "s", "m"), errBoom)
 	require.ErrorIs(t, newStore(gone).Release(context.Background(), "acme", "s"), errBoom)
+	require.ErrorIs(t, newStore(gone).Finish(context.Background(), "acme", "m"), errBoom)
 	_, _, err = newStore(gone).Owner(context.Background(), "acme", "m")
 	require.ErrorIs(t, err, errBoom)
 }

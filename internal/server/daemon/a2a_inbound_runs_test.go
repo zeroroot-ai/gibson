@@ -41,6 +41,7 @@ type recordingStarter struct {
 	started []api.RunMissionData
 	ctxs    []context.Context
 	err     error
+	otherID string
 }
 
 func (r *recordingStarter) StartMission(ctx context.Context, req api.RunMissionData) (string, error) {
@@ -49,6 +50,12 @@ func (r *recordingStarter) StartMission(ctx context.Context, req api.RunMissionD
 	}
 	r.started = append(r.started, req)
 	r.ctxs = append(r.ctxs, ctx)
+	if r.otherID != "" {
+		return r.otherID, nil
+	}
+	if req.MissionID != "" {
+		return req.MissionID, nil
+	}
 	return fmt.Sprintf("m-%d", len(r.started)), nil
 }
 
@@ -117,10 +124,11 @@ func TestInboundRuns_StartsANewMissionWithThePublishedTargets(t *testing.T) {
 	task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("map the network")))
 
 	require.NoError(t, err)
-	assert.Equal(t, a2a.TaskID("m-1"), task.ID)
-	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
 	require.Len(t, starter.started, 1)
 	got := starter.started[0]
+	assert.Equal(t, a2a.TaskID(got.MissionID), task.ID, "the Task is the mission that the row names")
+	assert.NotEmpty(t, got.MissionID)
+	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
 	assert.Equal(t, "def-1", got.MissionDefinitionID, "the definition is the published one")
 	assert.Equal(t, "hash-1", got.PinnedDefinitionHash, "the start gets the pin of the publication")
 	assert.Equal(t, map[string]string{"t1": "h1", "t2": "h2", "t3": "h3"}, got.PinnedTargetHashes)
@@ -656,9 +664,10 @@ func TestInboundRuns_AFailedPinReadIsAnError(t *testing.T) {
 	assert.Empty(t, starter.started)
 }
 
-// The place is reserved before the mission starts, and the mission is bound to its
-// place after it starts.
-func TestInboundRuns_ReservesAPlaceBeforeTheMissionStartsAndBindsItAfter(t *testing.T) {
+// The place is reserved before the mission starts, and the row takes the ID that the
+// mission record takes. A running mission therefore always has its row, also when
+// the daemon stops between the start and any later step.
+func TestInboundRuns_TheRowNamesTheMissionBeforeItStarts(t *testing.T) {
 	starter := &recordingStarter{}
 	r := newInboundRuns(starter)
 	pubs := r.published.(*fakePublished)
@@ -667,7 +676,10 @@ func TestInboundRuns_ReservesAPlaceBeforeTheMissionStartsAndBindsItAfter(t *test
 
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
-	assert.Equal(t, []string{"reserve:acme/recon/" + inboundCallerRef, "bind:slot-1/m-1"}, pubs.events)
+	require.Len(t, starter.started, 1)
+	id := starter.started[0].MissionID
+	assert.Equal(t, []string{"reserve:acme/recon/" + inboundCallerRef + "/" + id}, pubs.events)
+	assert.Equal(t, id, pubs.reservedMission)
 }
 
 // A message over the limit gets a rejected Task, and no mission record is written.
@@ -709,14 +721,15 @@ func TestInboundRuns_AFailedStartGivesThePlaceBack(t *testing.T) {
 	_, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
 
 	require.ErrorContains(t, err, "boom")
-	assert.Equal(t, []string{"reserve:acme/recon/" + inboundCallerRef, "release:slot-1"}, pubs.events)
+	require.Len(t, pubs.events, 2)
+	assert.Equal(t, "release:slot-1", pubs.events[1])
 }
 
-// A mission that no task row names has no owner, so it ends at once.
-func TestInboundRuns_AMissionThatCannotBeBoundEndsAtOnce(t *testing.T) {
-	starter := &recordingStarter{}
+// A mission record with an ID other than the one of the row has no row. It ends at
+// once, and the place goes back.
+func TestInboundRuns_AMissionWithAnotherIDThanItsRowEndsAtOnce(t *testing.T) {
+	starter := &recordingStarter{otherID: "m-other"}
 	r := newInboundRuns(starter)
-	r.published.(*fakePublished).bindErr = errors.New("bind boom")
 	var stopped []string
 	r.stop = func(_ context.Context, id string) error {
 		stopped = append(stopped, id)
@@ -725,19 +738,36 @@ func TestInboundRuns_AMissionThatCannotBeBoundEndsAtOnce(t *testing.T) {
 
 	task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
 
-	require.ErrorContains(t, err, "bind boom")
+	require.ErrorContains(t, err, "other than")
 	assert.Nil(t, task)
-	assert.Equal(t, []string{"m-1"}, stopped)
+	assert.Equal(t, []string{"m-other"}, stopped)
+	assert.Contains(t, r.published.(*fakePublished).events, "release:slot-1")
 }
 
-func TestInboundRuns_MissionFinishedReadsTheWorld(t *testing.T) {
+func TestInboundRuns_MissionKnownReadsTheWorld(t *testing.T) {
 	f := newTaskFixture(t)
 	f.startMission(ownerRef)
-	finished := f.runs.missionFinished("acme")
-	assert.False(t, finished(f.mission), "a running mission has not ended")
-	assert.False(t, finished("not-in-the-world"), "a mission that the World does not hold has not ended")
+	known := f.runs.missionKnown("acme")
+	exists, terminal := known(f.mission)
+	assert.True(t, exists)
+	assert.False(t, terminal, "a running mission has not ended")
+	exists, _ = known("not-in-the-world")
+	assert.False(t, exists)
 	f.end(brain.MissionCompleted)
-	assert.True(t, finished(f.mission))
+	_, terminal = known(f.mission)
+	assert.True(t, terminal)
+}
+
+// A read that finds the mission ended gives its place back at once.
+func TestInboundRuns_AReadOfAnEndedMissionFinishesItsTask(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.end(brain.MissionCompleted)
+
+	_, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
+
+	require.NoError(t, err)
+	assert.Contains(t, f.owners.events, "finish:"+f.mission)
 }
 
 // A finished mission builds its result one time. A repeated read comes from the

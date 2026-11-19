@@ -697,6 +697,10 @@ type RunMissionData struct {
 	// CreatedBy is who started the mission. The zero value means nobody is
 	// recorded.
 	CreatedBy principal.Principal
+	// MissionID, when it is set, is the ID that the new mission record takes. The
+	// caller chose it before the start, so it can write its own record of the mission
+	// first. It must be a new ID. A start that gives the mission another ID fails.
+	MissionID string
 	// PinnedDefinitionHash, when it is set, is the hash that the definition must have
 	// when the mission loads it. A mission start that loads another definition is
 	// refused with FailedPrecondition and writes no mission record. The inbound entry

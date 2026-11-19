@@ -13,6 +13,10 @@
 
 CREATE TABLE IF NOT EXISTS inbound_missions (
     agent                 TEXT        PRIMARY KEY,
+    -- publication_id is new for each publication of the agent name. The count of
+    -- open tasks is by publication, so the open tasks of an old publication do not
+    -- count against a new publication of the same name.
+    publication_id        TEXT        NOT NULL,
     mission_definition_id TEXT        NOT NULL,
     -- definition_hash is the hash of the definition at publish. A call starts a
     -- mission only while the definition still has this hash.
@@ -38,11 +42,14 @@ CREATE TABLE IF NOT EXISTS inbound_missions (
 CREATE TABLE IF NOT EXISTS inbound_tasks (
     slot        TEXT        PRIMARY KEY,
     agent       TEXT        NOT NULL,
+    publication_id TEXT     NOT NULL,
     owner       TEXT        NOT NULL,
-    mission_id  TEXT        NOT NULL DEFAULT '',
+    -- mission_id is set when the reservation is made. The mission record takes this
+    -- ID, so a running mission always has its row.
+    mission_id  TEXT        NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS inbound_tasks_mission_idx ON inbound_tasks (mission_id) WHERE mission_id <> '';
-CREATE INDEX IF NOT EXISTS inbound_tasks_open_idx ON inbound_tasks (agent) WHERE finished_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS inbound_tasks_mission_idx ON inbound_tasks (mission_id);
+CREATE INDEX IF NOT EXISTS inbound_tasks_open_idx ON inbound_tasks (publication_id) WHERE finished_at IS NULL;

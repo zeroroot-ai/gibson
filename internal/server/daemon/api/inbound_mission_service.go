@@ -251,6 +251,20 @@ func (s *InboundMissionService) PublishInboundMission(
 	case err != nil:
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: read the targets: %v", rpc, err))
 	}
+	// A new publication of a name starts with no grant. A grant that an earlier
+	// publication of the name left behind, for example after a failed cleanup, is
+	// deleted here, so it never applies to this publication.
+	if _, gerr := s.store.Get(ctx, tenant, req.GetAgent()); errors.Is(gerr, inboundmissionstore.ErrNotFound) {
+		stale, rerr := s.grantTuples(ctx, object)
+		if rerr != nil {
+			return nil, status_grpc.Error(codes.Internal, rpc+": "+rerr.Error())
+		}
+		if len(stale) > 0 {
+			if derr := s.fga.Delete(ctx, stale); derr != nil {
+				return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the stale grants: %v", rpc, derr))
+			}
+		}
+	}
 	publishedBy := ""
 	if id, idErr := auth.IdentityFromContext(ctx); idErr == nil {
 		publishedBy = id.Subject
