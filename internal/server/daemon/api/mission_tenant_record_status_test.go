@@ -13,6 +13,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	enginemission "github.com/zeroroot-ai/gibson/internal/engine/mission"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
@@ -45,6 +46,21 @@ func TestPreserveStatus_ATenantRecordFailureIsUnavailable(t *testing.T) {
 		t.Fatalf("code = %v (%v), want Unavailable", got, err)
 	}
 	if got := status_grpc.Code(preserveStatus(errors.New("boom"), "x")); got != codes.Internal {
+		t.Fatalf("a plain error keeps Internal, got %v", got)
+	}
+}
+
+// A tenant with no data plane has no Agent Skills and no outside agents: the
+// handlers answer NotFound, not Internal.
+func TestSkillAndOutsideStatus_ATenantWithNoDataPlaneIsNotFound(t *testing.T) {
+	err := fmt.Errorf("agent skill store: acquire conn: %w", &datapool.NotProvisionedError{Tenant: "e2e-stranger"})
+	if got := status_grpc.Code(agentSkillStatus(context.Background(), "ListAgentSkills", err)); got != codes.NotFound {
+		t.Fatalf("agent skill code = %v, want NotFound", got)
+	}
+	if got := status_grpc.Code(outsideAgentStatus("ListOutsideAgents", err)); got != codes.NotFound {
+		t.Fatalf("outside agent code = %v, want NotFound", got)
+	}
+	if got := status_grpc.Code(agentSkillStatus(context.Background(), "x", errors.New("boom"))); got != codes.Internal {
 		t.Fatalf("a plain error keeps Internal, got %v", got)
 	}
 }

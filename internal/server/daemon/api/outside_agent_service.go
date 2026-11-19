@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"log/slog"
 	"net/url"
 	"regexp"
@@ -111,6 +112,11 @@ func ValidateOutsideAgentURL(ctx context.Context, r netguard.Resolver, raw strin
 }
 
 func outsideAgentStatus(rpc string, err error) error {
+	// A tenant with no data plane has no outside agents (see agentSkillStatus).
+	var notProvisioned *datapool.NotProvisionedError
+	if errors.As(err, &notProvisioned) {
+		return status_grpc.Error(codes.NotFound, rpc+": the tenant has no outside agent store")
+	}
 	switch {
 	case errors.Is(err, outsideagentstore.ErrNotFound):
 		return status_grpc.Error(codes.NotFound, rpc+": "+err.Error())
