@@ -72,11 +72,14 @@ func modelProviderTestRig(t *testing.T, mp *gibsonv1alpha1.ModelProvider, extra 
 	return r, c
 }
 
+// providerKeyName is the name of the Secret that holds the key of the provider.
+const providerKeyName = "anthropic-key"
+
 func newModelProvider() *gibsonv1alpha1.ModelProvider {
 	return &gibsonv1alpha1.ModelProvider{
 		ObjectMeta: metav1.ObjectMeta{Name: "claude", Namespace: "tenant-acme", Generation: 1},
 		Spec: gibsonv1alpha1.ModelProviderSpec{
-			TenantID: "acme", Type: gibsonv1alpha1.ModelProviderAnthropic, CredentialSecret: "anthropic-key",
+			TenantID: "acme", Type: gibsonv1alpha1.ModelProviderAnthropic, CredentialSecret: providerKeyName,
 		},
 	}
 }

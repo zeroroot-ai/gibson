@@ -592,7 +592,7 @@ type DaemonCallRequest struct {
 
 // MintDaemonCall signs a daemon call grant. It is valid for 60 seconds, names
 // one route, and holds no mission and no task. It uses the same key and the same
-// kid as a task grant. Its `typ` header is modelcall.DaemonCallTokenType.
+// kid as a task grant. Its `typ` header is modelcall.DaemonCallJWTType.
 func (m *Minter) MintDaemonCall(req DaemonCallRequest) (string, error) {
 	route, ok := modelcall.PurposeRoute(req.Purpose)
 	if !ok {
@@ -622,7 +622,7 @@ func (m *Minter) MintDaemonCall(req DaemonCallRequest) (string, error) {
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	signer := m.keySet().Current
 	tok.Header["kid"] = signer.keyID
-	tok.Header["typ"] = modelcall.DaemonCallTokenType
+	tok.Header["typ"] = modelcall.DaemonCallJWTType
 	signed, err := tok.SignedString(signer.priv)
 	if err != nil {
 		return "", fmt.Errorf("capabilitygrant: sign the daemon call grant: %w", err)

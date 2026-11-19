@@ -6,8 +6,8 @@ package llmtrace
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +21,7 @@ import (
 // them again with GATEWAY_SPAN_DUMP_DIR=<dir> and the agentgateway_fixture tag.
 func loadSpan(t *testing.T, name string) Span {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", name+".json"))
+	data, err := fs.ReadFile(os.DirFS("testdata"), name+".json")
 	if err != nil {
 		t.Fatalf("read span %s: %v", name, err)
 	}

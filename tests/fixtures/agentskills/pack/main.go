@@ -90,25 +90,22 @@ func run() error {
 // relative to the folder and uses "/".
 func readFolder(dir string, replacements map[string]string) ([]agentskill.File, error) {
 	var files []agentskill.File
-	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, werr error) error {
+	fsys := os.DirFS(dir)
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil {
 			return werr
 		}
 		if d.IsDir() {
 			return nil
 		}
-		raw, rerr := os.ReadFile(p)
+		raw, rerr := fs.ReadFile(fsys, p)
 		if rerr != nil {
 			return fmt.Errorf("read %s: %w", p, rerr)
 		}
 		for k, v := range replacements {
 			raw = bytes.ReplaceAll(raw, []byte(k), []byte(v))
 		}
-		rel, relErr := filepath.Rel(dir, p)
-		if relErr != nil {
-			return fmt.Errorf("relative path of %s: %w", p, relErr)
-		}
-		files = append(files, agentskill.File{Path: filepath.ToSlash(rel), Content: raw})
+		files = append(files, agentskill.File{Path: p, Content: raw})
 		return nil
 	})
 	if err != nil {

@@ -37,7 +37,7 @@ type DaemonCall struct {
 // verifies in full.
 func IsDaemonCallToken(token string) bool {
 	_, typ, err := peekHeader(token)
-	return err == nil && typ == modelcall.DaemonCallTokenType
+	return err == nil && typ == modelcall.DaemonCallJWTType
 }
 
 // maxDaemonCallSkew is the clock skew that the verifier tolerates.
@@ -58,7 +58,7 @@ func (v *Verifier) VerifyDaemonCall(ctx context.Context, token string) (DaemonCa
 	if err != nil {
 		return DaemonCall{}, err
 	}
-	if typ != modelcall.DaemonCallTokenType {
+	if typ != modelcall.DaemonCallJWTType {
 		return DaemonCall{}, ErrNotDaemonCall
 	}
 	if kid == "" {

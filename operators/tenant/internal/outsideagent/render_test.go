@@ -6,6 +6,7 @@ package outsideagent
 import (
 	"bytes"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,7 +61,7 @@ func TestRender_Golden(t *testing.T) {
 					t.Fatalf("write golden: %v", err)
 				}
 			}
-			want, err := os.ReadFile(path)
+			want, err := fs.ReadFile(os.DirFS("testdata"), name+".golden.yaml")
 			if err != nil {
 				t.Fatalf("read golden: %v", err)
 			}
@@ -176,9 +177,9 @@ func TestRender_HoldsNoCredentialValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := find(objs, "AgentgatewayBackend")
-	secret, _, _ := unstructured.NestedString(b.Object, "spec", "policies", "auth", "secretRef", "name")
-	if secret != "oa-acme-scout-credential" {
-		t.Errorf("secretRef = %q, want oa-acme-scout-credential", secret)
+	refName, _, _ := unstructured.NestedString(b.Object, "spec", "policies", "auth", "secretRef", "name")
+	if refName != "oa-acme-scout-credential" {
+		t.Errorf("secretRef = %q, want oa-acme-scout-credential", refName)
 	}
 	if _, found, _ := unstructured.NestedString(b.Object, "spec", "policies", "auth", "key"); found {
 		t.Error("the backend holds an inline key")

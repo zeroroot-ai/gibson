@@ -43,8 +43,8 @@ const (
 	attrProvider     = "gen_ai.provider.name"
 	attrRequestModel = "gen_ai.request.model"
 	attrRespModel    = "gen_ai.response.model"
-	attrInTokens     = "gen_ai.usage.input_tokens"
-	attrOutTokens    = "gen_ai.usage.output_tokens"
+	attrInputUsage   = "gen_ai.usage.input_tokens"
+	attrOutputUsage  = "gen_ai.usage.output_tokens"
 	attrCacheRead    = "gen_ai.usage.cache_read.input_tokens"
 	attrCacheWrite   = "gen_ai.usage.cache_creation.input_tokens"
 	attrCostTotal    = "agw.ai.usage.cost.total"
@@ -146,8 +146,8 @@ func FromSpan(sp Span) (Observation, error) {
 		Provider:         attrString(a, attrProvider),
 		Model:            firstNonEmpty(attrString(a, attrRespModel), attrString(a, attrRequestModel)),
 		Format:           format,
-		InputTokens:      attrInt(a, attrInTokens),
-		OutputTokens:     attrInt(a, attrOutTokens),
+		InputTokens:      attrInt(a, attrInputUsage),
+		OutputTokens:     attrInt(a, attrOutputUsage),
 		CacheReadTokens:  attrInt(a, attrCacheRead),
 		CacheWriteTokens: attrInt(a, attrCacheWrite),
 		HTTPStatus:       int(attrInt(a, attrHTTPCode)),

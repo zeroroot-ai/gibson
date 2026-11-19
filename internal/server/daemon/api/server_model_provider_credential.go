@@ -99,10 +99,10 @@ var errEmptyModelCredential = errors.New("the credential is empty")
 
 // The credential fields of a provider in the tenant secret store.
 const (
-	credFieldAPIKey       = "api_key"
-	credFieldAWSAccessKey = "aws_access_key_id"
-	credFieldAWSSecretKey = "aws_secret_access_key"
-	credFieldAWSSession   = "aws_session_token"
+	providerFieldAPIKey        = "api_key"
+	providerFieldAWSAccessKey  = "aws_access_key_id"
+	providerFieldAWSSigningKey = "aws_secret_access_key"
+	providerFieldAWSSession    = "aws_session_token"
 )
 
 // modelCredentialFor reads the credential fields of a provider and shapes them
@@ -120,7 +120,7 @@ func modelCredentialFor(
 		return v, nil
 	}
 	if providerType != modelProviderTypeBedrock {
-		v, err := read(credFieldAPIKey)
+		v, err := read(providerFieldAPIKey)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +131,7 @@ func modelCredentialFor(
 	}
 	out := map[string][]byte{}
 	for field, key := range map[string]string{
-		credFieldAWSAccessKey: ModelCredentialKeyAccessKey, credFieldAWSSecretKey: ModelCredentialKeySecretKey,
+		providerFieldAWSAccessKey: ModelCredentialKeyAccessKey, providerFieldAWSSigningKey: ModelCredentialKeySecretKey,
 	} {
 		v, err := read(field)
 		if err != nil {
@@ -142,7 +142,7 @@ func modelCredentialFor(
 		}
 		out[key] = v
 	}
-	if v, err := read(credFieldAWSSession); err == nil && len(v) > 0 {
+	if v, err := read(providerFieldAWSSession); err == nil && len(v) > 0 {
 		out[ModelCredentialKeySessionToken] = v
 	}
 	return out, nil

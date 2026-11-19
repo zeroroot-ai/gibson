@@ -171,8 +171,8 @@ func GrantRoutes() []string {
 // kinds apart: ext-authz never reads it as a task grant, and never reads a task
 // grant as it.
 const (
-	// DaemonCallTokenType is the `typ` header of a daemon call grant.
-	DaemonCallTokenType = "daemon-call+jwt"
+	// DaemonCallJWTType is the `typ` header of a daemon call grant.
+	DaemonCallJWTType = "daemon-call+jwt"
 	// DaemonCallMaxLifetime is the longest lifetime of a daemon call grant.
 	DaemonCallMaxLifetime = 60 * time.Second
 

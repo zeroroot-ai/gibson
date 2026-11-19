@@ -6,6 +6,7 @@ package modelprovider
 import (
 	"bytes"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,7 +90,7 @@ func TestRender_Golden(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			want, err := os.ReadFile(path)
+			want, err := fs.ReadFile(os.DirFS("testdata"), name+".golden.yaml")
 			if err != nil {
 				t.Fatalf("read %s: %v (run with -update)", path, err)
 			}

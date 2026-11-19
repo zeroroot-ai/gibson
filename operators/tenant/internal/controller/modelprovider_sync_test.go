@@ -40,6 +40,9 @@ func syncRig(t *testing.T, records *fakeRecords, objs ...client.Object) (*ModelP
 	return &ModelProviderSyncRunnable{Client: c, Daemon: records}, c
 }
 
+// storedRef is the stored name of a provider secret, as the record holds it.
+func storedRef(name string) string { return "provider_cred:" + name }
+
 func getMP(t *testing.T, c client.Client, name string) (*gibsonv1alpha1.ModelProvider, bool) {
 	t.Helper()
 	var mp gibsonv1alpha1.ModelProvider
@@ -49,9 +52,9 @@ func getMP(t *testing.T, c client.Client, name string) (*gibsonv1alpha1.ModelPro
 
 func TestSync_CreatesOneModelProviderForEachRecord(t *testing.T) {
 	rec := &fakeRecords{byTenant: map[string][]provision.DesiredModelProvider{
-		"acme": {{Name: "claude", Type: "anthropic", CredentialSecret: "provider_cred:claude"}},
+		"acme": {{Name: "claude", Type: "anthropic", CredentialSecret: storedRef("claude")}},
 		// A tenant that is not ready is not read.
-		"newco": {{Name: "x", Type: "openai", CredentialSecret: "provider_cred:x"}},
+		"newco": {{Name: "x", Type: "openai", CredentialSecret: storedRef("x")}},
 	}}
 	r, c := syncRig(t, rec)
 	if err := r.Sync(context.Background()); err != nil {
@@ -78,12 +81,12 @@ func TestSync_UpdatesAndRemoves(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "local", Namespace: "tenant-acme", Labels: map[string]string{LabelModelProviderFromRecord: "true"}},
 		Spec: gibsonv1alpha1.ModelProviderSpec{
 			TenantID: "acme", Type: gibsonv1alpha1.ModelProviderOpenAICompatible,
-			BaseURL: "https://old.example", CredentialSecret: "provider_cred:local",
+			BaseURL: "https://old.example", CredentialSecret: storedRef("local"),
 		},
 	}
 	gone := &gibsonv1alpha1.ModelProvider{
 		ObjectMeta: metav1.ObjectMeta{Name: "gone", Namespace: "tenant-acme", Labels: map[string]string{LabelModelProviderFromRecord: "true"}},
-		Spec:       gibsonv1alpha1.ModelProviderSpec{TenantID: "acme", Type: gibsonv1alpha1.ModelProviderOpenAI, CredentialSecret: "provider_cred:gone"},
+		Spec:       gibsonv1alpha1.ModelProviderSpec{TenantID: "acme", Type: gibsonv1alpha1.ModelProviderOpenAI, CredentialSecret: storedRef("gone")},
 	}
 	// A ModelProvider that a person made by hand has no label. The loop keeps it.
 	manual := &gibsonv1alpha1.ModelProvider{
@@ -91,7 +94,7 @@ func TestSync_UpdatesAndRemoves(t *testing.T) {
 		Spec:       gibsonv1alpha1.ModelProviderSpec{TenantID: "acme", Type: gibsonv1alpha1.ModelProviderOpenAI, CredentialSecret: "s"},
 	}
 	rec := &fakeRecords{byTenant: map[string][]provision.DesiredModelProvider{
-		"acme": {{Name: "local", Type: "openai-compatible", BaseURL: "https://new.example", CredentialSecret: "provider_cred:local"}},
+		"acme": {{Name: "local", Type: "openai-compatible", BaseURL: "https://new.example", CredentialSecret: storedRef("local")}},
 	}}
 	r, c := syncRig(t, rec, old, gone, manual)
 	if err := r.Sync(context.Background()); err != nil {
@@ -114,10 +117,10 @@ func TestSync_UpdatesAndRemoves(t *testing.T) {
 func TestSync_ATypeChangeReplacesTheModelProvider(t *testing.T) {
 	old := &gibsonv1alpha1.ModelProvider{
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "tenant-acme", Labels: map[string]string{LabelModelProviderFromRecord: "true"}},
-		Spec:       gibsonv1alpha1.ModelProviderSpec{TenantID: "acme", Type: gibsonv1alpha1.ModelProviderOpenAI, CredentialSecret: "provider_cred:p"},
+		Spec:       gibsonv1alpha1.ModelProviderSpec{TenantID: "acme", Type: gibsonv1alpha1.ModelProviderOpenAI, CredentialSecret: storedRef("p")},
 	}
 	rec := &fakeRecords{byTenant: map[string][]provision.DesiredModelProvider{
-		"acme": {{Name: "p", Type: "anthropic", CredentialSecret: "provider_cred:p"}},
+		"acme": {{Name: "p", Type: "anthropic", CredentialSecret: storedRef("p")}},
 	}}
 	r, c := syncRig(t, rec, old)
 	if err := r.Sync(context.Background()); err != nil {
@@ -135,7 +138,7 @@ func TestSync_ATypeChangeReplacesTheModelProvider(t *testing.T) {
 func TestSync_ADaemonErrorDeletesNothing(t *testing.T) {
 	old := &gibsonv1alpha1.ModelProvider{
 		ObjectMeta: metav1.ObjectMeta{Name: "keep", Namespace: "tenant-acme", Labels: map[string]string{LabelModelProviderFromRecord: "true"}},
-		Spec:       gibsonv1alpha1.ModelProviderSpec{TenantID: "acme", Type: gibsonv1alpha1.ModelProviderOpenAI, CredentialSecret: "provider_cred:keep"},
+		Spec:       gibsonv1alpha1.ModelProviderSpec{TenantID: "acme", Type: gibsonv1alpha1.ModelProviderOpenAI, CredentialSecret: storedRef("keep")},
 	}
 	r, c := syncRig(t, &fakeRecords{err: errors.New("daemon down")}, old)
 	if err := r.Sync(context.Background()); err == nil {
@@ -164,7 +167,7 @@ func TestSync_ANameThatIsNotAKubernetesNameIsSkipped(t *testing.T) {
 // updates the ModelProvider.
 func TestSync_CarriesTheCABundleSecret(t *testing.T) {
 	rec := &fakeRecords{byTenant: map[string][]provision.DesiredModelProvider{
-		"acme": {{Name: "mock", Type: "openai-compatible", BaseURL: "https://mock.example", CredentialSecret: "provider_cred:mock",
+		"acme": {{Name: "mock", Type: "openai-compatible", BaseURL: "https://mock.example", CredentialSecret: storedRef("mock"),
 			CABundleSecret: "mock-ca"}},
 	}}
 	r, c := syncRig(t, rec)

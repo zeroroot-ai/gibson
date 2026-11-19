@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,7 +31,7 @@ const collectorSVID = "spiffe://example.org/platform/otel-collector"
 // returns it as an OTLP span. The test data holds typed attributes.
 func spanFromFixture(t *testing.T, name string, override map[string]string) *tracepb.Span {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "engine", "llmtrace", "testdata", name+".json"))
+	data, err := fs.ReadFile(os.DirFS(filepath.Join("..", "..", "..", "engine", "llmtrace", "testdata")), name+".json")
 	if err != nil {
 		t.Fatalf("read span %s: %v", name, err)
 	}

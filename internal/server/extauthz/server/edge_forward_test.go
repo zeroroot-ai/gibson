@@ -92,7 +92,7 @@ func TestEdgeForward_TheSameGrantPassesAtTheGateway(t *testing.T) {
 func TestEdgeForward_ADaemonCallGrantIsRefusedWithoutAReplayRecord(t *testing.T) {
 	// Not parallel: the test reads a process-wide counter before and after a call.
 	srv, priv, _ := dcServer(t)
-	g := signDC(t, priv, modelcall.DaemonCallTokenType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
+	g := signDC(t, priv, modelcall.DaemonCallJWTType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
 	before := testutil.ToFloat64(extauthzEdgeForwardDeniedTotal.WithLabelValues(forwardDenyDaemonCall))
 	resp, err := srv.Check(edge(t), modelRequest(modelcall.EdgeModelPrefix+"v1/responses", modelTenant, modelProvider, "", g, nil))
 	if got := statusOf(t, resp, err); got != codes.PermissionDenied {

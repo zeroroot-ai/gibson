@@ -86,7 +86,7 @@ func gw(t *testing.T) context.Context {
 func TestDaemonCall_ChatAllowedForTheInitiator(t *testing.T) {
 	t.Parallel()
 	srv, priv, mock := dcServer(t)
-	g := signDC(t, priv, modelcall.DaemonCallTokenType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
+	g := signDC(t, priv, modelcall.DaemonCallJWTType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
 	forged := map[string]string{modelcall.HeaderMission: "forged", modelcall.HeaderTask: "forged"}
 	req := modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, forged)
 	resp, err := srv.Check(gw(t), req)
@@ -113,7 +113,7 @@ func TestDaemonCall_ChatAllowedForTheInitiator(t *testing.T) {
 func TestDaemonCall_EmbeddingUsesTheTenantMembersAndTheDaemonSubject(t *testing.T) {
 	t.Parallel()
 	srv, priv, _ := dcServer(t)
-	g := signDC(t, priv, modelcall.DaemonCallTokenType, dcClaims("embedding", modelcall.RouteEmbeddings, modelTenant, ""))
+	g := signDC(t, priv, modelcall.DaemonCallJWTType, dcClaims("embedding", modelcall.RouteEmbeddings, modelTenant, ""))
 	req := modelRequest(modelcall.RouteEmbeddings, modelTenant, modelProvider, modelName1, g, nil)
 	resp, err := srv.Check(gw(t), req)
 	if got := statusOf(t, resp, err); got != codes.OK {
@@ -130,7 +130,7 @@ func TestDaemonCall_ModelListNeedsNoModel(t *testing.T) {
 	srv, priv := buildModelServer(t, mock)
 	srv.edgeIDs = idSet([]string{edgeSVID})
 	srv.gatewayIDs = idSet([]string{gatewaySVID})
-	g := signDC(t, priv, modelcall.DaemonCallTokenType, dcClaims("model_list", modelcall.RouteModels, modelTenant, ""))
+	g := signDC(t, priv, modelcall.DaemonCallJWTType, dcClaims("model_list", modelcall.RouteModels, modelTenant, ""))
 	req := modelRequest(modelcall.RouteModels, modelTenant, modelProvider, "", g, nil)
 	resp, err := srv.Check(gw(t), req)
 	if got := statusOf(t, resp, err); got != codes.OK {
@@ -156,31 +156,31 @@ func TestDaemonCall_Refusals(t *testing.T) {
 		return func() jwt.MapClaims { c := ok(); f(c); return c }
 	}
 	cases := []tc{
-		{name: "the route header names another tenant", typ: modelcall.DaemonCallTokenType, claims: ok,
+		{name: "the route header names another tenant", typ: modelcall.DaemonCallJWTType, claims: ok,
 			path: modelcall.RouteResponses, tenant: "tenant-b"},
-		{name: "another path than the grant route", typ: modelcall.DaemonCallTokenType, claims: ok,
+		{name: "another path than the grant route", typ: modelcall.DaemonCallJWTType, claims: ok,
 			path: modelcall.RouteEmbeddings},
-		{name: "a mission claim", typ: modelcall.DaemonCallTokenType,
+		{name: "a mission claim", typ: modelcall.DaemonCallJWTType,
 			claims: with(func(c jwt.MapClaims) { c["mission_id"] = "m1" }), path: modelcall.RouteResponses},
-		{name: "a task grant with the daemon type", typ: modelcall.DaemonCallTokenType,
+		{name: "a task grant with the daemon type", typ: modelcall.DaemonCallJWTType,
 			claims: with(func(c jwt.MapClaims) {
 				c["mission_id"], c["task_id"] = "m1", "t1"
 				c["allowed_rpcs"] = []string{modelcall.RouteResponses}
 			}), path: modelcall.RouteResponses},
-		{name: "a purpose outside the set", typ: modelcall.DaemonCallTokenType,
+		{name: "a purpose outside the set", typ: modelcall.DaemonCallJWTType,
 			claims: with(func(c jwt.MapClaims) { c[modelcall.ClaimPurpose] = "admin" }), path: modelcall.RouteResponses},
-		{name: "a route that the purpose does not own", typ: modelcall.DaemonCallTokenType,
+		{name: "a route that the purpose does not own", typ: modelcall.DaemonCallJWTType,
 			claims: with(func(c jwt.MapClaims) { c[modelcall.ClaimRoute] = modelcall.RouteModels }), path: modelcall.RouteModels},
-		{name: "chat with no initiator", typ: modelcall.DaemonCallTokenType,
+		{name: "chat with no initiator", typ: modelcall.DaemonCallJWTType,
 			claims: with(func(c jwt.MapClaims) { delete(c, modelcall.InitiatorClaim) }), path: modelcall.RouteResponses},
-		{name: "a lifetime over 60 seconds", typ: modelcall.DaemonCallTokenType,
+		{name: "a lifetime over 60 seconds", typ: modelcall.DaemonCallJWTType,
 			claims: with(func(c jwt.MapClaims) { c["exp"] = time.Now().Add(5 * time.Minute).Unix() }),
 			path:   modelcall.RouteResponses},
-		{name: "an expired grant", typ: modelcall.DaemonCallTokenType,
+		{name: "an expired grant", typ: modelcall.DaemonCallJWTType,
 			claims: with(func(c jwt.MapClaims) {
 				c["iat"], c["exp"] = time.Now().Add(-2*time.Minute).Unix(), time.Now().Add(-time.Minute).Unix()
 			}), path: modelcall.RouteResponses},
-		{name: "a model path from the Edge", typ: modelcall.DaemonCallTokenType, claims: ok,
+		{name: "a model path from the Edge", typ: modelcall.DaemonCallJWTType, claims: ok,
 			path: modelcall.RouteResponses, ctx: func(t *testing.T) context.Context {
 				t.Helper()
 				return peerContext(t, edgeSVID)
@@ -218,7 +218,7 @@ func TestDaemonCall_Refusals(t *testing.T) {
 func TestDaemonCall_ReplayIsRefused(t *testing.T) {
 	t.Parallel()
 	srv, priv, _ := dcServer(t)
-	g := signDC(t, priv, modelcall.DaemonCallTokenType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
+	g := signDC(t, priv, modelcall.DaemonCallJWTType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
 	req := modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil)
 	if resp, err := srv.Check(gw(t), req); statusOf(t, resp, err) != codes.OK {
 		t.Fatal("the first call was refused")
@@ -235,7 +235,7 @@ func TestDaemonCall_ReplayStoreDownFailsClosed(t *testing.T) {
 	srv, priv := buildModelServerWithReplay(t, mock, &memReplay{seen: map[string]bool{}, err: errTestStore})
 	srv.edgeIDs = idSet([]string{edgeSVID})
 	srv.gatewayIDs = idSet([]string{gatewaySVID})
-	g := signDC(t, priv, modelcall.DaemonCallTokenType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
+	g := signDC(t, priv, modelcall.DaemonCallJWTType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
 	req := modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil)
 	resp, err := srv.Check(gw(t), req)
 	if got := statusOf(t, resp, err); got != codes.Unavailable {
@@ -268,7 +268,7 @@ func TestDaemonCall_ATaskGrantStaysATaskGrant(t *testing.T) {
 func TestDaemonCall_OnAnEdgeRouteIsNotAccepted(t *testing.T) {
 	t.Parallel()
 	srv, priv, _ := dcServer(t)
-	g := signDC(t, priv, modelcall.DaemonCallTokenType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
+	g := signDC(t, priv, modelcall.DaemonCallJWTType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
 	resp, err := srv.Check(peerContext(t, edgeSVID), soleGrantRequest(g))
 	if got := statusOf(t, resp, err); got == codes.OK {
 		t.Fatal("a daemon call grant passed on an Edge route")
