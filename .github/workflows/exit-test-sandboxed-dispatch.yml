@@ -40,7 +40,12 @@ on:
       - 'tests/e2e/sandboxed_agent_dispatch_test.go'
       - 'tests/e2e/helpers/**'
       - '.github/workflows/exit-test-sandboxed-dispatch.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      charts-ref:
+        description: The ref of zeroroot-ai/charts to install.
+        required: false
+        default: main
 
 concurrency:
   group: exit-test-sandboxed-dispatch-${{ github.ref }}
@@ -92,6 +97,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zeroroot-ai/charts
+          ref: ${{ inputs.charts-ref || 'main' }}
           path: charts
 
       - name: Set up Go

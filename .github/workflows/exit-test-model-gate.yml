@@ -51,7 +51,12 @@ on:
       - 'tests/e2e/model_gate_test.go'
       - '.github/scripts/run-e2e-job.sh'
       - '.github/workflows/exit-test-model-gate.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      charts-ref:
+        description: The ref of zeroroot-ai/charts to install.
+        required: false
+        default: main
 
 # One run at a time, and a run that started finishes (gibson#151).
 concurrency:
@@ -98,6 +103,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zeroroot-ai/charts
+          ref: ${{ inputs.charts-ref || 'main' }}
           path: charts
 
       - name: Set up Go
