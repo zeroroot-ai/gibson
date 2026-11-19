@@ -83,7 +83,7 @@ func grantReq(kind tenantv1.GrantTargetKind, id string) *tenantv1.GrantAccessReq
 	}}
 }
 
-// GrantAccess refuses a target that matches no registered provider type or
+// GrantAccess refuses a target that matches no provider name or
 // known model, and accepts one that does.
 func TestGrantAccess_RefusesATargetThatMatchesNothing(t *testing.T) {
 	prov := tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER
@@ -94,12 +94,12 @@ func TestGrantAccess_RefusesATargetThatMatchesNothing(t *testing.T) {
 		id   string
 		want codes.Code
 	}{
-		{"provider type", prov, "openai", codes.OK},
-		{"embedding-only type", prov, "voyage", codes.InvalidArgument},
-		{"provider with only the embedding capability", prov, "mistral", codes.InvalidArgument},
-		{"provider config name is not the gate name", prov, "my-openai", codes.InvalidArgument},
+		{"provider name", prov, "my-openai", codes.OK},
+		{"embedding-only type", prov, "embed-only-type", codes.InvalidArgument},
+		{"provider with only the embedding capability", prov, "embed-capability", codes.InvalidArgument},
+		{"provider type is not the gate name", prov, "openai", codes.InvalidArgument},
 		{"free text provider", prov, "nonsense", codes.InvalidArgument},
-		{"disabled provider", prov, "google", codes.InvalidArgument},
+		{"disabled provider", prov, "off", codes.InvalidArgument},
 		{"default model", model, "gpt-4o", codes.OK},
 		{"live chat model", model, "gpt-4o-mini", codes.OK},
 		{"live model in the list", model, "text-embedding-3", codes.OK},

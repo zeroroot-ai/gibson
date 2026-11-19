@@ -416,10 +416,10 @@ func chatConfig(c *providerconfig.ProviderConfig) bool {
 }
 
 // checkGrantTarget refuses a grant target that matches no chat provider or chat
-// model of the tenant. A provider target must be the type of an enabled,
-// chat-capable provider config of the tenant. That type is the provider name
-// that the gate uses. A model target must be the default model of such a config,
-// or a chat model that the live list of such a provider names.
+// model of the tenant. A provider target must be the name of an enabled,
+// chat-capable provider config of the tenant. The gate of a model call uses
+// that name, not the provider type. A model target must be the default model
+// of such a config, or a chat model that the live list of such a provider names.
 func (s *DaemonServer) checkGrantTarget(ctx context.Context, tenantID string, kind tenantv1.GrantTargetKind, id string) error {
 	if s.providerConfig == nil {
 		return status_grpc.Error(codes.FailedPrecondition, "provider store is not configured")
@@ -437,7 +437,7 @@ func (s *DaemonServer) checkGrantTarget(ctx context.Context, tenantID string, ki
 	switch kind {
 	case tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER:
 		for _, c := range configs {
-			if string(c.Type) == id {
+			if c.Name == id {
 				return nil
 			}
 		}
