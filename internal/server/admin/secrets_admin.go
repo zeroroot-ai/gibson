@@ -174,7 +174,7 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *secretsv1.Lis
 	if cat := req.GetCategoryFilter(); cat != secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED {
 		// categoryPrefix returns "cred:" or "provider_config:" — append the
 		// caller-supplied name sub-prefix.
-		prefix = categoryPrefix(cat) + callerPrefix
+		prefix = secrets.CategoryPrefix(cat) + callerPrefix
 	} else {
 		// No category filter: the caller prefix is already the stored form
 		// (colon-flat at root).
@@ -261,7 +261,7 @@ func (s *SecretsAdminServer) SetSecret(ctx context.Context, req *secretsv1.SetSe
 
 	// Enforce the category prefix on the stored name. The dashboard's
 	// form sends the unprefixed name; the daemon namespaces it.
-	stored := storedName(req.GetCategory(), req.GetName())
+	stored := secrets.StoredName(req.GetCategory(), req.GetName())
 
 	if err := s.service.Put(ctx, stored, req.GetValue()); err != nil {
 		return nil, err
@@ -556,34 +556,6 @@ func parseCategory(name string) secretsv1.SecretCategory {
 	default:
 		return secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED
 	}
-}
-
-// categoryPrefix returns the colon-flat key prefix for a category enum value.
-// Used to convert ListSecrets category_filter into a broker List filter so
-// that only the correct category is scanned.
-func categoryPrefix(cat secretsv1.SecretCategory) string {
-	switch cat {
-	case secretsv1.SecretCategory_SECRET_CATEGORY_CRED:
-		return "cred:"
-	case secretsv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG:
-		return "provider_config:"
-	default:
-		return ""
-	}
-}
-
-// storedName returns the broker key for a SetSecret request. Tenant secrets
-// are stored colon-flat at the KV root as "<category>:<name>". If the supplied
-// name already carries the category prefix it is returned as-is (idempotent).
-func storedName(cat secretsv1.SecretCategory, name string) string {
-	prefix := categoryPrefix(cat)
-	if prefix == "" {
-		return name
-	}
-	if strings.HasPrefix(name, prefix) {
-		return name
-	}
-	return prefix + name
 }
 
 // callerName returns the caller-facing name for a stored key. With the

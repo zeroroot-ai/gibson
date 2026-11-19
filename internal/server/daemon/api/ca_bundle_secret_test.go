@@ -48,9 +48,9 @@ func TestRegisterOutsideAgent_ChecksTheCABundleAtSaveTime(t *testing.T) {
 		secrets map[string][]byte
 		want    codes.Code
 	}{
-		"a bundle":          {map[string][]byte{"partner-ca": bundle}, codes.OK},
+		"a bundle":          {map[string][]byte{"cred:partner-ca": bundle}, codes.OK},
 		"a missing secret":  {map[string][]byte{}, codes.InvalidArgument},
-		"not a certificate": {map[string][]byte{"partner-ca": []byte("hello")}, codes.InvalidArgument},
+		"not a certificate": {map[string][]byte{"cred:partner-ca": []byte("hello")}, codes.InvalidArgument},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -88,7 +88,7 @@ func TestGetOutsideAgentCredential_AddsTheCABundle(t *testing.T) {
 			{Name: "bad-ca", CABundleSecret: "key"},
 		},
 	}}
-	secrets := &fakeCredStore{data: map[string][]byte{"key": []byte("tok"), "ca": bundle}}
+	secrets := &fakeCredStore{data: map[string][]byte{"key": []byte("tok"), "cred:ca": bundle}}
 	srv := outsideOperatorServer(store, secrets)
 	get := func(name string) (*daemonoperatorv1.GetOutsideAgentCredentialResponse, error) {
 		return srv.GetOutsideAgentCredential(peerCtx(t, testTenantOperatorSVID),
@@ -112,7 +112,7 @@ func TestGetOutsideAgentCredential_AddsTheCABundle(t *testing.T) {
 func TestGetModelProviderCredential_AddsTheCABundle(t *testing.T) {
 	bundle := testCABundle(t)
 	store := &fakeCredStore{data: map[string][]byte{
-		"provider_cred:mock:api_key": []byte("sk-mock"), "mock-ca": bundle, "not-ca": []byte("hello"),
+		"provider_cred:mock:api_key": []byte("sk-mock"), "cred:mock-ca": bundle, "cred:not-ca": []byte("hello"),
 	}}
 	srv := modelCredServer(store)
 	req := modelCredReq("openai-compatible", "provider_cred:mock")
@@ -142,7 +142,7 @@ func TestCheckProviderCABundle(t *testing.T) {
 		return &tenantv1.ProviderConfigInput{Credentials: creds}
 	}
 	srv := newPendingServer().WithModelProviderCredentialSource(
-		&fakeCredStore{data: map[string][]byte{"ca": bundle, "not-ca": []byte("x")}}, testTenantOperatorSVID)
+		&fakeCredStore{data: map[string][]byte{"cred:ca": bundle, "cred:not-ca": []byte("x")}}, testTenantOperatorSVID)
 
 	assert.NoError(t, srv.checkProviderCABundle(tctx, input(nil)), "no field")
 	assert.NoError(t, srv.checkProviderCABundle(tctx, input(map[string]string{cabundle.Field: " "})), "blank field")
@@ -151,4 +151,24 @@ func TestCheckProviderCABundle(t *testing.T) {
 	assert.Error(t, srv.checkProviderCABundle(tctx, input(map[string]string{cabundle.Field: "missing"})))
 	assert.Error(t, newPendingServer().checkProviderCABundle(tctx, input(map[string]string{cabundle.Field: "ca"})),
 		"no secret store")
+}
+
+// SetSecret stores a credential under "cred:<name>", and the dashboard shows
+// the bare name. The field of the provider names the bare name, so the read must
+// use the stored name. A secret that exists only under the bare name is not a
+// credential of the tenant.
+func TestReadCABundleSecret_UsesTheStoredNameOfSetSecret(t *testing.T) {
+	bundle := testCABundle(t)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	got, err := readCABundleSecret(ctx, &fakeCredStore{data: map[string][]byte{"cred:mock-ca": bundle}}, "mock-ca")
+	require.NoError(t, err, "a bundle that SetSecret stored as cred:mock-ca")
+	assert.Equal(t, bundle, got)
+
+	got, err = readCABundleSecret(ctx, &fakeCredStore{data: map[string][]byte{"cred:mock-ca": bundle}}, "cred:mock-ca")
+	require.NoError(t, err, "a name that has the prefix already is read as it is")
+	assert.Equal(t, bundle, got)
+
+	_, err = readCABundleSecret(ctx, &fakeCredStore{data: map[string][]byte{"mock-ca": bundle}}, "mock-ca")
+	require.Error(t, err, "a key with no prefix is not a credential of the tenant")
 }
