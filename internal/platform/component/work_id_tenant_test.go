@@ -303,7 +303,7 @@ func newRecordingFindingSubmitter(t *testing.T, sc *state.StateClient) (submitte
 	sink := func(_ context.Context, _ string, f finding.EnhancedFinding, _ string) {
 		seenMission = f.MissionID.String()
 	}
-	return NewGraphRAGFindingSubmitter(sink, nil, sc, testLogger()), &seenMission
+	return NewGraphRAGFindingSubmitter(sink, &memFindingStore{}, sc, testLogger()), &seenMission
 }
 
 // TestFindingSubmitter_IgnoresWorkContextOfAnotherTenant checks the second half
@@ -347,7 +347,7 @@ func TestFindingSubmitter_CarriesTheMissionRunOfTheWorkItem(t *testing.T) {
 	env := newWorkIDEnv(t)
 	var seenRun string
 	sink := func(_ context.Context, _ string, _ finding.EnhancedFinding, run string) { seenRun = run }
-	submitter := NewGraphRAGFindingSubmitter(sink, nil, env.state, testLogger())
+	submitter := NewGraphRAGFindingSubmitter(sink, &memFindingStore{}, env.state, testLogger())
 
 	writeWorkContext(t, env.mr, "work-run-1", "mission-of-victim", victimTenant)
 	require.NoError(t, env.mr.Set(workRunKey("work-run-1"), "run-7"))

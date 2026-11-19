@@ -90,7 +90,7 @@ func TestFindingSubmitter_RecordedEvidence(t *testing.T) {
 		mission.String():     {{ToolCallID: "call-1", ToolName: "httpx", Result: "recorded"}},
 		"another-mission-id": {{ToolCallID: "call-other", Result: "other"}},
 	}}
-	s := NewGraphRAGFindingSubmitter(nil, nil, nil, testLogger()).WithToolCallRecord(record)
+	s := NewGraphRAGFindingSubmitter(nil, &memFindingStore{}, nil, testLogger()).WithToolCallRecord(record)
 	ctx := context.Background()
 
 	got, err := s.recordedEvidence(ctx, mission, []string{"call-1"})
@@ -116,7 +116,7 @@ func TestFindingSubmitter_RecordedEvidence(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, none)
 
-	_, err = NewGraphRAGFindingSubmitter(nil, nil, nil, testLogger()).recordedEvidence(ctx, mission, []string{"call-1"})
+	_, err = NewGraphRAGFindingSubmitter(nil, &memFindingStore{}, nil, testLogger()).recordedEvidence(ctx, mission, []string{"call-1"})
 	require.ErrorIs(t, err, ErrToolCallRecordUnavailable)
 }
 
@@ -124,7 +124,7 @@ func TestFindingSubmitter_RecordedEvidence(t *testing.T) {
 // whole submit fails and the World sink sees nothing.
 func TestFindingSubmitter_NamedToolCallWithNoRecordFailsTheSubmit(t *testing.T) {
 	var seen finding.EnhancedFinding
-	s := NewGraphRAGFindingSubmitter(recordingSink(&seen), nil, nil, testLogger()).
+	s := NewGraphRAGFindingSubmitter(recordingSink(&seen), &memFindingStore{}, nil, testLogger()).
 		WithToolCallRecord(&stubToolCallRecord{})
 
 	_, err := s.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"), victimTenant, "",

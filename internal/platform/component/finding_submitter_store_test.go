@@ -6,6 +6,7 @@ package component
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -27,6 +29,62 @@ type failingPool struct {
 
 func (p failingPool) For(context.Context, auth.TenantID) (*datapool.Conn, error) { return nil, p.err }
 
+// poolStore is the store that the daemon builds: pgstore over a data pool.
+func poolStore(p datapool.Pool) FindingRecordStore {
+	return pgstore.New(func() datapool.Pool { return p })
+}
+
+// memFindingStore is a finding store that keeps each record in memory. err,
+// when set, fails each write.
+type memFindingStore struct {
+	mu      sync.Mutex
+	records []finding.EnhancedFinding
+	err     error
+}
+
+func (m *memFindingStore) Store(_ context.Context, _ string, f finding.EnhancedFinding) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return m.err
+	}
+	m.records = append(m.records, f)
+	return nil
+}
+
+// A daemon with no data pool refuses each finding. The World never gets a
+// finding that has no store row.
+func TestFindingSubmitter_NoDataPoolRefusesTheSubmit(t *testing.T) {
+	var seen finding.EnhancedFinding
+	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), poolStore(nil), nil, testLogger())
+
+	id, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"),
+		victimTenant, "", `{"title":"exposed admin panel"}`, "", "")
+
+	require.ErrorIs(t, err, ErrFindingNotStored)
+	assert.Empty(t, id)
+	assert.Empty(t, seen.ID, "the World sink did not run")
+}
+
+// A stored finding is the record that the World gets.
+func TestFindingSubmitter_TheWorldGetsTheStoredRecord(t *testing.T) {
+	var seen finding.EnhancedFinding
+	store := &memFindingStore{}
+	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), store, nil, testLogger())
+
+	id, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"),
+		victimTenant, "", `{"title":"exposed admin panel"}`, "", "")
+
+	require.NoError(t, err)
+	require.Len(t, store.records, 1)
+	assert.Equal(t, id, store.records[0].ID.String())
+	assert.Equal(t, id, seen.ID.String())
+}
+
+func TestNewGraphRAGFindingSubmitter_RequiresAStore(t *testing.T) {
+	assert.Panics(t, func() { NewGraphRAGFindingSubmitter(nil, nil, nil, testLogger()) })
+}
+
 // Postgres is the one home of the fields and the evidence of a finding. A
 // failed write fails the submit, and the World never hears of the finding.
 func TestFindingSubmitter_AStoreFailureFailsTheSubmitBeforeTheWorld(t *testing.T) {
@@ -36,7 +94,7 @@ func TestFindingSubmitter_AStoreFailureFailsTheSubmitBeforeTheWorld(t *testing.T
 	} {
 		t.Run(name, func(t *testing.T) {
 			var seen finding.EnhancedFinding
-			submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), failingPool{err: cause}, nil, testLogger())
+			submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), poolStore(failingPool{err: cause}), nil, testLogger())
 
 			id, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"),
 				victimTenant, "", `{"title":"exposed admin panel","severity":"info"}`, "", "")
@@ -62,7 +120,7 @@ func TestSubmitFinding_AStoreFailureGivesAFixedMessage(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var seen finding.EnhancedFinding
-			submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), failingPool{err: tc.cause}, nil, testLogger())
+			submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), poolStore(failingPool{err: tc.cause}), nil, testLogger())
 			svc := newWorkIDEnv(t).svc
 			svc.findingSubmitter = submitter
 

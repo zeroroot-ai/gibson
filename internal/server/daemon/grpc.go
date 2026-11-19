@@ -80,6 +80,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
@@ -1797,7 +1798,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			if d.brainRegistry != nil {
 				graphRAGSubmitter := component.NewGraphRAGFindingSubmitter(
 					ingestComponentFinding(d.brainRegistry), // findings → World → projector (ADR-0107)
-					d.pool,                                  // per-tenant Pool: nil when security.key_provider not configured
+					// The one home of each finding. With no data pool the store
+					// refuses each write, so a finding is never only in the World.
+					pgstore.New(func() datapool.Pool { return d.pool }),
 					d.stateClient,
 					d.logger.WithComponent("finding-submitter").Slog(),
 				)

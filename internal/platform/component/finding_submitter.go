@@ -18,9 +18,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
-	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
-	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -58,20 +56,20 @@ var ErrNoSubmitterIdentity = errors.New("finding submitter: no verified caller i
 // cause to the agent.
 var ErrFindingNotStored = errors.New("finding submitter: the finding was not stored")
 
-// GraphRAGFindingSubmitter implements FindingSubmitter by routing findings to:
-//  1. The per-tenant finding store (via the data-plane Pool), for tenant-scoped writes.
-//  2. The GraphRAG knowledge graph via FindingGraphBridge.StoreAsync (fire-and-forget).
-//
-// Each Submit call acquires a per-tenant Conn from the pool using the tenant extracted
-// from the request context. Pool errors are mapped to gRPC status errors via
-// datapool.MapPoolError; the finding_id is still returned to the caller so the agent
-// can continue processing.
-//
-// GraphRAG storage is fully async: StoreAsync returns immediately and the actual
-// write happens in a background goroutine managed by the bridge.
+// FindingRecordStore writes the one record of a finding to the per-tenant
+// store. pgstore.Store satisfies it.
+type FindingRecordStore interface {
+	Store(ctx context.Context, tenant string, f finding.EnhancedFinding) error
+}
+
+// GraphRAGFindingSubmitter implements FindingSubmitter. It writes a finding to
+// the per-tenant finding store first, and then routes it into the tenant World.
+// Postgres is the one home of the fields and the evidence of a finding, so a
+// finding that the store did not write fails the submit and never reaches the
+// World.
 type GraphRAGFindingSubmitter struct {
 	worldSink   WorldFindingSink
-	pool        datapool.Pool
+	store       FindingRecordStore
 	stateClient *state.StateClient
 	logger      *slog.Logger
 
@@ -97,22 +95,26 @@ func (s *GraphRAGFindingSubmitter) WithEnrolledAgentLookup(l EnrolledAgentLookup
 //
 // Parameters:
 //   - bridge:      FindingGraphBridge for async Neo4j storage (must not be nil).
-//   - pool:        Per-tenant data-plane Pool used to acquire Conn for finding writes.
-//     May be nil; when nil, finding persistence is skipped (Neo4j storage still runs).
+//   - store:       The per-tenant finding store (required). The daemon passes a
+//     pgstore.Store over its data pool. A daemon with no pool has a store that
+//     refuses each write, so each submit fails.
 //   - stateClient: StateClient used to resolve workID → missionID from Redis.
 //   - logger:      Structured logger; if nil, slog.Default() is used.
 func NewGraphRAGFindingSubmitter(
 	worldSink WorldFindingSink,
-	pool datapool.Pool,
+	store FindingRecordStore,
 	stateClient *state.StateClient,
 	logger *slog.Logger,
 ) *GraphRAGFindingSubmitter {
+	if store == nil {
+		panic("component.NewGraphRAGFindingSubmitter: the finding store must not be nil")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &GraphRAGFindingSubmitter{
 		worldSink:   worldSink,
-		pool:        pool,
+		store:       store,
 		stateClient: stateClient,
 		logger:      logger.With("component", "graphrag_finding_submitter"),
 	}
@@ -211,11 +213,12 @@ func (s *GraphRAGFindingSubmitter) recordedEvidence(
 //     attribution and is never read.
 //  4. Resolves the missionID from the work-item context stored in Redis.
 //  5. Builds the one EnhancedFinding the store keeps and the World sink folds.
-//  6. Acquires a per-tenant Conn and stores it (warn on failure).
+//  6. Writes it to the per-tenant store. A failed write fails the submit
+//     (ErrFindingNotStored), and the World never gets the finding.
 //  7. Hands it to the World sink.
 //
-// Returns the generated finding ID and nil on success. JSON parse errors return
-// an error; store failures are non-fatal.
+// Returns the generated finding ID and nil on success. A parse error and a
+// store failure each return an error.
 func (s *GraphRAGFindingSubmitter) Submit(
 	ctx context.Context,
 	tenant, workID, findingJSON, severity, title string,
@@ -344,22 +347,14 @@ func (s *GraphRAGFindingSubmitter) resolveSubmitter(ctx context.Context, tenant 
 }
 
 // persistFinding writes the finding to the findings table of the database of
-// the tenant. A daemon with no pool skips the write. Any write error, including
-// a tenant that is not provisioned, is returned.
+// the tenant. Any write error, including a tenant that is not provisioned and a
+// daemon with no data pool, is returned.
 func (s *GraphRAGFindingSubmitter) persistFinding(
 	ctx context.Context,
 	tenant string,
 	enhanced finding.EnhancedFinding,
 ) error {
-	if s.pool == nil {
-		s.logger.WarnContext(ctx, "finding submitter: pool not configured; finding not persisted to store",
-			slog.String("tenant", tenant),
-			slog.String("finding_id", enhanced.ID.String()),
-		)
-		return nil
-	}
-	store := pgstore.New(func() datapool.Pool { return s.pool })
-	if err := store.Store(ctx, tenant, enhanced); err != nil {
+	if err := s.store.Store(ctx, tenant, enhanced); err != nil {
 		return fmt.Errorf("%w: %w", ErrFindingNotStored, err)
 	}
 	s.logger.DebugContext(ctx, "finding submitter: finding stored in per-tenant store",
