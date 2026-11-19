@@ -255,7 +255,7 @@ func TestIngestToolCall_TheRecordIsReadableWhenTheSinkReturns(t *testing.T) {
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestToolCall(reg)
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		id := fmt.Sprintf("call-%d", i)
 		sink(ctx, "acme", harness.ToolCallRecord{ToolCallID: id, MissionID: "m1", ToolName: "nmap"})
 		if _, missing := reg.For("acme").RecordedToolCalls("m1", []string{id}); len(missing) != 0 {

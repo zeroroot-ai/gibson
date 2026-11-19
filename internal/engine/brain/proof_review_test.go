@@ -125,7 +125,7 @@ func TestEngine_SubmitAndWait_TheRecordIsReadableAtOnce(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	e := NewRegistry(ctx, memStoreFactory()).For("t")
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		id := fmt.Sprintf("call-%d", i)
 		if err := e.SubmitAndWait(ctx, AgentToolCallObserved{ToolCallID: id, MissionID: "m1"}); err != nil {
 			t.Fatalf("SubmitAndWait(%s): %v", id, err)

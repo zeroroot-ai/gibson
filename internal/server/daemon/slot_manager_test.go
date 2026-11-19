@@ -5,7 +5,6 @@ package daemon
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"testing"
 
@@ -18,7 +17,7 @@ import (
 )
 
 // slotTestLogger returns a logger that writes nothing.
-func slotTestLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+func slotTestLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // newSlotManager builds a slot manager over the given provider records.
 func newSlotManager(providers ...SlotProvider) *DaemonSlotManager {

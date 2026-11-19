@@ -6,7 +6,6 @@ package main
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -87,7 +86,7 @@ func TestProbeMux_ReadinessFollowsTheCondition(t *testing.T) {
 // An empty address starts no listener. A real address serves, and it stops with
 // the context.
 func TestStartProbeListener(t *testing.T) {
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

@@ -30,7 +30,7 @@ func TestQueuedToolCallID_IsStableAndUnique(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, job := range []string{"job-1", "job-2"} {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			id := queuedToolCallID(job, i)
 			if seen[id] {
 				t.Fatalf("duplicate id %s", id)

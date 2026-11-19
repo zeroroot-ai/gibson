@@ -233,7 +233,7 @@ func TestA2ARuns_TheDepthLimitRefusesTheNextRun(t *testing.T) {
 	limit := harness.MaxDelegationDepth()
 	parent := "node-task"
 	var ids []string
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		id := "chain-" + string(rune('a'+i))
 		ids = append(ids, id)
 		eng.Submit(brain.WorkDispatched{

@@ -66,7 +66,7 @@ func pull(t *testing.T, ref string) (*agentskill.Pulled, error) {
 func rawImage(t *testing.T, cfg, layer types.MediaType, tarBytes []byte, layers int) v1.Image {
 	t.Helper()
 	img := v1.Image(empty.Image)
-	for i := 0; i < layers; i++ {
+	for range layers {
 		var err error
 		img, err = mutate.Append(img, mutate.Addendum{Layer: static.NewLayer(tarBytes, layer)})
 		if err != nil {

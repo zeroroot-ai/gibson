@@ -143,7 +143,7 @@ func TestValidate_SizeLimits(t *testing.T) {
 
 	// Nine files of 1 MiB are 9 MiB, over the 8 MiB folder limit.
 	var many []file
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		many = append(many, file{Path: fmt.Sprintf("f%d.bin", i), Content: big})
 	}
 	if _, err := agentskill.Validate("web-recon", folder(many...)); !errors.Is(err, errOver) {
@@ -151,7 +151,7 @@ func TestValidate_SizeLimits(t *testing.T) {
 	}
 
 	var files []file
-	for i := 0; i < agentskill.MaxFiles; i++ {
+	for i := range agentskill.MaxFiles {
 		files = append(files, file{Path: fmt.Sprintf("f%d.md", i), Content: []byte("x")})
 	}
 	if _, err := agentskill.Validate("web-recon", folder(files[:agentskill.MaxFiles-1]...)); err != nil {
