@@ -40,8 +40,9 @@ func (r missionTenantTuples) Forget(ctx context.Context, tenant string, id types
 }
 
 // missionTenantRecorder returns the recorder of the daemon, or nil when the
-// daemon has no authorizer (a unit test daemon). The daemon starts with an
-// authorizer in every deployment.
+// daemon has no authorizer. A store built with a nil recorder refuses to create
+// a mission (mission.ErrNoTenantRecorder), so a daemon with no authorizer starts
+// no mission. The daemon starts with an authorizer in every deployment.
 func (d *daemonImpl) missionTenantRecorder() mission.TenantRecorder {
 	if d.authorizer == nil {
 		return nil
@@ -57,7 +58,7 @@ func (d *daemonImpl) newMissionStore(rdb *redis.Client, tenant string) *mission.
 }
 
 // newMissionStoreWith builds a store that records the tenant of each mission it
-// creates. A nil recorder builds a store that records nothing.
+// creates. A nil recorder builds a store that fails when it creates a mission.
 func newMissionStoreWith(rdb *redis.Client, rec mission.TenantRecorder, tenant string) *mission.ConnBoundMissionStore {
 	s := mission.NewConnBoundMissionStore(rdb)
 	if rec == nil {

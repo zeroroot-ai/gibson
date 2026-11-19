@@ -11,6 +11,7 @@ package mission
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,7 +27,8 @@ import (
 type ConnBoundMissionStore struct {
 	rdb *goredis.Client
 	// recorder and tenant tie each mission this store creates to its tenant in
-	// the authorization store. Both are zero for a store that only reads.
+	// the authorization store. A store that only reads needs neither. A store
+	// that creates a mission with no recorder fails (ErrNoTenantRecorder).
 	recorder TenantRecorder
 	tenant   string
 }
@@ -42,6 +44,17 @@ type TenantRecorder interface {
 	Forget(ctx context.Context, tenant string, missionID types.ID) error
 }
 
+// ErrNoTenantRecorder is the error of a store that was asked to create or delete
+// a mission and has no TenantRecorder. A new call site that builds its store with
+// NewConnBoundMissionStore alone and then creates a mission meets it on its first
+// test, not as a mission with no tuple on a cluster.
+var ErrNoTenantRecorder = errors.New("mission store: no tenant recorder: a store that creates missions must be built with WithTenantRecorder")
+
+// ErrTenantRecordFailed marks the error of a failed write of the tenant tuple of
+// a mission. The authorization store was not reachable or refused the write, and
+// the caller can retry, so the API maps it to Unavailable.
+var ErrTenantRecordFailed = errors.New("the tenant of the mission could not be recorded")
+
 // WithTenantRecorder returns the store set to record the tenant of each mission
 // it creates. The record is written BEFORE the mission, and a failed write
 // creates no mission. A mission that exists without its tuple is the defect
@@ -54,12 +67,26 @@ func (s *ConnBoundMissionStore) WithTenantRecorder(rec TenantRecorder, tenant st
 // recordTenant writes the tenant tuple of a mission about to be created.
 func (s *ConnBoundMissionStore) recordTenant(ctx context.Context, id types.ID) error {
 	if s.recorder == nil {
-		return nil
+		return ErrNoTenantRecorder
 	}
 	if err := s.recorder.Record(ctx, s.tenant, id); err != nil {
-		return fmt.Errorf("record the tenant of mission %s: %w", id, err)
+		return fmt.Errorf("%w: mission %s: %w", ErrTenantRecordFailed, id, err)
 	}
 	return nil
+}
+
+// forgetNewTenant removes the tuple of a mission whose record could not be
+// written, so the tuple does not stay for a mission that does not exist. It is a
+// best effort: a tuple with no mission opens nothing, and a failure here is not
+// worth a second error. The context is detached because the failed write may be
+// the cancellation of the caller.
+func (s *ConnBoundMissionStore) forgetNewTenant(ctx context.Context, id types.ID) {
+	if s.recorder == nil {
+		return
+	}
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = s.recorder.Forget(fctx, s.tenant, id)
 }
 
 // NewConnBoundMissionStore creates a MissionStore backed by the given tenant-bound client.
@@ -124,7 +151,10 @@ func (s *ConnBoundMissionStore) Save(ctx context.Context, mission *Mission) erro
 		return fmt.Errorf("failed to marshal mission: %w", err)
 	}
 
-	// The tuple first: with no tuple there is no mission.
+	// The tuple first: with no tuple there is no mission. A Save of a mission
+	// that exists writes the same tuple again, which repairs a mission made
+	// before the store wrote tuples.
+	existed := s.rdb.Exists(ctx, cbMissionKey(mission.ID)).Val() > 0
 	if err := s.recordTenant(ctx, mission.ID); err != nil {
 		return err
 	}
@@ -134,6 +164,9 @@ func (s *ConnBoundMissionStore) Save(ctx context.Context, mission *Mission) erro
 	pipe.SAdd(ctx, cbMissionByTargetKey(mission.TargetID), mission.ID.String())
 	pipe.SAdd(ctx, cbMissionByNameKey(mission.Name), mission.ID.String())
 	if _, err := pipe.Exec(ctx); err != nil {
+		if !existed {
+			s.forgetNewTenant(ctx, mission.ID)
+		}
 		return fmt.Errorf("failed to save mission: %w", err)
 	}
 	return nil
@@ -295,6 +328,9 @@ func (s *ConnBoundMissionStore) Update(ctx context.Context, mission *Mission) er
 
 // Delete soft-deletes a mission (only terminal states allowed).
 func (s *ConnBoundMissionStore) Delete(ctx context.Context, id types.ID) error {
+	if s.recorder == nil {
+		return ErrNoTenantRecorder
+	}
 	mission, err := s.Get(ctx, id)
 	if err != nil {
 		return err
@@ -311,10 +347,8 @@ func (s *ConnBoundMissionStore) Delete(ctx context.Context, id types.ID) error {
 		return fmt.Errorf("failed to delete mission: %w", err)
 	}
 	// The record is gone, so the tuple goes. An absent tuple is not an error.
-	if s.recorder != nil {
-		if err := s.recorder.Forget(ctx, s.tenant, id); err != nil {
-			return fmt.Errorf("forget the tenant of mission %s: %w", id, err)
-		}
+	if err := s.recorder.Forget(ctx, s.tenant, id); err != nil {
+		return fmt.Errorf("forget the tenant of mission %s: %w", id, err)
 	}
 	return nil
 }
@@ -493,14 +527,14 @@ func (s *ConnBoundMissionStore) FindOrCreateByName(ctx context.Context, mission 
 			if err != nil {
 				return nil, false, err
 			}
-			return existing, false, nil
+			return s.existingRecorded(ctx, existing)
 		}
 		id, _ := types.ParseID(existingIDs[0])
 		existing, err := s.Get(ctx, id)
 		if err != nil {
 			return nil, false, err
 		}
-		return existing, false, nil
+		return s.existingRecorded(ctx, existing)
 	}
 
 	// We won the lock — check if the name already exists in the set.
@@ -511,7 +545,7 @@ func (s *ConnBoundMissionStore) FindOrCreateByName(ctx context.Context, mission 
 		id, err := types.ParseID(existingIDs[0])
 		if err == nil {
 			if existing, err := s.Get(ctx, id); err == nil {
-				return existing, false, nil
+				return s.existingRecorded(ctx, existing)
 			}
 		}
 	}
@@ -525,9 +559,21 @@ func (s *ConnBoundMissionStore) FindOrCreateByName(ctx context.Context, mission 
 	pipe.SAdd(ctx, cbMissionByTargetKey(mission.TargetID), mission.ID.String())
 	pipe.SAdd(ctx, cbMissionByNameKey(mission.Name), mission.ID.String())
 	if _, err := pipe.Exec(ctx); err != nil {
+		s.forgetNewTenant(ctx, mission.ID)
 		return nil, false, fmt.Errorf("failed to create mission: %w", err)
 	}
 	return mission, true, nil
+}
+
+// existingRecorded returns a mission that FindOrCreateByName found, after it
+// writes the tenant tuple of that mission again. The write is idempotent. A
+// mission made before the store wrote tuples gets its tuple on its next run by
+// name, as a run by ID gets it through Save.
+func (s *ConnBoundMissionStore) existingRecorded(ctx context.Context, existing *Mission) (*Mission, bool, error) {
+	if err := s.recordTenant(ctx, existing.ID); err != nil {
+		return nil, false, err
+	}
+	return existing, false, nil
 }
 
 // ---------------------------------------------------------------------------
