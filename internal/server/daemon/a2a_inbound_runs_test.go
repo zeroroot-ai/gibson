@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"testing"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -282,7 +283,7 @@ type fakeMissionFindings struct {
 }
 
 func (f *fakeMissionFindings) MissionFindings(
-	_ context.Context, tenant string, missionID types.ID,
+	_ context.Context, tenant string, missionID types.ID, _ int,
 ) ([]finding.EnhancedFinding, error) {
 	f.asked = append(f.asked, tenant+"/"+missionID.String())
 	return f.findings, f.err
@@ -550,24 +551,24 @@ func TestPGMissionFindings_ReadsEveryPageOfTheMission(t *testing.T) {
 	}
 	p := &pager{all: all, pageSize: 2}
 
-	got, err := pgMissionFindings{store: p}.MissionFindings(context.Background(), "acme", mission)
+	got, err := pgMissionFindings{store: p}.MissionFindings(context.Background(), "acme", mission, 1<<20)
 
 	require.NoError(t, err)
 	assert.Len(t, got, 5, "no finding is left out")
 	require.Len(t, p.queries, 3)
 	for i, q := range p.queries {
 		assert.Equal(t, mission, q.MissionID, "only the findings of that mission")
-		assert.Equal(t, pgstore.MaxPageSize, q.Limit)
+		assert.Equal(t, inboundFindingPage, q.Limit)
 		assert.Equal(t, i*2, q.Offset)
 	}
 
 	// A store that reports more than it returns cannot loop for ever.
 	short := &pager{all: all[:2], pageSize: 2, total: 9}
-	got, err = pgMissionFindings{store: short}.MissionFindings(context.Background(), "acme", mission)
+	got, err = pgMissionFindings{store: short}.MissionFindings(context.Background(), "acme", mission, 1<<20)
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 
-	_, err = pgMissionFindings{store: &pager{err: errors.New("db down")}}.MissionFindings(context.Background(), "acme", mission)
+	_, err = pgMissionFindings{store: &pager{err: errors.New("db down")}}.MissionFindings(context.Background(), "acme", mission, 1<<20)
 	require.ErrorContains(t, err, "read the findings of mission")
 }
 
@@ -711,4 +712,81 @@ func TestInboundRuns_MissionFinishedReadsTheWorld(t *testing.T) {
 	assert.False(t, finished("not-in-the-world"), "a mission that the World does not hold has not ended")
 	f.end(brain.MissionCompleted)
 	assert.True(t, finished(f.mission))
+}
+
+// The read stops when the size passes the limit. It does not load the findings
+// that remain.
+func TestPGMissionFindings_StopsReadingWhenTheSizePassesTheLimit(t *testing.T) {
+	var all []finding.EnhancedFinding
+	for range 10 {
+		all = append(all, finding.EnhancedFinding{Finding: agent.Finding{
+			ID: types.NewID(), Evidence: []*typespb.Evidence{{Content: strings.Repeat("A", 100)}},
+		}})
+	}
+	p := &pager{all: all, pageSize: 2}
+
+	got, err := pgMissionFindings{store: p}.MissionFindings(context.Background(), "acme", types.NewID(), 350)
+
+	require.ErrorIs(t, err, a2aserver.ErrResultTooLarge)
+	assert.Nil(t, got)
+	assert.Len(t, p.queries, 2, "the read stopped after the page that passed the limit, not at the end")
+}
+
+// A finished mission builds its result one time. A repeated read comes from the
+// cache, also when the result is over the limit.
+func TestInboundRuns_TheResultOfAFinishedMissionIsBuiltOnce(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.findings.findings = []finding.EnhancedFinding{{Finding: agent.Finding{ID: types.NewID(), Title: "t"}}}
+	f.end(brain.MissionCompleted)
+
+	for range 3 {
+		task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+		require.NoError(t, err)
+		require.Len(t, task.Artifacts, 1)
+	}
+	assert.Len(t, f.findings.asked, 1, "the findings were read one time")
+
+	g := newTaskFixture(t)
+	g.startMission(ownerRef)
+	g.findings.err = fmt.Errorf("%w: over", a2aserver.ErrResultTooLarge)
+	g.end(brain.MissionCompleted)
+	for range 3 {
+		_, err := g.runs.Task(context.Background(), ownerCaller, a2a.TaskID(g.mission))
+		require.ErrorIs(t, err, a2aserver.ErrResultTooLarge)
+	}
+	assert.Len(t, g.findings.asked, 1, "a result over the limit is not built again")
+
+	h := newTaskFixture(t)
+	h.startMission(ownerRef)
+	h.findings.err = errors.New("postgres is down")
+	h.end(brain.MissionCompleted)
+	for range 2 {
+		_, err := h.runs.Task(context.Background(), ownerCaller, a2a.TaskID(h.mission))
+		require.Error(t, err)
+	}
+	assert.Len(t, h.findings.asked, 2, "a failure to read is tried again")
+}
+
+func TestResultCache_IsBoundedAndExpires(t *testing.T) {
+	now := time.Unix(1000, 0)
+	c := &resultCache{now: func() time.Time { return now }}
+	for i := range resultCacheSize + 10 {
+		c.put(fmt.Sprintf("k%d", i), inboundResult{})
+	}
+	assert.Len(t, c.entries, resultCacheSize, "the cache holds at most its size")
+	assert.Len(t, c.order, resultCacheSize)
+	_, ok := c.get("k0")
+	assert.False(t, ok, "the oldest result went first")
+	_, ok = c.get(fmt.Sprintf("k%d", resultCacheSize+9))
+	assert.True(t, ok)
+
+	c.put("again", inboundResult{})
+	c.put("again", inboundResult{})
+	assert.Len(t, c.entries, resultCacheSize)
+
+	now = now.Add(resultCacheTTL + time.Second)
+	_, ok = c.get("again")
+	assert.False(t, ok, "a result expires")
+	assert.NotContains(t, c.entries, "again")
 }

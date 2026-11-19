@@ -138,3 +138,9 @@ func TestFindingsArtifact_AResultOverTheLimitFailsAndIsNeverTruncated(t *testing
 	_, err = FindingsArtifact("m-1", []finding.EnhancedFinding{full}, MaxInboundResultBytes)
 	require.NoError(t, err)
 }
+
+func TestEstimateFindingBytes_CountsTheTextOfEachPart(t *testing.T) {
+	full, bare := sampleFindings()
+	assert.Greater(t, EstimateFindingBytes(full), len(full.Evidence[0].Content), "the evidence counts")
+	assert.Equal(t, len("Banner")+len("low"), EstimateFindingBytes(bare))
+}

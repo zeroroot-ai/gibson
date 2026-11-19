@@ -113,3 +113,21 @@ func FindingsArtifact(missionID string, findings []finding.EnhancedFinding, limi
 		Parts: a2a.ContentParts{a2a.NewDataPart(json.RawMessage(body))},
 	}, nil
 }
+
+// EstimateFindingBytes is the size of the text of a finding in its result: the
+// text fields, each evidence item and each reproduction step. It is a little below
+// the size of the JSON, which adds keys and quotes. A reader that stops at the
+// limit uses it to stop early. FindingsArtifact still measures the whole result.
+func EstimateFindingBytes(f finding.EnhancedFinding) int {
+	n := len(f.Title) + len(f.Description) + len(f.Severity)
+	for _, e := range f.Evidence {
+		n += len(e.GetTitle()) + len(e.GetContent()) + len(e.GetToolCallId())
+		for k, v := range e.GetMetadata() {
+			n += len(k) + len(v)
+		}
+	}
+	for _, s := range f.ReproSteps {
+		n += len(s.Description) + len(s.ExpectedResult) + len(s.EvidenceRef)
+	}
+	return n
+}
