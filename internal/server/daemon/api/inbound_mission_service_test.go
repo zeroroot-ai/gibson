@@ -158,14 +158,14 @@ func (m *memInboundStore) holdsAgentLock(agent string) bool {
 	return m.heldAgents[agent]
 }
 
-func (r memReader) Delete(ctx context.Context, agent string) error {
-	return r.m.Delete(ctx, r.tenant, agent)
-}
-
 // memReader reads the memory store as the reader of a transaction does.
 type memReader struct {
 	m      *memInboundStore
 	tenant string
+}
+
+func (r memReader) Delete(ctx context.Context, agent string) error {
+	return r.m.Delete(ctx, r.tenant, agent)
 }
 
 func (r memReader) Get(ctx context.Context, agent string) (*inboundmissionstore.Entry, error) {

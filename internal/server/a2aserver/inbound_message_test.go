@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -550,7 +551,11 @@ func (o *orderRecorder) SetWriteDeadline(t time.Time) error {
 
 func (o *orderRecorder) Write(b []byte) (int, error) {
 	o.events = append(o.events, "write")
-	return o.ResponseRecorder.Write(b)
+	n, err := o.ResponseRecorder.Write(b)
+	if err != nil {
+		return n, fmt.Errorf("record the write: %w", err)
+	}
+	return n, nil
 }
 
 // On a kept-alive connection the deadline of one request must not stay for the next.
@@ -576,7 +581,7 @@ func TestInboundMiddleware_SetsTheDeadlineFirstAndClearsItLast(t *testing.T) {
 			assert.Equal(t, "deadline:set", rec.events[0], "the deadline comes before any write")
 			assert.Equal(t, "deadline:cleared", rec.events[len(rec.events)-1], "the deadline is cleared at the end")
 			firstWrite := slices.Index(rec.events, "write")
-			assert.Greater(t, firstWrite, 0)
+			assert.Positive(t, firstWrite)
 		})
 	}
 }
