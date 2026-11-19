@@ -687,7 +687,10 @@ func TestInboundRuns_AMissionThatCannotBeBoundEndsAtOnce(t *testing.T) {
 	r := newInboundRuns(starter)
 	r.published.(*fakePublished).bindErr = errors.New("bind boom")
 	var stopped []string
-	r.stop = func(_ context.Context, id string) error { stopped = append(stopped, id); return errors.New("stop boom") }
+	r.stop = func(_ context.Context, id string) error {
+		stopped = append(stopped, id)
+		return errors.New("stop boom")
+	}
 
 	task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
 

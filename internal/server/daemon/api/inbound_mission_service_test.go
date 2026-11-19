@@ -79,8 +79,12 @@ func (m *memInboundStore) Get(_ context.Context, _, agent string) (*inboundmissi
 func (m *memInboundStore) Reserve(context.Context, string, string, string, func(string) bool, time.Duration) (string, error) {
 	return "", errors.New("not used")
 }
-func (m *memInboundStore) Bind(context.Context, string, string, string) error { return errors.New("not used") }
-func (m *memInboundStore) Release(context.Context, string, string) error     { return errors.New("not used") }
+func (m *memInboundStore) Bind(context.Context, string, string, string) error {
+	return errors.New("not used")
+}
+func (m *memInboundStore) Release(context.Context, string, string) error {
+	return errors.New("not used")
+}
 func (m *memInboundStore) Owner(context.Context, string, string) (string, error) {
 	return "", errors.New("not used")
 }
