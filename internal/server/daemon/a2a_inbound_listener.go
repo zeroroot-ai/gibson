@@ -112,7 +112,8 @@ func (d *daemonImpl) buildA2AInboundServer() (*httpSubsystem, error) {
 		return nil, fmt.Errorf("%s: the brain and the data pool are not available", label)
 	}
 	runs := &inboundRuns{
-		published: d.inboundMissions, starter: d.daemonServer, registry: d.brainRegistry,
+		published: d.inboundMissions, source: &inboundMissionSource{pool: d.pool, targets: d.targetStore},
+		starter: d.daemonServer, registry: d.brainRegistry,
 		findings: pgMissionFindings{store: pgstore.New(func() datapool.Pool { return d.pool })},
 		stop: func(ctx context.Context, missionID string) error {
 			return d.StopMissionWithManager(ctx, missionID, false)

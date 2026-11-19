@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -35,10 +36,15 @@ type Entry struct {
 	// Agent is the name of the agent that the caller addresses. It is unique in
 	// the tenant.
 	Agent string
-	// DefinitionID is the mission definition that a call starts.
+	// DefinitionID is the ID of the mission definition that a call starts.
 	DefinitionID string
+	// DefinitionHash is the hash of the definition at publish. A call starts a
+	// mission only while the definition has this hash.
+	DefinitionHash string
 	// TargetIDs are the approved targets. A message can only narrow this set.
 	TargetIDs []string
+	// TargetHashes holds the hash of each approved target at publish, by target ID.
+	TargetHashes map[string]string
 	// PublishedBy is the subject of the tenant admin who published it.
 	PublishedBy string
 	CreatedAt   time.Time
@@ -46,8 +52,10 @@ type Entry struct {
 
 // Store reads and writes the published mission definitions of one tenant.
 type Store interface {
-	// Publish saves an entry. The same entry again changes nothing and returns
-	// the stored entry. The same agent with other fields returns ErrConflict.
+	// Publish saves an entry. The same agent with the same definition and the same
+	// targets again saves the new hashes, so an admin can publish again after the
+	// definition or a target changed. The same agent with another definition or other
+	// targets returns ErrConflict.
 	Publish(ctx context.Context, tenant string, e Entry) (*Entry, error)
 	// ListPage returns at most limit entries of the tenant, in agent order. With
 	// hasAfter it returns the entries whose agent is larger than after.
@@ -95,7 +103,7 @@ func NewPostgresStore(pool datapool.Pool) Store {
 
 var _ Store = (*postgresStore)(nil)
 
-const columns = `agent, mission_definition_id, target_ids, published_by, created_at`
+const columns = `agent, mission_definition_id, definition_hash, target_ids, target_hashes, published_by, created_at`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -103,24 +111,36 @@ type scanner interface {
 
 func scanEntry(row scanner) (*Entry, error) {
 	var e Entry
-	var targets string
-	if err := row.Scan(&e.Agent, &e.DefinitionID, &targets, &e.PublishedBy, &e.CreatedAt); err != nil {
+	var targets, hashes string
+	if err := row.Scan(&e.Agent, &e.DefinitionID, &e.DefinitionHash, &targets, &hashes, &e.PublishedBy, &e.CreatedAt); err != nil {
 		return nil, fmt.Errorf("scan inbound mission row: %w", err)
 	}
 	if err := json.Unmarshal([]byte(targets), &e.TargetIDs); err != nil {
 		return nil, fmt.Errorf("decode the targets of %s: %w", e.Agent, err)
+	}
+	if err := json.Unmarshal([]byte(hashes), &e.TargetHashes); err != nil {
+		return nil, fmt.Errorf("decode the target hashes of %s: %w", e.Agent, err)
 	}
 	e.CreatedAt = e.CreatedAt.UTC()
 	return &e, nil
 }
 
 func (s *postgresStore) Publish(ctx context.Context, tenant string, e Entry) (*Entry, error) {
-	if e.Agent == "" || e.DefinitionID == "" || len(e.TargetIDs) == 0 {
-		return nil, errors.New("inboundmissionstore: publish needs an agent, a definition and a target")
+	if e.Agent == "" || e.DefinitionID == "" || e.DefinitionHash == "" || len(e.TargetIDs) == 0 {
+		return nil, errors.New("inboundmissionstore: publish needs an agent, a definition with its hash and a target")
+	}
+	for _, id := range e.TargetIDs {
+		if e.TargetHashes[id] == "" {
+			return nil, fmt.Errorf("inboundmissionstore: publish needs the hash of target %s", id)
+		}
 	}
 	targets, err := json.Marshal(e.TargetIDs)
 	if err != nil {
 		return nil, fmt.Errorf("inboundmissionstore: encode the targets: %w", err)
+	}
+	hashes, err := json.Marshal(e.TargetHashes)
+	if err != nil {
+		return nil, fmt.Errorf("inboundmissionstore: encode the target hashes: %w", err)
 	}
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
@@ -131,18 +151,26 @@ func (s *postgresStore) Publish(ctx context.Context, tenant string, e Entry) (*E
 	var out *Entry
 	err = c.InTx(ctx, func(q datapool.SQL) error {
 		if _, err := q.Exec(ctx,
-			`INSERT INTO inbound_missions (agent, mission_definition_id, target_ids, published_by)
-			 VALUES ($1,$2,$3,$4)
+			`INSERT INTO inbound_missions (agent, mission_definition_id, definition_hash, target_ids, target_hashes, published_by)
+			 VALUES ($1,$2,$3,$4,$5,$6)
 			 ON CONFLICT (agent) DO NOTHING`,
-			e.Agent, e.DefinitionID, string(targets), e.PublishedBy); err != nil {
+			e.Agent, e.DefinitionID, e.DefinitionHash, string(targets), string(hashes), e.PublishedBy); err != nil {
 			return fmt.Errorf("insert: %w", err)
 		}
-		got, gerr := scanEntry(q.QueryRow(ctx, `SELECT `+columns+` FROM inbound_missions WHERE agent = $1`, e.Agent))
+		got, gerr := scanEntry(q.QueryRow(ctx, `SELECT `+columns+` FROM inbound_missions WHERE agent = $1 FOR UPDATE`, e.Agent))
 		if gerr != nil {
 			return gerr
 		}
 		if got.DefinitionID != e.DefinitionID || !slices.Equal(got.TargetIDs, e.TargetIDs) {
 			return fmt.Errorf("%w: %s", ErrConflict, e.Agent)
+		}
+		if got.DefinitionHash != e.DefinitionHash || !maps.Equal(got.TargetHashes, e.TargetHashes) {
+			if _, err := q.Exec(ctx,
+				`UPDATE inbound_missions SET definition_hash = $2, target_hashes = $3 WHERE agent = $1`,
+				e.Agent, e.DefinitionHash, string(hashes)); err != nil {
+				return fmt.Errorf("pin: %w", err)
+			}
+			got.DefinitionHash, got.TargetHashes = e.DefinitionHash, e.TargetHashes
 		}
 		out = got
 		return nil

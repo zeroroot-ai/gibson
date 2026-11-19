@@ -43,7 +43,9 @@ type missionStarter interface {
 // Everything else is the mission start function that the MCP mission tool uses.
 type inboundRuns struct {
 	published inboundmissionstore.Store
-	starter   missionStarter
+	// source reads the definition and the targets, to compare them with the pin.
+	source  api.InboundMissionSource
+	starter missionStarter
 	registry  *brain.Registry
 	findings  missionFindingReader
 	// stop ends a running mission of the tenant on the context.
@@ -133,6 +135,15 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		return nil, fmt.Errorf("%w: the tenant of the caller is not valid", a2aserver.ErrRefused)
 	}
 	ctx = auth.ContextWithTenant(ctx, tenant)
+	// The definition and the targets must be what the admin approved at publish. A
+	// change after that gives a rejected Task and no mission.
+	reason, err := api.InboundStaleReason(ctx, r.source, *pub, targets)
+	if err != nil {
+		return nil, fmt.Errorf("check the publication of agent %s: %w", req.Agent, err)
+	}
+	if reason != "" {
+		return rejectedInboundTask(reason + ". An admin of the tenant must publish it again"), nil
+	}
 	ctx = auth.WithIdentity(ctx, auth.Identity{
 		Subject: c.Subject, Issuer: auth.IssuerCapabilityGrant, CredentialType: auth.CredentialCapabilityGrant,
 		Tenant: tenant,

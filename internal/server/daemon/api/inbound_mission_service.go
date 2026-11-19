@@ -33,16 +33,57 @@ var (
 // maxInboundTargets bounds the approved targets of one published definition.
 const maxInboundTargets = 100
 
-// InboundMissionSource reads the part of the mission side that publishing
-// needs. The tenant comes from the context.
+// InboundDefinition is the part of a mission definition that a publication pins.
+type InboundDefinition struct {
+	// ID is the ID of the definition.
+	ID string
+	// Hash is the hash of the whole definition: its nodes, its budget and its
+	// scope. A change of any part changes the hash.
+	Hash string
+	// Agents are the names of the agents in its agent nodes.
+	Agents []string
+}
+
+// InboundMissionSource reads the part of the mission side that publishing and
+// starting need. The tenant comes from the context.
 type InboundMissionSource interface {
-	// DefinitionAgents returns the names of the agents in the agent nodes of a
-	// mission definition. It returns ErrInboundDefinitionNotFound for a
-	// definition that the tenant does not have.
-	DefinitionAgents(ctx context.Context, definitionID string) ([]string, error)
-	// CheckTargets returns ErrInboundTargetNotFound for a target that the tenant
-	// does not have.
-	CheckTargets(ctx context.Context, targetIDs []string) error
+	// Definition returns a definition by name or ID. It returns
+	// ErrInboundDefinitionNotFound for a definition that the tenant does not have.
+	Definition(ctx context.Context, definitionID string) (InboundDefinition, error)
+	// TargetHashes returns the hash of each target, by ID. It returns
+	// ErrInboundTargetNotFound when the tenant does not have one of them.
+	TargetHashes(ctx context.Context, targetIDs []string) (map[string]string, error)
+}
+
+// InboundStaleReason says why a publication no longer matches what the admin
+// approved, or "" when it matches. targetIDs are the targets to check. A start
+// checks the targets of the mission, and the list checks all approved targets.
+// An error is a failure to read, and it is not a mismatch.
+func InboundStaleReason(
+	ctx context.Context, source InboundMissionSource, e inboundmissionstore.Entry, targetIDs []string,
+) (string, error) {
+	def, err := source.Definition(ctx, e.DefinitionID)
+	switch {
+	case errors.Is(err, ErrInboundDefinitionNotFound):
+		return "the mission definition was deleted", nil
+	case err != nil:
+		return "", fmt.Errorf("read the definition: %w", err)
+	case def.ID != e.DefinitionID || def.Hash != e.DefinitionHash:
+		return "the mission definition changed after it was published", nil
+	}
+	hashes, err := source.TargetHashes(ctx, targetIDs)
+	switch {
+	case errors.Is(err, ErrInboundTargetNotFound):
+		return "an approved target was deleted", nil
+	case err != nil:
+		return "", fmt.Errorf("read the targets: %w", err)
+	}
+	for _, id := range targetIDs {
+		if hashes[id] != e.TargetHashes[id] {
+			return "an approved target changed after it was published", nil
+		}
+	}
+	return "", nil
 }
 
 // InboundIdentities reads the Capability Grant record of an agent identity.
@@ -141,10 +182,11 @@ func inboundStatus(rpc string, err error) error {
 	}
 }
 
-func inboundEntryProto(e inboundmissionstore.Entry) *tenantv1.InboundMissionEntry {
+func inboundEntryProto(e inboundmissionstore.Entry, staleReason string) *tenantv1.InboundMissionEntry {
 	return &tenantv1.InboundMissionEntry{
 		Agent: e.Agent, MissionDefinitionId: e.DefinitionID, TargetIds: e.TargetIDs,
 		PublishedBy: e.PublishedBy, CreatedAt: timestamppb.New(e.CreatedAt),
+		Stale: staleReason != "", StaleReason: staleReason,
 	}
 }
 
@@ -170,18 +212,21 @@ func (s *InboundMissionService) PublishInboundMission(
 	if len(slices.Compact(slices.Clone(targets))) != len(targets) {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: a target appears two times", rpc)
 	}
-	agents, err := s.source.DefinitionAgents(ctx, req.GetMissionDefinitionId())
+	def, err := s.source.Definition(ctx, req.GetMissionDefinitionId())
 	switch {
 	case errors.Is(err, ErrInboundDefinitionNotFound):
 		return nil, status_grpc.Error(codes.NotFound, rpc+": "+err.Error())
 	case err != nil:
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: read the definition: %v", rpc, err))
+	case def.ID == "" || def.Hash == "":
+		return nil, status_grpc.Error(codes.FailedPrecondition, rpc+": the definition has no ID, so it cannot be pinned")
 	}
-	if !slices.Contains(agents, req.GetAgent()) {
+	if !slices.Contains(def.Agents, req.GetAgent()) {
 		return nil, status_grpc.Errorf(codes.InvalidArgument,
 			"%s: the definition has no agent node for the agent %q", rpc, req.GetAgent())
 	}
-	switch err := s.source.CheckTargets(ctx, targets); {
+	hashes, err := s.source.TargetHashes(ctx, targets)
+	switch {
 	case errors.Is(err, ErrInboundTargetNotFound):
 		return nil, status_grpc.Error(codes.NotFound, rpc+": "+err.Error())
 	case err != nil:
@@ -192,7 +237,8 @@ func (s *InboundMissionService) PublishInboundMission(
 		publishedBy = id.Subject
 	}
 	entry, err := s.store.Publish(ctx, tenant, inboundmissionstore.Entry{
-		Agent: req.GetAgent(), DefinitionID: req.GetMissionDefinitionId(), TargetIDs: targets, PublishedBy: publishedBy,
+		Agent: req.GetAgent(), DefinitionID: def.ID, DefinitionHash: def.Hash, TargetIDs: targets, TargetHashes: hashes,
+		PublishedBy: publishedBy,
 	})
 	if err != nil {
 		return nil, inboundStatus(rpc, err)
@@ -200,7 +246,7 @@ func (s *InboundMissionService) PublishInboundMission(
 	if err := s.fga.Write(ctx, []authz.Tuple{{User: "tenant:" + tenant, Relation: "owner", Object: object}}); err != nil {
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the owner tuple: %v", rpc, err))
 	}
-	return &tenantv1.PublishInboundMissionResponse{Entry: inboundEntryProto(*entry)}, nil
+	return &tenantv1.PublishInboundMissionResponse{Entry: inboundEntryProto(*entry, "")}, nil
 }
 
 // ListInboundMissions returns one page of the published definitions of the
@@ -227,7 +273,11 @@ func (s *InboundMissionService) ListInboundMissions(
 		Entries: make([]*tenantv1.InboundMissionEntry, 0, len(entries)), NextPageToken: next,
 	}
 	for _, e := range entries {
-		out.Entries = append(out.Entries, inboundEntryProto(e))
+		reason, rerr := InboundStaleReason(ctx, s.source, e, e.TargetIDs)
+		if rerr != nil {
+			return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: check %s: %v", rpc, e.Agent, rerr))
+		}
+		out.Entries = append(out.Entries, inboundEntryProto(e, reason))
 	}
 	return out, nil
 }

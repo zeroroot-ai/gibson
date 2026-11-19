@@ -5,6 +5,9 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -12,6 +15,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
@@ -56,41 +60,81 @@ type inboundMissionSource struct {
 
 var _ api.InboundMissionSource = (*inboundMissionSource)(nil)
 
-// DefinitionAgents returns the agent names of the agent nodes of a definition.
-func (s *inboundMissionSource) DefinitionAgents(ctx context.Context, definitionID string) ([]string, error) {
+// Definition returns the pin of a definition: its ID, the hash of its content and
+// the agents of its agent nodes. The hash is the SHA-256 of the canonical JSON of
+// the whole definition, so a change of a node, the budget or the scope changes it.
+func (s *inboundMissionSource) Definition(ctx context.Context, definitionID string) (api.InboundDefinition, error) {
 	tenant, err := tenantFromCtx(ctx)
 	if err != nil {
-		return nil, err
+		return api.InboundDefinition{}, err
 	}
 	conn, err := s.pool.For(ctx, tenant)
 	if err != nil {
-		return nil, fmt.Errorf("acquire conn for tenant %s: %w", tenant, err)
+		return api.InboundDefinition{}, fmt.Errorf("acquire conn for tenant %s: %w", tenant, err)
 	}
 	defer conn.Release()
 	def, err := findMissionDefinition(ctx, mission.NewConnBoundMissionStore(conn.Redis), definitionID)
 	if errors.Is(err, errMissionDefinitionNotFound) {
-		return nil, fmt.Errorf("%w: %s", api.ErrInboundDefinitionNotFound, definitionID)
+		return api.InboundDefinition{}, fmt.Errorf("%w: %s", api.ErrInboundDefinitionNotFound, definitionID)
 	}
 	if err != nil {
-		return nil, err
+		return api.InboundDefinition{}, err
 	}
-	var agents []string
+	canonical, err := mission.MarshalDefinitionJSON(def)
+	if err != nil {
+		return api.InboundDefinition{}, fmt.Errorf("encode the definition: %w", err)
+	}
+	sum := sha256.Sum256(canonical)
+	out := api.InboundDefinition{ID: def.GetId(), Hash: hex.EncodeToString(sum[:])}
 	for _, node := range def.GetNodes() {
 		if name := node.GetAgentConfig().GetAgentName(); name != "" {
-			agents = append(agents, name)
+			out.Agents = append(out.Agents, name)
 		}
 	}
-	return agents, nil
+	return out, nil
 }
 
-// CheckTargets reads each target with the check that mission start uses, so a
-// target of another tenant is not found.
-func (s *inboundMissionSource) CheckTargets(ctx context.Context, targetIDs []string) error {
+// TargetHashes reads each target with the check that mission start uses, so a
+// target of another tenant is not found, and it returns the hash of each one. The
+// hash covers what a mission assesses: the name, the type, the connection, the
+// model, the configuration, the capabilities and the URL. It does not cover the
+// status, the tags, the description or the times, which change with no change of
+// scope.
+func (s *inboundMissionSource) TargetHashes(ctx context.Context, targetIDs []string) (map[string]string, error) {
 	caller := resolveTargetCallerTenant(ctx)
+	out := make(map[string]string, len(targetIDs))
 	for _, id := range targetIDs {
-		if _, err := resolveTargetUUID(ctx, s.targets, id, caller); err != nil {
-			return fmt.Errorf("%w: %s", api.ErrInboundTargetNotFound, id)
+		t, err := resolveTargetUUID(ctx, s.targets, id, caller)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s", api.ErrInboundTargetNotFound, id)
 		}
+		h, err := targetHash(t)
+		if err != nil {
+			return nil, err
+		}
+		out[id] = h
 	}
-	return nil
+	return out, nil
+}
+
+// targetHash is the SHA-256 of the scope fields of a target. json.Marshal sorts
+// the keys of a map, so the encoding is stable.
+func targetHash(t *types.Target) (string, error) {
+	scope := struct {
+		Name         string
+		Type         string
+		Provider     types.Provider
+		Connection   map[string]any
+		Model        string
+		Config       map[string]any
+		Capabilities []string
+		URL          string
+		Headers      map[string]string
+	}{t.Name, t.Type, t.Provider, t.Connection, t.Model, t.Config, t.Capabilities, t.URL, t.Headers}
+	raw, err := json.Marshal(scope)
+	if err != nil {
+		return "", fmt.Errorf("encode target %s: %w", t.ID, err)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }

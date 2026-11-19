@@ -87,23 +87,37 @@ func (m *memInboundStore) Delete(_ context.Context, _, agent string) error {
 }
 
 type fakeInboundSource struct {
-	agents    map[string][]string
+	defs      map[string]InboundDefinition
+	hashes    map[string]string
 	defErr    error
 	targetErr error
 }
 
-func (f *fakeInboundSource) DefinitionAgents(_ context.Context, id string) ([]string, error) {
+func (f *fakeInboundSource) Definition(_ context.Context, id string) (InboundDefinition, error) {
 	if f.defErr != nil {
-		return nil, f.defErr
+		return InboundDefinition{}, f.defErr
 	}
-	agents, ok := f.agents[id]
+	d, ok := f.defs[id]
 	if !ok {
-		return nil, ErrInboundDefinitionNotFound
+		return InboundDefinition{}, ErrInboundDefinitionNotFound
 	}
-	return agents, nil
+	return d, nil
 }
 
-func (f *fakeInboundSource) CheckTargets(context.Context, []string) error { return f.targetErr }
+func (f *fakeInboundSource) TargetHashes(_ context.Context, ids []string) (map[string]string, error) {
+	if f.targetErr != nil {
+		return nil, f.targetErr
+	}
+	out := map[string]string{}
+	for _, id := range ids {
+		h, ok := f.hashes[id]
+		if !ok {
+			h = "h-" + id
+		}
+		out[id] = h
+	}
+	return out, nil
+}
 
 // failingInboundFGA fails the calls that the test names.
 type failingInboundFGA struct {
@@ -166,7 +180,7 @@ func newInboundFixture(t *testing.T) *inboundFixture {
 	t.Helper()
 	f := &inboundFixture{
 		store:  &memInboundStore{entries: map[string]inboundmissionstore.Entry{}},
-		source: &fakeInboundSource{agents: map[string][]string{"def-1": {"recon", "other"}}},
+		source: &fakeInboundSource{defs: map[string]InboundDefinition{"def-1": {ID: "def-1", Hash: "hash-1", Agents: []string{"recon", "other"}}}, hashes: map[string]string{}},
 		fga:    &failingInboundFGA{recordingAuthorizer: &recordingAuthorizer{fakeAuthorizer: newFakeAuthorizer()}},
 	}
 	f.identities = &fakeInboundIdentities{names: []string{"mission:originate"}}
@@ -250,6 +264,9 @@ func TestPublishInboundMission_Refusals(t *testing.T) {
 		{"the definition does not exist", nil, nil, pub("recon", "missing", goodTarget), codes.NotFound},
 		{"the definition read fails", func(f *inboundFixture) { f.source.defErr = errInboundBoom }, nil,
 			pub("recon", "def-1", goodTarget), codes.Internal},
+		{"the definition has no ID to pin", func(f *inboundFixture) {
+			f.source.defs["def-1"] = InboundDefinition{Hash: "h", Agents: []string{"recon"}}
+		}, nil, pub("recon", "def-1", goodTarget), codes.FailedPrecondition},
 		{"the definition has no node for the agent", nil, nil, pub("scanner", "def-1", goodTarget),
 			codes.InvalidArgument},
 		{"the target is not of the tenant", func(f *inboundFixture) { f.source.targetErr = ErrInboundTargetNotFound }, nil,
@@ -261,7 +278,7 @@ func TestPublishInboundMission_Refusals(t *testing.T) {
 		{"the owner tuple fails", func(f *inboundFixture) { f.fga.writeErr = errInboundBoom }, nil,
 			pub("recon", "def-1", goodTarget), codes.Internal},
 		{"the agent holds another definition", func(f *inboundFixture) {
-			f.source.agents["def-2"] = []string{"recon"}
+			f.source.defs["def-2"] = InboundDefinition{ID: "def-2", Hash: "hash-2", Agents: []string{"recon"}}
 			_, _ = f.svc.PublishInboundMission(f.ctx, pub("recon", "def-2", goodTarget))
 		}, nil, pub("recon", "def-1", goodTarget), codes.AlreadyExists},
 	}
@@ -289,7 +306,7 @@ func TestPublishInboundMission_Refusals(t *testing.T) {
 func TestListInboundMissions_PagesByAgent(t *testing.T) {
 	f := newInboundFixture(t)
 	for _, a := range []string{"c", "a", "b"} {
-		f.source.agents["def-"+a] = []string{a}
+		f.source.defs["def-"+a] = InboundDefinition{ID: "def-" + a, Hash: "h", Agents: []string{a}}
 		_, err := f.svc.PublishInboundMission(f.ctx, pub(a, "def-"+a, goodTarget))
 		require.NoError(t, err)
 	}
@@ -519,4 +536,47 @@ func TestGrantInboundCaller_RefusesAnIdentityThatIsNotACallerIdentity(t *testing
 			}
 		})
 	}
+}
+
+// The list shows that a publication is stale, so the admin can publish again.
+func TestListInboundMissions_ShowsAStalePublication(t *testing.T) {
+	tests := []struct {
+		name       string
+		change     func(f *inboundFixture)
+		wantStale  bool
+		wantReason string
+	}{
+		{"nothing changed", func(*inboundFixture) {}, false, ""},
+		{"the definition changed", func(f *inboundFixture) {
+			f.source.defs["def-1"] = InboundDefinition{ID: "def-1", Hash: "hash-changed", Agents: []string{"recon"}}
+		}, true, "the mission definition changed"},
+		{"the definition was deleted", func(f *inboundFixture) { delete(f.source.defs, "def-1") }, true, "was deleted"},
+		{"a target changed", func(f *inboundFixture) { f.source.hashes[goodTarget] = "other" }, true, "target changed"},
+		{"a target was deleted", func(f *inboundFixture) { f.source.targetErr = ErrInboundTargetNotFound }, true, "target was deleted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := publishedFixture(t)
+			tt.change(f)
+			resp, err := f.svc.ListInboundMissions(f.ctx, &tenantv1.ListInboundMissionsRequest{})
+			require.NoError(t, err)
+			require.Len(t, resp.GetEntries(), 1)
+			assert.Equal(t, tt.wantStale, resp.GetEntries()[0].GetStale())
+			assert.Contains(t, resp.GetEntries()[0].GetStaleReason(), tt.wantReason)
+		})
+	}
+
+	f := publishedFixture(t)
+	f.source.defErr = errInboundBoom
+	_, err := f.svc.ListInboundMissions(f.ctx, &tenantv1.ListInboundMissionsRequest{})
+	assert.Equal(t, codes.Internal, code(err), "a failed read is not a stale publication")
+}
+
+func TestPublishInboundMission_PinsTheDefinitionAndEachTarget(t *testing.T) {
+	f := newInboundFixture(t)
+	_, err := f.svc.PublishInboundMission(f.ctx, pub("recon", "def-1", goodTarget))
+	require.NoError(t, err)
+	e := f.store.entries["recon"]
+	assert.Equal(t, "hash-1", e.DefinitionHash)
+	assert.Equal(t, map[string]string{goodTarget: "h-" + goodTarget}, e.TargetHashes)
 }

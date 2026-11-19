@@ -29,7 +29,9 @@ service InboundMissionService {
   // calls under one agent name. The agent must be an agent node of the
   // definition. Each target must belong to the tenant. A second call with the
   // same fields changes nothing. A second call with the same agent and other
-  // fields is refused with ALREADY_EXISTS: unpublish it first.
+  // fields is refused with ALREADY_EXISTS: unpublish it first. A call with the
+  // same agent, definition and targets pins the current state again, so an admin
+  // can publish again after a change.
   rpc PublishInboundMission(PublishInboundMissionRequest) returns (PublishInboundMissionResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "admin"
@@ -101,6 +103,13 @@ message InboundMissionEntry {
   repeated string target_ids = 3;
   string published_by = 4;
   google.protobuf.Timestamp created_at = 5;
+  // stale is true when the definition or an approved target is not what the admin
+  // approved at publish: it changed or it was deleted. A call to a stale
+  // publication starts no mission, and its Task is rejected. The admin publishes
+  // again to approve the new state.
+  bool stale = 6;
+  // stale_reason says what changed. It is empty when stale is false.
+  string stale_reason = 7;
 }
 
 message PublishInboundMissionRequest {

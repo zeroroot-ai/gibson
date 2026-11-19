@@ -52,7 +52,9 @@ type InboundMissionServiceClient interface {
 	// calls under one agent name. The agent must be an agent node of the
 	// definition. Each target must belong to the tenant. A second call with the
 	// same fields changes nothing. A second call with the same agent and other
-	// fields is refused with ALREADY_EXISTS: unpublish it first.
+	// fields is refused with ALREADY_EXISTS: unpublish it first. A call with the
+	// same agent, definition and targets pins the current state again, so an admin
+	// can publish again after a change.
 	PublishInboundMission(ctx context.Context, in *PublishInboundMissionRequest, opts ...grpc.CallOption) (*PublishInboundMissionResponse, error)
 	// ListInboundMissions returns each published definition of the tenant.
 	ListInboundMissions(ctx context.Context, in *ListInboundMissionsRequest, opts ...grpc.CallOption) (*ListInboundMissionsResponse, error)
@@ -144,7 +146,9 @@ type InboundMissionServiceServer interface {
 	// calls under one agent name. The agent must be an agent node of the
 	// definition. Each target must belong to the tenant. A second call with the
 	// same fields changes nothing. A second call with the same agent and other
-	// fields is refused with ALREADY_EXISTS: unpublish it first.
+	// fields is refused with ALREADY_EXISTS: unpublish it first. A call with the
+	// same agent, definition and targets pins the current state again, so an admin
+	// can publish again after a change.
 	PublishInboundMission(context.Context, *PublishInboundMissionRequest) (*PublishInboundMissionResponse, error)
 	// ListInboundMissions returns each published definition of the tenant.
 	ListInboundMissions(context.Context, *ListInboundMissionsRequest) (*ListInboundMissionsResponse, error)

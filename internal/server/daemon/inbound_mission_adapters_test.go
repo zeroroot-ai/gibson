@@ -70,31 +70,62 @@ func (f *fakeTargetsByID) Get(_ context.Context, id types.ID) (*types.Target, er
 	return f.byID[id], nil
 }
 
-func TestInboundMissionSource_DefinitionAgents(t *testing.T) {
+func TestInboundMissionSource_DefinitionPinsTheContent(t *testing.T) {
 	f := newInboundSourceFixture(t)
 
-	agents, err := f.source.DefinitionAgents(f.ctx, "recon-def")
+	def, err := f.source.Definition(f.ctx, "recon-def")
 	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"recon", "scanner"}, agents, "only agent nodes name an agent")
+	assert.ElementsMatch(t, []string{"recon", "scanner"}, def.Agents, "only agent nodes name an agent")
+	assert.Equal(t, "def-1", def.ID)
+	assert.Len(t, def.Hash, 64)
 
-	agents, err = f.source.DefinitionAgents(f.ctx, "def-1")
+	byID, err := f.source.Definition(f.ctx, "def-1")
 	require.NoError(t, err, "the definition is found by ID too")
-	assert.Len(t, agents, 2)
+	assert.Equal(t, def.Hash, byID.Hash)
 
-	_, err = f.source.DefinitionAgents(f.ctx, "missing")
+	_, err = f.source.Definition(f.ctx, "missing")
 	require.ErrorIs(t, err, api.ErrInboundDefinitionNotFound)
-
-	_, err = f.source.DefinitionAgents(context.Background(), "recon-def")
+	_, err = f.source.Definition(context.Background(), "recon-def")
 	require.ErrorIs(t, err, errNoTenantInContext)
-
 	f.source.pool = &mockPool{err: errors.New("pool down")}
-	_, err = f.source.DefinitionAgents(f.ctx, "recon-def")
-	assert.ErrorContains(t, err, "pool down")
+	_, err = f.source.Definition(f.ctx, "recon-def")
+	require.ErrorContains(t, err, "pool down")
 }
 
-func TestInboundMissionSource_CheckTargets(t *testing.T) {
+// A change of the budget, the scope or a node changes the hash of the definition.
+func TestInboundMissionSource_DefinitionHashChangesWithTheContent(t *testing.T) {
 	f := newInboundSourceFixture(t)
-	require.NoError(t, f.source.CheckTargets(f.ctx, []string{f.target.ID.String()}))
+	before, err := f.source.Definition(f.ctx, "recon-def")
+	require.NoError(t, err)
+
+	conn, err := f.source.pool.For(f.ctx, auth.MustNewTenantID("acme"))
+	require.NoError(t, err)
+	store := mission.NewConnBoundMissionStore(conn.Redis)
+	def, err := store.GetDefinition(f.ctx, "recon-def")
+	require.NoError(t, err)
+	def.Constraints = &missionpb.MissionConstraints{MaxTokens: 1 << 30}
+	require.NoError(t, store.UpdateDefinition(f.ctx, def))
+
+	after, err := f.source.Definition(f.ctx, "recon-def")
+	require.NoError(t, err)
+	assert.NotEqual(t, before.Hash, after.Hash)
+}
+
+func TestInboundMissionSource_TargetHashes(t *testing.T) {
+	f := newInboundSourceFixture(t)
+	first, err := f.source.TargetHashes(f.ctx, []string{f.target.ID.String()})
+	require.NoError(t, err)
+	assert.Len(t, first[f.target.ID.String()], 64)
+
+	// A change of the scope of the target changes the hash. A change of the tags does not.
+	f.target.Tags = []string{"x"}
+	same, err := f.source.TargetHashes(f.ctx, []string{f.target.ID.String()})
+	require.NoError(t, err)
+	assert.Equal(t, first, same)
+	f.target.URL = "https://elsewhere.example"
+	changed, err := f.source.TargetHashes(f.ctx, []string{f.target.ID.String()})
+	require.NoError(t, err)
+	assert.NotEqual(t, first, changed)
 
 	var other types.ID
 	for id, tg := range f.source.targets.(*fakeTargetsByID).byID {
@@ -107,7 +138,8 @@ func TestInboundMissionSource_CheckTargets(t *testing.T) {
 		"an unknown target":          types.NewID().String(),
 		"a name and not a UUID":      "t1",
 	} {
-		assert.ErrorIs(t, f.source.CheckTargets(f.ctx, []string{id}), api.ErrInboundTargetNotFound, name)
+		_, err := f.source.TargetHashes(f.ctx, []string{id})
+		require.ErrorIs(t, err, api.ErrInboundTargetNotFound, name)
 	}
 }
 

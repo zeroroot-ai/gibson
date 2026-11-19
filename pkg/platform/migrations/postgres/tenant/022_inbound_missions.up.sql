@@ -14,7 +14,13 @@
 CREATE TABLE IF NOT EXISTS inbound_missions (
     agent                 TEXT        PRIMARY KEY,
     mission_definition_id TEXT        NOT NULL,
+    -- definition_hash is the hash of the definition at publish. A call starts a
+    -- mission only while the definition still has this hash.
+    definition_hash       TEXT        NOT NULL,
     target_ids            TEXT        NOT NULL,
+    -- target_hashes is a JSON object, target id to the hash of the target at
+    -- publish. A call starts a mission only while each of its targets has its hash.
+    target_hashes         TEXT        NOT NULL,
     published_by          TEXT        NOT NULL DEFAULT '',
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );

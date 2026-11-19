@@ -5,6 +5,7 @@ package inboundmissionstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -94,11 +95,15 @@ var created = time.Date(2026, 11, 1, 10, 0, 0, 0, time.FixedZone("x", 3600))
 
 func rowOf(e Entry) []any {
 	targets := `["` + strings.Join(e.TargetIDs, `","`) + `"]`
-	return []any{e.Agent, e.DefinitionID, targets, e.PublishedBy, created}
+	hashes, _ := json.Marshal(e.TargetHashes)
+	return []any{e.Agent, e.DefinitionID, e.DefinitionHash, targets, string(hashes), e.PublishedBy, created}
 }
 
 func sample() Entry {
-	return Entry{Agent: "recon", DefinitionID: "def-1", TargetIDs: []string{"t1", "t2"}, PublishedBy: "user:ana"}
+	return Entry{
+		Agent: "recon", DefinitionID: "def-1", DefinitionHash: "h-def", TargetIDs: []string{"t1", "t2"},
+		TargetHashes: map[string]string{"t1": "h1", "t2": "h2"}, PublishedBy: "user:ana",
+	}
 }
 
 func okExec(string) (int64, error) { return 1, nil }
@@ -119,9 +124,12 @@ func TestPublish(t *testing.T) {
 		{"stores and returns the entry", e, &fakeDB{exec: okExec, queryRow: stored}, "", nil},
 		{"the same entry again", e,
 			&fakeDB{exec: func(string) (int64, error) { return 0, nil }, queryRow: stored}, "", nil},
-		{"no agent", Entry{DefinitionID: "d", TargetIDs: []string{"t"}}, &fakeDB{}, "needs an agent", nil},
-		{"no definition", Entry{Agent: "a", TargetIDs: []string{"t"}}, &fakeDB{}, "needs an agent", nil},
-		{"no target", Entry{Agent: "a", DefinitionID: "d"}, &fakeDB{}, "needs an agent", nil},
+		{"no agent", Entry{DefinitionID: "d", DefinitionHash: "h", TargetIDs: []string{"t"}}, &fakeDB{}, "needs an agent", nil},
+		{"no definition", Entry{Agent: "a", DefinitionHash: "h", TargetIDs: []string{"t"}}, &fakeDB{}, "needs an agent", nil},
+		{"no definition hash", Entry{Agent: "a", DefinitionID: "d", TargetIDs: []string{"t"}}, &fakeDB{}, "needs an agent", nil},
+		{"no target", Entry{Agent: "a", DefinitionID: "d", DefinitionHash: "h"}, &fakeDB{}, "needs an agent", nil},
+		{"no hash of a target", Entry{Agent: "a", DefinitionID: "d", DefinitionHash: "h", TargetIDs: []string{"t"}},
+			&fakeDB{}, "needs the hash of target t", nil},
 		{"no conn", e, &fakeDB{forErr: errBoom}, "boom", errBoom},
 		{"insert fails", e, &fakeDB{exec: func(string) (int64, error) { return 0, errBoom }}, "insert", errBoom},
 		{"read back fails", e, &fakeDB{exec: okExec,
@@ -129,8 +137,11 @@ func TestPublish(t *testing.T) {
 		{"the agent holds another definition", otherDef, &fakeDB{exec: okExec, queryRow: stored}, "recon", ErrConflict},
 		{"the agent holds other targets", otherTargets, &fakeDB{exec: okExec, queryRow: stored}, "recon", ErrConflict},
 		{"the stored targets are not JSON", e, &fakeDB{exec: okExec, queryRow: func(string) datapool.Row {
-			return fakeRow{values: []any{"recon", "def-1", "not json", "", created}}
+			return fakeRow{values: []any{"recon", "def-1", "h", "not json", "{}", "", created}}
 		}}, "decode the targets", nil},
+		{"the stored hashes are not JSON", e, &fakeDB{exec: okExec, queryRow: func(string) datapool.Row {
+			return fakeRow{values: []any{"recon", "def-1", "h", `["t1"]`, "nope", "", created}}
+		}}, "decode the target hashes", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -150,6 +161,36 @@ func TestPublish(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The same agent, definition and targets with new hashes saves the new pin, so an
+// admin can publish again after the definition or a target changed.
+func TestPublish_ANewPinReplacesTheOldPin(t *testing.T) {
+	stored := sample()
+	want := sample()
+	want.DefinitionHash = "h-def-2"
+	want.TargetHashes = map[string]string{"t1": "h1", "t2": "h2-new"}
+	db := &fakeDB{exec: okExec, queryRow: func(sql string) datapool.Row {
+		assert.Contains(t, sql, "FOR UPDATE", "the row is locked while the pin changes")
+		return fakeRow{values: rowOf(stored)}
+	}}
+
+	got, err := newStore(db).Publish(context.Background(), "acme", want)
+
+	require.NoError(t, err)
+	assert.Equal(t, "h-def-2", got.DefinitionHash)
+	assert.Equal(t, "h2-new", got.TargetHashes["t2"])
+	assert.Contains(t, strings.Join(db.seen, "\n"), "UPDATE inbound_missions SET definition_hash")
+
+	failing := &fakeDB{queryRow: func(string) datapool.Row { return fakeRow{values: rowOf(stored)} },
+		exec: func(sql string) (int64, error) {
+			if strings.HasPrefix(sql, "UPDATE") {
+				return 0, errBoom
+			}
+			return 1, nil
+		}}
+	_, err = newStore(failing).Publish(context.Background(), "acme", want)
+	require.ErrorIs(t, err, errBoom)
 }
 
 func TestGet(t *testing.T) {

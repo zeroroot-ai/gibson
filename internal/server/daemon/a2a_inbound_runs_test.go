@@ -60,12 +60,42 @@ func targetsPart(ids ...string) *a2a.Part {
 	return a2a.NewDataPart(map[string]any{"targets": list})
 }
 
+// fakePinSource answers the pin checks of a start from a definition and the hashes
+// of the targets.
+type fakePinSource struct {
+	def       api.InboundDefinition
+	defErr    error
+	hashes    map[string]string
+	targetErr error
+}
+
+func (f *fakePinSource) Definition(context.Context, string) (api.InboundDefinition, error) {
+	return f.def, f.defErr
+}
+
+func (f *fakePinSource) TargetHashes(_ context.Context, ids []string) (map[string]string, error) {
+	if f.targetErr != nil {
+		return nil, f.targetErr
+	}
+	out := map[string]string{}
+	for _, id := range ids {
+		out[id] = f.hashes[id]
+	}
+	return out, nil
+}
+
 func newInboundRuns(starter *recordingStarter) *inboundRuns {
 	pubs := publishedFor("recon")
 	e := pubs.entries["recon"]
 	e.TargetIDs = []string{"t1", "t2", "t3"}
+	e.DefinitionHash = "hash-1"
+	e.TargetHashes = map[string]string{"t1": "h1", "t2": "h2", "t3": "h3"}
 	pubs.entries["recon"] = e
-	return &inboundRuns{published: pubs, starter: starter}
+	source := &fakePinSource{
+		def:    api.InboundDefinition{ID: "def-1", Hash: "hash-1", Agents: []string{"recon"}},
+		hashes: map[string]string{"t1": "h1", "t2": "h2", "t3": "h3"},
+	}
+	return &inboundRuns{published: pubs, source: source, starter: starter}
 }
 
 func startInbound(r *inboundRuns, agentName string, msg *a2a.Message) (*a2a.Task, error) {
@@ -534,4 +564,62 @@ func TestPGMissionFindings_ReadsEveryPageOfTheMission(t *testing.T) {
 
 	_, err = pgMissionFindings{store: &pager{err: errors.New("db down")}}.MissionFindings(context.Background(), "acme", mission)
 	require.ErrorContains(t, err, "read the findings of mission")
+}
+
+// The definition and the targets must be what the admin approved. After a change,
+// a message gets a rejected Task and no mission starts. This holds for the budget,
+// the scope and the agent node (each one changes the hash), and for a target.
+func TestInboundRuns_AChangedOrDeletedPinIsRejectedAndNoMissionStarts(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(s *fakePinSource)
+		msg    *a2a.Message
+		want   string
+	}{
+		{"the definition changed", func(s *fakePinSource) { s.def.Hash = "hash-2" }, inboundMessage(a2a.NewTextPart("x")), "definition changed"},
+		{"the definition has another ID", func(s *fakePinSource) { s.def.ID = "def-2" }, inboundMessage(a2a.NewTextPart("x")), "definition changed"},
+		{"the definition was deleted", func(s *fakePinSource) { s.defErr = api.ErrInboundDefinitionNotFound },
+			inboundMessage(a2a.NewTextPart("x")), "definition was deleted"},
+		{"a target changed", func(s *fakePinSource) { s.hashes["t2"] = "other" }, inboundMessage(targetsPart("t2")), "target changed"},
+		{"a target was deleted", func(s *fakePinSource) { s.targetErr = api.ErrInboundTargetNotFound },
+			inboundMessage(targetsPart("t2")), "target was deleted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			starter := &recordingStarter{}
+			r := newInboundRuns(starter)
+			tt.change(r.source.(*fakePinSource))
+
+			task, err := startInbound(r, "recon", tt.msg)
+
+			require.NoError(t, err)
+			assert.Equal(t, a2a.TaskStateRejected, task.Status.State)
+			assert.Contains(t, a2aserver.TextOf(task.Status.Message), tt.want)
+			assert.Empty(t, starter.started, "no mission started")
+		})
+	}
+}
+
+// A target that the message does not use does not matter: only the targets of the
+// mission are compared at start.
+func TestInboundRuns_AChangeOfATargetThatTheMissionDoesNotUseStartsTheMission(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	r.source.(*fakePinSource).hashes["t3"] = "other"
+
+	task, err := startInbound(r, "recon", inboundMessage(targetsPart("t1")))
+
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
+	assert.Len(t, starter.started, 1)
+}
+
+func TestInboundRuns_AFailedPinReadIsAnError(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	r.source.(*fakePinSource).defErr = errors.New("redis down")
+	task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
+	require.ErrorContains(t, err, "check the publication of agent recon")
+	assert.Nil(t, task)
+	assert.Empty(t, starter.started)
 }
