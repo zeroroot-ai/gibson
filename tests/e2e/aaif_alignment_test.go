@@ -51,7 +51,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -244,20 +243,8 @@ func respondWhenRouted(
 	t.Helper()
 	c, err := g.Client()
 	require.NoError(t, err)
-	var resp *modelclient.Response
-	helpers.Eventually(t, aaifRouteTimeout, "the gateway serves the route of the provider", func() (bool, string) {
-		r, cerr := c.Respond(ctx, g.Caller(), g.Target(), req)
-		if cerr == nil {
-			resp = r
-			return true, ""
-		}
-		var api *modelclient.APIError
-		if errors.As(cerr, &api) && api.Retryable() {
-			return false, cerr.Error()
-		}
-		t.Fatalf("the model call failed and a retry does not help: %v", cerr)
-		return false, ""
-	})
+	resp, err := helpers.RespondWhenRouted(ctx, c, g.Caller(), g.Target(), req, aaifRouteTimeout)
+	require.NoError(t, err, "the gateway serves the route of the provider")
 	return resp
 }
 
@@ -613,7 +600,18 @@ func TestAAIFAlignment_A2ADelegation(t *testing.T) {
 		replyCh <- a2aReply{status: resp.StatusCode, body: string(b)}
 	}()
 
-	workB := callee.Next(t, aaifMissionTimeout)
+	// The call of the caller ends at once when the Agent gateway refuses it.
+	// The test then reports that error and does not wait for a callee that
+	// got no work.
+	var workB *helpers.HeldWork
+	select {
+	case workB = <-callee.Works():
+	case r := <-replyCh:
+		require.NoError(t, r.err, "send the A2A message through the Agent gateway")
+		t.Fatalf("the A2A call ended with status %d before the callee got work: %s", r.status, r.body)
+	case <-time.After(aaifMissionTimeout):
+		t.Fatalf("the agent %s got no work item within %s: the mission never dispatched it", aaifAgentB, aaifMissionTimeout)
+	}
 	require.Equal(t, workA.MissionID, workB.MissionID, "the delegated run must be a work item of the mission of the caller")
 	workB.Complete()
 

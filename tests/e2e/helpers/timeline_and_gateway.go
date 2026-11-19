@@ -191,6 +191,36 @@ type GatewayAccess struct {
 	http *http.Client
 }
 
+// RespondWhenRouted sends an Open Responses call and sends it again while the
+// gateway has no route for the provider or the call is retryable. The tenant
+// operator renders the route of a new provider after the save, so the first
+// calls can get a 404. A refusal or any other failure returns at once. The
+// call returns the last error when the timeout passes.
+func RespondWhenRouted(
+	ctx context.Context, c *modelclient.Client, caller modelclient.Caller, target modelclient.Target,
+	req modelclient.Request, timeout time.Duration,
+) (*modelclient.Response, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		resp, err := c.Respond(ctx, caller, target, req)
+		if err == nil {
+			return resp, nil
+		}
+		var api *modelclient.APIError
+		if !errors.As(err, &api) || !api.Retryable() {
+			return nil, fmt.Errorf("the model call failed and a retry does not help: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("wait for the route of the provider: %w", ctx.Err())
+		case <-deadline.C:
+			return nil, fmt.Errorf("no route after %s: %w", timeout, err)
+		case <-time.After(time.Second):
+		}
+	}
+}
+
 // ResolveGateway asks the daemon for the model of the primary slot of a work
 // item and builds a GatewayAccess from the reply.
 func ResolveGateway(

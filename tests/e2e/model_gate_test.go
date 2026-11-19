@@ -71,10 +71,10 @@ const (
 	// the mock provider (tests/fixtures/mockprovider).
 	modelGateMockURLEnv = "GIBSON_E2E_MOCK_PROVIDER_URL"
 	// modelGateUngrantedProvider is the name of a second provider of the
-	// tenant, and modelGateUngrantedType is its type. The runner revokes the
-	// grant of the tenant on it, so the plain member meets a provider with no
-	// grant (gibson#1257). The host never resolves, and the gate refuses the
-	// call before the provider is used.
+	// tenant, and modelGateUngrantedType is its type. The grant belongs to the
+	// name, not to the type. The runner revokes the grant of the tenant on it,
+	// so the plain member meets a provider with no grant (gibson#1257). The host never resolves,
+	// and the gate refuses the call before the provider is used.
 	modelGateUngrantedProvider = "model-gate-ungranted"
 	modelGateUngrantedType     = "ollama"
 	// modelGateModel is the saved default model of the mock provider. The mock
@@ -190,10 +190,13 @@ func (p *probeAgent) respond(ctx context.Context, work *componentpb.PollWorkResp
 	if err != nil {
 		return "", fmt.Errorf("build the model client: %w", err)
 	}
-	resp, err := client.Respond(ctx,
+	// The operator renders the route of a provider some seconds after the save,
+	// so the first call waits for it, as the AAIF test does.
+	resp, err := helpers.RespondWhenRouted(ctx, client,
 		modelclient.Caller{Tenant: modelGateTenant, Task: work.GetWorkId(), Purpose: "e2e-probe"},
 		modelclient.Target{Tenant: modelGateTenant, Provider: res.GetProvider(), Model: res.GetModel()},
-		modelclient.Request{Input: []modelclient.Item{modelclient.UserMessage("Say the deterministic reply.")}})
+		modelclient.Request{Input: []modelclient.Item{modelclient.UserMessage("Say the deterministic reply.")}},
+		aaifRouteTimeout)
 	if err != nil {
 		return "", fmt.Errorf("call the model gateway: %w", err)
 	}
@@ -241,7 +244,7 @@ func createProbeMissionDefinition(t *testing.T, ctx context.Context, daemon daem
 	t.Helper()
 	resp, err := daemon.CreateMissionDefinition(ctx, &daemonpb.CreateMissionDefinitionRequest{
 		Definition: &missionpb.MissionDefinition{
-			Name:        name,
+			Name:        helpers.RunName(t, name),
 			Description: "hosted#358 model gate exit test",
 			Nodes: map[string]*missionpb.MissionNode{
 				"probe": {
@@ -412,9 +415,9 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 		// (gibson#1257) gets the same revoke.
 		require.True(t, tenantHoldsProviderGrant(t, ctx, access), "the mock provider holds the tenant grant before the revoke")
 		revokeTenantProviderGrant(t, ctx, access, modelGateProvider)
-		revokeTenantProviderGrant(t, ctx, access, modelGateUngrantedType)
+		revokeTenantProviderGrant(t, ctx, access, modelGateUngrantedProvider)
 		require.False(t, tenantHoldsProviderGrant(t, ctx, access), "the tenant grant is gone")
-		require.False(t, tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedType), "the grant on the second provider is gone")
+		require.False(t, tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedProvider), "the grant on the second provider is gone")
 
 		_, errsBefore := probe.counts()
 		defID := createProbeMissionDefinition(t, ctx, clients.Daemon, "model-gate-exit-revoked")
@@ -447,8 +450,8 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 	// test. It needs the second provider to hold no grant, so the runner
 	// removes the grant of the tenant on it, when it holds one.
 	t.Run("the second provider is left with no grant for the member", func(t *testing.T) {
-		revokeTenantProviderGrant(t, ctx, access, modelGateUngrantedType)
-		require.False(t, tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedType),
+		revokeTenantProviderGrant(t, ctx, access, modelGateUngrantedProvider)
+		require.False(t, tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedProvider),
 			"the second provider holds no grant of the tenant")
 		require.True(t, tenantHoldsProviderGrant(t, ctx, access), "the mock provider still holds its grant")
 	})

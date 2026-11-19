@@ -21,6 +21,8 @@ package helpers
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -185,6 +187,10 @@ func StartHeldAgent(
 	return a
 }
 
+// Works returns the channel that gets each work item of the agent. A test that
+// also waits for another event reads it in a select. Next reads the same channel.
+func (a *HeldAgent) Works() <-chan *HeldWork { return a.works }
+
 // Next waits for the next work item of the agent. It fails the test when no
 // item arrives within timeout.
 func (a *HeldAgent) Next(t *testing.T, timeout time.Duration) *HeldWork {
@@ -233,6 +239,17 @@ func ServeTool(
 	t.Cleanup(func() { stop(); wg.Wait() })
 }
 
+// RunName returns name with a suffix that is new for each call. A mission
+// definition keeps its name, so a test that runs a second time on the same
+// cluster needs a name that the first run did not take.
+func RunName(t *testing.T, name string) string {
+	t.Helper()
+	var b [4]byte
+	_, err := rand.Read(b[:])
+	require.NoError(t, err, "read random bytes for the name %s", name)
+	return name + "-" + hex.EncodeToString(b[:])
+}
+
 // CreateAgentMission creates a mission definition with one AGENT node that the
 // named agent serves, and returns its id. constraints can be nil.
 func CreateAgentMission(
@@ -241,7 +258,7 @@ func CreateAgentMission(
 ) string {
 	t.Helper()
 	def := &missionpb.MissionDefinition{
-		Name:        name,
+		Name:        RunName(t, name),
 		Description: "exit test of the AAIF epics",
 		Nodes: map[string]*missionpb.MissionNode{
 			"agent": {
