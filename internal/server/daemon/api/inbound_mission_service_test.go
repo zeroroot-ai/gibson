@@ -37,7 +37,7 @@ type memInboundStore struct {
 }
 
 func (m *memInboundStore) Publish(
-	_ context.Context, _ string, e inboundmissionstore.Entry,
+	ctx context.Context, _ string, e inboundmissionstore.Entry, onCreate func(context.Context) error,
 ) (*inboundmissionstore.Entry, error) {
 	if m.publishErr != nil {
 		return nil, m.publishErr
@@ -47,6 +47,11 @@ func (m *memInboundStore) Publish(
 			return nil, fmt.Errorf("%w: %s", inboundmissionstore.ErrConflict, e.Agent)
 		}
 		return &old, nil
+	}
+	if onCreate != nil {
+		if err := onCreate(ctx); err != nil {
+			return nil, err
+		}
 	}
 	e.CreatedAt = time.Unix(1, 0).UTC()
 	e.PublicationID = "pub-" + e.Agent

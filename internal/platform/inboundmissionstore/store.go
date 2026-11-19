@@ -66,7 +66,13 @@ type Store interface {
 	// targets again saves the new hashes, so an admin can publish again after the
 	// definition or a target changed. The same agent with another definition or other
 	// targets returns ErrConflict.
-	Publish(ctx context.Context, tenant string, e Entry) (*Entry, error)
+	//
+	// The call takes a lock on the agent name in the database of the tenant, so two
+	// publishes of one name run one after the other. onCreate, when it is not nil,
+	// runs inside the same transaction, and only when this call created the row. A
+	// call that finds the row does not run it. An error of onCreate undoes the
+	// insert.
+	Publish(ctx context.Context, tenant string, e Entry, onCreate func(ctx context.Context) error) (*Entry, error)
 	// ListPage returns at most limit entries of the tenant, in agent order. With
 	// hasAfter it returns the entries whose agent is larger than after.
 	ListPage(ctx context.Context, tenant, after string, hasAfter bool, limit int) ([]Entry, error)
@@ -157,7 +163,9 @@ func scanEntry(row scanner) (*Entry, error) {
 	return &e, nil
 }
 
-func (s *postgresStore) Publish(ctx context.Context, tenant string, e Entry) (*Entry, error) {
+func (s *postgresStore) Publish(
+	ctx context.Context, tenant string, e Entry, onCreate func(ctx context.Context) error,
+) (*Entry, error) {
 	if e.Agent == "" || e.DefinitionID == "" || e.DefinitionHash == "" || len(e.TargetIDs) == 0 {
 		return nil, errors.New("inboundmissionstore: publish needs an agent, a definition with its hash and a target")
 	}
@@ -185,12 +193,21 @@ func (s *postgresStore) Publish(ctx context.Context, tenant string, e Entry) (*E
 
 	var out *Entry
 	err = c.InTx(ctx, func(q datapool.SQL) error {
-		if _, err := q.Exec(ctx,
+		if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "inbound-agent:"+e.Agent); err != nil {
+			return fmt.Errorf("lock the agent: %w", err)
+		}
+		inserted, err := q.Exec(ctx,
 			`INSERT INTO inbound_missions (agent, publication_id, mission_definition_id, definition_hash, target_ids, target_hashes, max_active_missions, published_by)
 			 VALUES ($1,$8,$2,$3,$4,$5,$6,$7)
 			 ON CONFLICT (agent) DO NOTHING`,
-			e.Agent, e.DefinitionID, e.DefinitionHash, string(targets), string(hashes), e.MaxActive, e.PublishedBy, uuid.NewString()); err != nil {
+			e.Agent, e.DefinitionID, e.DefinitionHash, string(targets), string(hashes), e.MaxActive, e.PublishedBy, uuid.NewString())
+		if err != nil {
 			return fmt.Errorf("insert: %w", err)
+		}
+		if inserted > 0 && onCreate != nil {
+			if err := onCreate(ctx); err != nil {
+				return fmt.Errorf("on create: %w", err)
+			}
 		}
 		got, gerr := scanEntry(q.QueryRow(ctx, `SELECT `+columns+` FROM inbound_missions WHERE agent = $1 FOR UPDATE`, e.Agent))
 		if gerr != nil {

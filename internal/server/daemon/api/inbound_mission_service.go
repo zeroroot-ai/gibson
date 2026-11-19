@@ -208,6 +208,21 @@ func inboundEntryProto(e inboundmissionstore.Entry, staleReason string) *tenantv
 	}
 }
 
+// deleteStaleGrants deletes every granted_caller tuple of one object.
+func (s *InboundMissionService) deleteStaleGrants(ctx context.Context, object string) error {
+	stale, err := s.grantTuples(ctx, object)
+	if err != nil {
+		return err
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	if err := s.fga.Delete(ctx, stale); err != nil {
+		return fmt.Errorf("delete the stale grants: %w", err)
+	}
+	return nil
+}
+
 // publishTargets checks the limit and the target list of a publish request. It
 // returns the targets sorted.
 func publishTargets(rpc string, req *tenantv1.PublishInboundMissionRequest) ([]string, error) {
@@ -264,28 +279,19 @@ func (s *InboundMissionService) PublishInboundMission(
 	case err != nil:
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: read the targets: %v", rpc, err))
 	}
-	// A new publication of a name starts with no grant. A grant that an earlier
-	// publication of the name left behind, for example after a failed cleanup, is
-	// deleted here, so it never applies to this publication.
-	if _, gerr := s.store.Get(ctx, tenant, req.GetAgent()); errors.Is(gerr, inboundmissionstore.ErrNotFound) {
-		stale, rerr := s.grantTuples(ctx, object)
-		if rerr != nil {
-			return nil, status_grpc.Error(codes.Internal, rpc+": "+rerr.Error())
-		}
-		if len(stale) > 0 {
-			if derr := s.fga.Delete(ctx, stale); derr != nil {
-				return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the stale grants: %v", rpc, derr))
-			}
-		}
-	}
 	publishedBy := ""
 	if id, idErr := auth.IdentityFromContext(ctx); idErr == nil {
 		publishedBy = id.Subject
 	}
+	// A new publication of a name starts with no grant. A grant that an earlier
+	// publication of the name left behind, for example after a failed cleanup, is
+	// deleted when this call creates the row. The store runs this inside the lock of
+	// the name, so a grant that an admin writes after another publish of the name is
+	// never deleted by a call that created nothing.
 	entry, err := s.store.Publish(ctx, tenant, inboundmissionstore.Entry{
 		Agent: req.GetAgent(), DefinitionID: def.ID, DefinitionHash: def.Hash, TargetIDs: targets, TargetHashes: hashes, MaxActive: req.GetMaxActiveMissions(),
 		PublishedBy: publishedBy,
-	})
+	}, func(ctx context.Context) error { return s.deleteStaleGrants(ctx, object) })
 	if err != nil {
 		return nil, inboundStatus(rpc, err)
 	}

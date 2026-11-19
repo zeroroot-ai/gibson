@@ -133,7 +133,13 @@ func TestPublish(t *testing.T) {
 		{"no hash of a target", Entry{Agent: "a", DefinitionID: "d", DefinitionHash: "h", TargetIDs: []string{"t"}, MaxActive: 1},
 			&fakeDB{}, "needs the hash of target t", nil},
 		{"no conn", e, &fakeDB{forErr: errBoom}, "boom", errBoom},
-		{"insert fails", e, &fakeDB{exec: func(string) (int64, error) { return 0, errBoom }}, "insert", errBoom},
+		{"insert fails", e, &fakeDB{exec: func(sql string) (int64, error) {
+			if strings.HasPrefix(sql, "INSERT") {
+				return 0, errBoom
+			}
+			return 1, nil
+		}}, "insert", errBoom},
+		{"the lock fails", e, &fakeDB{exec: func(string) (int64, error) { return 0, errBoom }}, "lock the agent", errBoom},
 		{"read back fails", e, &fakeDB{exec: okExec,
 			queryRow: func(string) datapool.Row { return fakeRow{err: errBoom} }}, "scan inbound mission row", errBoom},
 		{"the agent holds another definition", otherDef, &fakeDB{exec: okExec, queryRow: stored}, "recon", ErrConflict},
@@ -147,7 +153,7 @@ func TestPublish(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := newStore(tt.db).Publish(context.Background(), "acme", tt.entry)
+			got, err := newStore(tt.db).Publish(context.Background(), "acme", tt.entry, nil)
 			if tt.want == "" {
 				require.NoError(t, err)
 				assert.Equal(t, e.TargetIDs, got.TargetIDs)
@@ -178,7 +184,7 @@ func TestPublish_ANewPinReplacesTheOldPin(t *testing.T) {
 		return fakeRow{values: rowOf(stored)}
 	}}
 
-	got, err := newStore(db).Publish(context.Background(), "acme", want)
+	got, err := newStore(db).Publish(context.Background(), "acme", want, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, "h-def-2", got.DefinitionHash)
@@ -193,7 +199,7 @@ func TestPublish_ANewPinReplacesTheOldPin(t *testing.T) {
 			}
 			return 1, nil
 		}}
-	_, err = newStore(failing).Publish(context.Background(), "acme", want)
+	_, err = newStore(failing).Publish(context.Background(), "acme", want, nil)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -511,4 +517,38 @@ func TestWithIdentityLock_RunsTheFunctionUnderAnAdvisoryLockOfTheIdentity(t *tes
 	assert.False(t, ran, "the function does not run without the lock")
 	require.ErrorIs(t, newStore(&fakeDB{forErr: errBoom}).WithIdentityLock(context.Background(), "acme", "x",
 		func() error { return nil }), errBoom)
+}
+
+// Two publishes of one name run one after the other, because each takes a lock on
+// the name before it reads or writes the row. The hook for a new row runs only when
+// this call inserted the row, so a call that finds the row never deletes what a
+// later grant wrote.
+func TestPublish_TheHookRunsOnlyForANewRowUnderTheLockOfTheName(t *testing.T) {
+	e := sample()
+	stored := func(string) datapool.Row { return fakeRow{values: rowOf(e)} }
+	for _, tt := range []struct {
+		name     string
+		inserted int64
+		wantRuns int
+	}{{"a new row", 1, 1}, {"an existing row", 0, 0}} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := &fakeDB{queryRow: stored, exec: func(sql string) (int64, error) {
+				if strings.HasPrefix(sql, "INSERT") {
+					return tt.inserted, nil
+				}
+				return 1, nil
+			}}
+			runs := 0
+			_, err := newStore(db).Publish(context.Background(), "acme", e, func(context.Context) error { runs++; return nil })
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantRuns, runs)
+			require.NotEmpty(t, db.seen)
+			assert.Contains(t, db.seen[0], "pg_advisory_xact_lock", "the lock comes before the first read or write")
+		})
+	}
+
+	failed := &fakeDB{queryRow: stored, exec: okExec}
+	_, err := newStore(failed).Publish(context.Background(), "acme", e, func(context.Context) error { return errBoom })
+	require.ErrorIs(t, err, errBoom, "a failed hook fails the publish, and the transaction undoes the insert")
 }
