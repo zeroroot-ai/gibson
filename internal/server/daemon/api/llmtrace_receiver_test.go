@@ -182,6 +182,35 @@ func TestTraceReceiver_DropsAreCounted(t *testing.T) {
 	}
 }
 
+// A call that the gateway refused has no tenant, because ext-authz set none. It
+// is counted as refused. It is not a request and not a drop, so the drop check
+// of the exit test still means "a span that the daemon should have stored".
+func TestTraceReceiver_ARefusedCallIsNotADrop(t *testing.T) {
+	r, _ := newReceiver(t)
+	ctx := peerCtx(t, collectorSVID)
+	refused := spanFromFixture(t, "messages_denied", map[string]string{"gibson.tenant": ""})
+
+	refusedBefore := testutil.ToFloat64(gatewayLLMRefusedTotal)
+	dropsBefore := testutil.ToFloat64(gatewayLLMDroppedTotal.WithLabelValues(dropNoTenant))
+	reqBefore := testutil.ToFloat64(gatewayLLMRequestsTotal)
+	resp, err := r.Export(ctx, exportOf(refused))
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if got := testutil.ToFloat64(gatewayLLMRefusedTotal) - refusedBefore; got != 1 {
+		t.Errorf("refused = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(gatewayLLMDroppedTotal.WithLabelValues(dropNoTenant)) - dropsBefore; got != 0 {
+		t.Errorf("drops[no_tenant] = %v, want 0", got)
+	}
+	if got := testutil.ToFloat64(gatewayLLMRequestsTotal) - reqBefore; got != 0 {
+		t.Errorf("requests = %v, want 0", got)
+	}
+	if resp.GetPartialSuccess().GetRejectedSpans() != 0 {
+		t.Errorf("rejected spans = %d, want 0", resp.GetPartialSuccess().GetRejectedSpans())
+	}
+}
+
 // An engine that is not available fails the call, so the collector sends it
 // again.
 func TestTraceReceiver_AStoppedEngineFailsTheCall(t *testing.T) {

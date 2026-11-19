@@ -47,6 +47,15 @@ var (
 		Name: "gibson_gateway_outside_calls_total",
 		Help: "A2A spans of the Agent gateway, by result.",
 	}, []string{"result"})
+	// gatewayLLMRefusedTotal counts the spans of calls that the gateway answered
+	// with an error status and that carry no tenant. ext-authz or the router
+	// refused such a call before it had an identity (no route, a forged tenant,
+	// a wrong audience), so the daemon has no tenant Timeline to store it in. It
+	// is not a drop: the daemon had no record to keep.
+	gatewayLLMRefusedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "gibson_gateway_llm_refused_total",
+		Help: "Model call spans of calls that the gateway refused before they had a tenant.",
+	})
 	gatewayLLMDroppedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gibson_gateway_llm_dropped_total",
 		Help: "Model call spans that the daemon did not deliver, by reason.",
@@ -252,6 +261,13 @@ func (r *TraceReceiver) deliver(ctx context.Context, attrs []*commonpb.KeyValue)
 	obs, err := llmtrace.FromSpan(llmtrace.Span{Attributes: spanAttributes(attrs)})
 	if errors.Is(err, llmtrace.ErrNotAModelCall) {
 		return err
+	}
+	// A call that the gateway refused before it had a tenant is counted by
+	// itself. It is neither a request that the daemon should store nor a drop.
+	if err == nil && obs.Tenant == "" && obs.Failed() {
+		gatewayLLMRefusedTotal.Inc()
+		r.logger.Debug("a refused model call span has no tenant", "call_id", obs.CallID, "status", obs.HTTPStatus)
+		return nil
 	}
 	gatewayLLMRequestsTotal.Inc()
 	if err != nil {
