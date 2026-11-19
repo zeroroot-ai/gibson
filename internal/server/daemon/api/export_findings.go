@@ -69,9 +69,20 @@ func (s *DaemonServer) ExportFindings(ctx context.Context, req *tenantv1.ExportF
 
 	// Build the query from the request. An export holds each finding that
 	// matches, with all of its evidence when include_evidence is true.
+	// An ID that is not a UUID is a caller error. The database would refuse
+	// it, and the caller would get an internal error.
+	if id := req.GetFilters().GetMissionId(); id != "" {
+		if _, err := types.ParseID(id); err != nil {
+			return nil, status_grpc.Error(codes.InvalidArgument, "ExportFindings: filters.mission_id is not a UUID")
+		}
+	}
 	query := tenantv1FindingFiltersToQuery(req.GetFilters())
 	for _, id := range req.GetFindingIds() {
-		query.IDs = append(query.IDs, types.ID(id))
+		findingID, err := types.ParseID(id)
+		if err != nil {
+			return nil, status_grpc.Error(codes.InvalidArgument, "ExportFindings: a finding ID is not a UUID")
+		}
+		query.IDs = append(query.IDs, findingID)
 	}
 	store := pgstore.New(func() datapool.Pool { return pool })
 	find := store.Find

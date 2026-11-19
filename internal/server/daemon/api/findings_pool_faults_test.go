@@ -76,6 +76,19 @@ func TestExportFindings_RefusesACallWithNoTenant(t *testing.T) {
 	assert.Equal(t, codes.PermissionDenied, code(err))
 }
 
+func TestExportFindings_RefusesAnIDThatIsNotAUUID(t *testing.T) {
+	srv := serverWithPool(failingPool{err: errors.New("unused")})
+	_, err := srv.ExportFindings(tenantContext("acme"), &tenantv1.ExportFindingsRequest{
+		Filters: &tenantv1.FindingFilters{MissionId: "not-a-uuid"},
+	})
+	assert.Equal(t, codes.InvalidArgument, code(err), "a mission filter that is not a UUID")
+
+	_, err = srv.ExportFindings(tenantContext("acme"), &tenantv1.ExportFindingsRequest{
+		FindingIds: []string{"not-a-uuid"},
+	})
+	assert.Equal(t, codes.InvalidArgument, code(err), "a finding ID that is not a UUID")
+}
+
 func TestExportFindings_ANilPoolFromTheGetterIsUnavailable(t *testing.T) {
 	srv := &DaemonServer{poolGetter: func() datapool.Pool { return nil }}
 	_, err := srv.ExportFindings(tenantContext("acme"), &tenantv1.ExportFindingsRequest{})
