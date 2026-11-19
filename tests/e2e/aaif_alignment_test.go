@@ -55,6 +55,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -327,6 +328,17 @@ func itemsContain(c helpers.ObservedLlmCall, want string) bool {
 	return false
 }
 
+// requirePositiveCost checks that the cost of a priced model parses as a number
+// greater than zero. An unknown cost is empty and never 0, and "0.0" or "0.00"
+// is not a cost either, so the check parses the number.
+func requirePositiveCost(t *testing.T, cost string) {
+	t.Helper()
+	require.NotEmpty(t, cost, "the event must hold the cost of a priced model")
+	v, err := strconv.ParseFloat(cost, 64)
+	require.NoError(t, err, "the cost %q must be a number", cost)
+	require.Greater(t, v, 0.0, "the cost of a priced model must be greater than zero, got %q", cost)
+}
+
 // requireCallPoints checks the fields that points 1 and 2 name.
 func requireCallPoints(t *testing.T, c helpers.ObservedLlmCall, wantInOutput string) {
 	t.Helper()
@@ -362,8 +374,7 @@ func aaifOpenResponsesPoints(
 		require.True(t, itemsContain(call, "function_call"), "the event must hold the prior tool call; items: %q", call.Items)
 		require.True(t, itemsContain(call, "function_call_output"), "the event must hold the tool result; items: %q", call.Items)
 		if wantCost {
-			require.NotEmpty(t, call.Cost, "the event must hold the cost of a priced model")
-			require.NotEqual(t, "0", call.Cost, "an unknown cost is empty and never 0")
+			requirePositiveCost(t, call.Cost)
 		}
 	})
 
@@ -407,8 +418,7 @@ func aaifOpenResponsesPoints(
 		require.Len(t, seen, len(all), "each call must have its own call id")
 		requireCallPoints(t, *streamed, aaifMockReply)
 		if wantCost {
-			require.NotEmpty(t, streamed.Cost, "the event must hold the cost of a priced model")
-			require.NotEqual(t, "0", streamed.Cost, "an unknown cost is empty and never 0")
+			requirePositiveCost(t, streamed.Cost)
 		}
 	})
 }
