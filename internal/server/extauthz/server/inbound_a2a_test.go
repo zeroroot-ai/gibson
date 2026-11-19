@@ -194,6 +194,11 @@ func TestInboundA2A_Refusals(t *testing.T) {
 			peer: edgeSVID, path: path, want: codes.PermissionDenied,
 		},
 		{
+			name: "a caller that also holds another session bit",
+			c:    inboundCase{capabilities: []string{"mission:originate", "mission:delegate"}, allow: grantedInbound()},
+			peer: edgeSVID, path: path, want: codes.PermissionDenied,
+		},
+		{
 			name: "a revoked identity",
 			c:    inboundCase{status: "revoked", capabilities: originateCeiling, allow: grantedInbound()},
 			peer: edgeSVID, path: path, want: codes.Unauthenticated,

@@ -1179,3 +1179,32 @@ func TestService_RevokePrincipalReportsAStoreFailure(t *testing.T) {
 	m.mock.ExpectBegin().WillReturnError(errors.New("boom"))
 	require.ErrorContains(t, m.svc.RevokePrincipal(context.Background(), "acme", "agent_principal:a"), "revoke principal")
 }
+
+func TestActiveCapabilityNames(t *testing.T) {
+	store, mock, _ := newMockedStore(t)
+	mock.ExpectQuery("SELECT DISTINCT g.capability_name").WithArgs("acme", "agent_principal:a").
+		WillReturnRows(sqlmock.NewRows([]string{"capability_name"}).AddRow("mission:originate").AddRow("mission:delegate"))
+	got, err := store.ActiveCapabilityNames(context.Background(), "acme", "agent_principal:a")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"mission:originate", "mission:delegate"}, got)
+
+	_, err = store.ActiveCapabilityNames(context.Background(), "", "agent_principal:a")
+	require.Error(t, err)
+	mock.ExpectQuery("SELECT DISTINCT").WillReturnError(errors.New("boom"))
+	_, err = store.ActiveCapabilityNames(context.Background(), "acme", "agent_principal:a")
+	require.ErrorContains(t, err, "boom")
+	mock.ExpectQuery("SELECT DISTINCT").WillReturnRows(sqlmock.NewRows([]string{"capability_name"}).AddRow(nil))
+	_, err = store.ActiveCapabilityNames(context.Background(), "acme", "agent_principal:a")
+	require.Error(t, err)
+	mock.ExpectQuery("SELECT DISTINCT").WillReturnRows(
+		sqlmock.NewRows([]string{"capability_name"}).AddRow("x").RowError(0, errors.New("row boom")))
+	_, err = store.ActiveCapabilityNames(context.Background(), "acme", "agent_principal:a")
+	require.Error(t, err)
+}
+
+func TestService_ActiveCapabilityNamesReportsAStoreFailure(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("SELECT DISTINCT").WillReturnError(errors.New("boom"))
+	_, err := m.svc.ActiveCapabilityNames(context.Background(), "acme", "agent_principal:a")
+	require.ErrorContains(t, err, "active capability names")
+}

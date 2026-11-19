@@ -86,6 +86,9 @@ func expectOriginateGrant(m *mockedService, held bool) {
 	m.mock.ExpectQuery("JOIN capability_grant_agents a ON a.id = g.agent_id").
 		WithArgs("acme", "agent_principal:acct-1", "mission:originate").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(held))
+	m.mock.ExpectQuery("JOIN capability_grant_agents a ON a.id = g.agent_id").
+		WithArgs("acme", "agent_principal:acct-1", "mission:delegate").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 }
 
 func TestAgentKeyDescriptor_ServesAnAgentInsideItsLifetime(t *testing.T) {

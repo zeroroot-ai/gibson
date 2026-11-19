@@ -930,3 +930,35 @@ func (s *CapabilityGrantStore) RevokePrincipal(ctx context.Context, tenantID, pr
 	committed = true
 	return total, nil
 }
+
+// ActiveCapabilityNames returns the names of the active grants of the principal in
+// the tenant, on agent rows that are active. The names are sorted and each one
+// appears once.
+func (s *CapabilityGrantStore) ActiveCapabilityNames(ctx context.Context, tenantID, principalRef string) ([]string, error) {
+	if tenantID == "" || principalRef == "" {
+		return nil, errors.New("capabilitygrant: ActiveCapabilityNames: tenant and principal are required")
+	}
+	const query = `
+SELECT DISTINCT g.capability_name
+FROM   capability_grant_grants g
+JOIN   capability_grant_agents a ON a.id = g.agent_id
+WHERE  a.tenant_id = $1 AND a.principal_ref = $2 AND a.status = 'active' AND g.status = 'active'
+ORDER BY g.capability_name`
+	rows, err := s.db.QueryContext(ctx, query, tenantID, principalRef)
+	if err != nil {
+		return nil, fmt.Errorf("capabilitygrant: ActiveCapabilityNames %q: %w", principalRef, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("capabilitygrant: ActiveCapabilityNames %q: scan: %w", principalRef, err)
+		}
+		out = append(out, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("capabilitygrant: ActiveCapabilityNames %q: rows: %w", principalRef, err)
+	}
+	return out, nil
+}

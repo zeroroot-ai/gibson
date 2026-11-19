@@ -13,8 +13,9 @@ import (
 
 // descriptorCapabilities are the capability bits that the key descriptor lists.
 // ext-authz reads them without a database. An inbound A2A call needs
-// mission:originate (gibson#1410).
-var descriptorCapabilities = []string{capname.MissionOriginate}
+// mission:originate (gibson#1410). It refuses a caller that holds another
+// session bit, because a caller identity has the one ceiling mission:originate.
+var descriptorCapabilities = []string{capname.MissionOriginate, capname.MissionDelegate}
 
 // AgentKeyDescriptor returns the per-kid key descriptor for the agent whose id
 // is kid (ADR-0045, gibson#648). The descriptor is a JWKS superset:

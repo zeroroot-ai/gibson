@@ -33,9 +33,12 @@ func (d *daemonImpl) registerInboundMission(ctx context.Context, srv *grpc.Serve
 	if d.targetStore == nil {
 		return errors.New("daemon: InboundMissionService needs the target store")
 	}
+	if d.capabilityGrantSvc == nil {
+		return errors.New("daemon: InboundMissionService needs the capability grant service")
+	}
 	d.inboundMissions = inboundmissionstore.NewPostgresStore(d.pool)
 	source := &inboundMissionSource{pool: d.pool, targets: d.targetStore}
-	svc, err := api.NewInboundMissionService(d.inboundMissions, source, d.authorizer, pageKeys)
+	svc, err := api.NewInboundMissionService(d.inboundMissions, source, d.authorizer, d.capabilityGrantSvc, pageKeys)
 	if err != nil {
 		return fmt.Errorf("daemon: InboundMissionService: %w", err)
 	}

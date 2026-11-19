@@ -28,6 +28,7 @@ const (
 	inboundDenyNoToken    = "no_capability_grant"
 	inboundDenyTokenType  = "not_a_component_token"
 	inboundDenyCeiling    = "no_originate_ceiling"
+	inboundDenyExtraBit   = "extra_ceiling"
 	inboundDenyNoGrant    = "no_grant_to_definition"
 	inboundDenyFGAUnavail = "fga_unavailable"
 )
@@ -94,6 +95,16 @@ func (s *EnvoyAuthzServer) inboundA2AResponse(ctx context.Context, req *authv3.C
 		s.log.InfoContext(ctx, "ext-authz: inbound A2A caller has no mission:originate ceiling",
 			"path", path, "principal", cid.Principal, "tenant", cid.Tenant)
 		return denyInbound(inboundDenyCeiling, denyForbidden())
+	}
+
+	// A caller identity has the one ceiling mission:originate. An identity with
+	// another session bit is not a caller identity.
+	for _, c := range cid.Capabilities {
+		if c != capname.MissionOriginate {
+			s.log.WarnContext(ctx, "ext-authz: inbound A2A caller holds another capability",
+				"path", path, "principal", cid.Principal, "capability", c)
+			return denyInbound(inboundDenyExtraBit, denyForbidden())
+		}
 	}
 
 	object, err := authz.PublishedMissionObject(cid.Tenant, agent)

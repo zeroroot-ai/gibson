@@ -17,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -125,6 +126,9 @@ func TestRegisterInboundMission_NeedsThePoolTheAuthorizerAndTheTargetStore(t *te
 	require.ErrorContains(t, d.registerInboundMission(ctx, srv, keys), "needs the target store")
 
 	d.targetStore = &fakeTargetStoreForMission{}
+	require.ErrorContains(t, d.registerInboundMission(ctx, srv, keys), "needs the capability grant service")
+
+	d.capabilityGrantSvc = &capabilitygrant.CapabilityGrantService{}
 	require.NoError(t, d.registerInboundMission(ctx, srv, keys))
 	assert.NotNil(t, d.inboundMissions)
 	assert.Contains(t, srv.GetServiceInfo(), "gibson.tenant.v1.InboundMissionService")

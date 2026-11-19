@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/capname"
 	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -44,6 +45,21 @@ type InboundMissionSource interface {
 	CheckTargets(ctx context.Context, targetIDs []string) error
 }
 
+// InboundIdentities reads the Capability Grant record of an agent identity.
+type InboundIdentities interface {
+	// ActiveCapabilityNames returns the names of the active grants of the
+	// principal. An identity that has not enrolled has none.
+	ActiveCapabilityNames(ctx context.Context, tenantID, principalRef string) ([]string, error)
+}
+
+// inboundOtherRelations are the relations that an agent identity can hold as the
+// user of a tuple, other than the grant to a published definition. A caller
+// identity holds none of them.
+var inboundOtherRelations = []string{
+	"direct_execute", "direct_configure", "direct_read", "direct_receive_work", "can_send",
+	"opened_by", "scorer", "granted_agent",
+}
+
 // InboundMissionFGA is the part of authz.Authorizer that the service uses.
 type InboundMissionFGA interface {
 	Check(ctx context.Context, user, relation, object string) (bool, error)
@@ -62,17 +78,21 @@ type InboundMissionService struct {
 	store    inboundmissionstore.Store
 	source   InboundMissionSource
 	fga      InboundMissionFGA
-	pageKeys *pagetoken.Keys
+	// identities reads the Capability Grant record of a caller identity.
+	identities InboundIdentities
+	pageKeys   *pagetoken.Keys
 }
 
 // NewInboundMissionService returns the service. Each argument is required.
 func NewInboundMissionService(
-	store inboundmissionstore.Store, source InboundMissionSource, fga InboundMissionFGA, pageKeys *pagetoken.Keys,
+	store inboundmissionstore.Store, source InboundMissionSource, fga InboundMissionFGA, identities InboundIdentities,
+	pageKeys *pagetoken.Keys,
 ) (*InboundMissionService, error) {
-	if store == nil || source == nil || fga == nil || pageKeys == nil {
-		return nil, errors.New("api: InboundMissionService needs a store, a mission source, the authorizer and the page keys")
+	if store == nil || source == nil || fga == nil || identities == nil || pageKeys == nil {
+		return nil, errors.New("api: InboundMissionService needs a store, a mission source, the authorizer, " +
+			"the identity record and the page keys")
 	}
-	return &InboundMissionService{store: store, source: source, fga: fga, pageKeys: pageKeys}, nil
+	return &InboundMissionService{store: store, source: source, fga: fga, identities: identities, pageKeys: pageKeys}, nil
 }
 
 func inboundTenant(ctx context.Context, rpc string) (string, error) {
@@ -287,6 +307,9 @@ func (s *InboundMissionService) GrantInboundCaller(
 	if _, err := s.store.Get(ctx, tenant, req.GetAgent()); err != nil {
 		return nil, inboundStatus(rpc, err)
 	}
+	if err := s.requireSoleGrant(ctx, tenant, subject, object); err != nil {
+		return nil, err
+	}
 	if err := s.fga.Write(ctx, []authz.Tuple{{User: subject, Relation: "granted_caller", Object: object}}); err != nil {
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the grant: %v", rpc, err))
 	}
@@ -365,4 +388,48 @@ func inboundGrantTuples(ctx context.Context, az any, principalRef string) ([]aut
 		return nil, fmt.Errorf("read the inbound grants of %s: %w", principalRef, err)
 	}
 	return tuples, nil
+}
+
+// requireSoleGrant refuses an identity that is not a caller identity. A caller
+// identity has the one ceiling mission:originate, and it holds no other grant and
+// no other relation. The one grant it may hold is the grant to this definition.
+// An identity that has not enrolled has no Capability Grant record yet, and
+// ext-authz refuses a call of an identity with another session bit.
+func (s *InboundMissionService) requireSoleGrant(ctx context.Context, tenant, subject, object string) error {
+	const rpc = "GrantInboundCaller"
+	names, err := s.identities.ActiveCapabilityNames(ctx, tenant, subject)
+	if err != nil {
+		return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: read the capability grants: %v", rpc, err))
+	}
+	for _, n := range names {
+		if n != capname.MissionOriginate {
+			return status_grpc.Errorf(codes.FailedPrecondition,
+				"%s: the identity holds the capability %q. A caller identity has only mission:originate", rpc, n)
+		}
+	}
+	reader, ok := any(s.fga).(authz.TupleReader)
+	if !ok {
+		return status_grpc.Error(codes.Internal, rpc+": the authorizer cannot read stored tuples")
+	}
+	others, err := reader.ReadTuples(ctx, subject, "granted_caller", "published_mission:")
+	if err != nil {
+		return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: read the grants: %v", rpc, err))
+	}
+	for _, t := range others {
+		if t.Object != object {
+			return status_grpc.Errorf(codes.FailedPrecondition,
+				"%s: the identity already holds the grant to %s. A caller identity has one grant", rpc, t.Object)
+		}
+	}
+	for _, rel := range inboundOtherRelations {
+		held, err := reader.ReadTuples(ctx, subject, rel, "")
+		if err != nil {
+			return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: read the relations: %v", rpc, err))
+		}
+		if len(held) > 0 {
+			return status_grpc.Errorf(codes.FailedPrecondition,
+				"%s: the identity holds the relation %s. A caller identity has only the grant to a published definition", rpc, rel)
+		}
+	}
+	return nil
 }

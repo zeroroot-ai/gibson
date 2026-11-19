@@ -139,12 +139,22 @@ func (f *failingInboundFGA) ListUsersOfType(ctx context.Context, a, b, c, d stri
 	return f.recordingAuthorizer.ListUsersOfType(ctx, a, b, c, d)
 }
 
+type fakeInboundIdentities struct {
+	names []string
+	err   error
+}
+
+func (f *fakeInboundIdentities) ActiveCapabilityNames(context.Context, string, string) ([]string, error) {
+	return f.names, f.err
+}
+
 type inboundFixture struct {
-	svc    *InboundMissionService
-	store  *memInboundStore
-	source *fakeInboundSource
-	fga    *failingInboundFGA
-	ctx    context.Context
+	identities *fakeInboundIdentities
+	svc        *InboundMissionService
+	store      *memInboundStore
+	source     *fakeInboundSource
+	fga        *failingInboundFGA
+	ctx        context.Context
 }
 
 const (
@@ -159,7 +169,8 @@ func newInboundFixture(t *testing.T) *inboundFixture {
 		source: &fakeInboundSource{agents: map[string][]string{"def-1": {"recon", "other"}}},
 		fga:    &failingInboundFGA{recordingAuthorizer: &recordingAuthorizer{fakeAuthorizer: newFakeAuthorizer()}},
 	}
-	svc, err := NewInboundMissionService(f.store, f.source, f.fga, testPageKeys(t))
+	f.identities = &fakeInboundIdentities{names: []string{"mission:originate"}}
+	svc, err := NewInboundMissionService(f.store, f.source, f.fga, f.identities, testPageKeys(t))
 	require.NoError(t, err)
 	f.svc = svc
 	f.ctx = auth.WithIdentity(context.Background(),
@@ -183,15 +194,17 @@ func TestNewInboundMissionService_NeedsEachArgument(t *testing.T) {
 	f := newInboundFixture(t)
 	for name, build := range map[string]func() (*InboundMissionService, error){
 		"no store": func() (*InboundMissionService, error) {
-			return NewInboundMissionService(nil, f.source, f.fga, f.svc.pageKeys)
+			return NewInboundMissionService(nil, f.source, f.fga, f.identities, f.svc.pageKeys)
 		},
 		"no source": func() (*InboundMissionService, error) {
-			return NewInboundMissionService(f.store, nil, f.fga, f.svc.pageKeys)
+			return NewInboundMissionService(f.store, nil, f.fga, f.identities, f.svc.pageKeys)
 		},
 		"no fga": func() (*InboundMissionService, error) {
-			return NewInboundMissionService(f.store, f.source, nil, f.svc.pageKeys)
+			return NewInboundMissionService(f.store, f.source, nil, f.identities, f.svc.pageKeys)
 		},
-		"no keys": func() (*InboundMissionService, error) { return NewInboundMissionService(f.store, f.source, f.fga, nil) },
+		"no keys": func() (*InboundMissionService, error) {
+			return NewInboundMissionService(f.store, f.source, f.fga, f.identities, nil)
+		},
 	} {
 		svc, err := build()
 		assert.Nil(t, svc, name)
@@ -464,4 +477,46 @@ func TestListInboundCallers_PagesInMemoryOverAStableSort(t *testing.T) {
 	}
 	_, err = f.svc.ListInboundCallers(context.Background(), &tenantv1.ListInboundCallersRequest{Agent: "recon"})
 	assert.Equal(t, codes.PermissionDenied, code(err))
+}
+
+// A caller identity has the one ceiling mission:originate, and no other grant and
+// no other relation. Any other identity gets FailedPrecondition, and no tuple.
+func TestGrantInboundCaller_RefusesAnIdentityThatIsNotACallerIdentity(t *testing.T) {
+	const ref = "agent_principal:a1"
+	tests := []struct {
+		name  string
+		setup func(f *inboundFixture)
+		want  codes.Code
+	}{
+		{"a caller identity", func(f *inboundFixture) {}, codes.OK},
+		{"an identity that has not enrolled", func(f *inboundFixture) { f.identities.names = nil }, codes.OK},
+		{"the same grant again", func(f *inboundFixture) {
+			f.fga.stored = []authz.Tuple{{User: ref, Relation: "granted_caller", Object: reconObject}}
+		}, codes.OK},
+		{"another session bit", func(f *inboundFixture) {
+			f.identities.names = []string{"mission:originate", "mission:delegate"}
+		}, codes.FailedPrecondition},
+		{"a tool grant", func(f *inboundFixture) { f.identities.names = []string{"execute:tool:nmap"} }, codes.FailedPrecondition},
+		{"a grant to another definition", func(f *inboundFixture) {
+			f.fga.stored = []authz.Tuple{{User: ref, Relation: "granted_caller", Object: "published_mission:acme/other"}}
+		}, codes.FailedPrecondition},
+		{"a relation on a component", func(f *inboundFixture) {
+			f.fga.stored = []authz.Tuple{{User: ref, Relation: "direct_execute", Object: "component:agent/x"}}
+		}, codes.FailedPrecondition},
+		{"the capability read fails", func(f *inboundFixture) { f.identities.err = errInboundBoom }, codes.Internal},
+		{"the tuple read fails", func(f *inboundFixture) { f.fga.readErr = errInboundBoom }, codes.Internal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := publishedFixture(t)
+			f.fga.allow("tenant:acme", "belongs_to", ref)
+			tt.setup(f)
+			_, err := f.svc.GrantInboundCaller(f.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: ref})
+			assert.Equal(t, tt.want, code(err))
+			if tt.want != codes.OK {
+				assert.NotContains(t, f.fga.writtenTuples(),
+					authz.Tuple{User: ref, Relation: "granted_caller", Object: reconObject})
+			}
+		})
+	}
 }

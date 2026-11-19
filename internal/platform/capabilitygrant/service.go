@@ -584,3 +584,13 @@ func (s *CapabilityGrantService) RevokePrincipal(ctx context.Context, tenantID, 
 	}
 	return nil
 }
+
+// ActiveCapabilityNames returns the names of the active grants of the principal.
+// An identity that has not enrolled has none.
+func (s *CapabilityGrantService) ActiveCapabilityNames(ctx context.Context, tenantID, principalRef string) ([]string, error) {
+	names, err := s.store.ActiveCapabilityNames(ctx, tenantID, principalRef)
+	if err != nil {
+		return nil, fmt.Errorf("capabilitygrant: active capability names: %w", err)
+	}
+	return names, nil
+}
