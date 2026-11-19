@@ -120,14 +120,15 @@ func (c *HTTPClient) Delete(ctx context.Context, tuples []Tuple) error {
 		"authorization_model_id": c.modelID,
 		"deletes": map[string]any{
 			"tuple_keys": toTupleKeys(tuples),
+			// OpenFGA (1.10 and later) refuses the whole batch when one tuple
+			// to delete is absent, unless the deletes object says to ignore a
+			// missing tuple. The old mapping of that refusal to success left
+			// the present tuples of a mixed batch in the store. A real error,
+			// such as an unknown store, now stays an error.
+			"on_missing": "ignore",
 		},
 	}
 	err := c.doJSON(ctx, fmt.Sprintf("/stores/%s/write", c.storeID), body, nil)
-	// Delete of non-existent tuple is idempotent.
-	if err != nil && errors.Is(err, clients.ErrNotFound) {
-		metrics.ObserveSubsystemCall("fga", "Delete", start, nil)
-		return nil
-	}
 	metrics.ObserveSubsystemCall("fga", "Delete", start, err)
 	return err
 }

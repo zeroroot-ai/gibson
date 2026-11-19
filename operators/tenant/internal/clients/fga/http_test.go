@@ -143,21 +143,14 @@ func TestWriteAndDelete_EmptyIsANoOp(t *testing.T) {
 
 // TestHTTPClient_MapsEachOpenFGAMessageText pins the 400 mapping for the old
 // and the current OpenFGA texts (gibson#879). A write of a tuple that exists is
-// an idempotent success, and so is a delete of a tuple that does not exist.
+// an idempotent success. A delete sets on_missing to ignore, so a refusal of a
+// delete stays an error (TestDelete_MixedBatch below).
 func TestHTTPClient_MapsEachOpenFGAMessageText(t *testing.T) {
 	tuple := fga.Tuple{User: "tenant:acme#member", Relation: "can_invoke", Object: "plugin:acme/gitlab"}
 	answer := func(body string) http.HandlerFunc {
 		return func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"code":"write_failed_due_to_invalid_input","message":"` + body + `"}`))
-		}
-	}
-	for _, msg := range []string{
-		"cannot delete a tuple which does not exist: user: 'tenant:acme#member'",
-		"tuple to be deleted did not exist",
-	} {
-		if err := newHTTPClient(t, answer(msg)).Delete(context.Background(), []fga.Tuple{tuple}); err != nil {
-			t.Errorf("delete answered %q: err = %v, want nil", msg, err)
 		}
 	}
 	for _, msg := range []string{
@@ -172,5 +165,59 @@ func TestHTTPClient_MapsEachOpenFGAMessageText(t *testing.T) {
 	// The control: another 400 is still an error.
 	if err := newHTTPClient(t, answer("type 'nope' not found")).Delete(context.Background(), []fga.Tuple{tuple}); err == nil {
 		t.Error("an unrelated 400 must stay an error")
+	}
+}
+
+// TestDelete_MixedBatch uses a server that acts as OpenFGA does. A delete of an
+// absent tuple fails the whole batch and removes nothing, unless the deletes
+// object holds on_missing ignore. One absent and one present tuple in one batch
+// must succeed and the present tuple must be gone.
+func TestDelete_MixedBatch(t *testing.T) {
+	present := map[string]bool{"user:alice|member|tenant:acme": true}
+	c := newHTTPClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Deletes struct {
+				TupleKeys []map[string]string `json:"tuple_keys"`
+				OnMissing string              `json:"on_missing"`
+			} `json:"deletes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode the write body: %v", err)
+		}
+		key := func(k map[string]string) string { return k["user"] + "|" + k["relation"] + "|" + k["object"] }
+		for _, k := range body.Deletes.TupleKeys {
+			if !present[key(k)] && body.Deletes.OnMissing != "ignore" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"code":"write_failed_due_to_invalid_input","message":"cannot delete a tuple which does not exist: user: '` + k["user"] + `'"}`))
+				return
+			}
+		}
+		for _, k := range body.Deletes.TupleKeys {
+			delete(present, key(k))
+		}
+		_, _ = w.Write([]byte("{}"))
+	})
+	err := c.Delete(context.Background(), []fga.Tuple{
+		{User: "tenant:acme", Relation: "owner", Object: "agent_skill:acme/absent"},
+		{User: "user:alice", Relation: "member", Object: "tenant:acme"},
+	})
+	if err != nil {
+		t.Fatalf("Delete of an absent and a present tuple: %v", err)
+	}
+	if present["user:alice|member|tenant:acme"] {
+		t.Fatal("the present tuple of the mixed batch is still in the store")
+	}
+}
+
+// TestDelete_ARealErrorStaysAnError pins that an unknown store (404) is not
+// read as a successful delete.
+func TestDelete_ARealErrorStaysAnError(t *testing.T) {
+	c := newHTTPClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":"store_id_not_found","message":"store not found"}`))
+	})
+	err := c.Delete(context.Background(), []fga.Tuple{{User: "user:a", Relation: "member", Object: "tenant:t"}})
+	if err == nil {
+		t.Fatal("a 404 on delete must be an error")
 	}
 }
