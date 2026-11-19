@@ -42,6 +42,10 @@
 //
 //	EXT_AUTHZ_GRPC_ADDR             default :9001
 //	EXT_AUTHZ_HTTP_ADDR             default :9002 (health and readiness)
+//	EXT_AUTHZ_PROBE_ADDR            optional, for example :8081. A plaintext
+//	                                listener for the kubelet that serves GET
+//	                                /healthz and GET /readyz only. Unset means
+//	                                no listener.
 //	EXT_AUTHZ_METRICS_ADDR          default :9003 (metrics only, mTLS with the
 //	                                same material as the health listener)
 //	EXT_AUTHZ_REGISTRY_PATH         default /etc/gibson/registry.yaml
@@ -350,6 +354,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The plaintext probe listener for the kubelet. Unset means not started.
+	probeErrC, err := startProbeListener(ctx, log, envOr("EXT_AUTHZ_PROBE_ADDR", ""), readyAgg)
+	if err != nil {
+		log.Error("init probe listener", "err", err)
+		os.Exit(1)
+	}
+
 	httpErrC := make(chan error, 1)
 	go func() {
 		log.Info("HTTPS health server starting", "addr", httpAddr, "cert_dir", healthCertDir)
@@ -371,6 +382,9 @@ func main() {
 		os.Exit(1)
 	case err := <-metricsErrC:
 		log.Error("fatal metrics listener error", "err", err)
+		os.Exit(1)
+	case err := <-probeErrC:
+		log.Error("fatal probe listener error", "err", err)
 		os.Exit(1)
 	}
 
