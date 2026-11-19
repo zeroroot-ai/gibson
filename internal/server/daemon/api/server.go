@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"log/slog"
@@ -26,6 +27,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
+	enginemission "github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
 	"github.com/zeroroot-ai/gibson/internal/engine/target"
@@ -1240,6 +1242,13 @@ func containsString(haystack []string, needle string) bool {
 // codes.Internal, causing the dashboard to receive a 500 instead of a 412.
 // Spec: per-tenant-data-plane-completion Req 8.1–8.3.
 func preserveStatus(err error, internalMsg string) error {
+	// A mission whose tenant could not be recorded was not created. The
+	// authorization store failed, so the caller retries: Unavailable. The check
+	// comes first because a handler that maps a message by its text (a message
+	// that holds "not found") would give this error the wrong code.
+	if errors.Is(err, enginemission.ErrTenantRecordFailed) {
+		return status_grpc.Errorf(codes.Unavailable, "%s: %v", internalMsg, err)
+	}
 	if _, ok := status_grpc.FromError(err); ok {
 		// err already has a gRPC status code — preserve it.
 		return err
@@ -2237,6 +2246,13 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 	result, err := s.daemon.CreateMission(ctx, data)
 	if err != nil {
 		s.logger.Error("failed to create mission", "error", err, "name", req.Name)
+
+		// A mission whose tenant could not be recorded was not created, and the
+		// caller retries. The typed error comes first: a message of the
+		// authorization store may hold any of the words below.
+		if errors.Is(err, enginemission.ErrTenantRecordFailed) {
+			return nil, preserveStatus(err, "failed to create mission")
+		}
 
 		// Map errors to appropriate gRPC codes
 		if strings.Contains(err.Error(), "not found") {
