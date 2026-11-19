@@ -134,3 +134,18 @@ func TestSetMissionGate_RefusesAnEmptyField(t *testing.T) {
 		t.Fatal("want an error for an empty tenant")
 	}
 }
+
+// A check through ConsistentChecker asks for higher consistency.
+func TestCheckHigherConsistency_AsksForHigherConsistency(t *testing.T) {
+	g := &gateServer{checkAllowed: true}
+	az := newTestFgaAuthorizer(t, g.start(t).URL)
+
+	allowed, err := az.CheckHigherConsistency(context.Background(), "agent_principal:a", "can_originate", "published_mission:acme/recon")
+
+	if err != nil || !allowed {
+		t.Fatalf("CheckHigherConsistency = %v, %v", allowed, err)
+	}
+	if len(g.consistency) != 1 || g.consistency[0] != "HIGHER_CONSISTENCY" {
+		t.Fatalf("consistency = %v, want HIGHER_CONSISTENCY", g.consistency)
+	}
+}

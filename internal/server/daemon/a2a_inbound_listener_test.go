@@ -124,9 +124,15 @@ func TestPublishedCards_Failures(t *testing.T) {
 // checkAuthorizer answers Check from a set of allowed questions and records each one.
 type checkAuthorizer struct {
 	authz.Authorizer
-	allow map[string]bool
-	err   error
-	asked []string
+	allow  map[string]bool
+	err    error
+	asked  []string
+	higher int
+}
+
+func (c *checkAuthorizer) CheckHigherConsistency(ctx context.Context, user, relation, object string) (bool, error) {
+	c.higher++
+	return c.Check(ctx, user, relation, object)
 }
 
 func (c *checkAuthorizer) Check(_ context.Context, user, relation, object string) (bool, error) {
@@ -143,6 +149,7 @@ func TestInboundGrants_CanOriginateAsksFGAForTheCallerOnThePublishedDefinition(t
 	ok, err := g.CanOriginate(context.Background(), caller, "recon")
 	require.NoError(t, err)
 	assert.True(t, ok)
+	assert.Equal(t, 1, az.higher, "the grant is checked with higher consistency")
 
 	ok, err = g.CanOriginate(context.Background(), caller, "scanner")
 	require.NoError(t, err)

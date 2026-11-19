@@ -114,3 +114,17 @@ func (f *fgaAuthorizer) checkHigherConsistency(ctx context.Context, t Conditiona
 		"duration_ms", time.Since(start).Milliseconds())
 	return resp.GetAllowed(), nil
 }
+
+// ConsistentChecker is the optional interface of an Authorizer that answers a check
+// with higher consistency. A check of a right that an admin can take away at once
+// uses it, so an answer from a cache older than a confirmed delete is not accepted.
+type ConsistentChecker interface {
+	// CheckHigherConsistency reports whether the user holds the relation on the
+	// object, with higher consistency.
+	CheckHigherConsistency(ctx context.Context, user, relation, object string) (bool, error)
+}
+
+// CheckHigherConsistency implements ConsistentChecker.
+func (f *fgaAuthorizer) CheckHigherConsistency(ctx context.Context, user, relation, object string) (bool, error) {
+	return f.checkHigherConsistency(ctx, ConditionalTuple{User: user, Relation: relation, Object: object})
+}

@@ -83,11 +83,7 @@ func (c publishedCards) Card(ctx context.Context, tenant, agent string) (*a2a.Ag
 // inboundGrants decides the right of a caller to use a published definition with
 // FGA: can_originate of the caller on the published definition of the agent. It is
 // the one check of that right. ext-authz proves the identity and the ceiling.
-type inboundGrants struct {
-	authorizer interface {
-		Check(ctx context.Context, user, relation, object string) (bool, error)
-	}
-}
+type inboundGrants struct{ authorizer authz.ConsistentChecker }
 
 var _ a2aserver.InboundGrants = inboundGrants{}
 
@@ -97,7 +93,8 @@ func (g inboundGrants) CanOriginate(ctx context.Context, c a2aserver.InboundCall
 	if err != nil {
 		return false, fmt.Errorf("form the published mission object of %s: %w", agent, err)
 	}
-	ok, err := g.authorizer.Check(ctx, c.Subject, "can_originate", object)
+	// Higher consistency: an unpublish or a revoke of the grant must apply at once.
+	ok, err := g.authorizer.CheckHigherConsistency(ctx, c.Subject, "can_originate", object)
 	if err != nil {
 		return false, fmt.Errorf("check can_originate on %s: %w", object, err)
 	}
@@ -129,7 +126,8 @@ func (d *daemonImpl) buildA2AInboundServer() (*httpSubsystem, error) {
 	if !strings.HasSuffix(baseURL, "/"+inboundRoutePrefix) {
 		return nil, fmt.Errorf("%s: %s must end with /%s", label, EnvA2AInboundPublicURL, inboundRoutePrefix)
 	}
-	if d.inboundMissions == nil || d.compRegistry == nil || d.authorizer == nil {
+	consistent, ok := d.authorizer.(authz.ConsistentChecker)
+	if d.inboundMissions == nil || d.compRegistry == nil || !ok {
 		return nil, fmt.Errorf("%s: the published missions and the component registry are not available", label)
 	}
 	tlsCfg, err := d.peerTLSConfig(label, edge)
@@ -161,7 +159,7 @@ func (d *daemonImpl) buildA2AInboundServer() (*httpSubsystem, error) {
 	}
 	handler := a2aserver.NewInboundHandler(runs,
 		publishedCards{published: d.inboundMissions, registry: d.compRegistry, baseURL: baseURL},
-		inboundGrants{authorizer: d.authorizer})
+		inboundGrants{authorizer: consistent})
 	lis, err := listenTLS(label, addr, tlsCfg)
 	if err != nil {
 		return nil, err
