@@ -147,6 +147,25 @@ func TestProjectBrainEvent(t *testing.T) {
 			wantError:     "work item failed",
 		},
 
+		// ---- MissionDone with a state that is not final → nil ------------
+		{
+			name:    "MissionDone with the outcome working returns nil",
+			ev:      brain.MissionDone{ID: "mission-5", Outcome: brain.MissionWorking},
+			wantNil: true,
+		},
+		{
+			name:    "MissionDone with the outcome paused returns nil",
+			ev:      brain.MissionDone{ID: "mission-5", Outcome: brain.MissionPaused},
+			wantNil: true,
+		},
+		{
+			name:          "MissionDone with no outcome maps to status completed",
+			ev:            brain.MissionDone{ID: "mission-6"},
+			wantEventType: "status",
+			wantMissionID: "mission-6",
+			wantStatus:    "completed",
+		},
+
 		// ---- non-lifecycle events return nil -----------------------------
 		{
 			name:    "HostObserved returns nil",

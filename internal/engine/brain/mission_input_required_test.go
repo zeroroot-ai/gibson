@@ -150,3 +150,32 @@ func TestCanceled_RescanTreatsItAsEnded(t *testing.T) {
 		t.Fatalf("event = %T, want ScanReconciled", events[0])
 	}
 }
+
+// A mission cannot end in a state that still runs. The reducer drops a
+// MissionDone event whose outcome is not terminal.
+func TestMissionDone_AnOutcomeThatIsNotTerminalChangesNothing(t *testing.T) {
+	for _, outcome := range []MissionStatus{MissionSubmitted, MissionWorking, MissionInputRequired, MissionPaused} {
+		t.Run(string(outcome), func(t *testing.T) {
+			w := NewWorld("t")
+			Reduce(w, MissionStarted{ID: "m1", RunID: "r1"})
+
+			Reduce(w, MissionDone{ID: "m1", RunID: "r1", Outcome: outcome, Reason: "bad"})
+
+			if got := missionStatusOf(t, w, "m1"); got != MissionWorking {
+				t.Fatalf("status = %q, want working", got)
+			}
+		})
+	}
+}
+
+func TestMissionDone_FinalOutcome(t *testing.T) {
+	if got, ok := (MissionDone{}).FinalOutcome(); !ok || got != MissionCompleted {
+		t.Fatalf("empty outcome = %q, %v, want completed, true", got, ok)
+	}
+	if got, ok := (MissionDone{Outcome: MissionCanceled}).FinalOutcome(); !ok || got != MissionCanceled {
+		t.Fatalf("canceled outcome = %q, %v, want canceled, true", got, ok)
+	}
+	if _, ok := (MissionDone{Outcome: MissionWorking}).FinalOutcome(); ok {
+		t.Fatal("working is not a final outcome")
+	}
+}

@@ -116,19 +116,15 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 		return missionEventData(now, "mission.resumed", e.ID, "", string(brain.MissionWorking), "")
 
 	case brain.MissionDone:
-		status := "completed"
-		errMsg := ""
-		switch e.Outcome {
-		case brain.MissionFailed:
-			status = "failed"
-			errMsg = e.Reason
-		case brain.MissionCanceled:
-			status = string(brain.MissionCanceled)
-		case brain.MissionCompleted, brain.MissionSubmitted, brain.MissionWorking,
-			brain.MissionInputRequired, brain.MissionPaused:
-			// The event reports completed for each other outcome.
+		outcome, ok := e.FinalOutcome()
+		if !ok {
+			return nil // the reducer drops this event, so no status changed
 		}
-		return missionEventData(now, "status", e.ID, "", status, errMsg)
+		errMsg := ""
+		if outcome == brain.MissionFailed {
+			errMsg = e.Reason
+		}
+		return missionEventData(now, "status", e.ID, "", string(outcome), errMsg)
 	}
 
 	return nil

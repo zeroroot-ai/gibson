@@ -193,6 +193,16 @@ type MissionDone struct {
 
 func (MissionDone) Kind() string { return "mission.done" }
 
+// FinalOutcome returns the terminal state that the event sets. An empty
+// outcome is MissionCompleted. It returns false for an outcome that is not
+// terminal, because a mission cannot end in a state that still runs.
+func (e MissionDone) FinalOutcome() (MissionStatus, bool) {
+	if e.Outcome == "" {
+		return MissionCompleted, true
+	}
+	return e.Outcome, e.Outcome.IsTerminal()
+}
+
 func findMission(w *World, id string) (ecs.Entity, bool) {
 	q := ecs.NewFilter1[Mission](w.ecs).Query()
 	for q.Next() {
@@ -283,14 +293,14 @@ func applyMissionResumed(w *World, e MissionResumed) {
 }
 
 func applyMissionDone(w *World, e MissionDone) {
+	outcome, ok := e.FinalOutcome()
+	if !ok {
+		return // an outcome that is not terminal ends nothing
+	}
 	if ent, ok := findMission(w, e.ID); ok {
 		m := w.missions.Get(ent)
 		if m.Status.IsTerminal() {
 			return // already terminal — idempotent (paused or working can still finish)
-		}
-		outcome := e.Outcome
-		if outcome == "" {
-			outcome = MissionCompleted
 		}
 		m.Status = outcome
 		m.Reason = e.Reason
@@ -304,10 +314,6 @@ func applyMissionDone(w *World, e MissionDone) {
 	// no decision in flight is a no-op.
 	if ent, ok := findOpenDecision(w, e.ID); ok {
 		dec := w.decisions.Get(ent)
-		outcome := e.Outcome
-		if outcome == "" {
-			outcome = MissionCompleted
-		}
 		dec.Outcome = string(outcome)
 		dec.Rationale = e.Reason
 	}
