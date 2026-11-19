@@ -27,7 +27,7 @@ const skillText = "---\nname: web-recon\ndescription: Find web hosts.\n---\nUse 
 func writeSkill(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "web-recon")
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "references"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "references"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skillText), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "references", "guide.md"), []byte("guide @TOOL@"), 0o600))
 	return dir
@@ -56,7 +56,7 @@ func TestReadFolder_ReplacesKeysAndUsesSlashPaths(t *testing.T) {
 func TestReadFolder_MissingFolder(t *testing.T) {
 	files, err := readFolder(filepath.Join(t.TempDir(), "absent"), nil)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "read the folder")
+	require.ErrorContains(t, err, "read the folder")
 	assert.Nil(t, files)
 }
 
@@ -91,7 +91,7 @@ func TestPackFolder_RefusesAFolderThatDoesNotValidate(t *testing.T) {
 	img, digest, err := packFolder("other-name", files)
 
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "validate the folder")
+	require.ErrorContains(t, err, "validate the folder")
 	assert.Nil(t, img)
 	assert.Empty(t, digest.Hex)
 }
@@ -156,7 +156,7 @@ func TestRun_RejectsBadArguments(t *testing.T) {
 
 func TestRun_RefusesAFolderThatDoesNotValidate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "wrong-name")
-	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.MkdirAll(dir, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skillText), 0o600))
 
 	err := runWith(t, "-dir", dir, "-repo", "127.0.0.1:1/skills/x")

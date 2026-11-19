@@ -149,8 +149,8 @@ func TestModelProviderSync_ClientFailuresAreReported(t *testing.T) {
 	}{
 		{
 			name: "the tenants cannot be listed",
-			funcs: interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList,
-				opts ...client.ListOption,
+			funcs: interceptor.Funcs{List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList,
+				_ ...client.ListOption,
 			) error {
 				return errInjected
 			}},
@@ -171,8 +171,8 @@ func TestModelProviderSync_ClientFailuresAreReported(t *testing.T) {
 		{
 			name: "a model provider without a record cannot be deleted",
 			objs: []client.Object{existing("gone", "https://x")},
-			funcs: interceptor.Funcs{Delete: func(ctx context.Context, c client.WithWatch, obj client.Object,
-				opts ...client.DeleteOption,
+			funcs: interceptor.Funcs{Delete: func(_ context.Context, _ client.WithWatch, _ client.Object,
+				_ ...client.DeleteOption,
 			) error {
 				return errInjected
 			}},
@@ -181,8 +181,8 @@ func TestModelProviderSync_ClientFailuresAreReported(t *testing.T) {
 		{
 			name:    "a model provider cannot be created",
 			records: []provision.DesiredModelProvider{record},
-			funcs: interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object,
-				opts ...client.CreateOption,
+			funcs: interceptor.Funcs{Create: func(_ context.Context, _ client.WithWatch, _ client.Object,
+				_ ...client.CreateOption,
 			) error {
 				return errInjected
 			}},
@@ -192,8 +192,8 @@ func TestModelProviderSync_ClientFailuresAreReported(t *testing.T) {
 			name:    "a model provider cannot be updated",
 			objs:    []client.Object{existing("local", "https://old.example")},
 			records: []provision.DesiredModelProvider{record},
-			funcs: interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object,
-				opts ...client.UpdateOption,
+			funcs: interceptor.Funcs{Update: func(_ context.Context, _ client.WithWatch, _ client.Object,
+				_ ...client.UpdateOption,
 			) error {
 				return errInjected
 			}},
@@ -219,14 +219,14 @@ func TestModelProviderSync_ClientFailuresAreReported(t *testing.T) {
 func TestModelProviderSync_ARecordThatAlreadyExistsIsNotAnError(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(syncScheme(t)).
 		WithObjects(tenantObject("acme", gibsonv1alpha1.TenantPhaseReady)).
-		WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object,
-			opts ...client.CreateOption,
+		WithInterceptorFuncs(interceptor.Funcs{Create: func(_ context.Context, _ client.WithWatch, obj client.Object,
+			_ ...client.CreateOption,
 		) error {
 			return apierrors.NewAlreadyExists(schema.GroupResource{Resource: "modelproviders"}, obj.GetName())
 		}}).Build()
-	records := &fakeRecords{byTenant: map[string][]provision.DesiredModelProvider{
-		"acme": {{Name: "claude", Type: "anthropic", CredentialSecret: "provider_cred:claude"}},
-	}}
+	desired := provision.DesiredModelProvider{Name: "claude", Type: "anthropic"}
+	desired.CredentialSecret = "provider_cred:claude"
+	records := &fakeRecords{byTenant: map[string][]provision.DesiredModelProvider{"acme": {desired}}}
 	r := &ModelProviderSyncRunnable{Client: c, Daemon: records}
 	if err := r.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync: %v", err)
@@ -304,8 +304,8 @@ func TestOutsideAgentSync_ClientFailuresAreReported(t *testing.T) {
 	}{
 		{
 			name: "the tenants cannot be listed",
-			funcs: interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList,
-				opts ...client.ListOption,
+			funcs: interceptor.Funcs{List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList,
+				_ ...client.ListOption,
 			) error {
 				return errInjected
 			}},
@@ -315,8 +315,8 @@ func TestOutsideAgentSync_ClientFailuresAreReported(t *testing.T) {
 			name:    "the unused credential Secret cannot be deleted",
 			records: noKey,
 			creds:   goodCreds,
-			funcs: interceptor.Funcs{Delete: func(ctx context.Context, c client.WithWatch, obj client.Object,
-				opts ...client.DeleteOption,
+			funcs: interceptor.Funcs{Delete: func(_ context.Context, _ client.WithWatch, _ client.Object,
+				_ ...client.DeleteOption,
 			) error {
 				return errInjected
 			}},
@@ -340,8 +340,8 @@ func TestOutsideAgentSync_ClientFailuresAreReported(t *testing.T) {
 			name:    "the credential Secret cannot be written",
 			records: withKey,
 			creds:   goodCreds,
-			funcs: interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object,
-				opts ...client.CreateOption,
+			funcs: interceptor.Funcs{Create: func(_ context.Context, _ client.WithWatch, _ client.Object,
+				_ ...client.CreateOption,
 			) error {
 				return errInjected
 			}},
@@ -351,8 +351,8 @@ func TestOutsideAgentSync_ClientFailuresAreReported(t *testing.T) {
 			name:    "a gateway object cannot be written",
 			records: noKey,
 			creds:   goodCreds,
-			funcs: interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object,
-				opts ...client.CreateOption,
+			funcs: interceptor.Funcs{Create: func(_ context.Context, _ client.WithWatch, _ client.Object,
+				_ ...client.CreateOption,
 			) error {
 				return errInjected
 			}},
@@ -377,8 +377,8 @@ func TestOutsideAgentSync_ClientFailuresAreReported(t *testing.T) {
 			records: map[string][]provision.DesiredOutsideAgent{},
 			creds:   goodCreds,
 			objs:    []client.Object{ownedGatewayObject("HTTPRoute", "gateway.networking.k8s.io/v1", "acme", "old")},
-			funcs: interceptor.Funcs{Delete: func(ctx context.Context, c client.WithWatch, obj client.Object,
-				opts ...client.DeleteOption,
+			funcs: interceptor.Funcs{Delete: func(_ context.Context, _ client.WithWatch, _ client.Object,
+				_ ...client.DeleteOption,
 			) error {
 				return errInjected
 			}},

@@ -95,8 +95,8 @@ func TestModelProvider_ClientFailuresFailTheReconcile(t *testing.T) {
 		{
 			name: "the finalizer cannot be added",
 			mp:   newModelProvider(),
-			funcs: interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object,
-				opts ...client.UpdateOption,
+			funcs: interceptor.Funcs{Update: func(_ context.Context, _ client.WithWatch, _ client.Object,
+				_ ...client.UpdateOption,
 			) error {
 				return errInjected
 			}},
@@ -133,8 +133,8 @@ func TestModelProvider_ClientFailuresFailTheReconcile(t *testing.T) {
 		{
 			name: "the owned objects cannot be listed",
 			mp:   finalizedModelProvider(),
-			funcs: interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList,
-				opts ...client.ListOption,
+			funcs: interceptor.Funcs{List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList,
+				_ ...client.ListOption,
 			) error {
 				return errInjected
 			}},
@@ -288,8 +288,8 @@ func TestModelProvider_UpdateFailuresOnDriftedObjectsAreReported(t *testing.T) {
 }
 
 func TestModelProvider_AStaleObjectThatCannotBeDeletedFails(t *testing.T) {
-	r, c := faultRig(t, finalizedModelProvider(), interceptor.Funcs{Delete: func(ctx context.Context, c client.WithWatch,
-		obj client.Object, opts ...client.DeleteOption,
+	r, c := faultRig(t, finalizedModelProvider(), interceptor.Funcs{Delete: func(_ context.Context, _ client.WithWatch,
+		_ client.Object, _ ...client.DeleteOption,
 	) error {
 		return errInjected
 	}})
@@ -315,8 +315,8 @@ func TestModelProvider_AStaleObjectThatCannotBeDeletedFails(t *testing.T) {
 
 func TestModelProvider_StatusPatchFailureDoesNotFailTheReconcile(t *testing.T) {
 	r, _ := faultRig(t, finalizedModelProvider(), interceptor.Funcs{SubResourcePatch: func(
-		ctx context.Context, c client.Client, subResourceName string, obj client.Object,
-		patch client.Patch, opts ...client.SubResourcePatchOption,
+		_ context.Context, _ client.Client, _ string, _ client.Object,
+		_ client.Patch, _ ...client.SubResourcePatchOption,
 	) error {
 		return errInjected
 	}})
@@ -344,8 +344,8 @@ func TestModelProvider_DeleteFailuresKeepTheFinalizer(t *testing.T) {
 	}{
 		{
 			name: "the owned objects cannot be listed",
-			funcs: interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList,
-				opts ...client.ListOption,
+			funcs: interceptor.Funcs{List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList,
+				_ ...client.ListOption,
 			) error {
 				return errInjected
 			}},
@@ -365,8 +365,8 @@ func TestModelProvider_DeleteFailuresKeepTheFinalizer(t *testing.T) {
 		},
 		{
 			name: "the finalizer cannot be removed",
-			funcs: interceptor.Funcs{Patch: func(ctx context.Context, c client.WithWatch, obj client.Object,
-				patch client.Patch, opts ...client.PatchOption,
+			funcs: interceptor.Funcs{Patch: func(_ context.Context, _ client.WithWatch, _ client.Object,
+				_ client.Patch, _ ...client.PatchOption,
 			) error {
 				return errInjected
 			}},
@@ -394,8 +394,8 @@ func TestModelProvider_DeleteOfAnOwnedObjectThatFailsKeepsTheFinalizer(t *testin
 		modelprovider.LabelManagedBy: "gibson-tenant-operator", modelprovider.LabelTenant: "acme",
 		modelprovider.LabelModelProvider: "claude", modelprovider.LabelSourceNS: "tenant-acme",
 	})
-	r, _ := faultRig(t, deletingModelProvider(), interceptor.Funcs{Delete: func(ctx context.Context, c client.WithWatch,
-		obj client.Object, opts ...client.DeleteOption,
+	r, _ := faultRig(t, deletingModelProvider(), interceptor.Funcs{Delete: func(_ context.Context, _ client.WithWatch,
+		_ client.Object, _ ...client.DeleteOption,
 	) error {
 		return errInjected
 	}}, owned)
