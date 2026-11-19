@@ -30,13 +30,6 @@ func (f *faultOutsideStore) Register(
 	return f.memOutsideStore.Register(ctx, tenant, e)
 }
 
-func (f *faultOutsideStore) List(ctx context.Context, tenant string) ([]outsideagentstore.Entry, error) {
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	return f.memOutsideStore.List(ctx, tenant)
-}
-
 func (f *faultOutsideStore) ListPage(
 	ctx context.Context, tenant, after string, hasAfter bool, limit int,
 ) ([]outsideagentstore.Entry, error) {

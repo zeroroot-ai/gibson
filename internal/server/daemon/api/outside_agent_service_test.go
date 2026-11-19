@@ -40,14 +40,6 @@ func (m *memOutsideStore) Register(
 	return &e, nil
 }
 
-func (m *memOutsideStore) List(context.Context, string) ([]outsideagentstore.Entry, error) {
-	out := make([]outsideagentstore.Entry, 0, len(m.entries))
-	for _, e := range m.entries {
-		out = append(out, e)
-	}
-	return out, nil
-}
-
 func (m *memOutsideStore) ListPage(
 	_ context.Context, _, after string, hasAfter bool, limit int,
 ) ([]outsideagentstore.Entry, error) {

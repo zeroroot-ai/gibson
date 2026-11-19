@@ -240,10 +240,6 @@ func (m *oneOutsideStore) Register(context.Context, string, outsideagentstore.En
 	return nil, errors.New("not used")
 }
 
-func (m *oneOutsideStore) List(context.Context, string) ([]outsideagentstore.Entry, error) {
-	return nil, errors.New("not used")
-}
-
 func (m *oneOutsideStore) ListPage(context.Context, string, string, bool, int) ([]outsideagentstore.Entry, error) {
 	return nil, errors.New("not used")
 }

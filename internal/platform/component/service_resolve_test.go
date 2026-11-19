@@ -300,10 +300,6 @@ func (m *memOutsideAgents) Register(context.Context, string, outsideagentstore.E
 	return nil, errors.New("not used")
 }
 
-func (m *memOutsideAgents) List(context.Context, string) ([]outsideagentstore.Entry, error) {
-	return nil, errors.New("not used")
-}
-
 func (m *memOutsideAgents) ListPage(context.Context, string, string, bool, int) ([]outsideagentstore.Entry, error) {
 	return nil, errors.New("not used")
 }

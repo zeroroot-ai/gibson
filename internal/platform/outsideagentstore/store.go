@@ -44,8 +44,6 @@ type Store interface {
 	// Register saves an entry. The same entry again changes nothing and returns
 	// the stored entry. The same name with other fields returns ErrConflict.
 	Register(ctx context.Context, tenant string, e Entry) (*Entry, error)
-	// List returns each outside agent of the tenant, in name order.
-	List(ctx context.Context, tenant string) ([]Entry, error)
 	// ListPage returns at most limit outside agents of the tenant, in name
 	// order. With hasAfter it returns the agents whose name is larger than
 	// after.
@@ -141,31 +139,6 @@ func (s *postgresStore) Register(ctx context.Context, tenant string, e Entry) (*
 	})
 	if err != nil {
 		return nil, fmt.Errorf("outsideagentstore: register %s: %w", e.Name, err)
-	}
-	return out, nil
-}
-
-func (s *postgresStore) List(ctx context.Context, tenant string) ([]Entry, error) {
-	c, err := s.conns.For(ctx, tenant)
-	if err != nil {
-		return nil, fmt.Errorf("outside agent store: acquire conn: %w", err)
-	}
-	defer c.Release()
-	rows, err := c.SQL().Query(ctx, `SELECT `+columns+` FROM outside_agents ORDER BY name ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("outsideagentstore: list: %w", err)
-	}
-	defer rows.Close()
-	out := []Entry{}
-	for rows.Next() {
-		e, scanErr := scanEntry(rows)
-		if scanErr != nil {
-			return nil, fmt.Errorf("outsideagentstore: list: %w", scanErr)
-		}
-		out = append(out, *e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("outsideagentstore: list rows: %w", err)
 	}
 	return out, nil
 }

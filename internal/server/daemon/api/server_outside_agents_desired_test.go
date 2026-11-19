@@ -25,10 +25,6 @@ func (m *tenantOutsideStore) Register(context.Context, string, outsideagentstore
 	return nil, errors.New("not used")
 }
 
-func (m *tenantOutsideStore) List(_ context.Context, tenant string) ([]outsideagentstore.Entry, error) {
-	return m.byTenant[tenant], m.err
-}
-
 func (m *tenantOutsideStore) ListPage(
 	_ context.Context, tenant, after string, hasAfter bool, limit int,
 ) ([]outsideagentstore.Entry, error) {

@@ -173,49 +173,6 @@ func TestRegister_ConflictOnEachField(t *testing.T) {
 	}
 }
 
-func TestList(t *testing.T) {
-	a, b := sample(), sample()
-	b.Name = "tracer"
-	db := &fakeDB{query: func(string) (datapool.Rows, error) {
-		return &fakeRows{rows: [][]any{rowOf(a), rowOf(b)}}, nil
-	}}
-
-	got, err := newStore(db).List(context.Background(), "acme")
-
-	require.NoError(t, err)
-	require.Len(t, got, 2)
-	assert.Equal(t, "scout", got[0].Name)
-	assert.Equal(t, "tracer", got[1].Name)
-	assert.Contains(t, db.seen[0], "ORDER BY name ASC")
-	assert.Equal(t, 1, db.released)
-}
-
-func TestList_Failures(t *testing.T) {
-	tests := []struct {
-		name string
-		db   *fakeDB
-		want string
-	}{
-		{"no conn", &fakeDB{forErr: errBoom}, "boom"},
-		{"query fails", &fakeDB{query: func(string) (datapool.Rows, error) { return nil, errBoom }}, "list"},
-		{"scan fails", &fakeDB{query: func(string) (datapool.Rows, error) {
-			return &fakeRows{rows: [][]any{rowOf(sample())}, scanErr: errBoom}, nil
-		}}, "scan outside agent row"},
-		{"rows fail", &fakeDB{query: func(string) (datapool.Rows, error) {
-			return &fakeRows{err: errBoom}, nil
-		}}, "list rows"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := newStore(tt.db).List(context.Background(), "acme")
-			require.Error(t, err)
-			require.ErrorIs(t, err, errBoom)
-			assert.Contains(t, err.Error(), tt.want)
-			assert.Nil(t, got)
-		})
-	}
-}
-
 func TestGet(t *testing.T) {
 	e := sample()
 	db := &fakeDB{queryRow: func(string) datapool.Row { return fakeRow{values: rowOf(e)} }}

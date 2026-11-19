@@ -257,10 +257,6 @@ func (o *outsideStoreStub) Register(context.Context, string, outsideagentstore.E
 	return nil, errors.New("not used")
 }
 
-func (o *outsideStoreStub) List(context.Context, string) ([]outsideagentstore.Entry, error) {
-	return nil, errors.New("not used")
-}
-
 func (o *outsideStoreStub) ListPage(context.Context, string, string, bool, int) ([]outsideagentstore.Entry, error) {
 	return nil, errors.New("not used")
 }
