@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
@@ -168,13 +170,26 @@ func (d *daemonImpl) peerTLSConfig(label string, peer spiffeid.ID) (*tls.Config,
 	if td := d.spiffeTrustDomain(); !peer.MemberOf(td) {
 		return nil, fmt.Errorf("%s: %s is not in the trust domain %s", label, peer, td)
 	}
-	x509Source, ok := d.spiffeX509Source.(*workloadapi.X509Source)
-	if !ok || x509Source == nil {
+	x509Source, ok := d.spiffeX509Source.(x509Source)
+	if !ok || x509Source == nil || isNilWorkloadSource(d.spiffeX509Source) {
 		return nil, fmt.Errorf("%s: the SPIFFE X.509 source is not open (got %T)", label, d.spiffeX509Source)
 	}
 	cfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(peer))
 	cfg.MinVersion = tls.VersionTLS13
 	return cfg, nil
+}
+
+// x509Source is the SVID and the trust bundles that an A2A listener serves with.
+// *workloadapi.X509Source is the one production value.
+type x509Source interface {
+	x509svid.Source
+	x509bundle.Source
+}
+
+// isNilWorkloadSource reports a nil *workloadapi.X509Source inside the interface.
+func isNilWorkloadSource(v any) bool {
+	w, ok := v.(*workloadapi.X509Source)
+	return ok && w == nil
 }
 
 // listenTLS listens on addr and serves TLS with the config.
