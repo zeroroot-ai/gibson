@@ -244,6 +244,8 @@ func TestBuildA2AInboundServer_ServesThePublishedCardAndNothingElse(t *testing.T
 	require.NotNil(t, sub)
 	defer func() { _ = sub.listener.Close() }()
 	assert.Equal(t, 64<<10, sub.srv.MaxHeaderBytes)
+	assert.Equal(t, 30*time.Second, sub.srv.ReadTimeout, "a slow request cannot hold a connection")
+	assert.Equal(t, 2*time.Minute, sub.srv.IdleTimeout, "an idle connection ends")
 
 	get := func(path string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, path, http.NoBody)

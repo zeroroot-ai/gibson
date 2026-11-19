@@ -208,7 +208,12 @@ func (d *daemonImpl) newHTTPSubsystem(handler http.Handler, lis net.Listener) *h
 		srv: &http.Server{
 			Handler:           handler,
 			ReadHeaderTimeout: 10 * time.Second,
-			MaxHeaderBytes:    64 << 10,
+			// A request is small (the body limit of the inbound endpoint is 1 MiB), so
+			// 30 seconds read it. No write timeout: a result can be large, and the
+			// permits of the inbound runs bound the results in work.
+			ReadTimeout:    30 * time.Second,
+			IdleTimeout:    2 * time.Minute,
+			MaxHeaderBytes: 64 << 10,
 		},
 		listener:            lis,
 		logger:              d.logger,
