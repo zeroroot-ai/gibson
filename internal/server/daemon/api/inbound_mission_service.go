@@ -97,7 +97,7 @@ type InboundIdentities interface {
 // inboundRelationChecks are the relations that an agent identity can hold as the
 // user of a stored tuple, each with the object type that a Read needs. OpenFGA
 // refuses a Read with a user and no object type. A caller identity holds none of
-// them, except the base tuples of inboundBaseTuples.
+// them, except the base tuples of isInboundBaseTuple.
 var inboundRelationChecks = []struct{ relation, objectType string }{
 	{"direct_execute", "component:"}, {"direct_configure", "component:"}, {"direct_read", "component:"},
 	{"direct_receive_work", "component:"}, {"can_be_invoked_by", "component:"},
@@ -105,15 +105,18 @@ var inboundRelationChecks = []struct{ relation, objectType string }{
 	{"member", "tenant:"}, {"member", "team:"},
 }
 
-// inboundBaseTuples are the tuples with the principal as user that CreateAgentIdentity
-// writes for every agent identity: tenant membership, and the client grant of
-// capabilitygrant.ClientCapabilityGrants (execute on the system backplane). The
-// others written there have the principal as object (owner, belongs_to). A caller
-// identity may hold these and nothing else.
-func inboundBaseTuples(principal, tenant string) []authz.Tuple {
-	return append(
-		[]authz.Tuple{{User: principal, Relation: "member", Object: "tenant:" + tenant}},
-		capabilitygrant.ClientCapabilityGrants(principal, "agent_principal")...)
+// isInboundBaseTuple reports whether a stored tuple with the principal as user is one
+// that CreateAgentIdentity writes for every agent identity: tenant membership, and
+// the client grant of capabilitygrant.ClientCapabilityGrants (execute on the system
+// backplane). The others written there have the principal as object (owner,
+// belongs_to). A caller identity may hold these and nothing else. The function only
+// compares a tuple. It builds no tenant membership tuple, because only
+// tenantrole.Syncer and CreateAgentIdentity write one.
+func isInboundBaseTuple(t authz.Tuple, principal, tenant string) bool {
+	if t.User == principal && t.Relation == "member" && t.Object == "tenant:"+tenant {
+		return true
+	}
+	return slices.Contains(capabilitygrant.ClientCapabilityGrants(principal, "agent_principal"), t)
 }
 
 // InboundMissionFGA is the part of authz.Authorizer that the service uses.
@@ -537,14 +540,13 @@ func (s *InboundMissionService) requireSoleGrant(ctx context.Context, tenant, su
 				"%s: the identity already holds the grant to %s. A caller identity has one grant", rpc, t.Object)
 		}
 	}
-	base := inboundBaseTuples(subject, tenant)
 	for _, check := range inboundRelationChecks {
 		held, err := reader.ReadTuples(ctx, subject, check.relation, check.objectType)
 		if err != nil {
 			return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: read the relations: %v", rpc, err))
 		}
 		for _, t := range held {
-			if !slices.Contains(base, t) {
+			if !isInboundBaseTuple(t, subject, tenant) {
 				return status_grpc.Errorf(codes.FailedPrecondition,
 					"%s: the identity holds the relation %s on %s. A caller identity has only the grant to a published definition",
 					rpc, t.Relation, t.Object)
