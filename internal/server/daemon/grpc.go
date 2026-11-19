@@ -808,6 +808,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if d.pool != nil && d.secretsService != nil {
 		providerStore := providerconfig.NewBrokerBackedStore(d.pool, d.secretsService)
 		daemonSvc.WithProviderConfigStore(providerStore)
+		// A provider save refuses a base_url whose host has a private address,
+		// unless security.allow_private_llm_endpoints is set.
+		daemonSvc.WithPrivateModelEndpoints(d.config.Security.AllowPrivateLLMEndpoints)
 		d.logger.Info(ctx, "provider-config store wired (broker-backed: metadata in Postgres, credentials in secrets broker)")
 
 		// Per-tenant embedder resolution (E11 BYO-embedder, ADR-0059,
@@ -815,9 +818,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// classification resolve their embedder from the tenant's configured
 		// embedding provider via embedder.NewFromProvider, sized to that model's
 		// vector dimension. A tenant with no embedding provider hits the
-		// onboarding gate. allowPrivate honours security.allow_private_llm_endpoints:
-		// off by default (the secure SSRF default); operators running an
-		// in-cluster/air-gapped embedder endpoint opt in via that knob.
+		// onboarding gate. The embedder calls go through the model gateway. The
+		// address of an embedder endpoint is checked when the provider is saved
+		// (checkProviderBaseURL), with security.allow_private_llm_endpoints.
 		embedderResolver := tenantembedder.NewResolver(providerStore, d.modelClient)
 		daemonSvc.WithEmbedderResolver(embedderResolver)
 		d.embedderResolver = embedderResolver

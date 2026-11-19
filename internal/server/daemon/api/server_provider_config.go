@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/infra/netguard"
 	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -351,6 +353,9 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateP
 	if err := s.checkProviderCABundle(ctx, req.GetInput()); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
+	if err := s.checkProviderBaseURL(ctx, req.GetInput()); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
 	if err := s.fillDefaultModelWindow(ctx, req.GetInput(), nil); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
@@ -390,6 +395,34 @@ func (s *DaemonServer) checkProviderCABundle(ctx context.Context, in *tenantv1.P
 	return nil
 }
 
+// checkProviderBaseURL checks the credential field base_url of a provider at
+// save time. The model gateway calls that URL, so its host must resolve to
+// public addresses only. The check refuses a private, loopback, link-local or
+// metadata address, and a host that does not resolve. With
+// security.allow_private_llm_endpoints set, the address is not checked. The
+// check is for one point in time. The egress policy of the gateway must still
+// refuse an internal address at the time of the call.
+func (s *DaemonServer) checkProviderBaseURL(ctx context.Context, in *tenantv1.ProviderConfigInput) error {
+	raw := strings.TrimSpace(in.GetCredentials()[fieldBaseURL])
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%s does not parse: %w", fieldBaseURL, err)
+	}
+	if u.Hostname() == "" {
+		return fmt.Errorf("%s has no host", fieldBaseURL)
+	}
+	if s.allowPrivateModelEndpoints {
+		return nil
+	}
+	if err := netguard.CheckHost(ctx, s.modelEndpointResolver, u.Hostname(), netguard.LLMEndpointHint); err != nil {
+		return fmt.Errorf("%s host is refused: %w", fieldBaseURL, err)
+	}
+	return nil
+}
+
 // invalidateEmbedderCache drops the per-tenant embedder cache after a
 // provider-config mutation so the next vector operation resolves the tenant's
 // current embedding provider (e.g. a tenant that just configured one clears the
@@ -420,6 +453,9 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *tenantv1.UpdateP
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 	if err := s.checkProviderCABundle(ctx, req.GetInput()); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
+	if err := s.checkProviderBaseURL(ctx, req.GetInput()); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 	existing, err := s.providerConfig.Get(ctx, tenantID, req.GetName())

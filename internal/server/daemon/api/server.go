@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
 	"github.com/zeroroot-ai/gibson/internal/engine/target"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/infra/netguard"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
@@ -136,6 +138,13 @@ type DaemonServer struct {
 	// call the RPC (the tenant operator).
 	modelCredStore ConnectorSecretResolver
 	modelCredPeer  string
+
+	// modelEndpointResolver resolves the host of the base_url of a provider
+	// when the provider is saved. allowPrivateModelEndpoints is
+	// security.allow_private_llm_endpoints. When it is false, a base_url whose
+	// host has a private, loopback, link-local or metadata address is refused.
+	modelEndpointResolver      netguard.Resolver
+	allowPrivateModelEndpoints bool
 
 	// outsideAgents backs GetTenantOutsideAgents and GetOutsideAgentCredential
 	// (gibson#1403). The tenant secret store and the peer are the two above.
@@ -963,6 +972,9 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 		// request-path nil-guard ([[0003]]). WithReembedTrigger swaps in the
 		// production trigger at startup; nil there restores this no-op.
 		reembedTrigger: noopReembedTrigger{},
+		// The resolver of the base_url check at provider save.
+		// WithPrivateModelEndpoints sets the one setting of that check.
+		modelEndpointResolver: net.DefaultResolver,
 	}
 }
 
@@ -1064,6 +1076,14 @@ func (s *DaemonServer) WithPlatformDB(db *sql.DB) *DaemonServer {
 // Spec: dashboard-neo4j-crud-removal.
 func (s *DaemonServer) WithPoolGetter(getter func() datapool.Pool) *DaemonServer {
 	s.poolGetter = getter
+	return s
+}
+
+// WithPrivateModelEndpoints sets security.allow_private_llm_endpoints. When
+// allow is true, a provider save does not check the address of the base_url
+// host. An install with an in-cluster model server sets it.
+func (s *DaemonServer) WithPrivateModelEndpoints(allow bool) *DaemonServer {
+	s.allowPrivateModelEndpoints = allow
 	return s
 }
 

@@ -137,13 +137,11 @@ type CoreConfig struct {
 type SecurityConfig struct {
 	KeyProvider *crypto.KeyProviderConfig `mapstructure:"key_provider" yaml:"key_provider,omitempty"`
 
-	// AllowPrivateLLMEndpoints disables the SSRF guard on self-hosted LLM and
-	// embedding endpoints whose host resolves to a private/link-local/metadata
-	// address. Off by default (the secure default): tenant-supplied endpoints
-	// pointing at internal addresses are rejected. Operators running an
-	// in-cluster or air-gapped model server opt in by setting this true. It is
-	// forwarded to the per-tenant embedder resolver (tenantembedder.NewResolver)
-	// and the LLM provider SSRF guard.
+	// AllowPrivateLLMEndpoints turns off the address check of the base_url of a
+	// model provider. The daemon runs the check when a tenant saves a provider
+	// (CreateProvider and UpdateProvider). Off by default: a base_url whose host
+	// has a private, loopback, link-local or metadata address is refused. An
+	// install with an in-cluster or air-gapped model server sets it true.
 	AllowPrivateLLMEndpoints bool `mapstructure:"allow_private_llm_endpoints" yaml:"allow_private_llm_endpoints"`
 
 	// AllowPrivateConnectorEndpoints is the same opt-in for the connector
