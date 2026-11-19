@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -107,4 +108,23 @@ func TestStartMission_RefusesBeforeTheDaemonStartsAnything(t *testing.T) {
 			assert.False(t, started, "the daemon started a mission after the refusal")
 		})
 	}
+}
+
+// The RunMission RPC subscribes to events after admission. A refused call
+// subscribes to nothing.
+func TestRunMission_SubscribesOnlyAfterAdmission(t *testing.T) {
+	subscribed := false
+	d := &mockDaemon{subscribeFn: func(context.Context, []string, string) (<-chan EventData, error) {
+		subscribed = true
+		return make(chan EventData), nil
+	}}
+	srv := NewDaemonServer(d, nil, nil)
+	srv.quotaManager = scriptedQuota{missionErr: status.Error(codes.ResourceExhausted, "quota used up")}
+	ctx, cancel := context.WithCancel(auth.WithTenant(context.Background(), auth.MustNewTenantID("acme")))
+	defer cancel()
+
+	err := srv.RunMission(&daemonpb.RunMissionRequest{MissionDefinitionId: "d", TargetId: "t"}, &mockServerStream{ctx: ctx})
+
+	assert.Equal(t, codes.ResourceExhausted, status.Code(err))
+	assert.False(t, subscribed, "a refused call opened a subscription")
 }

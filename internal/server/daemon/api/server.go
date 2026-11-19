@@ -1333,23 +1333,37 @@ func isTerminalMissionEvent(me *MissionEventData) bool {
 // allocates anything. A suspended tenant starts no new mission (ADR-0060, D41),
 // and a tenant over its mission or agent quota starts none either.
 func (s *DaemonServer) StartMission(ctx context.Context, req RunMissionData) (string, error) {
+	if err := s.admitMission(ctx); err != nil {
+		return "", err
+	}
+	return s.startAdmitted(ctx, req)
+}
+
+// admitMission applies the admission rules of a new mission. The RunMission RPC
+// calls it before it subscribes to events, so a refused call allocates nothing.
+func (s *DaemonServer) admitMission(ctx context.Context) error {
 	if err := s.requireActiveTenant(ctx, auth.TenantStringFromContext(ctx)); err != nil {
 		s.logger.Warn("mission submission rejected: tenant suspended", "error", err)
-		return "", preserveStatus(err, "tenant check failed")
+		return preserveStatus(err, "tenant check failed")
 	}
 	if s.quotaManager != nil {
 		if err := s.quotaManager.CheckMissionQuota(ctx); err != nil {
 			s.logger.Warn("mission submission rejected: mission quota exceeded", "error", err)
-			return "", preserveStatus(err, "mission quota check failed")
+			return preserveStatus(err, "mission quota check failed")
 		}
 		if err := s.quotaManager.CheckAgentQuota(ctx); err != nil {
 			s.logger.Warn("mission submission rejected: agent quota exceeded", "error", err)
-			return "", preserveStatus(err, "agent quota check failed")
+			return preserveStatus(err, "agent quota check failed")
 		}
 		// Memory-quota enforcement was removed by spec
 		// plans-and-quotas-simplification (it was unenforced and the Redis
 		// key family was dead). Future memory checks ship in their own spec.
 	}
+	return nil
+}
+
+// startAdmitted starts a mission after admitMission passed.
+func (s *DaemonServer) startAdmitted(ctx context.Context, req RunMissionData) (string, error) {
 	id, err := s.daemon.RunMission(ctx, req)
 	if err != nil {
 		return "", preserveStatus(err, "failed to start mission")
@@ -1379,13 +1393,16 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 	// subscription is unfiltered and the loop below filters by ID
 	// (gibson#1112 PR 3 — events flow brain → lifecycle projector → bus,
 	// not through a per-run channel).
+	if err := s.admitMission(stream.Context()); err != nil {
+		return err
+	}
 	eventChan, err := s.daemon.Subscribe(stream.Context(), nil, "")
 	if err != nil {
 		s.logger.Error("failed to subscribe for mission events", "error", err)
 		return preserveStatus(err, "failed to subscribe for mission events")
 	}
 
-	missionID, err := s.StartMission(stream.Context(), RunMissionData{
+	missionID, err := s.startAdmitted(stream.Context(), RunMissionData{
 		MissionDefinitionID: req.MissionDefinitionId, TargetIDs: []string{req.TargetId},
 		Variables: req.Variables, MemoryContinuity: req.MemoryContinuity,
 	})
