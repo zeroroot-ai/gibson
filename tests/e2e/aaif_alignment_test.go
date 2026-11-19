@@ -368,14 +368,28 @@ func aaifOpenResponsesPoints(
 	})
 
 	t.Run("a streamed call is observed with all items, tokens and cost", func(t *testing.T) {
+		callsBefore := len(s.observedCalls(t, work.MissionID))
+		mockBefore := aaifMockCount(t)
+
 		text, completed, err := g.StreamResponse(s.ctx, toolRoundTrip())
 		require.NoError(t, err, "the streamed call")
 		require.True(t, completed, "the stream must end with response.completed")
 		require.Equal(t, aaifMockReply, text)
 
-		helpers.Eventually(t, aaifTraceTimeout, "two llm_call.observed events", func() (bool, string) {
+		// The provider must get a streamed request. A gateway that buffers the
+		// call and answers in one piece would pass the checks above, so this
+		// one proves the stream reached the provider.
+		reqs := aaifMockRequests(t)
+		require.Greater(t, aaifMockCount(t), mockBefore, "the mock provider must get the streamed call")
+		last := reqs[len(reqs)-1]
+		require.Equal(t, wantMockPath, last.Path)
+		require.Regexp(t, `"stream"\s*:\s*true`, last.Body, "the provider must get a request with stream true")
+
+		// The streamed call is a new event with its own call id, not the one of
+		// the call before.
+		helpers.Eventually(t, aaifTraceTimeout, "a new llm_call.observed event for the streamed call", func() (bool, string) {
 			n := len(s.observedCalls(t, work.MissionID))
-			return n >= 2, fmt.Sprint(n)
+			return n > callsBefore, fmt.Sprintf("%d events, %d before the stream", n, callsBefore)
 		})
 		calls := s.observedCalls(t, work.MissionID)
 		seen := map[string]bool{}
@@ -383,7 +397,17 @@ func aaifOpenResponsesPoints(
 			seen[call.CallID] = true
 		}
 		require.Len(t, seen, len(calls), "each call must have its own call id")
-		requireCallPoints(t, calls[len(calls)-1], aaifMockReply)
+		var streamed *helpers.ObservedLlmCall
+		for i := callsBefore; i < len(calls); i++ {
+			if !calls[i].Failed() {
+				streamed = &calls[i]
+			}
+		}
+		require.NotNil(t, streamed, "a call that ended well must be among the new events: %d new", len(calls)-callsBefore)
+		requireCallPoints(t, *streamed, aaifMockReply)
+		if wantCost {
+			require.NotEmpty(t, streamed.Cost, "the event must hold the cost of a priced model")
+		}
 	})
 }
 
