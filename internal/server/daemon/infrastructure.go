@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
@@ -98,7 +99,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		return nil, fmt.Errorf("failed to initialize Redis client (required): %w", err)
 	}
 	d.logger.Info(ctx, "initialized Redis client",
-		"url", d.config.Redis.URL,
+		"url", redactedURL(d.config.Redis.URL),
 		"database", d.config.Redis.Database)
 
 	// Initialize OpenTelemetry observability stack (required for LLM tracing)
@@ -221,11 +222,22 @@ func (d *daemonImpl) initOTelObservability(ctx context.Context) *observability.O
 	return stack
 }
 
+// redactedURL returns raw with the password part removed, so a logger can show
+// the address of a service. A string that is not a URL gives a fixed text, never
+// the string, because the string can hold a credential.
+func redactedURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<not a URL>"
+	}
+	return u.Redacted()
+}
+
 // initRedis initializes the Redis client for tool execution.
 // Returns the client or an error if initialization fails.
 func (d *daemonImpl) initRedis(ctx context.Context) (queue.Client, error) {
 	d.logger.Info(ctx, "initializing Redis client",
-		"url", d.config.Redis.URL,
+		"url", redactedURL(d.config.Redis.URL),
 		"database", d.config.Redis.Database)
 
 	client, err := newQueueBackend(d.config.Redis.URL, d.config.Redis.ConnectTimeout, d.config.Redis.ReadTimeout)
@@ -252,7 +264,7 @@ func (i *Infrastructure) RedisClient() queue.Client {
 // Returns the initialized StateClient or an error if connection/initialization fails after all retries.
 func (d *daemonImpl) initStateClient(ctx context.Context) (*state.StateClient, error) {
 	d.logger.Info(ctx, "initializing StateClient for Redis state stores",
-		"url", d.config.Redis.URL,
+		"url", redactedURL(d.config.Redis.URL),
 		"database", d.config.Redis.Database)
 
 	// Create StateClient config from daemon config
