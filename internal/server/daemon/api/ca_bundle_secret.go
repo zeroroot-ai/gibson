@@ -20,13 +20,14 @@ import (
 // The field names the secret as the dashboard shows it. SetSecret stores a
 // credential under "cred:<name>", so the read uses the same rule
 // (secrets.StoredName). The daemon log holds the error of the store, and the
-// error to the caller does not.
+// error to the caller does not. The log holds no name of a secret, because the
+// name comes from a field that the CodeQL query secret-to-log treats as secret
+// material. The error to the caller names the secret.
 func readCABundleSecret(ctx context.Context, store ConnectorSecretResolver, secretName string) ([]byte, error) {
 	stored := secrets.StoredName(secretsv1.SecretCategory_SECRET_CATEGORY_CRED, secretName)
 	pemData, err := store.Resolve(ctx, stored)
 	if err != nil {
-		slog.WarnContext(ctx, "the tenant secret of a CA bundle cannot be read",
-			"secret", secretName, "stored_name", stored, "error", err)
+		slog.WarnContext(ctx, "the tenant secret of a CA bundle cannot be read", "error", err)
 		return nil, fmt.Errorf("the tenant secret %q for the CA bundle cannot be read", secretName)
 	}
 	if err := cabundle.Check(pemData); err != nil {
