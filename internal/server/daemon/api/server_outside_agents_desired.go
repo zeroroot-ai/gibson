@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -72,15 +73,16 @@ func (s *DaemonServer) GetTenantOutsideAgents(
 	out := &daemonoperatorv1.GetTenantOutsideAgentsResponse{}
 	for _, e := range entries {
 		out.Agents = append(out.Agents, &daemonoperatorv1.DesiredOutsideAgent{
-			Name: e.Name, A2AUrl: e.A2AURL, CredentialSecret: e.CredentialSecret,
+			Name: e.Name, A2AUrl: e.A2AURL, CredentialSecret: e.CredentialSecret, CaBundleSecret: e.CABundleSecret,
 		})
 	}
 	return out, nil
 }
 
 // GetOutsideAgentCredential returns the content of the credential Secret of one
-// outside agent. It reads the tenant secret that the record of the agent names.
-// The caller cannot name another tenant secret. An agent with no credential
+// outside agent. It reads the tenant secrets that the record of the agent names:
+// the credential under the key Authorization and the CA bundle under the key
+// ca.crt. The caller cannot name another tenant secret. An agent with neither
 // secret, or a tenant secret that does not exist, gives NotFound.
 //
 // gibsoncheck:allow tenant-from-request — DaemonOperatorService: the TLS peer of the
@@ -102,18 +104,29 @@ func (s *DaemonServer) GetOutsideAgentCredential(
 	case err != nil:
 		return nil, status.Errorf(codes.Internal, "read the outside agent: %v", err)
 	}
-	if entry.CredentialSecret == "" {
-		return nil, status.Errorf(codes.NotFound, "the outside agent %q has no credential secret", req.GetName())
+	if entry.CredentialSecret == "" && entry.CABundleSecret == "" {
+		return nil, status.Errorf(codes.NotFound, "the outside agent %q has no credential secret and no CA bundle",
+			req.GetName())
 	}
-	value, err := s.modelCredStore.Resolve(auth.WithTenant(ctx, tenant), entry.CredentialSecret)
-	if err != nil {
-		// The error names the secret and never a value.
-		return nil, status.Errorf(codes.NotFound, "the credential secret %q cannot be read", entry.CredentialSecret)
+	tctx := auth.WithTenant(ctx, tenant)
+	data := map[string][]byte{}
+	if entry.CredentialSecret != "" {
+		value, err := s.modelCredStore.Resolve(tctx, entry.CredentialSecret)
+		if err != nil {
+			// The error names the secret and never a value.
+			return nil, status.Errorf(codes.NotFound, "the credential secret %q cannot be read", entry.CredentialSecret)
+		}
+		if len(value) == 0 {
+			return nil, status.Errorf(codes.NotFound, "the credential secret %q is empty", entry.CredentialSecret)
+		}
+		data[OutsideAgentCredentialKey] = value
 	}
-	if len(value) == 0 {
-		return nil, status.Errorf(codes.NotFound, "the credential secret %q is empty", entry.CredentialSecret)
+	if entry.CABundleSecret != "" {
+		bundle, err := readCABundleSecret(tctx, s.modelCredStore, entry.CABundleSecret)
+		if err != nil {
+			return nil, status.Error(codes.NotFound, err.Error())
+		}
+		data[cabundle.Key] = bundle
 	}
-	return &daemonoperatorv1.GetOutsideAgentCredentialResponse{
-		Data: map[string][]byte{OutsideAgentCredentialKey: value},
-	}, nil
+	return &daemonoperatorv1.GetOutsideAgentCredentialResponse{Data: data}, nil
 }

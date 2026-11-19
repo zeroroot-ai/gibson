@@ -78,6 +78,15 @@ spec:
                   openai-compatible and optional for anthropic and openai.
                 pattern: ^https://[^/?#@\s]+(/[^?#\s]*)?$
                 type: string
+              caBundleSecret:
+                description: |-
+                  CABundleSecret is the name of the tenant secret that holds the PEM CA
+                  bundle that signs the certificate of the backend. Empty means the gateway
+                  verifies the backend with its public roots. The resource holds no bundle.
+                  The tenant operator copies it into the credential Secret under the key
+                  ca.crt.
+                maxLength: 253
+                type: string
               credentialSecret:
                 description: |-
                   CredentialSecret is the name of the tenant secret in OpenBao that holds the

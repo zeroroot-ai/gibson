@@ -170,6 +170,7 @@ func specOf(tenant string, d provision.DesiredModelProvider) gibsonv1alpha1.Mode
 	return gibsonv1alpha1.ModelProviderSpec{
 		TenantID: tenant, Type: gibsonv1alpha1.ModelProviderType(d.Type), BaseURL: d.BaseURL,
 		Region: d.Region, ProjectID: d.ProjectID, CredentialSecret: d.CredentialSecret,
+		CABundleSecret: d.CABundleSecret,
 	}
 }
 
@@ -178,7 +179,7 @@ func (r *ModelProviderSyncRunnable) update(ctx context.Context, mp *gibsonv1alph
 	// The model filter is not part of a provider record. The loop keeps it.
 	want.ModelFilter = mp.Spec.ModelFilter
 	if mp.Spec.BaseURL == want.BaseURL && mp.Spec.Region == want.Region && mp.Spec.ProjectID == want.ProjectID &&
-		mp.Spec.CredentialSecret == want.CredentialSecret {
+		mp.Spec.CredentialSecret == want.CredentialSecret && mp.Spec.CABundleSecret == want.CABundleSecret {
 		return nil
 	}
 	mp.Spec = want

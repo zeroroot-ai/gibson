@@ -110,6 +110,10 @@ message OutsideAgentEntry {
   string credential_secret = 3;
   string description = 4;
   google.protobuf.Timestamp created_at = 5;
+  // ca_bundle_secret is the name of the tenant secret that holds the PEM CA
+  // bundle that signs the certificate of the agent. Empty means the gateway
+  // uses its public roots. The record holds the name and never the value.
+  string ca_bundle_secret = 6;
 }
 
 message RegisterOutsideAgentRequest {
@@ -118,6 +122,10 @@ message RegisterOutsideAgentRequest {
   string a2a_url = 2 [(buf.validate.field).string = { min_len: 1, max_len: 2048 }];
   string credential_secret = 3 [(buf.validate.field).string = { max_len: 255 }];
   string description = 4 [(buf.validate.field).string = { max_len: 1024 }];
+  // ca_bundle_secret is the name of the tenant secret with the PEM CA bundle of
+  // the agent. Optional. The daemon checks at save time that the secret holds
+  // certificates.
+  string ca_bundle_secret = 5 [(buf.validate.field).string = { max_len: 255 }];
 }
 
 message RegisterOutsideAgentResponse {

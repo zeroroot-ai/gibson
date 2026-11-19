@@ -78,24 +78,26 @@ func (f fakeOutsideResolver) LookupIPAddr(_ context.Context, host string) ([]net
 }
 
 type outsideFixture struct {
-	svc   *OutsideAgentService
-	store *memOutsideStore
-	fga   *recordingAuthorizer
-	ctx   context.Context
+	svc     *OutsideAgentService
+	store   *memOutsideStore
+	fga     *recordingAuthorizer
+	secrets *fakeCredStore
+	ctx     context.Context
 }
 
 func newOutsideFixture(t *testing.T) *outsideFixture {
 	t.Helper()
 	f := &outsideFixture{
-		store: &memOutsideStore{entries: map[string]outsideagentstore.Entry{}},
-		fga:   &recordingAuthorizer{fakeAuthorizer: newFakeAuthorizer()},
+		store:   &memOutsideStore{entries: map[string]outsideagentstore.Entry{}},
+		fga:     &recordingAuthorizer{fakeAuthorizer: newFakeAuthorizer()},
+		secrets: &fakeCredStore{data: map[string][]byte{}},
 	}
 	resolver := fakeOutsideResolver{
 		"agent.partner.example": {net.ParseIP("93.184.216.34")},
 		"rebind.example":        {net.ParseIP("93.184.216.34"), net.ParseIP("10.0.0.5")},
 		"internal.example":      {net.ParseIP("10.0.0.5")},
 	}
-	svc, err := NewOutsideAgentService(f.store, f.fga, resolver)
+	svc, err := NewOutsideAgentService(f.store, f.fga, resolver, f.secrets)
 	require.NoError(t, err)
 	f.svc = svc
 	f.ctx = auth.WithIdentity(context.Background(),

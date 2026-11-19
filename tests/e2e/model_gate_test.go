@@ -57,6 +57,7 @@ import (
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -341,10 +342,13 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 
 	// The tenant's only provider is a plain openai provider that points at the
 	// mock provider. The window is stated, so the save makes no list call.
+	// The mock serves a certificate of a private CA. The provider names the tenant
+	// secret that holds that CA, and the gateway verifies the mock against it.
+	caSecret := saveMockProviderCA(ctx, t, modelGateTenant, secretsv1.NewSecretsServiceClient(clients.Conn()))
 	_, err = providers.CreateProvider(ctx, &tenantv1.CreateProviderRequest{Input: &tenantv1.ProviderConfigInput{
 		Name: modelGateProvider, Type: "openai", SetAsDefault: true,
 		DefaultModel: modelGateModel, DefaultModelContextWindow: 200000,
-		Credentials: map[string]string{"api_key": "mock-key-e2e-only", "base_url": mockProviderURL(t)},
+		Credentials: mockProviderCredentials(mockProviderURL(t), caSecret),
 	}})
 	if status.Code(err) != codes.AlreadyExists {
 		require.NoError(t, err, "CreateProvider(%s)", modelGateProvider)

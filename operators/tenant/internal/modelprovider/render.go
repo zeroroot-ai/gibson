@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
@@ -166,6 +167,16 @@ func backend(
 		// and the install owns it. A backend-level ext-authz would run after the
 		// route policies, and the trusted headers would reach the provider.
 		"auth": auth,
+	}
+	// A backend with a private CA verifies the server certificate against the
+	// bundle that the tenant operator wrote in the credential Secret. The field
+	// is policies.tls.caCertificateRefs of the AgentgatewayBackend CRD. A Secret
+	// reference reads the PEM bundle from the key ca.crt. Without a CA bundle
+	// the policy is absent, and the gateway uses its public roots.
+	if mp.Spec.CABundleSecret != "" && mp.Spec.Type != gibsonv1alpha1.ModelProviderBedrock {
+		policies["tls"] = map[string]any{"caCertificateRefs": []any{map[string]any{
+			"kind": "Secret", "name": CredentialSecretName(mp.Spec.TenantID, mp.Name), "key": cabundle.Key,
+		}}}
 	}
 	if withAI {
 		policies["ai"] = map[string]any{

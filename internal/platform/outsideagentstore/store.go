@@ -32,8 +32,11 @@ type Entry struct {
 	Name             string
 	A2AURL           string
 	CredentialSecret string
-	Description      string
-	CreatedAt        time.Time
+	// CABundleSecret is the name of the tenant secret with the PEM CA bundle of
+	// the agent. Empty means the gateway uses its public roots.
+	CABundleSecret string
+	Description    string
+	CreatedAt      time.Time
 }
 
 // Store reads and writes the outside agents of one tenant.
@@ -87,7 +90,7 @@ func NewPostgresStore(pool datapool.Pool) Store {
 
 var _ Store = (*postgresStore)(nil)
 
-const columns = `name, a2a_url, credential_secret, description, created_at`
+const columns = `name, a2a_url, credential_secret, ca_bundle_secret, description, created_at`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -95,7 +98,7 @@ type scanner interface {
 
 func scanEntry(row scanner) (*Entry, error) {
 	var e Entry
-	if err := row.Scan(&e.Name, &e.A2AURL, &e.CredentialSecret, &e.Description, &e.CreatedAt); err != nil {
+	if err := row.Scan(&e.Name, &e.A2AURL, &e.CredentialSecret, &e.CABundleSecret, &e.Description, &e.CreatedAt); err != nil {
 		return nil, fmt.Errorf("scan outside agent row: %w", err)
 	}
 	e.CreatedAt = e.CreatedAt.UTC()
@@ -115,17 +118,18 @@ func (s *postgresStore) Register(ctx context.Context, tenant string, e Entry) (*
 	var out *Entry
 	err = c.InTx(ctx, func(q datapool.SQL) error {
 		if _, err := q.Exec(ctx,
-			`INSERT INTO outside_agents (name, a2a_url, credential_secret, description)
-			 VALUES ($1,$2,$3,$4)
+			`INSERT INTO outside_agents (name, a2a_url, credential_secret, ca_bundle_secret, description)
+			 VALUES ($1,$2,$3,$4,$5)
 			 ON CONFLICT (name) DO NOTHING`,
-			e.Name, e.A2AURL, e.CredentialSecret, e.Description); err != nil {
+			e.Name, e.A2AURL, e.CredentialSecret, e.CABundleSecret, e.Description); err != nil {
 			return fmt.Errorf("insert: %w", err)
 		}
 		got, gerr := scanEntry(q.QueryRow(ctx, `SELECT `+columns+` FROM outside_agents WHERE name = $1`, e.Name))
 		if gerr != nil {
 			return gerr
 		}
-		if got.A2AURL != e.A2AURL || got.CredentialSecret != e.CredentialSecret || got.Description != e.Description {
+		if got.A2AURL != e.A2AURL || got.CredentialSecret != e.CredentialSecret || got.CABundleSecret != e.CABundleSecret ||
+			got.Description != e.Description {
 			return fmt.Errorf("%w: %s", ErrConflict, e.Name)
 		}
 		out = got

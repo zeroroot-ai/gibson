@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -107,6 +108,7 @@ func (s *DaemonServer) GetTenantModelProviders(
 		}
 		d := &daemonoperatorv1.DesiredModelProvider{
 			Name: rec.Name, Type: gw, CredentialSecret: secret, BaseUrl: field(fieldBaseURL),
+			CaBundleSecret: field(cabundle.Field),
 		}
 		switch gw {
 		case gatewayTypeBedrock:

@@ -70,6 +70,7 @@ import (
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -197,10 +198,13 @@ func (s *aaifSetup) ensureProvider(t *testing.T, name, providerType, model strin
 	if mockURL == "" {
 		t.Fatalf("%s is not set: the AAIF test needs the https URL of the mock provider", aaifMockURLEnv)
 	}
+	// The mock serves a certificate of a private CA. The provider names the tenant
+	// secret that holds that CA, and the gateway verifies the mock against it.
+	caSecret := saveMockProviderCA(s.ctx, t, aaifTenant, secretsv1.NewSecretsServiceClient(s.clients.Conn()))
 	_, err := s.provs.CreateProvider(s.ctx, &tenantv1.CreateProviderRequest{Input: &tenantv1.ProviderConfigInput{
 		Name: name, Type: providerType, SetAsDefault: true,
 		DefaultModel: model, DefaultModelContextWindow: 200000,
-		Credentials: map[string]string{"api_key": "mock-key-e2e-only", "base_url": mockURL},
+		Credentials: mockProviderCredentials(mockURL, caSecret),
 	}})
 	if status.Code(err) != codes.AlreadyExists {
 		require.NoError(t, err, "CreateProvider(%s)", name)

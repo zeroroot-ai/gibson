@@ -169,6 +169,7 @@ func (r *OutsideAgentSyncRunnable) syncTenant(ctx context.Context, tenant string
 		names[rec.Name] = true
 		agent := outsideagent.Agent{
 			Tenant: tenant, Name: rec.Name, URL: rec.A2AURL, CredentialSecret: rec.CredentialSecret,
+			CABundleSecret: rec.CABundleSecret,
 		}
 		if err := r.syncAgent(ctx, agent); err != nil {
 			if errors.Is(err, clients.ErrNotFound) {
@@ -184,8 +185,9 @@ func (r *OutsideAgentSyncRunnable) syncTenant(ctx context.Context, tenant string
 
 // syncAgent writes the credential Secret, then the backend and the route. The
 // Secret goes first, so the backend never names a Secret that is not there.
-// With no credential secret in the record, the loop deletes a Secret that an
-// earlier version of the record left.
+// The Secret holds the credential under Authorization and the CA bundle under
+// ca.crt. With neither in the record, the loop deletes a Secret that an earlier
+// version of the record left.
 func (r *OutsideAgentSyncRunnable) syncAgent(ctx context.Context, a outsideagent.Agent) error {
 	objs, err := outsideagent.Render(a, r.Render)
 	if err != nil {
@@ -194,7 +196,7 @@ func (r *OutsideAgentSyncRunnable) syncAgent(ctx context.Context, a outsideagent
 	secretKey := types.NamespacedName{
 		Namespace: r.Render.Namespace, Name: outsideagent.CredentialSecretName(a.Tenant, a.Name),
 	}
-	if a.CredentialSecret == "" {
+	if a.CredentialSecret == "" && a.CABundleSecret == "" {
 		if err := r.deleteSecret(ctx, secretKey); err != nil {
 			return err
 		}

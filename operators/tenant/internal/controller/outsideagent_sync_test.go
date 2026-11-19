@@ -344,3 +344,43 @@ func TestOutsideAgentSync_RefusesToTakeAnObjectOfAnotherOwner(t *testing.T) {
 		t.Errorf("the object of the other owner changed: host = %q", host)
 	}
 }
+
+func TestOutsideAgentSync_WritesTheCABundleAndNamesItInTheBackend(t *testing.T) {
+	rec := &fakeOutsideRecords{byTenant: map[string][]provision.DesiredOutsideAgent{
+		"acme": {
+			{Name: "both", A2AURL: "https://both.example", CredentialSecret: "k", CABundleSecret: "ca"},
+			{Name: "ca-only", A2AURL: "https://ca.example", CABundleSecret: "ca"},
+		},
+	}}
+	creds := &fakeOutsideCredentials{data: map[string]map[string][]byte{
+		"acme/both":    {"Authorization": []byte("tok"), "ca.crt": []byte("PEM")},
+		"acme/ca-only": {"ca.crt": []byte("PEM")},
+	}}
+	r, c := outsideSyncRig(t, rec, creds)
+	if err := r.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	for _, name := range []string{"both", "ca-only"} {
+		secret, ok := hasSecret(t, c, "oa-acme-"+name+"-credential")
+		if !ok || string(secret.Data["ca.crt"]) != "PEM" {
+			t.Fatalf("%s: the Secret has no CA bundle", name)
+		}
+		backend, _ := getGateway(t, c, agentgatewayBackendGVK, "oa-acme-"+name)
+		refs, found, _ := unstructured.NestedSlice(backend.Object, "spec", "policies", "tls", "caCertificateRefs")
+		if !found || len(refs) != 1 {
+			t.Fatalf("%s: caCertificateRefs = %v", name, refs)
+		}
+		ref := refs[0].(map[string]any)
+		if ref["kind"] != "Secret" || ref["name"] != "oa-acme-"+name+"-credential" || ref["key"] != "ca.crt" {
+			t.Errorf("%s: ref = %v", name, ref)
+		}
+	}
+	both, _ := getGateway(t, c, agentgatewayBackendGVK, "oa-acme-both")
+	if _, found, _ := unstructured.NestedMap(both.Object, "spec", "policies", "auth"); !found {
+		t.Error("the agent with a credential has no auth policy")
+	}
+	only, _ := getGateway(t, c, agentgatewayBackendGVK, "oa-acme-ca-only")
+	if _, found, _ := unstructured.NestedMap(only.Object, "spec", "policies", "auth"); found {
+		t.Error("the agent with no credential has an auth policy")
+	}
+}

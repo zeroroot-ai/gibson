@@ -45,6 +45,10 @@ func TestRender_Golden(t *testing.T) {
 			Tenant: "acme", Name: "partner-scout", URL: "https://agent.partner.example/a2a",
 			CredentialSecret: "partner-key",
 		},
+		"private-ca": {
+			Tenant: "acme", Name: "private-scout", URL: "https://scout.corp.example/a2a",
+			CredentialSecret: "scout-key", CABundleSecret: "scout-ca",
+		},
 		"no-credential": {Tenant: "acme", Name: "open-scout", URL: "https://open.partner.example:8443"},
 	}
 	for name, a := range cases {

@@ -960,6 +960,10 @@ message GetModelProviderCredentialRequest {
   // provider_type is the type of the ModelProvider. It selects the key names of
   // the Secret. Required.
   string provider_type = 3 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+  // ca_bundle_secret is the name of the tenant secret that holds the PEM CA
+  // bundle of the backend, or is empty. When it is set, the daemon checks the
+  // bundle and adds it to data under the key ca.crt.
+  string ca_bundle_secret = 4 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message GetModelProviderCredentialResponse {
@@ -990,6 +994,9 @@ message DesiredModelProvider {
   // credential_secret is the name of the tenant secret that holds the
   // credential. It is a name and never a value.
   string credential_secret = 6;
+  // ca_bundle_secret is the name of the tenant secret that holds the PEM CA
+  // bundle of the backend, or is empty. It is a name and never a value.
+  string ca_bundle_secret = 7;
 }
 
 message GetTenantModelProvidersResponse {
@@ -1014,6 +1021,9 @@ message DesiredOutsideAgent {
   // credential, or is empty when the agent needs none. It is a name and never a
   // value.
   string credential_secret = 3;
+  // ca_bundle_secret is the name of the tenant secret that holds the PEM CA
+  // bundle of the agent, or is empty. It is a name and never a value.
+  string ca_bundle_secret = 4;
 }
 
 message GetTenantOutsideAgentsResponse {
@@ -1032,6 +1042,7 @@ message GetOutsideAgentCredentialRequest {
 
 message GetOutsideAgentCredentialResponse {
   // data is the content of the Secret, by the key names that the gateway reads.
+  // It holds Authorization for the credential and ca.crt for the CA bundle.
   map<string, bytes> data = 1;
 }
 

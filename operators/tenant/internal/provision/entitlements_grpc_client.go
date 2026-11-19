@@ -499,7 +499,7 @@ func (c *EntitlementsGRPCClient) ReportCatalogPluginStatus(ctx context.Context, 
 // A tenant secret that does not exist gives clients.ErrNotFound. The error text
 // never holds a value.
 func (c *EntitlementsGRPCClient) ModelProviderCredential(
-	ctx context.Context, tenantID, credentialSecret, providerType string,
+	ctx context.Context, tenantID, credentialSecret, providerType, caBundleSecret string,
 ) (map[string][]byte, error) {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
@@ -507,6 +507,7 @@ func (c *EntitlementsGRPCClient) ModelProviderCredential(
 	}
 	resp, err := c.client.GetModelProviderCredential(authedCtx, &operatorv1.GetModelProviderCredentialRequest{
 		TenantId: tenantID, CredentialSecret: credentialSecret, ProviderType: providerType,
+		CaBundleSecret: caBundleSecret,
 	})
 	if grpcstatus.Code(err) == codes.NotFound {
 		metrics.ObserveDaemonCallError("get-model-provider-credential", err)
@@ -527,6 +528,7 @@ type DesiredModelProvider struct {
 	Region           string
 	ProjectID        string
 	CredentialSecret string
+	CABundleSecret   string
 }
 
 // TenantModelProviders reads the provider records of one tenant via
@@ -548,6 +550,7 @@ func (c *EntitlementsGRPCClient) TenantModelProviders(
 		out = append(out, DesiredModelProvider{
 			Name: p.GetName(), Type: p.GetType(), BaseURL: p.GetBaseUrl(), Region: p.GetRegion(),
 			ProjectID: p.GetProjectId(), CredentialSecret: p.GetCredentialSecret(),
+			CABundleSecret: p.GetCaBundleSecret(),
 		})
 	}
 	return out, resp.GetSkipped(), nil
@@ -559,6 +562,7 @@ type DesiredOutsideAgent struct {
 	Name             string
 	A2AURL           string
 	CredentialSecret string
+	CABundleSecret   string
 }
 
 // TenantOutsideAgents reads the outside agent records of one tenant via
@@ -579,6 +583,7 @@ func (c *EntitlementsGRPCClient) TenantOutsideAgents(
 	for _, a := range resp.GetAgents() {
 		out = append(out, DesiredOutsideAgent{
 			Name: a.GetName(), A2AURL: a.GetA2AUrl(), CredentialSecret: a.GetCredentialSecret(),
+			CABundleSecret: a.GetCaBundleSecret(),
 		})
 	}
 	return out, nil

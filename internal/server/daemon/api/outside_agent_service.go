@@ -48,16 +48,19 @@ type OutsideAgentService struct {
 	store    outsideagentstore.Store
 	fga      OutsideAgentFGA
 	resolver netguard.Resolver
+	// secrets reads the tenant secret of a CA bundle, to check it at save time.
+	secrets ConnectorSecretResolver
 }
 
 // NewOutsideAgentService returns the service. Each argument is required.
 func NewOutsideAgentService(
-	store outsideagentstore.Store, fga OutsideAgentFGA, resolver netguard.Resolver,
+	store outsideagentstore.Store, fga OutsideAgentFGA, resolver netguard.Resolver, secrets ConnectorSecretResolver,
 ) (*OutsideAgentService, error) {
-	if store == nil || fga == nil || resolver == nil {
-		return nil, errors.New("api: OutsideAgentService needs a store, the authorizer and a resolver")
+	if store == nil || fga == nil || resolver == nil || secrets == nil {
+		return nil, errors.New(
+			"api: OutsideAgentService needs a store, the authorizer, a resolver and the tenant secret store")
 	}
-	return &OutsideAgentService{store: store, fga: fga, resolver: resolver}, nil
+	return &OutsideAgentService{store: store, fga: fga, resolver: resolver, secrets: secrets}, nil
 }
 
 func outsideAgentTenant(ctx context.Context, rpc string) (string, error) {
@@ -115,7 +118,7 @@ func outsideAgentStatus(rpc string, err error) error {
 func outsideAgentEntryProto(e outsideagentstore.Entry) *tenantv1.OutsideAgentEntry {
 	return &tenantv1.OutsideAgentEntry{
 		Name: e.Name, A2AUrl: e.A2AURL, CredentialSecret: e.CredentialSecret, Description: e.Description,
-		CreatedAt: timestamppb.New(e.CreatedAt),
+		CaBundleSecret: e.CABundleSecret, CreatedAt: timestamppb.New(e.CreatedAt),
 	}
 }
 
@@ -145,9 +148,14 @@ func (s *OutsideAgentService) RegisterOutsideAgent(
 	if err != nil {
 		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
 	}
+	if name := req.GetCaBundleSecret(); name != "" {
+		if _, err := readCABundleSecret(ctx, s.secrets, name); err != nil {
+			return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
+		}
+	}
 	entry, err := s.store.Register(ctx, tenant, outsideagentstore.Entry{
 		Name: req.GetName(), A2AURL: u.String(), CredentialSecret: req.GetCredentialSecret(),
-		Description: req.GetDescription(),
+		CABundleSecret: req.GetCaBundleSecret(), Description: req.GetDescription(),
 	})
 	if err != nil {
 		return nil, outsideAgentStatus(rpc, err)

@@ -75,7 +75,7 @@ type ModelProviderReconciler struct {
 // It returns clients.ErrNotFound when the tenant secret does not exist.
 type ModelCredentialSource interface {
 	ModelProviderCredential(
-		ctx context.Context, tenantID, credentialSecret, providerType string,
+		ctx context.Context, tenantID, credentialSecret, providerType, caBundleSecret string,
 	) (map[string][]byte, error)
 }
 
@@ -151,7 +151,7 @@ func (r *ModelProviderReconciler) syncCredential(
 	ctx context.Context, mp *gibsonv1alpha1.ModelProvider, secretName string,
 ) (waiting string, err error) {
 	data, err := r.Credentials.ModelProviderCredential(
-		ctx, mp.Spec.TenantID, mp.Spec.CredentialSecret, string(mp.Spec.Type))
+		ctx, mp.Spec.TenantID, mp.Spec.CredentialSecret, string(mp.Spec.Type), mp.Spec.CABundleSecret)
 	if err != nil {
 		if errors.Is(err, clients.ErrNotFound) {
 			return "the tenant secret " + mp.Spec.CredentialSecret + " does not exist", nil

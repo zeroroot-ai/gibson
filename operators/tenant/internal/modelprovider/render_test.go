@@ -67,6 +67,10 @@ func TestRender_Golden(t *testing.T) {
 			Type:    gibsonv1alpha1.ModelProviderOpenAICompatible,
 			BaseURL: "https://llm.example.com:8443/inference/v1",
 		}),
+		"private-ca": provider("mock", "acme", gibsonv1alpha1.ModelProviderSpec{
+			Type:    gibsonv1alpha1.ModelProviderOpenAICompatible,
+			BaseURL: "https://mockprovider.example.svc:8443/v1", CABundleSecret: "mock-ca",
+		}),
 		"bedrock": provider("aws", "acme", gibsonv1alpha1.ModelProviderSpec{
 			Type: gibsonv1alpha1.ModelProviderBedrock, Region: "us-east-1",
 		}),

@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 )
@@ -61,6 +62,10 @@ type Agent struct {
 	// CredentialSecret is the name of the tenant secret of the credential. Empty
 	// means the agent needs none, and the backend gets no auth policy.
 	CredentialSecret string
+	// CABundleSecret is the name of the tenant secret with the PEM CA bundle of
+	// the agent. Empty means the gateway uses its public roots. The credential
+	// Secret holds the bundle under the key ca.crt.
+	CABundleSecret string
 }
 
 // Config is the install-side configuration of the render.
@@ -170,12 +175,20 @@ func labels(a Agent) map[string]any {
 }
 
 // backend renders the AgentgatewayBackend. The backend has the A2A type. It
-// speaks TLS to the host with the host as the server name, and the gateway
-// verifies the certificate of the host against its system roots.
+// speaks TLS to the host with the host as the server name. The gateway verifies
+// the certificate of the host against the CA bundle of the agent, or against its
+// system roots when the agent has none.
 func backend(a Agent, cfg Config, name, host string, port int) *unstructured.Unstructured {
-	policies := map[string]any{
-		"tls": map[string]any{"sni": host},
+	tls := map[string]any{"sni": host}
+	if a.CABundleSecret != "" {
+		// policies.tls.caCertificateRefs of the AgentgatewayBackend CRD. A Secret
+		// reference reads the PEM bundle from the key ca.crt of the credential
+		// Secret.
+		tls["caCertificateRefs"] = []any{map[string]any{
+			"kind": "Secret", "name": CredentialSecretName(a.Tenant, a.Name), "key": cabundle.Key,
+		}}
 	}
+	policies := map[string]any{"tls": tls}
 	meta := map[string]any{"name": name, "namespace": cfg.Namespace, "labels": labels(a)}
 	if a.CredentialSecret != "" {
 		policies["auth"] = map[string]any{"secretRef": map[string]any{"name": CredentialSecretName(a.Tenant, a.Name)}}

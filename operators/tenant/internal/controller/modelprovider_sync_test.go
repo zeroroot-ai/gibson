@@ -159,3 +159,26 @@ func TestSync_ANameThatIsNotAKubernetesNameIsSkipped(t *testing.T) {
 		t.Errorf("%d ModelProviders, want 0", len(all.Items))
 	}
 }
+
+// The CA bundle secret of a record reaches the ModelProvider, and a change of it
+// updates the ModelProvider.
+func TestSync_CarriesTheCABundleSecret(t *testing.T) {
+	rec := &fakeRecords{byTenant: map[string][]provision.DesiredModelProvider{
+		"acme": {{Name: "mock", Type: "openai-compatible", BaseURL: "https://mock.example", CredentialSecret: "provider_cred:mock",
+			CABundleSecret: "mock-ca"}},
+	}}
+	r, c := syncRig(t, rec)
+	if err := r.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if mp, _ := getMP(t, c, "mock"); mp.Spec.CABundleSecret != "mock-ca" {
+		t.Errorf("ca bundle secret = %q, want mock-ca", mp.Spec.CABundleSecret)
+	}
+	rec.byTenant["acme"][0].CABundleSecret = ""
+	if err := r.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if mp, _ := getMP(t, c, "mock"); mp.Spec.CABundleSecret != "" {
+		t.Errorf("ca bundle secret = %q, want it cleared", mp.Spec.CABundleSecret)
+	}
+}

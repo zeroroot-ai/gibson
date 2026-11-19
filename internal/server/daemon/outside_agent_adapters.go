@@ -29,8 +29,11 @@ func (d *daemonImpl) registerOutsideAgent(ctx context.Context, srv *grpc.Server)
 	if d.authorizer == nil {
 		return errors.New("daemon: OutsideAgentService needs the authorizer")
 	}
+	if d.secretsService == nil {
+		return errors.New("daemon: OutsideAgentService needs the tenant secret store")
+	}
 	d.outsideAgents = outsideagentstore.NewPostgresStore(d.pool)
-	svc, err := api.NewOutsideAgentService(d.outsideAgents, d.authorizer, net.DefaultResolver)
+	svc, err := api.NewOutsideAgentService(d.outsideAgents, d.authorizer, net.DefaultResolver, d.secretsService)
 	if err != nil {
 		return fmt.Errorf("daemon: OutsideAgentService: %w", err)
 	}

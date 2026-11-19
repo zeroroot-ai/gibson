@@ -73,6 +73,15 @@ type ModelProviderSpec struct {
 	// +required
 	CredentialSecret string `json:"credentialSecret"`
 
+	// CABundleSecret is the name of the tenant secret that holds the PEM CA
+	// bundle that signs the certificate of the backend. Empty means the gateway
+	// verifies the backend with its public roots. The resource holds no bundle.
+	// The tenant operator copies it into the credential Secret under the key
+	// ca.crt.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	CABundleSecret string `json:"caBundleSecret,omitempty"`
+
 	// ModelFilter limits the models that the gateway lets through for this
 	// provider. Empty allows every model.
 	// +optional

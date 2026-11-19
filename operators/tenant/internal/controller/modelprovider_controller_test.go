@@ -31,9 +31,9 @@ type fakeModelCredentials struct {
 }
 
 func (f *fakeModelCredentials) ModelProviderCredential(
-	_ context.Context, tenantID, credentialSecret, providerType string,
+	_ context.Context, tenantID, credentialSecret, providerType, caBundleSecret string,
 ) (map[string][]byte, error) {
-	f.calls = append(f.calls, tenantID+"/"+credentialSecret+"/"+providerType)
+	f.calls = append(f.calls, tenantID+"/"+credentialSecret+"/"+providerType+"/"+caBundleSecret)
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -158,7 +158,7 @@ func TestModelProvider_WritesTheCredentialSecret(t *testing.T) {
 	if got := getModelProvider(t, c); got.Status.Phase != gibsonv1alpha1.ModelProviderPhaseReady || !got.Status.Ready {
 		t.Errorf("status = %+v, want Ready", got.Status)
 	}
-	if len(src.calls) == 0 || src.calls[0] != "acme/anthropic-key/anthropic" {
+	if len(src.calls) == 0 || src.calls[0] != "acme/anthropic-key/anthropic/" {
 		t.Errorf("daemon calls = %v", src.calls)
 	}
 }
@@ -290,5 +290,42 @@ func TestModelProvider_ARenderErrorIsReported(t *testing.T) {
 	got := getModelProvider(t, c)
 	if got.Status.Phase != gibsonv1alpha1.ModelProviderPhaseFailed || got.Status.LastError == "" {
 		t.Errorf("status = %+v, want Failed with a message", got.Status)
+	}
+}
+
+// A provider with a CA bundle secret asks the daemon for it, and the Secret holds
+// the bundle under ca.crt. The backend names that key in its TLS policy.
+func TestModelProvider_WritesTheCABundleIntoTheSecret(t *testing.T) {
+	mp := newModelProvider()
+	mp.Spec.CABundleSecret = "claude-ca"
+	r, c := modelProviderTestRig(t, mp)
+	src := anthropicCredentials()
+	src.data["anthropic-key"]["ca.crt"] = []byte("PEM-BUNDLE")
+	r.Credentials = src
+	reconcileTwice(t, r)
+
+	var secret corev1.Secret
+	key := types.NamespacedName{Namespace: "gibson-gateway", Name: "mp-acme-claude-credential"}
+	if err := c.Get(context.Background(), key, &secret); err != nil {
+		t.Fatalf("the credential Secret was not written: %v", err)
+	}
+	if got := string(secret.Data["ca.crt"]); got != "PEM-BUNDLE" {
+		t.Errorf("ca.crt = %q", got)
+	}
+	if len(src.calls) == 0 || src.calls[0] != "acme/anthropic-key/anthropic/claude-ca" {
+		t.Errorf("daemon calls = %v", src.calls)
+	}
+	backend := &unstructured.Unstructured{}
+	backend.SetGroupVersionKind(agentgatewayBackendGVK)
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "gibson-gateway", Name: "mp-acme-claude"}, backend); err != nil {
+		t.Fatalf("the backend was not written: %v", err)
+	}
+	refs, found, _ := unstructured.NestedSlice(backend.Object, "spec", "policies", "tls", "caCertificateRefs")
+	if !found || len(refs) != 1 {
+		t.Fatalf("caCertificateRefs = %v", refs)
+	}
+	ref := refs[0].(map[string]any)
+	if ref["kind"] != "Secret" || ref["name"] != "mp-acme-claude-credential" || ref["key"] != "ca.crt" {
+		t.Errorf("ref = %v", ref)
 	}
 }

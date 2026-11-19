@@ -23,6 +23,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -347,6 +348,9 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateP
 	if err := validateProviderInput(req.GetInput()); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
+	if err := s.checkProviderCABundle(ctx, req.GetInput()); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
 	if err := s.fillDefaultModelWindow(ctx, req.GetInput(), nil); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
@@ -365,6 +369,25 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateP
 	// when the index marker already matches.
 	s.maybeTriggerReembed(tenantID, req.GetInput())
 	return &tenantv1.CreateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
+}
+
+// checkProviderCABundle checks the credential field ca_bundle_secret of a
+// provider at save time. The field names a tenant secret with a PEM CA bundle
+// for a backend that has a private CA. The secret must exist and must hold
+// certificates, so a bad name is refused here and not at the gateway. With no
+// value the gateway uses its public roots.
+func (s *DaemonServer) checkProviderCABundle(ctx context.Context, in *tenantv1.ProviderConfigInput) error {
+	name := strings.TrimSpace(in.GetCredentials()[cabundle.Field])
+	if name == "" {
+		return nil
+	}
+	if s.modelCredStore == nil {
+		return fmt.Errorf("the tenant secret store is not configured, so %s cannot be checked", cabundle.Field)
+	}
+	if _, err := readCABundleSecret(ctx, s.modelCredStore, name); err != nil {
+		return fmt.Errorf("%s: %w", cabundle.Field, err)
+	}
+	return nil
 }
 
 // invalidateEmbedderCache drops the per-tenant embedder cache after a
@@ -394,6 +417,9 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *tenantv1.UpdateP
 			"daemon `security.key_provider` not configured — provider storage is disabled")
 	}
 	if err := validateProviderInput(req.GetInput()); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
+	if err := s.checkProviderCABundle(ctx, req.GetInput()); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 	existing, err := s.providerConfig.Get(ctx, tenantID, req.GetName())

@@ -132,11 +132,12 @@ func (f fakeProviders) List(context.Context, string) ([]*providerconfig.Provider
 
 func TestGetTenantModelProviders(t *testing.T) {
 	store := &fakeCredStore{data: map[string][]byte{
-		"provider_cred:eu:aws_region":  []byte("eu-west-1"),
-		"provider_cred:local:base_url": []byte("https://llm.internal"),
-		"provider_cred:claude:api_key": []byte("sk-secret-do-not-return"),
-		"provider_cred:vx:project_id":  []byte("proj"),
-		"provider_cred:vx:region":      []byte("us-east5"),
+		"provider_cred:eu:aws_region":          []byte("eu-west-1"),
+		"provider_cred:local:base_url":         []byte("https://llm.internal"),
+		"provider_cred:local:ca_bundle_secret": []byte("local-ca"),
+		"provider_cred:claude:api_key":         []byte("sk-secret-do-not-return"),
+		"provider_cred:vx:project_id":          []byte("proj"),
+		"provider_cred:vx:region":              []byte("us-east5"),
 	}}
 	srv := modelCredServer(store)
 	srv.providerConfig = fakeProviders{records: []*providerconfig.ProviderConfig{
@@ -169,8 +170,12 @@ func TestGetTenantModelProviders(t *testing.T) {
 	if e := got["eu"]; e.GetType() != "bedrock" || e.GetRegion() != "eu-west-1" {
 		t.Errorf("eu = %v", e)
 	}
-	if l := got["local"]; l.GetType() != "openai-compatible" || l.GetBaseUrl() != "https://llm.internal" {
+	if l := got["local"]; l.GetType() != "openai-compatible" || l.GetBaseUrl() != "https://llm.internal" ||
+		l.GetCaBundleSecret() != "local-ca" {
 		t.Errorf("local = %v", l)
+	}
+	if c := got["claude"]; c.GetCaBundleSecret() != "" {
+		t.Errorf("claude has a CA bundle secret %q, want none", c.GetCaBundleSecret())
 	}
 	if v := got["vx"]; v.GetType() != "vertexai" || v.GetProjectId() != "proj" || v.GetRegion() != "us-east5" {
 		t.Errorf("vx = %v", v)

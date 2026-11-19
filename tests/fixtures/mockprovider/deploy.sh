@@ -9,7 +9,8 @@
 #   1. Build the image and load it into kind.
 #   2. Make a CA and a certificate for the Service name of the mock.
 #   3. Apply mockprovider.yaml and wait for the rollout.
-#   4. Write the two URLs of the mock to the env file that run-e2e-job.sh reads.
+#   4. Write the two URLs and the CA of the mock to the env file that
+#      run-e2e-job.sh reads.
 #
 # Inputs (environment):
 #   CLUSTER   the kind cluster name
@@ -47,4 +48,8 @@ kubectl -n "$MOCK_NS" rollout status deployment/mock-provider --timeout=5m
 {
   echo "GIBSON_E2E_MOCK_PROVIDER_URL=https://${MOCK_HOST}"
   echo "GIBSON_E2E_MOCK_RECORDED_URL=http://${MOCK_HOST}"
+  # The CA that signed the certificate of the mock, in base64 on one line. The
+  # test saves it as a tenant secret and names it in the field ca_bundle_secret
+  # of its provider, so the gateway verifies the mock against it.
+  echo "GIBSON_E2E_MOCK_CA_B64=$(base64 -w0 "$dir/ca.crt")"
 } > "$env_file"

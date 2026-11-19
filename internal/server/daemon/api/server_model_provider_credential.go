@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -74,14 +75,21 @@ func (s *DaemonServer) GetModelProviderCredential(
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "tenant_id: %v", err)
 	}
-	data, err := modelCredentialFor(auth.WithTenant(ctx, tenant), s.modelCredStore,
-		req.GetProviderType(), req.GetCredentialSecret())
+	tctx := auth.WithTenant(ctx, tenant)
+	data, err := modelCredentialFor(tctx, s.modelCredStore, req.GetProviderType(), req.GetCredentialSecret())
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return nil, status.Errorf(codes.NotFound, "the credential secret %q does not exist", req.GetCredentialSecret())
 		}
 		// The error names the type and the key, never a value.
 		return nil, status.Errorf(codes.FailedPrecondition, "the credential secret %q: %v", req.GetCredentialSecret(), err)
+	}
+	if name := req.GetCaBundleSecret(); name != "" {
+		bundle, err := readCABundleSecret(tctx, s.modelCredStore, name)
+		if err != nil {
+			return nil, status.Error(codes.NotFound, err.Error())
+		}
+		data[cabundle.Key] = bundle
 	}
 	return &daemonoperatorv1.GetModelProviderCredentialResponse{Data: data}, nil
 }
