@@ -19,7 +19,7 @@ import (
 
 func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
-func okPuller(_ context.Context, ref, name string) (*agentskill.Pulled, error) {
+func okPuller(_ context.Context, _, name string) (*agentskill.Pulled, error) {
 	if name == "broken" {
 		return nil, errors.New("registry down")
 	}

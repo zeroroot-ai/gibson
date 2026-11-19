@@ -13,6 +13,7 @@ import (
 // MissionRunStatus represents the execution status of a mission run
 type MissionRunStatus string
 
+// The values of MissionRunStatus.
 const (
 	MissionRunStatusSubmitted MissionRunStatus = "submitted"
 	MissionRunStatusWorking   MissionRunStatus = "working"

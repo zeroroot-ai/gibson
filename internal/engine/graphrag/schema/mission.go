@@ -16,6 +16,7 @@ import (
 // MissionStatus represents the execution status of a mission
 type MissionStatus string
 
+// The values of MissionStatus.
 const (
 	MissionStatusSubmitted MissionStatus = "submitted"
 	MissionStatusWorking   MissionStatus = "working"

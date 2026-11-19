@@ -104,6 +104,7 @@ func (s *CredentialStatus) UnmarshalJSON(data []byte) error {
 // MissionStatus represents the execution state of a mission
 type MissionStatus string
 
+// The values of MissionStatus.
 const (
 	MissionStatusSubmitted MissionStatus = "submitted"
 	MissionStatusWorking   MissionStatus = "working"

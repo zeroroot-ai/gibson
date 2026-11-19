@@ -377,12 +377,12 @@ func isProviderNotFoundError(err error) bool {
 // validateConstraints checks if a model meets the constraints of the slot. An
 // unknown context window (zero) passes. A known window that falls short fails.
 func (m *DaemonSlotManager) validateConstraints(slot agent.SlotDefinition, model harness.SlotModel) error {
-	min := slot.Constraints.MinContextWindow
-	if model.ContextWindow > 0 && model.ContextWindow < min {
+	minWindow := slot.Constraints.MinContextWindow
+	if model.ContextWindow > 0 && model.ContextWindow < minWindow {
 		return types.NewError(
 			harness.ErrInvalidSlotConfig,
 			fmt.Sprintf("model %q context window %d is less than required %d for slot %q",
-				model.Model, model.ContextWindow, min, slot.Name),
+				model.Model, model.ContextWindow, minWindow, slot.Name),
 		)
 	}
 	return nil

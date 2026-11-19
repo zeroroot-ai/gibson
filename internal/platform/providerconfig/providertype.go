@@ -14,6 +14,7 @@ import (
 // ProviderType represents the type of LLM provider.
 type ProviderType string
 
+// The values of ProviderType.
 const (
 	ProviderAnthropic   ProviderType = "anthropic"
 	ProviderOpenAI      ProviderType = "openai"

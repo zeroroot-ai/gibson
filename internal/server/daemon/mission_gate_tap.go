@@ -299,9 +299,9 @@ type noMissionGate struct{}
 func (noMissionGate) AwaitOpen(context.Context, string) error { return nil }
 
 // InstallMissionGate registers the mission gate tap on a tenant engine and
-// returns it. It is called once for each engine, from brain.Registry.OnEngine,
-// before the tick loop starts.
-func InstallMissionGate(tenant string, eng *brain.Engine, writer missionGateWriter, logger *slog.Logger) *missionGateTap {
+// returns it as the gate that the brain executor waits on. It is called once
+// for each engine, from brain.Registry.OnEngine, before the tick loop starts.
+func InstallMissionGate(tenant string, eng *brain.Engine, writer missionGateWriter, logger *slog.Logger) missionGateAwaiter {
 	if logger == nil {
 		logger = slog.Default()
 	}

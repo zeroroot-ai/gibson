@@ -76,7 +76,7 @@ func (v *Verifier) VerifyDaemonCall(ctx context.Context, token string) (DaemonCa
 		jwt.WithIssuedAt(),
 		jwt.WithLeeway(maxDaemonCallSkew),
 	)
-	parsed, err := parser.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
+	parsed, err := parser.ParseWithClaims(token, claims, func(_ *jwt.Token) (any, error) {
 		key, ferr := keyFetcher{v: v}.Fetch(ctx, kid)
 		if ferr != nil {
 			return nil, fmt.Errorf("%w: kid %s: %w", ErrUnknownKey, kid, ferr)

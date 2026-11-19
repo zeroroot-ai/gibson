@@ -20,7 +20,9 @@ const (
 	// is listed, attributed to its creator, and inert: no System acts on it
 	// until MissionStarted moves it to working (hosted#205).
 	MissionSubmitted MissionStatus = "submitted"
-	MissionWorking   MissionStatus = "working"
+	// MissionWorking is a mission that runs. The executor Systems dispatch and
+	// decide for it.
+	MissionWorking MissionStatus = "working"
 	// MissionInputRequired is a mission that waits for a person while an
 	// approval request is open. The mission keeps its work going, as ADR-0132
 	// requires: the fleet runs on while the decision is pending. The state
@@ -31,11 +33,11 @@ const (
 	// MissionCanceled is a mission that a person stopped. It is terminal and
 	// it is not a failure.
 	MissionCanceled MissionStatus = "canceled"
-	// MissionPaused: a working mission halted by an operator (gibson#851,
-	// brain-native pause). The executor Systems stop dispatching/deciding for it
-	// until it is resumed; its World state is untouched, so resume continues
-	// exactly where it left off (the Timeline is the durable record — no separate
-	// checkpoint store, ADR-0101).
+	// MissionPaused is a working mission that an operator halted (gibson#851,
+	// brain-native pause). The executor Systems stop dispatching and deciding
+	// for it until it resumes. Its World state is untouched, so a resume
+	// continues where the pause stopped. The Timeline is the durable record,
+	// with no separate checkpoint store (ADR-0101).
 	MissionPaused MissionStatus = "paused"
 )
 

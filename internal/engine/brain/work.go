@@ -26,12 +26,12 @@ const (
 	// executed, and (unlike failed) not a mission failure. Its dependents become
 	// dead (their dep never reaches `done`) and are ignored by completion.
 	WorkSkipped WorkState = "skipped"
-	// WorkCanceled: the work was canceled after it started, for example by
+	// WorkCanceled is work that was canceled after it started, for example by
 	// CancelTask of an A2A Task. It is terminal. It is not done, so the
 	// dependents of the item never run.
 	WorkCanceled WorkState = "canceled"
-	// WorkInputRequired: the work stopped to wait for input or for auth from a
-	// caller (A2A Task state input-required or auth-required). It is not
+	// WorkInputRequired is work that stopped to wait for input or for auth from
+	// a caller (A2A Task state input-required or auth-required). It is not
 	// terminal. A later WorkCompleted moves it to done, failed or canceled.
 	WorkInputRequired WorkState = "input_required"
 )

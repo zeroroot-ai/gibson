@@ -193,6 +193,7 @@ func BedrockCredentialSchema() []CredentialField {
 	}
 }
 
+// MistralCredentialSchema is the form schema for a Mistral provider.
 func MistralCredentialSchema() []CredentialField {
 	return []CredentialField{
 		{Key: "api_key", Label: "Mistral API Key", Required: true, Secret: true, Type: FieldPassword},
@@ -217,6 +218,7 @@ func FoundryCredentialSchema() []CredentialField {
 	}
 }
 
+// CloudflareCredentialSchema is the form schema for a Cloudflare Workers AI provider.
 func CloudflareCredentialSchema() []CredentialField {
 	return []CredentialField{
 		{Key: "cloudflare_account_id", Label: "Cloudflare Account ID", Required: true, Secret: true, Placeholder: "ab12...", Type: FieldPassword},
@@ -225,6 +227,7 @@ func CloudflareCredentialSchema() []CredentialField {
 	}
 }
 
+// CohereCredentialSchema is the form schema for a Cohere provider.
 func CohereCredentialSchema() []CredentialField {
 	return []CredentialField{
 		{Key: "api_key", Label: "Cohere API Key", Required: true, Secret: true, Type: FieldPassword},
@@ -232,6 +235,7 @@ func CohereCredentialSchema() []CredentialField {
 	}
 }
 
+// HuggingFaceCredentialSchema is the form schema for a HuggingFace provider.
 func HuggingFaceCredentialSchema() []CredentialField {
 	return []CredentialField{
 		{Key: "api_key", Label: "HuggingFace API Token", Required: true, Secret: true, Placeholder: "hf_...", Type: FieldPassword},
@@ -239,6 +243,7 @@ func HuggingFaceCredentialSchema() []CredentialField {
 	}
 }
 
+// LlamafileCredentialSchema is the form schema for a Llamafile provider.
 func LlamafileCredentialSchema() []CredentialField {
 	return []CredentialField{
 		// Llamafile is self-hosted — no credentials required. The only field
