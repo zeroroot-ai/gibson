@@ -20,10 +20,11 @@ import (
 
 // The inbound A2A endpoint (epic gibson#1367). An outside A2A client calls a
 // published agent through the Edge. Only the Edge can reach this handler.
-// ext-authz checked the Capability Grant JWT of the caller, the ceiling
-// mission:originate and the FGA grant to the published definition. It then set
-// x-gibson-tenant and x-gibson-subject with overwrite. The handler trusts these
-// two headers and nothing else of the caller. It reads the agent from the path.
+// ext-authz checked the Capability Grant JWT of the caller and the ceiling
+// mission:originate. It then set x-gibson-tenant and x-gibson-subject with
+// overwrite. The handler trusts these two headers and nothing else of the caller.
+// It reads the agent from the path. ext-authz does NOT check the FGA grant to the
+// published definition: this handler does, in the method that runs (InboundGrants).
 
 // MaxInboundRequestBytes is the size limit of the body of an inbound request. A
 // message holds text and a target list, so 1 MiB is far above any real message. No
@@ -164,6 +165,11 @@ func requireGrant(ctx context.Context, grants InboundGrants, c InboundCaller, ag
 
 // inboundRPC is the a2asrv.RequestHandler of the inbound listener. It serves
 // SendMessage, GetTask and CancelTask. Every other method is not supported.
+//
+// Every new handler method MUST make its own check. ext-authz does not see the
+// JSON-RPC method and checks no grant. A method that starts work or changes work
+// calls requireGrant. A method that reads calls the ownership check of the runs.
+// A method that does neither is open to any caller with the ceiling.
 type inboundRPC struct {
 	UnsupportedMethods
 	runs   InboundRuns

@@ -47,9 +47,12 @@ func denyInbound(reason string, resp *authv3.CheckResponse) *authv3.CheckRespons
 //     reads for this call and never from its cache, so a revoke applies at once. The token
 //     names the exact path, it is short lived and it is single use. A revoked or
 //     lapsed identity has no descriptor, so it fails here.
-//  2. The descriptor lists the ceiling mission:originate.
-//  3. FGA shows can_originate from the principal of the descriptor to the
-//     published definition of the agent in the path.
+//  2. The descriptor lists the ceiling mission:originate and no other session bit.
+//
+// The FGA right to use the published definition (can_originate) is NOT checked
+// here. ext-authz sees the path, and the JSON-RPC method is in the body, so it
+// cannot tell a start from a read. The daemon checks the right in the method that
+// runs, so a caller keeps the read of its own missions after an unpublish.
 //
 // The tenant is the tenant of the descriptor. The caller cannot name it, and no
 // route header is read. On allow, ext-authz sets x-gibson-tenant and

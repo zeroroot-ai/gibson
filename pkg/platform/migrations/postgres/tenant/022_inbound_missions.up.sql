@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS inbound_missions (
 -- NULL counts against max_active_missions. The reservation locks the row of the
 -- publication in inbound_missions, so parallel messages and more than one replica
 -- cannot go over the limit. The row stays after an unpublish, so the caller can
--- still read and cancel its own missions.
+-- still read its own missions. A cancel needs the live grant to the agent.
 CREATE TABLE IF NOT EXISTS inbound_tasks (
     slot        TEXT        PRIMARY KEY,
     agent       TEXT        NOT NULL,
