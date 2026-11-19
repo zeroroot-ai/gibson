@@ -102,11 +102,14 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		"url", redactedURL(d.config.Redis.URL),
 		"database", d.config.Redis.Database)
 
-	// Initialize OpenTelemetry observability stack (required for LLM tracing)
-	// This provides unified tracing and metrics to OTLP-compatible backends
+	// Initialize the OpenTelemetry stack of the daemon itself: the traces of the
+	// harness and of the missions, and the OTLP metrics. It is optional. The record
+	// of a model call does not use it: that record comes from the gateway trace
+	// receiver (internal/server/daemon/api/llmtrace_receiver.go).
 	otelStack := d.initOTelObservability(ctx)
 	if otelStack == nil {
-		d.logger.Warn(ctx, "OTel observability not configured - LLM tracing disabled",
+		d.logger.Info(ctx, "OpenTelemetry export of the daemon is off, so no harness spans, mission spans or OTLP metrics leave it. "+
+			"The model call record is not affected: it comes from the gateway trace",
 			"docs", "docs/runbooks/otel-observability.md")
 	}
 
