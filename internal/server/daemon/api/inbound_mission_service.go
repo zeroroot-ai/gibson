@@ -294,6 +294,20 @@ func (s *InboundMissionService) inboundCallers(ctx context.Context, object strin
 	return users, nil
 }
 
+// grantTuples reads every stored granted_caller tuple of one object. ReadTuples
+// pages through the tuples, so none is left out.
+func (s *InboundMissionService) grantTuples(ctx context.Context, object string) ([]authz.Tuple, error) {
+	reader, ok := any(s.fga).(authz.TupleReader)
+	if !ok {
+		return nil, errors.New("the authorizer cannot read stored tuples")
+	}
+	tuples, err := reader.ReadTuples(ctx, "", "granted_caller", object)
+	if err != nil {
+		return nil, fmt.Errorf("read the grants of %s: %w", object, err)
+	}
+	return tuples, nil
+}
+
 // UnpublishInboundMission removes the mark, the caller grants and the owner
 // tuple. A grant that stayed would come back if the tenant published the same
 // agent name again.
@@ -315,18 +329,26 @@ func (s *InboundMissionService) UnpublishInboundMission(
 	// The tuples go first. A failure here leaves the record in place, and the
 	// caller can retry.
 	tuples := []authz.Tuple{{User: "tenant:" + tenant, Relation: "owner", Object: object}}
-	users, err := s.inboundCallers(ctx, object)
+	grants, err := s.grantTuples(ctx, object)
 	if err != nil {
 		return nil, status_grpc.Error(codes.Internal, rpc+": "+err.Error())
 	}
-	for _, u := range users {
-		tuples = append(tuples, authz.Tuple{User: u, Relation: "granted_caller", Object: object})
-	}
-	if err := s.fga.Delete(ctx, tuples); err != nil {
+	if err := s.fga.Delete(ctx, append(tuples, grants...)); err != nil {
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the tuples: %v", rpc, err))
 	}
 	if err := s.store.Delete(ctx, tenant, req.GetAgent()); err != nil {
 		return nil, inboundStatus(rpc, err)
+	}
+	// A grant that a parallel call wrote after the first read is deleted now. The
+	// record is gone, so no new grant is written after this read.
+	late, err := s.grantTuples(ctx, object)
+	if err != nil {
+		return nil, status_grpc.Error(codes.Internal, rpc+": "+err.Error())
+	}
+	if len(late) > 0 {
+		if err := s.fga.Delete(ctx, late); err != nil {
+			return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the late grants: %v", rpc, err))
+		}
 	}
 	return &tenantv1.UnpublishInboundMissionResponse{}, nil
 }
@@ -364,8 +386,18 @@ func (s *InboundMissionService) GrantInboundCaller(
 	if err := s.requireSoleGrant(ctx, tenant, subject, object); err != nil {
 		return nil, err
 	}
-	if err := s.fga.Write(ctx, []authz.Tuple{{User: subject, Relation: "granted_caller", Object: object}}); err != nil {
+	grant := authz.Tuple{User: subject, Relation: "granted_caller", Object: object}
+	if err := s.fga.Write(ctx, []authz.Tuple{grant}); err != nil {
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the grant: %v", rpc, err))
+	}
+	// The record may have gone between the first check and the write. A grant to a
+	// publication that is gone would come back with the next publish of the name, so
+	// the grant is deleted and the call fails.
+	if _, err := s.store.Get(ctx, tenant, req.GetAgent()); err != nil {
+		if derr := s.fga.Delete(ctx, []authz.Tuple{grant}); derr != nil {
+			return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the orphan grant: %v", rpc, derr))
+		}
+		return nil, inboundStatus(rpc, err)
 	}
 	return &tenantv1.GrantInboundCallerResponse{}, nil
 }

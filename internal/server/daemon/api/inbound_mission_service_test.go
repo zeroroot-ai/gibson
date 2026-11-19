@@ -24,10 +24,11 @@ import (
 var errInboundBoom = errors.New("boom")
 
 type memInboundStore struct {
-	entries    map[string]inboundmissionstore.Entry
-	publishErr error
-	listErr    error
-	deleteErr  error
+	afterDelete func()
+	entries     map[string]inboundmissionstore.Entry
+	publishErr  error
+	listErr     error
+	deleteErr   error
 }
 
 func (m *memInboundStore) Publish(
@@ -97,6 +98,9 @@ func (m *memInboundStore) Delete(_ context.Context, _, agent string) error {
 		return fmt.Errorf("%w: %s", inboundmissionstore.ErrNotFound, agent)
 	}
 	delete(m.entries, agent)
+	if m.afterDelete != nil {
+		m.afterDelete()
+	}
 	return nil
 }
 
@@ -137,6 +141,8 @@ func (f *fakeInboundSource) TargetHashes(_ context.Context, ids []string) (map[s
 type failingInboundFGA struct {
 	*recordingAuthorizer
 	checkErr, writeErr, deleteErr, listErr error
+	// afterWrite runs after a write, as a parallel call would.
+	afterWrite func()
 }
 
 func (f *failingInboundFGA) Check(ctx context.Context, user, relation, object string) (bool, error) {
@@ -150,7 +156,11 @@ func (f *failingInboundFGA) Write(ctx context.Context, t []authz.Tuple) error {
 	if f.writeErr != nil {
 		return f.writeErr
 	}
-	return f.recordingAuthorizer.Write(ctx, t)
+	err := f.recordingAuthorizer.Write(ctx, t)
+	if f.afterWrite != nil {
+		f.afterWrite()
+	}
+	return err
 }
 
 func (f *failingInboundFGA) Delete(ctx context.Context, t []authz.Tuple) error {
@@ -358,7 +368,10 @@ func TestListInboundMissions_PagesByAgent(t *testing.T) {
 
 func TestUnpublishInboundMission_RemovesTheRecordTheGrantsAndTheOwnerTuple(t *testing.T) {
 	f := publishedFixture(t)
-	f.fga.withUsers("published_mission", reconObject, "granted_caller", "agent_principal:a1", "agent_principal:a2")
+	f.fga.stored = []authz.Tuple{
+		{User: "agent_principal:a1", Relation: "granted_caller", Object: reconObject},
+		{User: "agent_principal:a2", Relation: "granted_caller", Object: reconObject},
+	}
 
 	_, err := f.svc.UnpublishInboundMission(f.ctx, &tenantv1.UnpublishInboundMissionRequest{Agent: "recon"})
 	require.NoError(t, err)
@@ -380,7 +393,7 @@ func TestUnpublishInboundMission_Refusals(t *testing.T) {
 	}{
 		{"a bad name", nil, "Bad!", codes.InvalidArgument},
 		{"not published", nil, "other", codes.NotFound},
-		{"the grant list fails", func(f *inboundFixture) { f.fga.listErr = errInboundBoom }, "recon", codes.Internal},
+		{"the grant read fails", func(f *inboundFixture) { f.fga.readErr = errInboundBoom }, "recon", codes.Internal},
 		{"the tuple delete fails", func(f *inboundFixture) { f.fga.deleteErr = errInboundBoom }, "recon", codes.Internal},
 		{"the store delete fails", func(f *inboundFixture) { f.store.deleteErr = errInboundBoom }, "recon", codes.Internal},
 	}
@@ -600,4 +613,39 @@ func TestPublishInboundMission_PinsTheDefinitionAndEachTarget(t *testing.T) {
 	assert.Equal(t, "hash-1", e.DefinitionHash)
 	assert.Equal(t, int32(3), e.MaxActive, "the admin sets the limit")
 	assert.Equal(t, map[string]string{goodTarget: "h-" + goodTarget}, e.TargetHashes)
+}
+
+// No grant survives an unpublish, also a grant that a parallel call wrote after the
+// first read. The grants are read in pages with ReadTuples, and the read is repeated
+// after the record is gone.
+func TestUnpublishInboundMission_DeletesAGrantThatWasWrittenDuringTheCall(t *testing.T) {
+	f := publishedFixture(t)
+	late := authz.Tuple{User: "agent_principal:late", Relation: "granted_caller", Object: reconObject}
+	f.store.afterDelete = func() { f.fga.stored = append(f.fga.stored, late) }
+
+	_, err := f.svc.UnpublishInboundMission(f.ctx, &tenantv1.UnpublishInboundMissionRequest{Agent: "recon"})
+
+	require.NoError(t, err)
+	assert.Contains(t, f.fga.deleted, late)
+	assert.Empty(t, f.fga.stored, "no grant is left for the next publish of the name")
+}
+
+// A grant that is written for a record that went away in the meantime is deleted,
+// so it does not come back with a later publish of the same name.
+func TestGrantInboundCaller_DeletesAGrantWhenTheRecordWentAway(t *testing.T) {
+	f := publishedFixture(t)
+	f.fga.allow("tenant:acme", "belongs_to", "agent_principal:a1")
+	f.fga.afterWrite = func() { delete(f.store.entries, "recon") }
+
+	_, err := f.svc.GrantInboundCaller(f.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
+
+	assert.Equal(t, codes.NotFound, code(err))
+	assert.Contains(t, f.fga.deleted, authz.Tuple{User: "agent_principal:a1", Relation: "granted_caller", Object: reconObject})
+
+	g := publishedFixture(t)
+	g.fga.allow("tenant:acme", "belongs_to", "agent_principal:a1")
+	g.fga.afterWrite = func() { delete(g.store.entries, "recon") }
+	g.fga.deleteErr = errInboundBoom
+	_, err = g.svc.GrantInboundCaller(g.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
+	assert.Equal(t, codes.Internal, code(err))
 }

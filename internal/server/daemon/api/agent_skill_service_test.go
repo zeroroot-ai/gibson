@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -143,6 +144,9 @@ type recordingAuthorizer struct {
 
 func (r *recordingAuthorizer) Delete(_ context.Context, t []authz.Tuple) error {
 	r.deleted = append(r.deleted, t...)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stored = slices.DeleteFunc(r.stored, func(s authz.Tuple) bool { return slices.Contains(t, s) })
 	return nil
 }
 
