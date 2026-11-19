@@ -182,10 +182,16 @@ func publishedFixture(t *testing.T) *inboundFixture {
 func TestNewInboundMissionService_NeedsEachArgument(t *testing.T) {
 	f := newInboundFixture(t)
 	for name, build := range map[string]func() (*InboundMissionService, error){
-		"no store":  func() (*InboundMissionService, error) { return NewInboundMissionService(nil, f.source, f.fga, f.svc.pageKeys) },
-		"no source": func() (*InboundMissionService, error) { return NewInboundMissionService(f.store, nil, f.fga, f.svc.pageKeys) },
-		"no fga":    func() (*InboundMissionService, error) { return NewInboundMissionService(f.store, f.source, nil, f.svc.pageKeys) },
-		"no keys":   func() (*InboundMissionService, error) { return NewInboundMissionService(f.store, f.source, f.fga, nil) },
+		"no store": func() (*InboundMissionService, error) {
+			return NewInboundMissionService(nil, f.source, f.fga, f.svc.pageKeys)
+		},
+		"no source": func() (*InboundMissionService, error) {
+			return NewInboundMissionService(f.store, nil, f.fga, f.svc.pageKeys)
+		},
+		"no fga": func() (*InboundMissionService, error) {
+			return NewInboundMissionService(f.store, f.source, nil, f.svc.pageKeys)
+		},
+		"no keys": func() (*InboundMissionService, error) { return NewInboundMissionService(f.store, f.source, f.fga, nil) },
 	} {
 		svc, err := build()
 		assert.Nil(t, svc, name)
