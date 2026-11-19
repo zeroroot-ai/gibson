@@ -48,11 +48,15 @@ spec:
         - x-gibson-subject
         - x-gibson-mission
         - x-gibson-task
+        - x-gibson-identity-subject
+        - x-gibson-identity-issuer
+        - x-gibson-identity-credential-type
+        - x-gibson-identity-tenant
+        - x-gibson-identity-issued-at
         - x-gibson-route-tenant
+        - x-gibson-route-provider
         - x-gibson-route-agent
         - x-gibson-route-bank
-        - x-gibson-identity-tenant
-        - x-gibson-identity-subject
         - x-capability-grant
       type: RequestHeaderModifier
     - type: URLRewrite
@@ -82,11 +86,15 @@ spec:
         - x-gibson-subject
         - x-gibson-mission
         - x-gibson-task
+        - x-gibson-identity-subject
+        - x-gibson-identity-issuer
+        - x-gibson-identity-credential-type
+        - x-gibson-identity-tenant
+        - x-gibson-identity-issued-at
         - x-gibson-route-tenant
+        - x-gibson-route-provider
         - x-gibson-route-agent
         - x-gibson-route-bank
-        - x-gibson-identity-tenant
-        - x-gibson-identity-subject
         - x-capability-grant
       type: RequestHeaderModifier
     - type: URLRewrite

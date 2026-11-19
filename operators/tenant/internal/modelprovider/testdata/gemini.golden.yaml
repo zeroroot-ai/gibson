@@ -42,6 +42,24 @@ spec:
     - group: agentgateway.dev
       kind: AgentgatewayBackend
       name: mp-acme-gem
+    filters:
+    - requestHeaderModifier:
+        remove:
+        - x-gibson-tenant
+        - x-gibson-subject
+        - x-gibson-mission
+        - x-gibson-task
+        - x-gibson-identity-subject
+        - x-gibson-identity-issuer
+        - x-gibson-identity-credential-type
+        - x-gibson-identity-tenant
+        - x-gibson-identity-issued-at
+        - x-gibson-route-tenant
+        - x-gibson-route-provider
+        - x-gibson-route-agent
+        - x-gibson-route-bank
+        - x-capability-grant
+      type: RequestHeaderModifier
     matches:
     - headers:
       - name: x-gibson-route-tenant
@@ -67,6 +85,24 @@ spec:
     - group: agentgateway.dev
       kind: AgentgatewayBackend
       name: mp-acme-gem
+    filters:
+    - requestHeaderModifier:
+        remove:
+        - x-gibson-tenant
+        - x-gibson-subject
+        - x-gibson-mission
+        - x-gibson-task
+        - x-gibson-identity-subject
+        - x-gibson-identity-issuer
+        - x-gibson-identity-credential-type
+        - x-gibson-identity-tenant
+        - x-gibson-identity-issued-at
+        - x-gibson-route-tenant
+        - x-gibson-route-provider
+        - x-gibson-route-agent
+        - x-gibson-route-bank
+        - x-capability-grant
+      type: RequestHeaderModifier
     matches:
     - headers:
       - name: x-gibson-route-tenant

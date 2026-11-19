@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/gatewayheaders"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
 
@@ -254,5 +255,52 @@ func TestSplitBaseURL(t *testing.T) {
 func TestGlobToRegexp(t *testing.T) {
 	if got := globToRegexp("claude-*-v1.2"); got != `^claude-.*-v1\.2$` {
 		t.Errorf("globToRegexp = %q", got)
+	}
+}
+
+// Each rule of a provider route removes every Gibson header, so the trusted
+// headers, the route headers and the grant never reach the provider.
+func TestRender_RouteRemovesEachGibsonHeader(t *testing.T) {
+	for _, typ := range []gibsonv1alpha1.ModelProviderType{
+		gibsonv1alpha1.ModelProviderAnthropic, gibsonv1alpha1.ModelProviderBedrock,
+	} {
+		_, routes := objectsOf(t, provider("p", "acme", gibsonv1alpha1.ModelProviderSpec{Type: typ, Region: "eu-west-1"}))
+		if len(routes) != 1 {
+			t.Fatalf("%s: routes = %d, want 1", typ, len(routes))
+		}
+		rules, _, _ := unstructured.NestedSlice(routes[0].Object, "spec", "rules")
+		if len(rules) != 2 {
+			t.Fatalf("%s: rules = %d, want 2", typ, len(rules))
+		}
+		for i, raw := range rules {
+			rule, _ := raw.(map[string]any)
+			got := map[string]bool{}
+			filters, _ := rule["filters"].([]any)
+			for _, f := range filters {
+				fm, _ := f.(map[string]any)
+				if fm["type"] != "RequestHeaderModifier" {
+					continue
+				}
+				mod, _ := fm["requestHeaderModifier"].(map[string]any)
+				removed, _ := mod["remove"].([]any)
+				for _, h := range removed {
+					name, _ := h.(string)
+					got[name] = true
+				}
+			}
+			for _, h := range gatewayheaders.Removed() {
+				if !got[h] {
+					t.Errorf("%s: rule %d does not remove %s", typ, i, h)
+				}
+			}
+			for _, must := range []string{
+				"x-capability-grant", "x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task",
+				"x-gibson-route-tenant", "x-gibson-route-provider", "x-gibson-identity-tenant",
+			} {
+				if !got[must] {
+					t.Errorf("%s: rule %d: the pinned list does not hold %s", typ, i, must)
+				}
+			}
+		}
 	}
 }

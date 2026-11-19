@@ -36,7 +36,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
-	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/gatewayheaders"
 )
 
 // Labels that mark an object as rendered from an outside agent.
@@ -94,18 +94,6 @@ func ObjectName(tenant, name string) string { return "oa-" + tenant + "-" + name
 // CredentialSecretName returns the name of the Secret that the backend reads.
 func CredentialSecretName(tenant, name string) string {
 	return ObjectName(tenant, name) + "-credential"
-}
-
-// RemovedHeaders are the headers that the route removes before the call leaves
-// Gibson. They are the trusted headers that ext-authz sets, the route claim, the
-// headers of the Edge rate limit and the task grant.
-func RemovedHeaders() []string {
-	return []string{
-		modelcall.HeaderTenant, modelcall.HeaderSubject, modelcall.HeaderMission, modelcall.HeaderTask,
-		modelcall.HeaderRouteTenant, agentcall.HeaderRouteAgent, agentcall.HeaderRouteBank,
-		"x-gibson-identity-tenant", "x-gibson-identity-subject",
-		"x-capability-grant",
-	}
 }
 
 // Render returns the gateway objects of an outside agent: the backend first, then
@@ -213,7 +201,7 @@ func route(a Agent, cfg Config, name, basePath string) *unstructured.Unstructure
 	for _, h := range routeHeaders {
 		headers = append(headers, map[string]any{"type": "Exact", "name": h.Name, "value": h.Value})
 	}
-	removed := RemovedHeaders()
+	removed := gatewayheaders.Removed()
 	remove := make([]any, 0, len(removed))
 	for _, h := range removed {
 		remove = append(remove, h)

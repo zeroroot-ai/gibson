@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/gatewayheaders"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
@@ -318,7 +319,8 @@ func splitBaseURL(raw string) (host string, port int, path string, err error) {
 }
 
 // route renders the HTTPRoute of the provider. The two model paths go to the
-// model backend. The list path goes to the list backend.
+// model backend. The list path goes to the list backend. Each rule removes the
+// headers of gatewayheaders.Removed.
 func route(
 	mp *gibsonv1alpha1.ModelProvider, cfg Config, name, modelBackend, listBackend string,
 ) *unstructured.Unstructured {
@@ -338,13 +340,28 @@ func route(
 			"group": "agentgateway.dev", "kind": "AgentgatewayBackend", "name": backendName,
 		}}
 	}
+	// Each rule removes the Gibson headers before the call leaves Gibson. The
+	// provider gets no trusted header, no route header and no grant.
+	filters := func() []any {
+		removed := gatewayheaders.Removed()
+		remove := make([]any, 0, len(removed))
+		for _, h := range removed {
+			remove = append(remove, h)
+		}
+		return []any{map[string]any{
+			"type":                  "RequestHeaderModifier",
+			"requestHeaderModifier": map[string]any{"remove": remove},
+		}}
+	}
 	rules := []any{
 		map[string]any{
 			"matches":     []any{match(RouteResponses), match(RouteEmbeddings)},
+			"filters":     filters(),
 			"backendRefs": ref(modelBackend),
 		},
 		map[string]any{
 			"matches":     []any{match(RouteModels)},
+			"filters":     filters(),
 			"backendRefs": ref(listBackend),
 		},
 	}

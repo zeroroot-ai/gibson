@@ -14,6 +14,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
+
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/gatewayheaders"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -108,7 +110,7 @@ func TestRender_RouteRemovesEachInternalHeader(t *testing.T) {
 		for _, h := range removed {
 			got[h.(string)] = true
 		}
-		for _, h := range RemovedHeaders() {
+		for _, h := range gatewayheaders.Removed() {
 			if !got[h] {
 				t.Errorf("rule %d does not remove %s", i, h)
 			}
