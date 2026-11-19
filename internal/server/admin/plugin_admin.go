@@ -228,18 +228,10 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *t
 		Object:   authz.SecretObject(tenant.String(), req.GetNewExistingRef()),
 	}
 	// Delete of an absent tuple is a no-op, so it no longer says whether the
-	// declared name was bound. Read the stored tuple first. An edit of a name
-	// that was never bound is NotFound and writes no grant.
-	reader, ok := s.authzr.(authz.TupleReader)
-	if !ok {
-		return nil, status.Errorf(codes.Internal, "authorizer %T cannot read stored tuples", s.authzr)
-	}
-	stored, err := reader.ReadTuples(ctx, oldTuple.User, oldTuple.Relation, oldTuple.Object)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "read old tuple: %v", err)
-	}
-	if len(stored) == 0 {
-		return nil, status.Errorf(codes.NotFound, "the install has no binding for %q", req.GetDeclaredName())
+	// declared name was bound. An edit of a name that was never bound is
+	// NotFound and writes no grant.
+	if err := s.requireStoredTuple(ctx, oldTuple, req.GetDeclaredName()); err != nil {
+		return nil, err
 	}
 	if err := s.authzr.Delete(ctx, []authz.Tuple{oldTuple}); err != nil {
 		return nil, status.Errorf(codes.Internal, "delete old tuple: %v", err)
@@ -255,6 +247,22 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *t
 		return nil, status.Errorf(codes.Unavailable, "binding moved but the plugin was not told; retry: %v", err)
 	}
 	return &tenantv1.EditPluginSecretBindingResponse{}, nil
+}
+
+// requireStoredTuple returns NotFound when the binding tuple is not stored.
+func (s *PluginsAdminServer) requireStoredTuple(ctx context.Context, tuple authz.Tuple, declaredName string) error {
+	reader, ok := s.authzr.(authz.TupleReader)
+	if !ok {
+		return status.Errorf(codes.Internal, "authorizer %T cannot read stored tuples", s.authzr)
+	}
+	stored, err := reader.ReadTuples(ctx, tuple.User, tuple.Relation, tuple.Object)
+	if err != nil {
+		return status.Errorf(codes.Internal, "read the binding: %v", err)
+	}
+	if len(stored) == 0 {
+		return status.Errorf(codes.NotFound, "the install has no binding for %q", declaredName)
+	}
+	return nil
 }
 
 // RevokePluginSecretBinding removes a single binding and emits a
@@ -276,6 +284,11 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 		User:     principal,
 		Relation: "can_resolve",
 		Object:   authz.SecretObject(tenant.String(), req.GetDeclaredName()),
+	}
+	// Delete of an absent tuple is a no-op. A revoke of a name that was never
+	// bound is NotFound, with no audit record and no event: nothing was revoked.
+	if err := s.requireStoredTuple(ctx, tuple, req.GetDeclaredName()); err != nil {
+		return nil, err
 	}
 	identity, identityErr := auth.IdentityFromContext(ctx)
 	if identityErr != nil {

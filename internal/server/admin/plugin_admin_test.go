@@ -93,7 +93,23 @@ func (f *fakeAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deletes = append(f.deletes, tuples)
+	for _, d := range tuples {
+		kept := f.stored[:0:0]
+		for _, t := range f.stored {
+			if t != d {
+				kept = append(kept, t)
+			}
+		}
+		f.stored = kept
+	}
 	return nil
+}
+
+// bind seeds the stored binding of a plugin principal to a declared secret.
+func (f *fakeAuthorizer) bind(principal, secret, tenant string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stored = append(f.stored, authz.Tuple{User: principal, Relation: "can_resolve", Object: authz.SecretObject(tenant, secret)})
 }
 func (f *fakeAuthorizer) ListObjects(_ context.Context, user, _, _ string) ([]string, error) {
 	if f.listObjs == nil {
@@ -171,6 +187,7 @@ func TestGetPluginInstall_NotFound(t *testing.T) {
 func TestRevokePluginSecretBinding_DeletesAndAudits(t *testing.T) {
 	srv, reg, az, au := newPluginsTestServer(t)
 	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
+	az.bind("plugin_principal:github", "cred:db", "acme")
 	ctx := ctxWithTenant(t, "acme")
 
 	_, err := srv.RevokePluginSecretBinding(ctx, &tenantv1.RevokePluginSecretBindingRequest{
@@ -195,6 +212,7 @@ func TestRevokePluginSecretBinding_DeletesAndAudits(t *testing.T) {
 func TestRevokePluginSecretBinding_NoRecordMeansNoRevoke(t *testing.T) {
 	srv, reg, az, au := newPluginsTestServer(t)
 	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
+	az.bind("plugin_principal:github", "cred:db", "acme")
 	au.recordErr = errors.New("audit store down")
 
 	_, err := srv.RevokePluginSecretBinding(ctxWithTenant(t, "acme"), &tenantv1.RevokePluginSecretBindingRequest{
@@ -325,8 +343,9 @@ func (r *recordingPublisher) Publish(_ context.Context, tenant, principal string
 // declared name, before the audit line, and a publish failure is
 // Unavailable so the operator retries.
 func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
-	srv, reg, _, au := newPluginsTestServer(t)
+	srv, reg, az, au := newPluginsTestServer(t)
 	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
+	az.bind("plugin_principal:github", "cred:db", "acme")
 	pub := &recordingPublisher{}
 	srv.events = pub
 	ctx := ctxWithTenant(t, "acme")
@@ -342,6 +361,7 @@ func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
 	}
 
 	srv.events = &recordingPublisher{err: errors.New("redis down")}
+	az.bind("plugin_principal:github", "cred:db", "acme")
 	_, err := srv.RevokePluginSecretBinding(ctx, &tenantv1.RevokePluginSecretBindingRequest{InstallId: "abc", DeclaredName: "cred:db"})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("publish failure must be Unavailable, got %v", err)
@@ -350,6 +370,23 @@ func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
 	// record, so the trail does not claim a revocation the plugin did not hear.
 	if len(au.events) != 3 || au.events[2].Success || au.events[2].Decision != "deny" {
 		t.Fatalf("audit events = %+v, want the first revocation and then a record and a failure record", au.events)
+	}
+}
+
+// TestRevokePluginSecretBinding_AnUnboundNameIsNotFound: a delete of an absent
+// tuple is a no-op. A revoke of a name that was never bound is NotFound, with no
+// audit record, no delete and no event.
+func TestRevokePluginSecretBinding_AnUnboundNameIsNotFound(t *testing.T) {
+	srv, reg, az, au := newPluginsTestServer(t)
+	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
+	pub := &recordingPublisher{}
+	srv.events = pub
+	_, err := srv.RevokePluginSecretBinding(ctxWithTenant(t, "acme"), &tenantv1.RevokePluginSecretBindingRequest{InstallId: "abc", DeclaredName: "cred:never"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("a revoke of a name that was never bound: want NotFound, got %v", err)
+	}
+	if len(az.deletes) != 0 || len(pub.events) != 0 || len(au.events) != 0 {
+		t.Fatalf("a refused revoke must leave no trace: deletes=%d published=%d audited=%d", len(az.deletes), len(pub.events), len(au.events))
 	}
 }
 
@@ -385,6 +422,7 @@ func TestEditPluginSecretBinding_TellsThePluginTheValueMoved(t *testing.T) {
 		t.Fatalf("published %+v", pub.events)
 	}
 	srv.events = &recordingPublisher{err: errors.New("redis down")}
+	az.bind("plugin_principal:p", "cred:db", "acme")
 	if _, err := srv.EditPluginSecretBinding(ctx, &tenantv1.EditPluginSecretBindingRequest{InstallId: "i1", DeclaredName: "cred:db", NewExistingRef: "cred:db_v3"}); status.Code(err) != codes.Unavailable {
 		t.Fatalf("publish failure must be Unavailable, got %v", err)
 	}
