@@ -113,6 +113,9 @@ func resolveSPIFFESocket(envValue, dir string) (string, error) {
 // mounted. The server must be a member of the runner's own trust domain: the
 // test-mode daemon has no fixed SPIFFE ID worth pinning, and a foreign trust
 // domain is the thing to refuse.
+// svidWait is how long the runner waits for its SVID.
+const svidWait = 3 * time.Minute
+
 func transportCredentials(ctx context.Context) (credentials.TransportCredentials, *workloadapi.X509Source, error) {
 	sock, err := resolveSPIFFESocket(os.Getenv("SPIFFE_ENDPOINT_SOCKET"), spireSocketDir)
 	if err != nil {
@@ -121,7 +124,10 @@ func transportCredentials(ctx context.Context) (credentials.TransportCredentials
 	if sock == "" {
 		return insecure.NewCredentials(), nil, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// A new pod waits for the SPIRE controller manager to make its entry, and the
+	// SPIRE agent then issues the SVID. On a loaded runner that took 38 seconds
+	// and more (F4-2), so the wait is long. A healthy start returns at once.
+	ctx, cancel := context.WithTimeout(ctx, svidWait)
 	defer cancel()
 	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(sock)))
 	if err != nil {
