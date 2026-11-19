@@ -542,6 +542,58 @@ func TestInboundRuns_ABuildThatHangsStopsAtTheTimeout(t *testing.T) {
 	release()
 }
 
+// gatedFindings reads no finding until gate closes. It stands for a slow read.
+type gatedFindings struct {
+	started chan struct{}
+	gate    chan struct{}
+}
+
+func (g *gatedFindings) ReadFindings(
+	_ context.Context, _ string, _ types.ID, _ func(finding.EnhancedFinding) error,
+) error {
+	close(g.started)
+	<-g.gate
+	return nil
+}
+
+// A reader that leaves does not free its permit while the build runs. Without this a
+// caller that asks for a result and disconnects could start builds with no bound.
+func TestInboundRuns_ALeavingReaderKeepsItsPermitUntilTheBuildEnds(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.end(brain.MissionCompleted)
+	g := &gatedFindings{started: make(chan struct{}), gate: make(chan struct{})}
+	f.runs.findings = g
+	f.runs.gate = newResultGate(1, 1, 1)
+	f.runs.buildTimeout = time.Minute
+	hooked, respond := a2aserver.WithResponseHooks(context.Background())
+	ctx, cancel := context.WithCancel(hooked)
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.runs.Task(ctx, ownerCaller, "recon", a2a.TaskID(f.mission))
+		done <- err
+	}()
+	<-g.started
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	respond() // the response of the reader that left ends here
+
+	release, ok := f.runs.gate.acquire("acme", ownerCaller.Subject)
+	if ok {
+		release()
+	}
+	assert.False(t, ok, "the build still runs, so its permit is still held")
+
+	close(g.gate)
+	require.Eventually(t, func() bool {
+		release, ok := f.runs.gate.acquire("acme", ownerCaller.Subject)
+		if ok {
+			release()
+		}
+		return ok
+	}, 5*time.Second, 10*time.Millisecond, "the permit goes back after the build ends")
+}
+
 // A reader whose context ends leaves at once. The build goes on for the others.
 func TestInboundRuns_AReaderLeavesWhenItsContextEnds(t *testing.T) {
 	f := newTaskFixture(t)

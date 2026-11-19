@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -404,7 +405,15 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 	if !ok {
 		return nil, a2aserver.ErrBusy
 	}
-	a2aserver.AfterResponse(ctx, release)
+	// handedOff is set when this reader leaves while its build runs. The end of its
+	// response then frees nothing, and the goroutine below frees the permit after
+	// the build.
+	var handedOff atomic.Bool
+	a2aserver.AfterResponse(ctx, func() {
+		if !handedOff.Load() {
+			release()
+		}
+	})
 	key := c.Tenant + "/" + m.ID
 	if res, ok := r.results.get(key); ok {
 		a2aserver.ExtendWriteDeadline(ctx, int64(res.size))
@@ -429,7 +438,14 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 	var v any
 	select {
 	case <-ctx.Done():
-		release()
+		// The build goes on for the other readers, and it holds memory. The permit
+		// of this reader stays until the build ends, so a caller that asks and
+		// leaves cannot start more builds than the bounds allow.
+		handedOff.Store(true)
+		go func() {
+			<-ch
+			release()
+		}()
 		return nil, fmt.Errorf("read the result: %w", ctx.Err())
 	case out := <-ch:
 		if out.Err != nil {
