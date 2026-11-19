@@ -384,3 +384,23 @@ func TestInboundCard_NeedsTheLiveGrant(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.NotContains(t, rec.Body.String(), "fga down")
 }
+
+func TestAfterResponse_RunsAfterTheHandlerAndAtOnceWithNoRequest(t *testing.T) {
+	ran := false
+	AfterResponse(context.Background(), func() { ran = true })
+	assert.True(t, ran, "with no request the function runs at once")
+
+	ran = false
+	ctx, done := WithResponseHooks(context.Background())
+	AfterResponse(ctx, func() { ran = true })
+	assert.False(t, ran)
+	done()
+	assert.True(t, ran)
+}
+
+// The busy error maps to a retryable server error of JSON-RPC.
+func TestMapError_BusyIsARetryableServerError(t *testing.T) {
+	err := MapError(ErrBusy)
+	require.ErrorIs(t, err, a2a.ErrServerError)
+	assert.Contains(t, err.Error(), "retry later")
+}

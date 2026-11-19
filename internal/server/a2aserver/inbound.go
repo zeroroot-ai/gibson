@@ -30,6 +30,41 @@ import (
 // existing constant bounds an A2A message, so this is the limit of the endpoint.
 const MaxInboundRequestBytes = 1 << 20
 
+// ErrBusy reports that the daemon builds or sends as many results as it allows for
+// the tenant or for the caller. The caller retries later. It maps to a server error
+// of JSON-RPC with a message that says retry.
+var ErrBusy = errors.New("a2a: too many results are in work for this caller, retry later")
+
+// responseHooks are functions that run after the response of a request is written.
+type responseHooks struct{ fns []func() }
+
+type hooksKey struct{}
+
+// AfterResponse registers fn to run after the response of the request of ctx is
+// written. A result holds its permit until then, because the JSON-RPC layer encodes
+// the whole Task after the handler returns. It does nothing for a context that is
+// not the context of an inbound request, and it then runs fn at once.
+func AfterResponse(ctx context.Context, fn func()) {
+	h, ok := ctx.Value(hooksKey{}).(*responseHooks)
+	if !ok {
+		fn()
+		return
+	}
+	h.fns = append(h.fns, fn)
+}
+
+// WithResponseHooks returns a context that collects the functions of AfterResponse,
+// and the function that runs them. The middleware calls it for each request and runs
+// done after the response is written.
+func WithResponseHooks(ctx context.Context) (hooked context.Context, done func()) {
+	h := &responseHooks{}
+	return context.WithValue(ctx, hooksKey{}, h), func() {
+		for _, fn := range h.fns {
+			fn()
+		}
+	}
+}
+
 // InboundCaller is the verified caller of an inbound request.
 type InboundCaller struct {
 	// Tenant is the tenant of the key descriptor of the caller. The caller cannot
@@ -239,6 +274,9 @@ func inboundMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		req.Body = http.MaxBytesReader(w, req.Body, MaxInboundRequestBytes)
+		hooked, done := WithResponseHooks(req.Context())
+		defer done()
+		req = req.WithContext(hooked)
 		next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), inboundCtxKey{}, inboundCall{caller: c, agent: agent})))
 	})
 }

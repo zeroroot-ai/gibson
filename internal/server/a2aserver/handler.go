@@ -175,6 +175,8 @@ func MapError(err error) error {
 		return a2a.ErrTaskNotCancelable
 	case errors.Is(err, ErrRefused):
 		return fmt.Errorf("%w: %w", a2a.ErrUnauthorized, err)
+	case errors.Is(err, ErrBusy):
+		return fmt.Errorf("%w: %w", a2a.ErrServerError, err)
 	case errors.Is(err, a2a.ErrInvalidParams):
 		return err
 	default:

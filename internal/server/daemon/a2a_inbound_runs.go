@@ -14,6 +14,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/google/uuid"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -53,6 +54,10 @@ type inboundRuns struct {
 	// results keeps the results of finished missions, so a repeated read does not
 	// load the findings again.
 	results resultCache
+	// flight shares one build of a result between parallel reads of a mission.
+	flight singleflight.Group
+	// gate bounds the results in work for a tenant and for a caller.
+	gate *resultGate
 	// stop ends a running mission of the tenant on the context.
 	stop func(ctx context.Context, missionID string) error
 }
@@ -365,16 +370,82 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 	if err != nil {
 		return nil, fmt.Errorf("the mission ID %q is not a UUID: %w", m.ID, err)
 	}
+	// A result is held in memory while it is built and while the JSON-RPC layer
+	// encodes it. A permit for the tenant and one for the caller bound the results in
+	// work, and the permits end after the response is written. When no permit is
+	// free the caller gets a retryable error.
+	release, ok := r.gate.acquire(c.Tenant, c.Subject)
+	if !ok {
+		return nil, a2aserver.ErrBusy
+	}
+	a2aserver.AfterResponse(ctx, release)
 	key := c.Tenant + "/" + m.ID
 	if res, ok := r.results.get(key); ok {
 		return withResult(t, res), nil
 	}
-	res, err := r.buildResult(ctx, c.Tenant, missionID)
+	// Parallel reads of one mission build the result once and share it.
+	v, err, _ := r.flight.Do(key, func() (any, error) {
+		if res, ok := r.results.get(key); ok {
+			return res, nil
+		}
+		res, err := r.buildResult(context.WithoutCancel(ctx), c.Tenant, missionID)
+		if err != nil {
+			return inboundResult{}, err
+		}
+		r.results.put(key, res)
+		return res, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	r.results.put(key, res)
+	res, _ := v.(inboundResult)
 	return withResult(t, res), nil
+}
+
+// resultGate bounds the results that are in work for one tenant and for one caller.
+// A permit is taken without waiting, so a busy daemon answers at once.
+type resultGate struct {
+	mu                   sync.Mutex
+	tenantMax, callerMax int
+	tenants, callers     map[string]int
+}
+
+// newResultGate returns a gate with the two bounds. A bound under 1 is 1.
+func newResultGate(tenantMax, callerMax int) *resultGate {
+	return &resultGate{
+		tenantMax: max(tenantMax, 1), callerMax: max(callerMax, 1),
+		tenants: map[string]int{}, callers: map[string]int{},
+	}
+}
+
+// acquire takes one permit for the tenant and one for the caller. It returns the
+// function that gives both back, or false when either bound is full. The function
+// is safe to call more than one time.
+func (g *resultGate) acquire(tenant, caller string) (release func(), ok bool) {
+	if g == nil {
+		return func() {}, true // a runs value with no gate bounds nothing, as in a unit test
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	ck := tenant + "/" + caller
+	if g.tenants[tenant] >= g.tenantMax || g.callers[ck] >= g.callerMax {
+		return nil, false
+	}
+	g.tenants[tenant]++
+	g.callers[ck]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			if g.tenants[tenant]--; g.tenants[tenant] == 0 {
+				delete(g.tenants, tenant)
+			}
+			if g.callers[ck]--; g.callers[ck] == 0 {
+				delete(g.callers, ck)
+			}
+		})
+	}, true
 }
 
 // buildResult reads the findings of a finished mission, page by page, and builds

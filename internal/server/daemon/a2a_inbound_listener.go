@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -32,6 +33,11 @@ const (
 	// EnvA2AInboundEdgeSVID is the SPIFFE ID of the Edge. It is the only peer
 	// that the listener accepts.
 	EnvA2AInboundEdgeSVID = "GIBSON_A2A_INBOUND_EDGE_SVID"
+	// EnvA2AInboundResultTenantLimit is the most results that the daemon builds or
+	// sends at one time for one tenant. The default is 4.
+	EnvA2AInboundResultTenantLimit = "GIBSON_A2A_INBOUND_RESULT_TENANT_LIMIT"
+	// EnvA2AInboundResultCallerLimit is the same for one caller. The default is 2.
+	EnvA2AInboundResultCallerLimit = "GIBSON_A2A_INBOUND_RESULT_CALLER_LIMIT"
 	// EnvA2AInboundPublicURL is the public URL of the Edge route
 	// /a2a/inbound. The card of a published agent lists <URL>/<agent> as its
 	// interface.
@@ -136,7 +142,16 @@ func (d *daemonImpl) buildA2AInboundServer() (*httpSubsystem, error) {
 	if d.brainRegistry == nil || d.pool == nil {
 		return nil, fmt.Errorf("%s: the brain and the data pool are not available", label)
 	}
+	tenantLimit, err := envLimit(EnvA2AInboundResultTenantLimit, 4)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", label, err)
+	}
+	callerLimit, err := envLimit(EnvA2AInboundResultCallerLimit, 2)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", label, err)
+	}
 	runs := &inboundRuns{
+		gate:      newResultGate(tenantLimit, callerLimit),
 		published: d.inboundMissions, source: &inboundMissionSource{pool: d.pool, targets: d.targetStore},
 		starter: d.daemonServer, registry: d.brainRegistry,
 		findings: pgMissionFindings{store: pgstore.New(func() datapool.Pool { return d.pool })},
@@ -152,4 +167,19 @@ func (d *daemonImpl) buildA2AInboundServer() (*httpSubsystem, error) {
 		return nil, err
 	}
 	return d.newHTTPSubsystem(handler, lis), nil
+}
+
+// envLimit reads a positive whole number from the environment. An unset variable
+// gives the default. A value that is not a whole number of at least 1 is an error,
+// and it stops the daemon at start.
+func envLimit(name string, def int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s must be a whole number of at least 1, got %q", name, raw)
+	}
+	return n, nil
 }

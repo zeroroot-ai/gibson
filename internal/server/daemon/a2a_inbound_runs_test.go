@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -886,4 +887,112 @@ func TestInboundRuns_ATaskIsFoundOnlyThroughThePathOfItsAgent(t *testing.T) {
 
 	_, err = f.runs.Cancel(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 	require.NoError(t, err)
+}
+
+func TestResultGate_BoundsTheResultsPerTenantAndPerCaller(t *testing.T) {
+	g := newResultGate(3, 2)
+	r1, ok := g.acquire("acme", "a")
+	require.True(t, ok)
+	r2, ok := g.acquire("acme", "a")
+	require.True(t, ok)
+	_, ok = g.acquire("acme", "a")
+	assert.False(t, ok, "the caller is at its bound")
+
+	r3, ok := g.acquire("acme", "b")
+	require.True(t, ok, "another caller of the tenant still gets a permit")
+	_, ok = g.acquire("acme", "c")
+	assert.False(t, ok, "the tenant is at its bound")
+	_, ok = g.acquire("globex", "a")
+	assert.True(t, ok, "another tenant is not bound by acme")
+
+	r1()
+	r1() // a second call changes nothing
+	_, ok = g.acquire("acme", "a")
+	assert.True(t, ok, "a permit that was given back is free")
+	r2()
+	r3()
+	assert.Equal(t, newResultGate(0, 0).tenantMax, 1, "a bound under 1 is 1")
+	var none *resultGate
+	_, ok = none.acquire("acme", "a")
+	assert.True(t, ok, "a nil gate bounds nothing")
+}
+
+// Parallel reads of one finished mission build the result one time and share it.
+func TestInboundRuns_ParallelReadsOfOneMissionBuildTheResultOnce(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.end(brain.MissionCompleted)
+	f.runs.gate = newResultGate(16, 16)
+	gate := make(chan struct{})
+	f.runs.findings = blockingFindings{inner: f.findings, wait: gate}
+
+	var wg sync.WaitGroup
+	results := make([]*a2a.Task, 6)
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			task, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
+			assert.NoError(t, err)
+			results[i] = task
+		}()
+	}
+	time.Sleep(50 * time.Millisecond) // the reads meet at the one build
+	close(gate)
+	wg.Wait()
+
+	assert.Len(t, f.findings.asked, 1, "the findings were read one time")
+	for _, task := range results {
+		require.NotNil(t, task)
+		require.Len(t, task.Artifacts, 1)
+		assert.Same(t, results[0].Artifacts[0], task.Artifacts[0], "the reads share one result")
+	}
+}
+
+// blockingFindings holds the read until wait is closed.
+type blockingFindings struct {
+	inner *fakeMissionFindings
+	wait  chan struct{}
+}
+
+func (b blockingFindings) ReadFindings(ctx context.Context, tenant string, id types.ID, add func(finding.EnhancedFinding) error) error {
+	<-b.wait
+	return b.inner.ReadFindings(ctx, tenant, id, add)
+}
+
+// When the permits are used, a read gets the retryable error at once, and it builds
+// nothing. The permit ends after the response is written.
+func TestInboundRuns_ABusyDaemonAnswersARetryableErrorAndTheResponseGivesThePermitBack(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.end(brain.MissionCompleted)
+	f.runs.gate = newResultGate(1, 1)
+
+	firstCtx, respond := a2aserver.WithResponseHooks(context.Background())
+	_, err := f.runs.Task(firstCtx, ownerCaller, "recon", a2a.TaskID(f.mission))
+	require.NoError(t, err)
+
+	_, err = f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
+	require.ErrorIs(t, err, a2aserver.ErrBusy, "the permit is held until the response is written")
+	assert.Len(t, f.findings.asked, 1, "the busy read built nothing")
+
+	respond() // the JSON-RPC layer has written the response
+	_, err = f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
+	require.NoError(t, err)
+}
+
+func TestEnvLimit(t *testing.T) {
+	t.Setenv("X_LIMIT", "")
+	n, err := envLimit("X_LIMIT", 4)
+	require.NoError(t, err)
+	assert.Equal(t, 4, n, "unset gives the default")
+	t.Setenv("X_LIMIT", " 7 ")
+	n, err = envLimit("X_LIMIT", 4)
+	require.NoError(t, err)
+	assert.Equal(t, 7, n)
+	for _, bad := range []string{"0", "-1", "many"} {
+		t.Setenv("X_LIMIT", bad)
+		_, err = envLimit("X_LIMIT", 4)
+		require.ErrorContains(t, err, "X_LIMIT", bad)
+	}
 }

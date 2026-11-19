@@ -264,3 +264,17 @@ func TestBuildA2AInboundServer_ServesThePublishedCardAndNothingElse(t *testing.T
 	assert.Equal(t, http.StatusOK, rpc.Code)
 	assert.Contains(t, rpc.Body.String(), "no grant to this agent")
 }
+
+func TestBuildA2AInboundServer_RefusesAResultLimitThatIsNotAPositiveNumber(t *testing.T) {
+	t.Setenv(EnvA2AInboundEdgeSVID, "spiffe://example.org/platform/envoy")
+	t.Setenv(EnvA2AInboundAddr, "127.0.0.1:0")
+	t.Setenv(EnvA2AInboundPublicURL, "https://edge.example/a2a/inbound")
+	for _, name := range []string{EnvA2AInboundResultTenantLimit, EnvA2AInboundResultCallerLimit} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "0")
+			sub, err := inboundListenerDaemon(t, nil).buildA2AInboundServer()
+			require.ErrorContains(t, err, name)
+			assert.Nil(t, sub)
+		})
+	}
+}
