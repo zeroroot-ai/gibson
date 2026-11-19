@@ -103,6 +103,9 @@ type Observation struct {
 	// Items is the transcript as Open Responses items: the input items, then
 	// the output items.
 	Items []json.RawMessage
+	// RequestItems is the number of leading items that are the request. A failed
+	// call has request items only.
+	RequestItems int
 }
 
 // maxFailureBytes bounds the error text of a failed call. A provider error is
@@ -160,6 +163,7 @@ func FromSpan(sp Span) (Observation, error) {
 		return Observation{}, err
 	}
 	o.Items = in
+	o.RequestItems = len(in)
 
 	if o.Failed() {
 		o.Failure = truncateText(respBody, maxFailureBytes)
@@ -207,7 +211,8 @@ func (o Observation) Events(recordedAt time.Time) []brain.Event {
 		CacheReadTokens:    int(o.CacheReadTokens),
 		CacheWriteTokens:   int(o.CacheWriteTokens),
 		Cost:               cost,
-		Completion:         o.Failure,
+		ErrorText:          o.Failure,
+		RequestItems:       o.RequestItems,
 		HTTPStatus:         o.HTTPStatus,
 	}}
 	// A failed call used no tokens, so it adds no usage to the mission.

@@ -16,6 +16,7 @@
 package brain
 
 import (
+	"encoding/json"
 	"regexp"
 
 	"github.com/mlange-42/ark/ecs"
@@ -136,13 +137,16 @@ func applyFlightRecorderRetentionSwept(w *World, e FlightRecorderRetentionSwept)
 		if c.RecordedAtUnixNano == 0 || c.RecordedAtUnixNano >= e.CutoffUnixNano {
 			continue
 		}
-		if len(c.Messages) > 0 {
-			c.Messages = []LlmMessage{{Role: "system", Content: purgedPlaceholder}}
+		// The items hold the request and the reply. A purged call keeps one
+		// item, a JSON string with the placeholder, and it has no output items.
+		if len(c.Items) > 0 {
+			purged, _ := json.Marshal(purgedPlaceholder)
+			c.Items = []json.RawMessage{purged}
+			c.RequestItems = 1
 		}
-		if c.Completion != "" {
-			c.Completion = purgedPlaceholder
+		if c.ErrorText != "" {
+			c.ErrorText = purgedPlaceholder
 		}
-		c.CompletionToolCalls = nil
 	}
 
 	tq := ecs.NewFilter1[AgentToolCall](w.ecs).Query()

@@ -291,7 +291,7 @@ func TestFromSpan_AFailedCallWithATextBodyIsNotDropped(t *testing.T) {
 			t.Fatalf("events = %d, want the call event only: a failed call adds no usage", len(events))
 		}
 		ev, ok := events[0].(brain.LlmCallObserved)
-		if !ok || ev.HTTPStatus != int(tc.status) || ev.Completion != tc.body || ev.PromptTokens != 0 || len(ev.Items) != 3 {
+		if !ok || ev.HTTPStatus != int(tc.status) || ev.ErrorText != tc.body || ev.PromptTokens != 0 || len(ev.Items) != 3 {
 			t.Errorf("event = %+v", events[0])
 		}
 	}

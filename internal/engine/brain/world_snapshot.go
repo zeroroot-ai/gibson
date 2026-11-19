@@ -513,22 +513,21 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// Replay LLM calls.
 	for _, c := range data.LlmCalls {
 		Reduce(w, LlmCallObserved{
-			CallID:              c.CallID,
-			RunID:               c.RunID,
-			Model:               c.Model,
-			ScopeID:             c.ScopeID,
-			PromptTokens:        c.PromptTokens,
-			CompletionTokens:    c.CompletionTokens,
-			Messages:            append([]LlmMessage(nil), c.Messages...),
-			Completion:          c.Completion,
-			CompletionToolCalls: append([]LlmToolCall(nil), c.CompletionToolCalls...),
-			RecordedAtUnixNano:  c.RecordedAtUnixNano,
-			Items:               append([]json.RawMessage(nil), c.Items...),
-			Provider:            c.Provider,
-			CacheReadTokens:     c.CacheReadTokens,
-			CacheWriteTokens:    c.CacheWriteTokens,
-			Cost:                c.Cost,
-			HTTPStatus:          c.HTTPStatus,
+			CallID:             c.CallID,
+			RunID:              c.RunID,
+			Model:              c.Model,
+			ScopeID:            c.ScopeID,
+			PromptTokens:       c.PromptTokens,
+			CompletionTokens:   c.CompletionTokens,
+			ErrorText:          c.ErrorText,
+			RecordedAtUnixNano: c.RecordedAtUnixNano,
+			Items:              append([]json.RawMessage(nil), c.Items...),
+			RequestItems:       c.RequestItems,
+			Provider:           c.Provider,
+			CacheReadTokens:    c.CacheReadTokens,
+			CacheWriteTokens:   c.CacheWriteTokens,
+			Cost:               c.Cost,
+			HTTPStatus:         c.HTTPStatus,
 		})
 	}
 

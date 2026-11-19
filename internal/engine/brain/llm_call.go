@@ -29,24 +29,16 @@ type LlmCall struct {
 	ScopeID          string
 	PromptTokens     int
 	CompletionTokens int
-	// Transcript: the prompt messages + the assistant completion, captured in
-	// full every time (ADR-0120) — never optional. Set once on first
-	// observation and never re-folded (a call's transcript is immutable, and a
-	// later report can only enrich token/model metadata, never the text). Lets
-	// the dashboard conversation view and the flight recorder replace Langfuse
-	// without a separate trace store.
-	Messages   []LlmMessage
-	Completion string
-	// CompletionToolCalls carries the tool calls the model made as part of
-	// THIS completion (resp.Message.ToolCalls) — distinct from Completion,
-	// which is the assistant's text content and is often empty on a
-	// tool-calling turn. Without this a tool-calling turn's transcript was
-	// silently incomplete (gibson#271).
-	CompletionToolCalls []LlmToolCall
+	// ErrorText is the text of the reply of a failed call (a status of 400 or
+	// more). It is empty for a call that worked: the output items hold its reply.
+	ErrorText string
 	// Items is the transcript of the call as Open Responses items: the input
 	// items, then the output items (ADR-0173). It is set when the call is read
 	// from the gateway trace. Each string of each item is redacted at fold time.
 	Items []json.RawMessage
+	// RequestItems is the number of leading items that are the request. The rest
+	// are the output items. A failed call has request items only.
+	RequestItems int
 	// Provider is the model provider that the gateway used.
 	Provider string
 	// CacheReadTokens and CacheWriteTokens are the cache token counts of the call.
@@ -68,31 +60,6 @@ type LlmCall struct {
 	RecordedAtUnixNano int64
 }
 
-// LlmMessage is one prompt message in an LlmCall transcript. Role + Content
-// cover a plain turn; ToolCalls carries any tool calls an assistant message in
-// the prompt history made, and ToolCallID/Name identify a tool-result message
-// (role "tool") replaying that call's result back to the model. Capturing
-// these keeps a tool-calling conversation's replayed history full-fidelity
-// instead of silently dropping to bare text (ADR-0120, gibson#271).
-type LlmMessage struct {
-	Role       string
-	Content    string
-	Name       string
-	ToolCalls  []LlmToolCall
-	ToolCallID string
-}
-
-// LlmToolCall is one tool call an LLM made as part of a completion — the
-// model's own record of what it asked to run, distinct from the AgentToolCall
-// the daemon observes when that call is actually dispatched and its result
-// comes back (tool_call.go). Mirrors internal/engine/llm.ToolCall.
-type LlmToolCall struct {
-	ID        string
-	Type      string
-	Name      string
-	Arguments string
-}
-
 // LlmCallObserved records that an LLM completion happened. Emitted daemon-side
 // from the provider-execution path (where token usage is known), fed into the
 // brain via the daemon EventBus like the other mission lifecycle events — NOT
@@ -109,23 +76,24 @@ type LlmCallObserved struct {
 	// reducer drops the event when the mission has moved on to another run, so
 	// late evidence of run 1 cannot count for run 2 (gibson#1217). Empty means
 	// the event is not run-scoped.
-	MissionRunID        string
-	RunID               string
-	Model               string
-	ScopeID             string
-	PromptTokens        int
-	CompletionTokens    int
-	Messages            []LlmMessage
-	Completion          string
-	CompletionToolCalls []LlmToolCall
-	RecordedAtUnixNano  int64
+	MissionRunID     string
+	RunID            string
+	Model            string
+	ScopeID          string
+	PromptTokens     int
+	CompletionTokens int
+	// ErrorText is the text of the reply of a failed call. See LlmCall.ErrorText.
+	ErrorText          string `json:",omitempty"`
+	RecordedAtUnixNano int64
 	// The fields below come from the gateway trace (gibson#1390). An event of the
 	// older shape decodes with the zero values.
-	Items            []json.RawMessage `json:",omitempty"`
-	Provider         string            `json:",omitempty"`
-	CacheReadTokens  int               `json:",omitempty"`
-	CacheWriteTokens int               `json:",omitempty"`
-	Cost             string            `json:",omitempty"`
+	Items []json.RawMessage `json:",omitempty"`
+	// RequestItems is the number of leading items that are the request.
+	RequestItems     int    `json:",omitempty"`
+	Provider         string `json:",omitempty"`
+	CacheReadTokens  int    `json:",omitempty"`
+	CacheWriteTokens int    `json:",omitempty"`
+	Cost             string `json:",omitempty"`
 	// HTTPStatus is the status of the gateway reply. A status of 400 or more
 	// means that the call failed. Completion then holds the error text.
 	HTTPStatus int `json:",omitempty"`
@@ -163,20 +131,15 @@ func applyLlmCallObserved(w *World, e LlmCallObserved) {
 			if c.CompletionTokens == 0 && e.CompletionTokens != 0 {
 				c.CompletionTokens = e.CompletionTokens
 			}
-			if len(c.Messages) == 0 && len(e.Messages) != 0 {
-				c.Messages = redactMessages(w, e.Messages)
-			}
-			if c.Completion == "" && e.Completion != "" {
-				c.Completion = redactForTenant(w, e.Completion)
-			}
-			if len(c.CompletionToolCalls) == 0 && len(e.CompletionToolCalls) != 0 {
-				c.CompletionToolCalls = redactToolCalls(w, e.CompletionToolCalls)
+			if c.ErrorText == "" && e.ErrorText != "" {
+				c.ErrorText = redactForTenant(w, e.ErrorText)
 			}
 			if c.RecordedAtUnixNano == 0 && e.RecordedAtUnixNano != 0 {
 				c.RecordedAtUnixNano = e.RecordedAtUnixNano
 			}
 			if len(c.Items) == 0 && len(e.Items) != 0 {
 				c.Items = redactItems(w, e.Items)
+				c.RequestItems = e.RequestItems
 			}
 			if c.Provider == "" {
 				c.Provider = e.Provider
@@ -198,22 +161,21 @@ func applyLlmCallObserved(w *World, e LlmCallObserved) {
 		}
 	}
 	w.llmCalls.NewEntity(&LlmCall{
-		CallID:              e.CallID,
-		RunID:               e.RunID,
-		Model:               e.Model,
-		ScopeID:             e.ScopeID,
-		PromptTokens:        e.PromptTokens,
-		CompletionTokens:    e.CompletionTokens,
-		Messages:            redactMessages(w, e.Messages),
-		Completion:          redactForTenant(w, e.Completion),
-		CompletionToolCalls: redactToolCalls(w, e.CompletionToolCalls),
-		RecordedAtUnixNano:  e.RecordedAtUnixNano,
-		Items:               redactItems(w, e.Items),
-		Provider:            e.Provider,
-		CacheReadTokens:     e.CacheReadTokens,
-		CacheWriteTokens:    e.CacheWriteTokens,
-		Cost:                e.Cost,
-		HTTPStatus:          e.HTTPStatus,
+		CallID:             e.CallID,
+		RunID:              e.RunID,
+		Model:              e.Model,
+		ScopeID:            e.ScopeID,
+		PromptTokens:       e.PromptTokens,
+		CompletionTokens:   e.CompletionTokens,
+		ErrorText:          redactForTenant(w, e.ErrorText),
+		RecordedAtUnixNano: e.RecordedAtUnixNano,
+		Items:              redactItems(w, e.Items),
+		RequestItems:       e.RequestItems,
+		Provider:           e.Provider,
+		CacheReadTokens:    e.CacheReadTokens,
+		CacheWriteTokens:   e.CacheWriteTokens,
+		Cost:               e.Cost,
+		HTTPStatus:         e.HTTPStatus,
 	})
 }
 
@@ -265,62 +227,23 @@ func redactJSONStrings(w *World, v any) any {
 	return v
 }
 
-// redactMessages applies the tenant's current redaction policy to a
-// transcript's message content and any tool calls it carries, returning a
-// fresh copy (never mutates the caller's slice).
-func redactMessages(w *World, msgs []LlmMessage) []LlmMessage {
-	if len(msgs) == 0 {
-		return nil
-	}
-	out := make([]LlmMessage, len(msgs))
-	for i, m := range msgs {
-		out[i] = LlmMessage{
-			Role:       m.Role,
-			Content:    redactForTenant(w, m.Content),
-			Name:       m.Name,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  redactToolCalls(w, m.ToolCalls),
-		}
-	}
-	return out
-}
-
-// redactToolCalls applies the tenant's current redaction policy to each tool
-// call's arguments, returning a fresh copy (never mutates the caller's slice).
-func redactToolCalls(w *World, calls []LlmToolCall) []LlmToolCall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]LlmToolCall, len(calls))
-	for i, c := range calls {
-		out[i] = LlmToolCall{
-			ID:        c.ID,
-			Type:      c.Type,
-			Name:      c.Name,
-			Arguments: redactForTenant(w, c.Arguments),
-		}
-	}
-	return out
-}
-
 // LlmCallSnapshot is a stable, comparable view of an LlmCall.
 type LlmCallSnapshot struct {
-	CallID              string
-	RunID               string
-	Model               string
-	ScopeID             string
-	PromptTokens        int
-	CompletionTokens    int
-	Messages            []LlmMessage
-	Completion          string
-	CompletionToolCalls []LlmToolCall
-	RecordedAtUnixNano  int64
-	Items               []json.RawMessage `json:",omitempty"`
-	Provider            string            `json:",omitempty"`
-	CacheReadTokens     int               `json:",omitempty"`
-	CacheWriteTokens    int               `json:",omitempty"`
-	Cost                string            `json:",omitempty"`
-	HTTPStatus          int               `json:",omitempty"`
+	CallID             string
+	RunID              string
+	Model              string
+	ScopeID            string
+	PromptTokens       int
+	CompletionTokens   int
+	ErrorText          string
+	RecordedAtUnixNano int64
+	Items              []json.RawMessage `json:",omitempty"`
+	RequestItems       int               `json:",omitempty"`
+	Provider           string            `json:",omitempty"`
+	CacheReadTokens    int               `json:",omitempty"`
+	CacheWriteTokens   int               `json:",omitempty"`
+	Cost               string            `json:",omitempty"`
+	HTTPStatus         int               `json:",omitempty"`
 }
 
 // TotalTokens is the prompt+completion token count — the per-call cost signal
@@ -334,22 +257,21 @@ func (w *World) LlmCallSnapshot() []LlmCallSnapshot {
 	for q.Next() {
 		c := q.Get()
 		out = append(out, LlmCallSnapshot{
-			CallID:              c.CallID,
-			RunID:               c.RunID,
-			Model:               c.Model,
-			ScopeID:             c.ScopeID,
-			PromptTokens:        c.PromptTokens,
-			CompletionTokens:    c.CompletionTokens,
-			Messages:            append([]LlmMessage(nil), c.Messages...),
-			Completion:          c.Completion,
-			CompletionToolCalls: append([]LlmToolCall(nil), c.CompletionToolCalls...),
-			RecordedAtUnixNano:  c.RecordedAtUnixNano,
-			Items:               append([]json.RawMessage(nil), c.Items...),
-			Provider:            c.Provider,
-			CacheReadTokens:     c.CacheReadTokens,
-			CacheWriteTokens:    c.CacheWriteTokens,
-			Cost:                c.Cost,
-			HTTPStatus:          c.HTTPStatus,
+			CallID:             c.CallID,
+			RunID:              c.RunID,
+			Model:              c.Model,
+			ScopeID:            c.ScopeID,
+			PromptTokens:       c.PromptTokens,
+			CompletionTokens:   c.CompletionTokens,
+			ErrorText:          c.ErrorText,
+			RecordedAtUnixNano: c.RecordedAtUnixNano,
+			Items:              append([]json.RawMessage(nil), c.Items...),
+			RequestItems:       c.RequestItems,
+			Provider:           c.Provider,
+			CacheReadTokens:    c.CacheReadTokens,
+			CacheWriteTokens:   c.CacheWriteTokens,
+			Cost:               c.Cost,
+			HTTPStatus:         c.HTTPStatus,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CallID < out[j].CallID })
