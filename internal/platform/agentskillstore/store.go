@@ -80,6 +80,9 @@ type Store interface {
 	// List returns the current version of each name. With allVersions it
 	// returns each version. A non-empty name restricts the list to that name.
 	List(ctx context.Context, tenant, name string, allVersions bool) ([]Entry, error)
+	// ListPage is List for one page. It returns at most limit entries, in the
+	// order of List. With after set it returns the entries that follow it.
+	ListPage(ctx context.Context, tenant, name string, allVersions bool, after *PageKey, limit int) ([]Entry, error)
 	// Get returns one version. An empty digest means the current version.
 	Get(ctx context.Context, tenant, name, digest string) (*Entry, error)
 	// Resolve returns the digest that a mission uses for a name. The first call
@@ -254,6 +257,60 @@ func (s *postgresStore) List(ctx context.Context, tenant, name string, allVersio
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("agentskillstore: list rows: %w", err)
+	}
+	return out, nil
+}
+
+// PageKey is the position of one entry in the order of List: the name, then
+// the newest publish first, then the digest. Its fields are unique together.
+type PageKey struct {
+	Name        string
+	PublishedAt time.Time
+	Digest      string
+}
+
+// KeyOf returns the position of an entry.
+func KeyOf(e Entry) PageKey {
+	return PageKey{Name: e.Name, PublishedAt: e.PublishedAt, Digest: e.Digest}
+}
+
+func (s *postgresStore) ListPage(
+	ctx context.Context, tenant, name string, allVersions bool, after *PageKey, limit int,
+) ([]Entry, error) {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("agent skill store: acquire conn: %w", err)
+	}
+	defer c.Release()
+
+	var afterName, afterDigest string
+	var afterAt time.Time
+	if after != nil {
+		afterName, afterAt, afterDigest = after.Name, after.PublishedAt, after.Digest
+	}
+	rows, err := c.SQL().Query(ctx,
+		`SELECT `+entryColumns+` FROM agent_skills
+		 WHERE ($1 = '' OR name = $1) AND ($2 OR is_current)
+		   AND (NOT $3 OR name > $4
+		        OR (name = $4 AND published_at < $5)
+		        OR (name = $4 AND published_at = $5 AND digest > $6))
+		 ORDER BY name ASC, published_at DESC, digest ASC
+		 LIMIT $7`,
+		name, allVersions, after != nil, afterName, afterAt, afterDigest, limit)
+	if err != nil {
+		return nil, fmt.Errorf("agentskillstore: list page: %w", err)
+	}
+	defer rows.Close()
+	out := []Entry{}
+	for rows.Next() {
+		e, scanErr := scanEntry(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("agentskillstore: list page: %w", scanErr)
+		}
+		out = append(out, *e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("agentskillstore: list page rows: %w", err)
 	}
 	return out, nil
 }

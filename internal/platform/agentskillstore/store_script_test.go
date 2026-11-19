@@ -464,3 +464,49 @@ func TestNewPostgresStore(t *testing.T) {
 	assert.Panics(t, func() { NewPostgresStore(nil) }, "a nil pool is a configuration error")
 	assert.IsType(t, &postgresStore{}, NewPostgresStore(scrPool{}))
 }
+
+func TestListPage(t *testing.T) {
+	db := &scrDB{query: func(string) (datapool.Rows, error) {
+		return &scrRows{rows: [][]any{
+			scrEntryRow("a", "sha256:1", "{}", true), scrEntryRow("b", "sha256:2", "{}", true),
+		}}, nil
+	}}
+	after := KeyOf(Entry{Name: "a", Digest: "sha256:0", PublishedAt: time.Unix(10, 0)})
+
+	got, err := scrStore(db).ListPage(context.Background(), "acme", "", true, &after, 2)
+
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "b", got[1].Name)
+	assert.Contains(t, db.seen[0], "ORDER BY name ASC, published_at DESC, digest ASC")
+	assert.Equal(t, 1, db.released)
+
+	first, err := scrStore(db).ListPage(context.Background(), "acme", "", false, nil, 2)
+	require.NoError(t, err)
+	assert.Len(t, first, 2)
+}
+
+func TestListPage_Failures(t *testing.T) {
+	tests := []struct {
+		name string
+		db   *scrDB
+		want string
+	}{
+		{"no conn", &scrDB{forErr: errScr}, "scripted failure"},
+		{"query fails", &scrDB{query: func(string) (datapool.Rows, error) { return nil, errScr }}, "list page"},
+		{"scan fails", &scrDB{query: func(string) (datapool.Rows, error) {
+			return &scrRows{rows: [][]any{scrEntryRow("a", "d", "{}", true)}, scanErr: errScr}, nil
+		}}, "scan Agent Skill row"},
+		{"rows fail", &scrDB{query: func(string) (datapool.Rows, error) {
+			return &scrRows{err: errScr}, nil
+		}}, "list page rows"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := scrStore(tt.db).ListPage(context.Background(), "acme", "a", false, nil, 5)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+			assert.Nil(t, got)
+		})
+	}
+}

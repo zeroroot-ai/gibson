@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"testing"
 	"time"
 
@@ -45,6 +46,29 @@ func (m *memOutsideStore) List(context.Context, string) ([]outsideagentstore.Ent
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+func (m *memOutsideStore) ListPage(
+	_ context.Context, _, after string, hasAfter bool, limit int,
+) ([]outsideagentstore.Entry, error) {
+	entries := make([]outsideagentstore.Entry, 0, len(m.entries))
+	for _, e := range m.entries {
+		entries = append(entries, e)
+	}
+	return outsidePage(entries, after, hasAfter, limit), nil
+}
+
+// outsidePage returns the entries after the key, in name order, cut to limit.
+func outsidePage(entries []outsideagentstore.Entry, after string, hasAfter bool, limit int) []outsideagentstore.Entry {
+	sorted := append([]outsideagentstore.Entry(nil), entries...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+	out := []outsideagentstore.Entry{}
+	for _, e := range sorted {
+		if (!hasAfter || e.Name > after) && len(out) < limit {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func (m *memOutsideStore) Get(_ context.Context, _, name string) (*outsideagentstore.Entry, error) {
@@ -97,7 +121,7 @@ func newOutsideFixture(t *testing.T) *outsideFixture {
 		"rebind.example":        {net.ParseIP("93.184.216.34"), net.ParseIP("10.0.0.5")},
 		"internal.example":      {net.ParseIP("10.0.0.5")},
 	}
-	svc, err := NewOutsideAgentService(f.store, f.fga, resolver, f.secrets)
+	svc, err := NewOutsideAgentService(f.store, f.fga, resolver, f.secrets, testPageKeys(t))
 	require.NoError(t, err)
 	f.svc = svc
 	f.ctx = auth.WithIdentity(context.Background(),

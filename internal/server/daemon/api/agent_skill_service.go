@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -18,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/supplychain"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -72,17 +74,42 @@ type AgentSkillService struct {
 	secrets AgentSkillSecrets
 	// shared is the operator source of Shared Agent Skills.
 	shared SharedAgentSkillSource
+	// pageKeys derives the signer of the page tokens of the list RPCs.
+	pageKeys *pagetoken.Keys
 }
 
 // NewAgentSkillService returns the service. Each argument is required.
 func NewAgentSkillService(
 	store agentskillstore.Store, pull AgentSkillPuller, fga AgentSkillFGA, secrets AgentSkillSecrets,
-	shared SharedAgentSkillSource,
+	shared SharedAgentSkillSource, pageKeys *pagetoken.Keys,
 ) (*AgentSkillService, error) {
-	if store == nil || pull == nil || fga == nil || secrets == nil || shared == nil {
-		return nil, errors.New("api: AgentSkillService needs a store, a puller, the authorizer, the secrets and the shared source")
+	if store == nil || pull == nil || fga == nil || secrets == nil || shared == nil || pageKeys == nil {
+		return nil, errors.New(
+			"api: AgentSkillService needs a store, a puller, the authorizer, the secrets, the shared source and the page keys")
 	}
-	return &AgentSkillService{store: store, pull: pull, fga: fga, secrets: secrets, shared: shared}, nil
+	return &AgentSkillService{
+		store: store, pull: pull, fga: fga, secrets: secrets, shared: shared, pageKeys: pageKeys,
+	}, nil
+}
+
+// skillPageKey writes the position of an entry in the list of the store: its
+// name, its publish time and its digest. The three together are unique.
+func skillPageKey(e agentskillstore.Entry) string {
+	return joinKey(e.Name, timeKey(e.PublishedAt), e.Digest)
+}
+
+// parseSkillPageKey reads the position that skillPageKey wrote. The signature
+// already covers the key, so a key that does not parse is a bad token.
+func parseSkillPageKey(key string) (agentskillstore.PageKey, error) {
+	parts, ok := splitKey(key, 3)
+	if !ok {
+		return agentskillstore.PageKey{}, status_grpc.Error(codes.InvalidArgument, pagetoken.ErrBadToken.Error())
+	}
+	at, err := parseTimeKey(parts[1])
+	if err != nil {
+		return agentskillstore.PageKey{}, err
+	}
+	return agentskillstore.PageKey{Name: parts[0], PublishedAt: at, Digest: parts[2]}, nil
 }
 
 // agentSkillTenant returns the tenant of the caller.
@@ -194,7 +221,8 @@ func (s *AgentSkillService) registryKeychain(ctx context.Context, rpc, secretNam
 	return supplychain.NewDockerConfigKeychain(raw, "the tenant secret "+secretName), nil
 }
 
-// ListAgentSkills returns the Agent Skills of the tenant.
+// ListAgentSkills returns one page of the Agent Skills of the tenant. The store
+// pages with a keyset, so a page reads only its own rows.
 func (s *AgentSkillService) ListAgentSkills(
 	ctx context.Context, req *tenantv1.ListAgentSkillsRequest,
 ) (*tenantv1.ListAgentSkillsResponse, error) {
@@ -208,13 +236,35 @@ func (s *AgentSkillService) ListAgentSkills(
 			return nil, err
 		}
 	}
-	entries, err := s.store.List(ctx, tenant, req.GetName(), req.GetAllVersions())
+	page, err := pageOf(s.pageKeys, "tenant-agent-skills", req.GetPageSize(), req.GetPageToken(), tenant,
+		req.GetName(), strconv.FormatBool(req.GetAllVersions()))
+	if err != nil {
+		return nil, err
+	}
+	var after *agentskillstore.PageKey
+	if pos, has := page.After(); has {
+		key, kerr := parseSkillPageKey(pos)
+		if kerr != nil {
+			return nil, kerr
+		}
+		after = &key
+	}
+	// One more row than the page tells whether a next page exists.
+	limit := page.Limit()
+	entries, err := s.store.ListPage(ctx, tenant, req.GetName(), req.GetAllVersions(), after, limit+1)
 	if err != nil {
 		return nil, agentSkillStatus(rpc, err)
+	}
+	more := len(entries) > limit
+	if more {
+		entries = entries[:limit]
 	}
 	out := &tenantv1.ListAgentSkillsResponse{Entries: make([]*tenantv1.AgentSkillEntry, 0, len(entries))}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, agentSkillEntryProto(e))
+	}
+	if more {
+		out.NextPageToken = page.Token(skillPageKey(entries[len(entries)-1]), true)
 	}
 	return out, nil
 }
@@ -229,8 +279,10 @@ var grantRelations = []struct {
 	{"granted_mission", "mission", tenantv1.AgentSkillSubjectKind_AGENT_SKILL_SUBJECT_KIND_MISSION},
 }
 
-// ListAgentSkillGrants returns the agents and the missions that hold a grant of
-// the Agent Skill. It reads the same tuples as DeleteAgentSkill.
+// ListAgentSkillGrants returns one page of the agents and the missions that
+// hold a grant of the Agent Skill. It reads the same tuples as
+// DeleteAgentSkill. The FGA client returns the users of a relation whole, so
+// the page is cut in memory over a stable sort.
 func (s *AgentSkillService) ListAgentSkillGrants(
 	ctx context.Context, req *tenantv1.ListAgentSkillGrantsRequest,
 ) (*tenantv1.ListAgentSkillGrantsResponse, error) {
@@ -246,36 +298,51 @@ func (s *AgentSkillService) ListAgentSkillGrants(
 	if err != nil {
 		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
 	}
+	page, err := pageOf(s.pageKeys, "tenant-agent-skill-grants", req.GetPageSize(), req.GetPageToken(), tenant,
+		req.GetName())
+	if err != nil {
+		return nil, err
+	}
 	if _, err := s.store.Get(ctx, tenant, req.GetName(), ""); err != nil {
 		return nil, agentSkillStatus(rpc, err)
 	}
-	out := &tenantv1.ListAgentSkillGrantsResponse{}
+	var grants []*tenantv1.AgentSkillGrant
 	for _, g := range grantRelations {
 		users, lerr := s.fga.ListUsersOfType(ctx, "agent_skill", object, g.relation, g.userType)
 		if lerr != nil {
 			return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: list the grants: %v", rpc, lerr))
 		}
 		for _, u := range users {
-			out.Grants = append(out.Grants, &tenantv1.AgentSkillGrant{
+			grants = append(grants, &tenantv1.AgentSkillGrant{
 				SubjectKind: g.kind, SubjectId: strings.TrimPrefix(u, g.userType+":"),
 			})
 		}
 	}
-	return out, nil
+	// The key of a grant is its kind and its subject, which are unique.
+	pos := func(g *tenantv1.AgentSkillGrant) string { return g.GetSubjectKind().String() + "/" + g.GetSubjectId() }
+	grants, next := pagetoken.Page(page, grants, pos)
+	return &tenantv1.ListAgentSkillGrantsResponse{Grants: grants, NextPageToken: next}, nil
 }
 
-// ListSharedAgentSkills returns the Shared Agent Skills that the operator offers
-// and whether the tenant holds each digest.
+// ListSharedAgentSkills returns one page of the Shared Agent Skills that the
+// operator offers and whether the tenant holds each digest. The operator source
+// is a list in memory, so the page is cut over the sorted names. The store is
+// read for the names of the page only.
 func (s *AgentSkillService) ListSharedAgentSkills(
-	ctx context.Context, _ *tenantv1.ListSharedAgentSkillsRequest,
+	ctx context.Context, req *tenantv1.ListSharedAgentSkillsRequest,
 ) (*tenantv1.ListSharedAgentSkillsResponse, error) {
 	const rpc = "ListSharedAgentSkills"
 	tenant, err := agentSkillTenant(ctx, rpc)
 	if err != nil {
 		return nil, err
 	}
-	out := &tenantv1.ListSharedAgentSkillsResponse{}
-	for _, name := range s.shared.Names() {
+	page, err := pageOf(s.pageKeys, "tenant-shared-agent-skills", req.GetPageSize(), req.GetPageToken(), tenant)
+	if err != nil {
+		return nil, err
+	}
+	names, next := pagetoken.Page(page, s.shared.Names(), func(n string) string { return n })
+	out := &tenantv1.ListSharedAgentSkillsResponse{NextPageToken: next}
+	for _, name := range names {
 		e, ok := s.shared.Get(name)
 		if !ok {
 			continue

@@ -34,11 +34,11 @@ func TestGetModelProviderCredential_APIKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetModelProviderCredential: %v", err)
 	}
-	if got := string(resp.GetData()[ModelCredentialKeyAuthorization]); got != "sk-ant-secret" {
+	if got := string(resp.GetSecret().GetData()[ModelCredentialKeyAuthorization]); got != "sk-ant-secret" {
 		t.Errorf("Authorization = %q", got)
 	}
-	if len(resp.GetData()) != 1 {
-		t.Errorf("keys = %d, want 1", len(resp.GetData()))
+	if len(resp.GetSecret().GetData()) != 1 {
+		t.Errorf("keys = %d, want 1", len(resp.GetSecret().GetData()))
 	}
 	if len(store.tenants) != 1 || store.tenants[0] != "acme" {
 		t.Errorf("the read used the tenants %v, want [acme]", store.tenants)
@@ -56,7 +56,7 @@ func TestGetModelProviderCredential_Bedrock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetModelProviderCredential: %v", err)
 	}
-	d := resp.GetData()
+	d := resp.GetSecret().GetData()
 	if string(d["accessKey"]) != "AK" || string(d["secretKey"]) != "SK" || string(d["sessionToken"]) != "ST" {
 		t.Errorf("data = %v", d)
 	}

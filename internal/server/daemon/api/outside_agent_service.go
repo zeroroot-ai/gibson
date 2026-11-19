@@ -19,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -50,17 +51,20 @@ type OutsideAgentService struct {
 	resolver netguard.Resolver
 	// secrets reads the tenant secret of a CA bundle, to check it at save time.
 	secrets ConnectorSecretResolver
+	// pageKeys derives the signer of the page tokens of the list RPCs.
+	pageKeys *pagetoken.Keys
 }
 
 // NewOutsideAgentService returns the service. Each argument is required.
 func NewOutsideAgentService(
 	store outsideagentstore.Store, fga OutsideAgentFGA, resolver netguard.Resolver, secrets ConnectorSecretResolver,
+	pageKeys *pagetoken.Keys,
 ) (*OutsideAgentService, error) {
-	if store == nil || fga == nil || resolver == nil || secrets == nil {
+	if store == nil || fga == nil || resolver == nil || secrets == nil || pageKeys == nil {
 		return nil, errors.New(
-			"api: OutsideAgentService needs a store, the authorizer, a resolver and the tenant secret store")
+			"api: OutsideAgentService needs a store, the authorizer, a resolver, the tenant secret store and the page keys")
 	}
-	return &OutsideAgentService{store: store, fga: fga, resolver: resolver, secrets: secrets}, nil
+	return &OutsideAgentService{store: store, fga: fga, resolver: resolver, secrets: secrets, pageKeys: pageKeys}, nil
 }
 
 func outsideAgentTenant(ctx context.Context, rpc string) (string, error) {
@@ -166,22 +170,37 @@ func (s *OutsideAgentService) RegisterOutsideAgent(
 	return &tenantv1.RegisterOutsideAgentResponse{Entry: outsideAgentEntryProto(*entry)}, nil
 }
 
-// ListOutsideAgents returns the outside agents of the tenant.
+// ListOutsideAgents returns one page of the outside agents of the tenant. The
+// store pages by name with a keyset, so a page reads only its own rows.
 func (s *OutsideAgentService) ListOutsideAgents(
-	ctx context.Context, _ *tenantv1.ListOutsideAgentsRequest,
+	ctx context.Context, req *tenantv1.ListOutsideAgentsRequest,
 ) (*tenantv1.ListOutsideAgentsResponse, error) {
 	const rpc = "ListOutsideAgents"
 	tenant, err := outsideAgentTenant(ctx, rpc)
 	if err != nil {
 		return nil, err
 	}
-	entries, err := s.store.List(ctx, tenant)
+	page, err := pageOf(s.pageKeys, "tenant-outside-agents", req.GetPageSize(), req.GetPageToken(), tenant)
+	if err != nil {
+		return nil, err
+	}
+	after, hasAfter := page.After()
+	// One more row than the page tells whether a next page exists.
+	limit := page.Limit()
+	entries, err := s.store.ListPage(ctx, tenant, after, hasAfter, limit+1)
 	if err != nil {
 		return nil, outsideAgentStatus(rpc, err)
+	}
+	more := len(entries) > limit
+	if more {
+		entries = entries[:limit]
 	}
 	out := &tenantv1.ListOutsideAgentsResponse{Entries: make([]*tenantv1.OutsideAgentEntry, 0, len(entries))}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, outsideAgentEntryProto(e))
+	}
+	if more {
+		out.NextPageToken = page.Token(entries[len(entries)-1].Name, true)
 	}
 	return out, nil
 }
@@ -321,7 +340,9 @@ func (s *OutsideAgentService) RevokeOutsideAgent(
 	return &tenantv1.RevokeOutsideAgentResponse{}, nil
 }
 
-// ListOutsideAgentGrants returns the missions that may call one outside agent.
+// ListOutsideAgentGrants returns one page of the missions that may call one
+// outside agent. The FGA client returns the users of a relation whole, so the
+// page is cut in memory over a stable sort.
 func (s *OutsideAgentService) ListOutsideAgentGrants(
 	ctx context.Context, req *tenantv1.ListOutsideAgentGrantsRequest,
 ) (*tenantv1.ListOutsideAgentGrantsResponse, error) {
@@ -337,6 +358,11 @@ func (s *OutsideAgentService) ListOutsideAgentGrants(
 	if err != nil {
 		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
 	}
+	page, err := pageOf(s.pageKeys, "tenant-outside-agent-grants", req.GetPageSize(), req.GetPageToken(), tenant,
+		req.GetName())
+	if err != nil {
+		return nil, err
+	}
 	if _, err := s.store.Get(ctx, tenant, req.GetName()); err != nil {
 		return nil, outsideAgentStatus(rpc, err)
 	}
@@ -344,9 +370,11 @@ func (s *OutsideAgentService) ListOutsideAgentGrants(
 	if err != nil {
 		return nil, status_grpc.Error(codes.Internal, rpc+": "+err.Error())
 	}
-	out := &tenantv1.ListOutsideAgentGrantsResponse{}
+	ids := make([]string, 0, len(users))
 	for _, u := range users {
-		out.MissionIds = append(out.MissionIds, strings.TrimPrefix(u, "mission:"))
+		ids = append(ids, strings.TrimPrefix(u, "mission:"))
 	}
-	return out, nil
+	// The key of a grant is its mission id, which is unique.
+	ids, next := pagetoken.Page(page, ids, func(id string) string { return id })
+	return &tenantv1.ListOutsideAgentGrantsResponse{MissionIds: ids, NextPageToken: next}, nil
 }

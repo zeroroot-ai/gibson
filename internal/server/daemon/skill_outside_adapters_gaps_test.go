@@ -4,6 +4,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 )
 
@@ -25,19 +27,28 @@ type stubPool struct{ datapool.Pool }
 // stubAuthorizer is an authorizer that the registration reads but never calls.
 type stubAuthorizer struct{ authz.Authorizer }
 
+// pageKeysForTest builds the page token keys that a registration needs.
+func pageKeysForTest(t *testing.T) *pagetoken.Keys {
+	t.Helper()
+	keys, err := pagetoken.NewKeys(bytes.Repeat([]byte{3}, 32))
+	require.NoError(t, err)
+	return keys
+}
+
 func TestRegisterAgentSkill_NeedsThePoolAndTheAuthorizer(t *testing.T) {
 	ctx := context.Background()
+	keys := pageKeysForTest(t)
 	srv := grpc.NewServer()
 
 	d := newMinimalDaemon(nil)
-	require.ErrorContains(t, d.registerAgentSkill(ctx, srv), "needs the per-tenant data pool")
+	require.ErrorContains(t, d.registerAgentSkill(ctx, srv, keys), "needs the per-tenant data pool")
 
 	d.pool = stubPool{}
-	require.ErrorContains(t, d.registerAgentSkill(ctx, srv), "needs the authorizer")
+	require.ErrorContains(t, d.registerAgentSkill(ctx, srv, keys), "needs the authorizer")
 	assert.Nil(t, d.agentSkillStore(), "no store before the registration")
 
 	d.authorizer = stubAuthorizer{}
-	require.NoError(t, d.registerAgentSkill(ctx, srv))
+	require.NoError(t, d.registerAgentSkill(ctx, srv, keys))
 	assert.NotNil(t, d.agentSkillStore())
 	assert.NotNil(t, d.sharedAgentSkills, "an empty operator source is still a source")
 	assert.Contains(t, srv.GetServiceInfo(), "gibson.tenant.v1.AgentSkillService")
@@ -45,20 +56,21 @@ func TestRegisterAgentSkill_NeedsThePoolAndTheAuthorizer(t *testing.T) {
 
 func TestRegisterOutsideAgent_NeedsThePoolTheAuthorizerAndTheSecretStore(t *testing.T) {
 	ctx := context.Background()
+	keys := pageKeysForTest(t)
 	srv := grpc.NewServer()
 
 	d := newMinimalDaemon(nil)
-	require.ErrorContains(t, d.registerOutsideAgent(ctx, srv), "needs the per-tenant data pool")
+	require.ErrorContains(t, d.registerOutsideAgent(ctx, srv, keys), "needs the per-tenant data pool")
 
 	d.pool = stubPool{}
-	require.ErrorContains(t, d.registerOutsideAgent(ctx, srv), "needs the authorizer")
+	require.ErrorContains(t, d.registerOutsideAgent(ctx, srv, keys), "needs the authorizer")
 
 	d.authorizer = stubAuthorizer{}
-	require.ErrorContains(t, d.registerOutsideAgent(ctx, srv), "needs the tenant secret store")
+	require.ErrorContains(t, d.registerOutsideAgent(ctx, srv, keys), "needs the tenant secret store")
 	assert.Nil(t, d.outsideAgentStore())
 
 	d.secretsService = &secrets.Service{}
-	require.NoError(t, d.registerOutsideAgent(ctx, srv))
+	require.NoError(t, d.registerOutsideAgent(ctx, srv, keys))
 	assert.NotNil(t, d.outsideAgentStore())
 	assert.Contains(t, srv.GetServiceInfo(), "gibson.tenant.v1.OutsideAgentService")
 }

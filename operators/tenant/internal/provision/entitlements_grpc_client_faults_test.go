@@ -162,7 +162,9 @@ func (f *operatorFixture) GetModelProviderCredential(
 		req.GetCaBundleSecret() != "ca" {
 		return nil, status.Error(codes.InvalidArgument, "unexpected request")
 	}
-	return &operatorv1.GetModelProviderCredentialResponse{Data: map[string][]byte{"Authorization": []byte("k")}}, nil
+	return &operatorv1.GetModelProviderCredentialResponse{
+		Secret: &operatorv1.SecretData{Data: map[string][]byte{"Authorization": []byte("k")}},
+	}, nil
 }
 
 func (f *operatorFixture) GetTenantModelProviders(
@@ -198,7 +200,7 @@ func (f *operatorFixture) GetOutsideAgentCredential(
 		return nil, f.err
 	}
 	data := map[string][]byte{"Authorization": []byte(req.GetName())}
-	return &operatorv1.GetOutsideAgentCredentialResponse{Data: data}, nil
+	return &operatorv1.GetOutsideAgentCredentialResponse{Secret: &operatorv1.SecretData{Data: data}}, nil
 }
 
 func TestEntitlementsGRPC_ReturnsWhatTheDaemonSends(t *testing.T) {
@@ -344,4 +346,108 @@ func TestNewEntitlementsGRPCClient_NoWorkloadAPIIsAnError(t *testing.T) {
 	if c != nil {
 		t.Error("a client was returned with an error")
 	}
+}
+
+// twoPageFixture serves each list in two pages. The first token is empty and
+// the second is "p2".
+type twoPageFixture struct {
+	operatorFixture
+	sizes  []int32
+	tokens []string
+}
+
+func (f *twoPageFixture) GetTenantModelProviders(
+	_ context.Context, req *operatorv1.GetTenantModelProvidersRequest,
+) (*operatorv1.GetTenantModelProvidersResponse, error) {
+	f.sizes = append(f.sizes, req.GetPageSize())
+	f.tokens = append(f.tokens, req.GetPageToken())
+	if req.GetPageToken() == "" {
+		return &operatorv1.GetTenantModelProvidersResponse{
+			Providers:     []*operatorv1.DesiredModelProvider{{Name: "a"}},
+			Skipped:       []string{"x: no route"},
+			NextPageToken: "p2",
+		}, nil
+	}
+	return &operatorv1.GetTenantModelProvidersResponse{
+		Providers: []*operatorv1.DesiredModelProvider{{Name: "b"}},
+		Skipped:   []string{"y: no route"},
+	}, nil
+}
+
+func (f *twoPageFixture) GetTenantOutsideAgents(
+	_ context.Context, req *operatorv1.GetTenantOutsideAgentsRequest,
+) (*operatorv1.GetTenantOutsideAgentsResponse, error) {
+	f.sizes = append(f.sizes, req.GetPageSize())
+	f.tokens = append(f.tokens, req.GetPageToken())
+	if req.GetPageToken() == "" {
+		return &operatorv1.GetTenantOutsideAgentsResponse{
+			Agents: []*operatorv1.DesiredOutsideAgent{{Name: "a"}}, NextPageToken: "p2",
+		}, nil
+	}
+	return &operatorv1.GetTenantOutsideAgentsResponse{Agents: []*operatorv1.DesiredOutsideAgent{{Name: "b"}}}, nil
+}
+
+// A sync deletes what the list does not hold, so the client must read each
+// page until the next token is empty.
+func TestEntitlementsGRPC_TenantListsReadEachPage(t *testing.T) {
+	ctx := context.Background()
+	fx := &twoPageFixture{}
+	c := bufconnClient(t, fx)
+
+	providers, skipped, err := c.TenantModelProviders(ctx, "acme")
+	if err != nil || len(providers) != 2 || providers[0].Name != "a" || providers[1].Name != "b" {
+		t.Errorf("TenantModelProviders = %+v, %v", providers, err)
+	}
+	if !reflect.DeepEqual(skipped, []string{"x: no route", "y: no route"}) {
+		t.Errorf("skipped = %v, want the skipped of both pages", skipped)
+	}
+	agents, err := c.TenantOutsideAgents(ctx, "acme")
+	if err != nil || len(agents) != 2 || agents[0].Name != "a" || agents[1].Name != "b" {
+		t.Errorf("TenantOutsideAgents = %+v, %v", agents, err)
+	}
+	if !reflect.DeepEqual(fx.tokens, []string{"", "p2", "", "p2"}) {
+		t.Errorf("tokens sent = %q", fx.tokens)
+	}
+	for _, size := range fx.sizes {
+		if size != 1000 {
+			t.Errorf("page_size = %d, want the largest page", size)
+		}
+	}
+}
+
+// A failure on a later page fails the read. A partial list must never reach a
+// sync.
+func TestEntitlementsGRPC_TenantListsFailOnALaterPage(t *testing.T) {
+	ctx := context.Background()
+	c := bufconnClient(t, &failingSecondPage{})
+	if providers, _, err := c.TenantModelProviders(ctx, "acme"); err == nil || providers != nil {
+		t.Errorf("TenantModelProviders = %v, %v, want an error and no list", providers, err)
+	}
+	if agents, err := c.TenantOutsideAgents(ctx, "acme"); err == nil || agents != nil {
+		t.Errorf("TenantOutsideAgents = %v, %v, want an error and no list", agents, err)
+	}
+}
+
+type failingSecondPage struct{ operatorFixture }
+
+func (f *failingSecondPage) GetTenantModelProviders(
+	_ context.Context, req *operatorv1.GetTenantModelProvidersRequest,
+) (*operatorv1.GetTenantModelProvidersResponse, error) {
+	if req.GetPageToken() != "" {
+		return nil, status.Error(codes.Internal, "boom")
+	}
+	return &operatorv1.GetTenantModelProvidersResponse{
+		Providers: []*operatorv1.DesiredModelProvider{{Name: "a"}}, NextPageToken: "p2",
+	}, nil
+}
+
+func (f *failingSecondPage) GetTenantOutsideAgents(
+	_ context.Context, req *operatorv1.GetTenantOutsideAgentsRequest,
+) (*operatorv1.GetTenantOutsideAgentsResponse, error) {
+	if req.GetPageToken() != "" {
+		return nil, status.Error(codes.Internal, "boom")
+	}
+	return &operatorv1.GetTenantOutsideAgentsResponse{
+		Agents: []*operatorv1.DesiredOutsideAgent{{Name: "a"}}, NextPageToken: "p2",
+	}, nil
 }

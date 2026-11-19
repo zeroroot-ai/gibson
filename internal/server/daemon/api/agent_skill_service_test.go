@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -48,6 +49,43 @@ func (m *memSkillStore) List(_ context.Context, _, skillName string, all bool) (
 	var out []agentskillstore.Entry
 	for _, e := range m.entries {
 		if (skillName == "" || e.Name == skillName) && (all || e.Current) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// ListPage walks the order of the real store: the name, the newest publish first,
+// then the digest.
+func (m *memSkillStore) ListPage(
+	ctx context.Context, tenant, skillName string, all bool, after *agentskillstore.PageKey, limit int,
+) ([]agentskillstore.Entry, error) {
+	entries, err := m.List(ctx, tenant, skillName, all)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		if !a.PublishedAt.Equal(b.PublishedAt) {
+			return a.PublishedAt.After(b.PublishedAt)
+		}
+		return a.Digest < b.Digest
+	})
+	out := []agentskillstore.Entry{}
+	for _, e := range entries {
+		if after != nil {
+			k := agentskillstore.KeyOf(e)
+			follows := k.Name > after.Name ||
+				(k.Name == after.Name && k.PublishedAt.Before(after.PublishedAt)) ||
+				(k.Name == after.Name && k.PublishedAt.Equal(after.PublishedAt) && k.Digest > after.Digest)
+			if !follows {
+				continue
+			}
+		}
+		if len(out) < limit {
 			out = append(out, e)
 		}
 	}
@@ -171,7 +209,7 @@ func newSkillFixture(t *testing.T, pullErr error) *skillFixture {
 	}
 	f.secrets = &fakeSkillSecrets{values: map[string][]byte{}}
 	f.shared = &fakeSharedSkills{}
-	svc, err := NewAgentSkillService(f.store, pull, f.fga, f.secrets, f.shared)
+	svc, err := NewAgentSkillService(f.store, pull, f.fga, f.secrets, f.shared, testPageKeys(t))
 	require.NoError(t, err)
 	f.svc = svc
 	f.ctx = auth.WithIdentity(context.Background(),

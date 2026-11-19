@@ -37,6 +37,15 @@ func (f *faultOutsideStore) List(ctx context.Context, tenant string) ([]outsidea
 	return f.memOutsideStore.List(ctx, tenant)
 }
 
+func (f *faultOutsideStore) ListPage(
+	ctx context.Context, tenant, after string, hasAfter bool, limit int,
+) ([]outsideagentstore.Entry, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.memOutsideStore.ListPage(ctx, tenant, after, hasAfter, limit)
+}
+
 func (f *faultOutsideStore) Get(ctx context.Context, tenant, name string) (*outsideagentstore.Entry, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
@@ -66,7 +75,7 @@ func faultyOutsideService(
 	if fga != nil {
 		fga(ff)
 	}
-	svc, err := NewOutsideAgentService(fs, ff, f.svc.resolver, f.secrets)
+	svc, err := NewOutsideAgentService(fs, ff, f.svc.resolver, f.secrets, testPageKeys(t))
 	require.NoError(t, err)
 	return svc, f
 }
@@ -241,10 +250,21 @@ func TestNewOutsideAgentService_NeedsEachDependency(t *testing.T) {
 	f := newOutsideFixture(t)
 	r := f.svc.resolver
 	for name, make := range map[string]func() (*OutsideAgentService, error){
-		"no store":    func() (*OutsideAgentService, error) { return NewOutsideAgentService(nil, f.fga, r, f.secrets) },
-		"no authz":    func() (*OutsideAgentService, error) { return NewOutsideAgentService(f.store, nil, r, f.secrets) },
-		"no resolver": func() (*OutsideAgentService, error) { return NewOutsideAgentService(f.store, f.fga, nil, f.secrets) },
-		"no secrets":  func() (*OutsideAgentService, error) { return NewOutsideAgentService(f.store, f.fga, r, nil) },
+		"no page keys": func() (*OutsideAgentService, error) {
+			return NewOutsideAgentService(f.store, f.fga, r, f.secrets, nil)
+		},
+		"no store": func() (*OutsideAgentService, error) {
+			return NewOutsideAgentService(nil, f.fga, r, f.secrets, testPageKeys(t))
+		},
+		"no authz": func() (*OutsideAgentService, error) {
+			return NewOutsideAgentService(f.store, nil, r, f.secrets, testPageKeys(t))
+		},
+		"no resolver": func() (*OutsideAgentService, error) {
+			return NewOutsideAgentService(f.store, f.fga, nil, f.secrets, testPageKeys(t))
+		},
+		"no secrets": func() (*OutsideAgentService, error) {
+			return NewOutsideAgentService(f.store, f.fga, r, nil, testPageKeys(t))
+		},
 	} {
 		svc, err := make()
 		require.Error(t, err, name)

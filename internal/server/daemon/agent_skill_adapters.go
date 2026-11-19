@@ -14,6 +14,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agentskill"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/supplychain"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -24,7 +25,7 @@ import (
 // credential of a tenant secret or none. It keeps the validated content in the database of the tenant. The
 // daemon cannot start without the per-tenant data pool or the authorizer, so a
 // missing one is an error and never a service that is silently Unimplemented.
-func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server) error {
+func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server, pageKeys *pagetoken.Keys) error {
 	if d.pool == nil {
 		return errors.New("daemon: AgentSkillService needs the per-tenant data pool")
 	}
@@ -52,7 +53,7 @@ func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server) e
 		d.logger.Warn(ctx, "shared Agent Skills not offered (non-fatal)", "error", loadErr)
 	}
 	d.sharedAgentSkills = shared
-	svc, err := api.NewAgentSkillService(d.agentSkills, pull, d.authorizer, secretReader, shared)
+	svc, err := api.NewAgentSkillService(d.agentSkills, pull, d.authorizer, secretReader, shared, pageKeys)
 	if err != nil {
 		return fmt.Errorf("daemon: AgentSkillService: %w", err)
 	}

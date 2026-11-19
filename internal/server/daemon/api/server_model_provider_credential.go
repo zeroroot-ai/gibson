@@ -91,7 +91,7 @@ func (s *DaemonServer) GetModelProviderCredential(
 		}
 		data[cabundle.Key] = bundle
 	}
-	return &daemonoperatorv1.GetModelProviderCredentialResponse{Data: data}, nil
+	return &daemonoperatorv1.GetModelProviderCredentialResponse{Secret: &daemonoperatorv1.SecretData{Data: data}}, nil
 }
 
 // errEmptyModelCredential reports a tenant secret with no value.

@@ -29,6 +29,15 @@ func (m *tenantOutsideStore) List(_ context.Context, tenant string) ([]outsideag
 	return m.byTenant[tenant], m.err
 }
 
+func (m *tenantOutsideStore) ListPage(
+	_ context.Context, tenant, after string, hasAfter bool, limit int,
+) ([]outsideagentstore.Entry, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return outsidePage(m.byTenant[tenant], after, hasAfter, limit), nil
+}
+
 func (m *tenantOutsideStore) Get(_ context.Context, tenant, name string) (*outsideagentstore.Entry, error) {
 	if m.err != nil {
 		return nil, m.err
@@ -89,8 +98,8 @@ func TestGetOutsideAgentCredential_ReturnsTheAuthorizationKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOutsideAgentCredential: %v", err)
 	}
-	if got := string(resp.GetData()[OutsideAgentCredentialKey]); got != "tok-1" || len(resp.GetData()) != 1 {
-		t.Errorf("data = %v", resp.GetData())
+	if got := string(resp.GetSecret().GetData()[OutsideAgentCredentialKey]); got != "tok-1" || len(resp.GetSecret().GetData()) != 1 {
+		t.Errorf("data = %v", resp.GetSecret().GetData())
 	}
 	if len(secrets.tenants) != 1 || secrets.tenants[0] != "acme" {
 		t.Errorf("the read used the tenants %v, want [acme]", secrets.tenants)

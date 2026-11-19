@@ -46,6 +46,10 @@ type Store interface {
 	Register(ctx context.Context, tenant string, e Entry) (*Entry, error)
 	// List returns each outside agent of the tenant, in name order.
 	List(ctx context.Context, tenant string) ([]Entry, error)
+	// ListPage returns at most limit outside agents of the tenant, in name
+	// order. With hasAfter it returns the agents whose name is larger than
+	// after.
+	ListPage(ctx context.Context, tenant, after string, hasAfter bool, limit int) ([]Entry, error)
 	// Get returns one outside agent, or ErrNotFound.
 	Get(ctx context.Context, tenant, name string) (*Entry, error)
 	// Delete removes one outside agent. It reports ErrNotFound for a name that
@@ -162,6 +166,35 @@ func (s *postgresStore) List(ctx context.Context, tenant string) ([]Entry, error
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("outsideagentstore: list rows: %w", err)
+	}
+	return out, nil
+}
+
+func (s *postgresStore) ListPage(
+	ctx context.Context, tenant, after string, hasAfter bool, limit int,
+) ([]Entry, error) {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("outside agent store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	rows, err := c.SQL().Query(ctx,
+		`SELECT `+columns+` FROM outside_agents WHERE (NOT $1 OR name > $2) ORDER BY name ASC LIMIT $3`,
+		hasAfter, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("outsideagentstore: list page: %w", err)
+	}
+	defer rows.Close()
+	out := []Entry{}
+	for rows.Next() {
+		e, scanErr := scanEntry(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("outsideagentstore: list page: %w", scanErr)
+		}
+		out = append(out, *e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("outsideagentstore: list page rows: %w", err)
 	}
 	return out, nil
 }

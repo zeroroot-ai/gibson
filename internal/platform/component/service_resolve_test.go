@@ -304,6 +304,10 @@ func (m *memOutsideAgents) List(context.Context, string) ([]outsideagentstore.En
 	return nil, errors.New("not used")
 }
 
+func (m *memOutsideAgents) ListPage(context.Context, string, string, bool, int) ([]outsideagentstore.Entry, error) {
+	return nil, errors.New("not used")
+}
+
 func (m *memOutsideAgents) Get(_ context.Context, tenant, name string) (*outsideagentstore.Entry, error) {
 	if m.err != nil {
 		return nil, m.err

@@ -181,10 +181,18 @@ message ListAgentSkillsRequest {
   // name restricts the list to one name. Empty means each name.
   string name = 1 [(buf.validate.field).string = { max_len: 64 }];
   bool all_versions = 2;
+  // page_size is the largest number of entries on one page. Zero means the
+  // server default. The server also caps it.
+  int32 page_size = 3;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 4 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListAgentSkillsResponse {
   repeated AgentSkillEntry entries = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 message GetAgentSkillRequest {
@@ -246,10 +254,19 @@ message SharedAgentSkillEntry {
   bool enabled = 4;
 }
 
-message ListSharedAgentSkillsRequest {}
+message ListSharedAgentSkillsRequest {
+  // page_size is the largest number of entries on one page. Zero means the
+  // server default. The server also caps it.
+  int32 page_size = 1;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
 
 message ListSharedAgentSkillsResponse {
   repeated SharedAgentSkillEntry entries = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 message EnableSharedAgentSkillRequest {
@@ -270,8 +287,16 @@ message AgentSkillGrant {
 
 message ListAgentSkillGrantsRequest {
   string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+  // page_size is the largest number of grants on one page. Zero means the
+  // server default. The server also caps it.
+  int32 page_size = 2;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 3 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListAgentSkillGrantsResponse {
   repeated AgentSkillGrant grants = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }

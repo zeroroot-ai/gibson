@@ -516,7 +516,7 @@ func (c *EntitlementsGRPCClient) ModelProviderCredential(
 	if err := translateGRPCError("get-model-provider-credential", err); err != nil {
 		return nil, err
 	}
-	return resp.GetData(), nil
+	return resp.GetSecret().GetData(), nil
 }
 
 // DesiredModelProvider is one provider record of a tenant, as the daemon returns
@@ -533,7 +533,9 @@ type DesiredModelProvider struct {
 
 // TenantModelProviders reads the provider records of one tenant via
 // DaemonOperatorService.GetTenantModelProviders (gibson#1387). It satisfies
-// the ModelProviderRecords interface of the controller package.
+// the ModelProviderRecords interface of the controller package. The sync
+// removes each ModelProvider that is not in the result, so it walks every page.
+// A read of the first page only would delete the providers of the later pages.
 func (c *EntitlementsGRPCClient) TenantModelProviders(
 	ctx context.Context, tenantID string,
 ) ([]DesiredModelProvider, []string, error) {
@@ -541,19 +543,30 @@ func (c *EntitlementsGRPCClient) TenantModelProviders(
 	if err != nil {
 		return nil, nil, err
 	}
-	resp, err := c.client.GetTenantModelProviders(authedCtx, &operatorv1.GetTenantModelProvidersRequest{TenantId: tenantID})
-	if err := translateGRPCError("get-tenant-model-providers", err); err != nil {
-		return nil, nil, err
-	}
-	out := make([]DesiredModelProvider, 0, len(resp.GetProviders()))
-	for _, p := range resp.GetProviders() {
-		out = append(out, DesiredModelProvider{
-			Name: p.GetName(), Type: p.GetType(), BaseURL: p.GetBaseUrl(), Region: p.GetRegion(),
-			ProjectID: p.GetProjectId(), CredentialSecret: p.GetCredentialSecret(),
-			CABundleSecret: p.GetCaBundleSecret(),
+	var skipped []string
+	out, err := pagetoken.Collect(authedCtx, 0,
+		func(ctx context.Context, token string) ([]DesiredModelProvider, string, error) {
+			resp, err := c.client.GetTenantModelProviders(ctx, &operatorv1.GetTenantModelProvidersRequest{
+				TenantId: tenantID, PageSize: pagetoken.MaxSize, PageToken: token,
+			})
+			if err := translateGRPCError("get-tenant-model-providers", err); err != nil {
+				return nil, "", err
+			}
+			skipped = append(skipped, resp.GetSkipped()...)
+			page := make([]DesiredModelProvider, 0, len(resp.GetProviders()))
+			for _, p := range resp.GetProviders() {
+				page = append(page, DesiredModelProvider{
+					Name: p.GetName(), Type: p.GetType(), BaseURL: p.GetBaseUrl(), Region: p.GetRegion(),
+					ProjectID: p.GetProjectId(), CredentialSecret: p.GetCredentialSecret(),
+					CABundleSecret: p.GetCaBundleSecret(),
+				})
+			}
+			return page, resp.GetNextPageToken(), nil
 		})
+	if err != nil {
+		return nil, nil, fmt.Errorf("get-tenant-model-providers: %w", err)
 	}
-	return out, resp.GetSkipped(), nil
+	return out, skipped, nil
 }
 
 // DesiredOutsideAgent is one outside agent record of a tenant, as the daemon
@@ -567,7 +580,8 @@ type DesiredOutsideAgent struct {
 
 // TenantOutsideAgents reads the outside agent records of one tenant via
 // DaemonOperatorService.GetTenantOutsideAgents (gibson#1403). It satisfies the
-// OutsideAgentRecords interface of the controller package.
+// OutsideAgentRecords interface of the controller package. The sync removes each
+// route that is not in the result, so it walks every page.
 func (c *EntitlementsGRPCClient) TenantOutsideAgents(
 	ctx context.Context, tenantID string,
 ) ([]DesiredOutsideAgent, error) {
@@ -575,16 +589,25 @@ func (c *EntitlementsGRPCClient) TenantOutsideAgents(
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.client.GetTenantOutsideAgents(authedCtx, &operatorv1.GetTenantOutsideAgentsRequest{TenantId: tenantID})
-	if err := translateGRPCError("get-tenant-outside-agents", err); err != nil {
-		return nil, err
-	}
-	out := make([]DesiredOutsideAgent, 0, len(resp.GetAgents()))
-	for _, a := range resp.GetAgents() {
-		out = append(out, DesiredOutsideAgent{
-			Name: a.GetName(), A2AURL: a.GetA2AUrl(), CredentialSecret: a.GetCredentialSecret(),
-			CABundleSecret: a.GetCaBundleSecret(),
+	out, err := pagetoken.Collect(authedCtx, 0,
+		func(ctx context.Context, token string) ([]DesiredOutsideAgent, string, error) {
+			resp, err := c.client.GetTenantOutsideAgents(ctx, &operatorv1.GetTenantOutsideAgentsRequest{
+				TenantId: tenantID, PageSize: pagetoken.MaxSize, PageToken: token,
+			})
+			if err := translateGRPCError("get-tenant-outside-agents", err); err != nil {
+				return nil, "", err
+			}
+			page := make([]DesiredOutsideAgent, 0, len(resp.GetAgents()))
+			for _, a := range resp.GetAgents() {
+				page = append(page, DesiredOutsideAgent{
+					Name: a.GetName(), A2AURL: a.GetA2AUrl(), CredentialSecret: a.GetCredentialSecret(),
+					CABundleSecret: a.GetCaBundleSecret(),
+				})
+			}
+			return page, resp.GetNextPageToken(), nil
 		})
+	if err != nil {
+		return nil, fmt.Errorf("get-tenant-outside-agents: %w", err)
 	}
 	return out, nil
 }
@@ -610,5 +633,5 @@ func (c *EntitlementsGRPCClient) OutsideAgentCredential(
 	if err := translateGRPCError("get-outside-agent-credential", err); err != nil {
 		return nil, err
 	}
-	return resp.GetData(), nil
+	return resp.GetSecret().GetData(), nil
 }

@@ -967,7 +967,15 @@ message GetModelProviderCredentialRequest {
 }
 
 message GetModelProviderCredentialResponse {
-  // data is the content of the Secret, by the key names that the gateway reads.
+  // secret is the content of the credential Secret, by the key names that the
+  // gateway reads.
+  SecretData secret = 1;
+}
+
+// SecretData is the content of one Kubernetes Secret. It is one object, not a
+// list.
+message SecretData {
+  // data is the value of each key of the Secret.
   map<string, bytes> data = 1;
 }
 
@@ -975,6 +983,12 @@ message GetModelProviderCredentialResponse {
 message GetTenantModelProvidersRequest {
   // tenant_id is the tenant slug. Required.
   string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // page_size is the largest number of provider records on one page. Zero means the
+  // server default. The server also caps it.
+  int32 page_size = 2;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 3 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // DesiredModelProvider is one provider record of a tenant, in the shape of the
@@ -1003,12 +1017,21 @@ message GetTenantModelProvidersResponse {
   repeated DesiredModelProvider providers = 1;
   // skipped lists each record that has no gateway route, as "<name>: <reason>".
   repeated string skipped = 2;
+  // next_page_token is empty on the last page. A page holds the skipped
+  // records of its own records only, so the caller reads each page.
+  string next_page_token = 3;
 }
 
 // GetTenantOutsideAgentsRequest names one tenant.
 message GetTenantOutsideAgentsRequest {
   // tenant_id is the tenant slug. Required.
   string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // page_size is the largest number of outside agents on one page. Zero means the
+  // server default. The server also caps it.
+  int32 page_size = 2;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 3 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // DesiredOutsideAgent is one outside agent record of a tenant.
@@ -1028,6 +1051,8 @@ message DesiredOutsideAgent {
 
 message GetTenantOutsideAgentsResponse {
   repeated DesiredOutsideAgent agents = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 // GetOutsideAgentCredentialRequest asks for the Secret content of one outside
@@ -1041,9 +1066,10 @@ message GetOutsideAgentCredentialRequest {
 }
 
 message GetOutsideAgentCredentialResponse {
-  // data is the content of the Secret, by the key names that the gateway reads.
-  // It holds Authorization for the credential and ca.crt for the CA bundle.
-  map<string, bytes> data = 1;
+  // secret is the content of the credential Secret, by the key names that the
+  // gateway reads. It holds Authorization for the credential and ca.crt for
+  // the CA bundle.
+  SecretData secret = 1;
 }
 
 // ---------------------------------------------------------------------------

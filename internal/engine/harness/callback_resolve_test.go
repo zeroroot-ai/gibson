@@ -261,6 +261,10 @@ func (o *outsideStoreStub) List(context.Context, string) ([]outsideagentstore.En
 	return nil, errors.New("not used")
 }
 
+func (o *outsideStoreStub) ListPage(context.Context, string, string, bool, int) ([]outsideagentstore.Entry, error) {
+	return nil, errors.New("not used")
+}
+
 func (o *outsideStoreStub) Get(_ context.Context, _, name string) (*outsideagentstore.Entry, error) {
 	if o.err != nil {
 		return nil, o.err

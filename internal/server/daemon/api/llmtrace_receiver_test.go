@@ -243,6 +243,10 @@ func (m *oneOutsideStore) List(context.Context, string) ([]outsideagentstore.Ent
 	return nil, errors.New("not used")
 }
 
+func (m *oneOutsideStore) ListPage(context.Context, string, string, bool, int) ([]outsideagentstore.Entry, error) {
+	return nil, errors.New("not used")
+}
+
 func (m *oneOutsideStore) Get(_ context.Context, tenant, name string) (*outsideagentstore.Entry, error) {
 	if m.err != nil {
 		return nil, m.err

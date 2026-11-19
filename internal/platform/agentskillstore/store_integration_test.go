@@ -246,3 +246,34 @@ func TestStore_Integration_ACorruptFileIsRefused(t *testing.T) {
 	_, err = s.ReadFile(context.Background(), "acme", "web-recon", "sha256:aa01", "references/guide.md")
 	require.ErrorIs(t, err, agentskillstore.ErrCorrupt)
 }
+
+// ListPage walks the same rows as List, one entry at a time, with no gap and no
+// repeat, also when one name holds several versions.
+func TestStore_Integration_ListPageWalksTheListOrder(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	publish(t, s, "a-skill", "aa01")
+	publish(t, s, "a-skill", "aa02")
+	publish(t, s, "b-skill", "bb01")
+
+	want, err := s.List(ctx, "acme", "", true)
+	require.NoError(t, err)
+	require.Len(t, want, 3)
+
+	var got []agentskillstore.Entry
+	var after *agentskillstore.PageKey
+	for range 5 {
+		page, perr := s.ListPage(ctx, "acme", "", true, after, 1)
+		require.NoError(t, perr)
+		if len(page) == 0 {
+			break
+		}
+		got = append(got, page...)
+		key := agentskillstore.KeyOf(page[len(page)-1])
+		after = &key
+	}
+	require.Len(t, got, len(want))
+	for i := range want {
+		assert.Equal(t, want[i].Digest, got[i].Digest)
+	}
+}

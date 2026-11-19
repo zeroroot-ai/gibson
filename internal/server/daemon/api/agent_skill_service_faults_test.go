@@ -42,6 +42,15 @@ func (f *faultSkillStore) List(ctx context.Context, tenant, name string, all boo
 	return f.memSkillStore.List(ctx, tenant, name, all)
 }
 
+func (f *faultSkillStore) ListPage(
+	ctx context.Context, tenant, name string, all bool, after *agentskillstore.PageKey, limit int,
+) ([]agentskillstore.Entry, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.memSkillStore.ListPage(ctx, tenant, name, all, after, limit)
+}
+
 func (f *faultSkillStore) Get(ctx context.Context, tenant, name, digest string) (*agentskillstore.Entry, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
@@ -116,7 +125,7 @@ func faultySkillService(
 	if fga != nil {
 		fga(ff)
 	}
-	svc, err := NewAgentSkillService(fs, f.svc.pull, ff, f.secrets, f.shared)
+	svc, err := NewAgentSkillService(fs, f.svc.pull, ff, f.secrets, f.shared, testPageKeys(t))
 	require.NoError(t, err)
 	return svc, f
 }
@@ -318,15 +327,24 @@ func TestNewAgentSkillService_NeedsEachDependency(t *testing.T) {
 		name string
 		make func() (*AgentSkillService, error)
 	}{
-		{"no store", func() (*AgentSkillService, error) { return NewAgentSkillService(nil, pull, f.fga, f.secrets, f.shared) }},
+		{"no page keys", func() (*AgentSkillService, error) {
+			return NewAgentSkillService(f.store, pull, f.fga, f.secrets, f.shared, nil)
+		}},
+		{"no store", func() (*AgentSkillService, error) {
+			return NewAgentSkillService(nil, pull, f.fga, f.secrets, f.shared, testPageKeys(t))
+		}},
 		{"no puller", func() (*AgentSkillService, error) {
-			return NewAgentSkillService(f.store, nil, f.fga, f.secrets, f.shared)
+			return NewAgentSkillService(f.store, nil, f.fga, f.secrets, f.shared, testPageKeys(t))
 		}},
 		{"no authorizer", func() (*AgentSkillService, error) {
-			return NewAgentSkillService(f.store, pull, nil, f.secrets, f.shared)
+			return NewAgentSkillService(f.store, pull, nil, f.secrets, f.shared, testPageKeys(t))
 		}},
-		{"no secrets", func() (*AgentSkillService, error) { return NewAgentSkillService(f.store, pull, f.fga, nil, f.shared) }},
-		{"no shared source", func() (*AgentSkillService, error) { return NewAgentSkillService(f.store, pull, f.fga, f.secrets, nil) }},
+		{"no secrets", func() (*AgentSkillService, error) {
+			return NewAgentSkillService(f.store, pull, f.fga, nil, f.shared, testPageKeys(t))
+		}},
+		{"no shared source", func() (*AgentSkillService, error) {
+			return NewAgentSkillService(f.store, pull, f.fga, f.secrets, nil, testPageKeys(t))
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

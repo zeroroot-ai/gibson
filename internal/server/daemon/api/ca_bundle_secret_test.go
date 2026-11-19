@@ -97,13 +97,13 @@ func TestGetOutsideAgentCredential_AddsTheCABundle(t *testing.T) {
 
 	resp, err := get("both")
 	require.NoError(t, err)
-	assert.Equal(t, "tok", string(resp.GetData()[OutsideAgentCredentialKey]))
-	assert.Equal(t, bundle, resp.GetData()[cabundle.Key])
+	assert.Equal(t, "tok", string(resp.GetSecret().GetData()[OutsideAgentCredentialKey]))
+	assert.Equal(t, bundle, resp.GetSecret().GetData()[cabundle.Key])
 
 	resp, err = get("ca-only")
 	require.NoError(t, err)
-	assert.Len(t, resp.GetData(), 1)
-	assert.Equal(t, bundle, resp.GetData()[cabundle.Key])
+	assert.Len(t, resp.GetSecret().GetData(), 1)
+	assert.Equal(t, bundle, resp.GetSecret().GetData()[cabundle.Key])
 
 	_, err = get("bad-ca")
 	assert.Equal(t, codes.NotFound, status.Code(err), "a secret that holds no certificate must not reach the gateway")
@@ -120,8 +120,8 @@ func TestGetModelProviderCredential_AddsTheCABundle(t *testing.T) {
 	req.CaBundleSecret = "mock-ca"
 	resp, err := srv.GetModelProviderCredential(peerCtx(t, testTenantOperatorSVID), req)
 	require.NoError(t, err)
-	assert.Equal(t, "sk-mock", string(resp.GetData()[ModelCredentialKeyAuthorization]))
-	assert.Equal(t, bundle, resp.GetData()[cabundle.Key])
+	assert.Equal(t, "sk-mock", string(resp.GetSecret().GetData()[ModelCredentialKeyAuthorization]))
+	assert.Equal(t, bundle, resp.GetSecret().GetData()[cabundle.Key])
 
 	for _, bad := range []string{"not-ca", "missing"} {
 		req.CaBundleSecret = bad
@@ -132,7 +132,7 @@ func TestGetModelProviderCredential_AddsTheCABundle(t *testing.T) {
 	req.CaBundleSecret = ""
 	resp, err = srv.GetModelProviderCredential(peerCtx(t, testTenantOperatorSVID), req)
 	require.NoError(t, err)
-	assert.NotContains(t, resp.GetData(), cabundle.Key)
+	assert.NotContains(t, resp.GetSecret().GetData(), cabundle.Key)
 }
 
 func TestCheckProviderCABundle(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -22,7 +23,7 @@ import (
 // daemon makes no call to an outside agent. The tenant operator renders the
 // route, and the Agent gateway makes the call. The daemon cannot start without
 // the per-tenant data pool or the authorizer.
-func (d *daemonImpl) registerOutsideAgent(ctx context.Context, srv *grpc.Server) error {
+func (d *daemonImpl) registerOutsideAgent(ctx context.Context, srv *grpc.Server, pageKeys *pagetoken.Keys) error {
 	if d.pool == nil {
 		return errors.New("daemon: OutsideAgentService needs the per-tenant data pool")
 	}
@@ -33,7 +34,7 @@ func (d *daemonImpl) registerOutsideAgent(ctx context.Context, srv *grpc.Server)
 		return errors.New("daemon: OutsideAgentService needs the tenant secret store")
 	}
 	d.outsideAgents = outsideagentstore.NewPostgresStore(d.pool)
-	svc, err := api.NewOutsideAgentService(d.outsideAgents, d.authorizer, net.DefaultResolver, d.secretsService)
+	svc, err := api.NewOutsideAgentService(d.outsideAgents, d.authorizer, net.DefaultResolver, d.secretsService, pageKeys)
 	if err != nil {
 		return fmt.Errorf("daemon: OutsideAgentService: %w", err)
 	}

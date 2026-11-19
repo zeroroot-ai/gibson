@@ -54,7 +54,8 @@ func (s *DaemonServer) outsideAgentOperatorReady(ctx context.Context) error {
 	return nil
 }
 
-// GetTenantOutsideAgents returns the outside agents of one tenant.
+// GetTenantOutsideAgents returns one page of the outside agents of one tenant,
+// in name order. The store pages with a keyset.
 //
 // gibsoncheck:allow tenant-from-request — DaemonOperatorService: platform_operator on
 // system_tenant at ext-authz, plus the SPIFFE peer check. The operator reads the
@@ -69,11 +70,22 @@ func (s *DaemonServer) GetTenantOutsideAgents(
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "tenant_id: %v", err)
 	}
-	entries, err := s.outsideAgents.List(ctx, tenant.String())
+	page, err := s.tenantPage(pageScopeTenantOutsideAgents, req.GetPageSize(), req.GetPageToken(), tenant.String())
+	if err != nil {
+		return nil, err
+	}
+	after, hasAfter := page.After()
+	// One more row than the page tells whether a next page exists.
+	limit := page.Limit()
+	entries, err := s.outsideAgents.ListPage(ctx, tenant.String(), after, hasAfter, limit+1)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "list the outside agents: %v", err)
 	}
 	out := &daemonoperatorv1.GetTenantOutsideAgentsResponse{}
+	if len(entries) > limit {
+		entries = entries[:limit]
+		out.NextPageToken = page.Token(entries[limit-1].Name, true)
+	}
 	for _, e := range entries {
 		out.Agents = append(out.Agents, &daemonoperatorv1.DesiredOutsideAgent{
 			Name: e.Name, A2AUrl: e.A2AURL, CredentialSecret: e.CredentialSecret, CaBundleSecret: e.CABundleSecret,
@@ -136,5 +148,5 @@ func (s *DaemonServer) GetOutsideAgentCredential(
 		}
 		data[cabundle.Key] = bundle
 	}
-	return &daemonoperatorv1.GetOutsideAgentCredentialResponse{Data: data}, nil
+	return &daemonoperatorv1.GetOutsideAgentCredentialResponse{Secret: &daemonoperatorv1.SecretData{Data: data}}, nil
 }
