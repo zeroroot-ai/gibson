@@ -4,7 +4,6 @@
 package a2aserver
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -16,8 +15,17 @@ import (
 const TargetsKey = "targets"
 
 // ErrAmbiguousTargets reports a message with more than one target list.
-var ErrAmbiguousTargets = errors.New("a2a: the message holds more than one target list")
+var ErrAmbiguousTargets = fmt.Errorf("%w: the message holds more than one target list", a2a.ErrInvalidParams)
 
+// The rule for a refusal (epic gibson#1367). A message that is not well formed
+// gets a JSON-RPC error with the code invalid params, and no Task: a target list
+// that is not a list of strings, an empty list, and two lists. An empty list is a
+// refusal and never means all targets. A message that is well formed and that the
+// policy refuses gets a Task in the state rejected, and no mission starts: a target
+// outside the publication, a definition or a target that changed or was deleted, a
+// publication over its limit, a tenant that is suspended, a tenant over its quota,
+// and an agent that is not published.
+//
 // TargetsOf reads the target list of an inbound message (epic gibson#1367). It
 // reads data parts only. It never reads a text part, a file part or the metadata
 // of a part, so no text of a message can add a target. present is false when no

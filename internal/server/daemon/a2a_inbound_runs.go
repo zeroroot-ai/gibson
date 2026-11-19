@@ -14,6 +14,8 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
@@ -263,7 +265,13 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		CreatedBy:  inboundPrincipal(c.Subject),
 	})
 	if err != nil {
-		if rerr := r.published.Release(ctx, c.Tenant, slot); rerr != nil {
+		rerr := r.published.Release(ctx, c.Tenant, slot)
+		// A tenant that is suspended or over its quota is a refusal of policy. The
+		// Task is rejected, as for any other refusal of a well formed message.
+		if code := status.Code(err); rerr == nil && (code == codes.ResourceExhausted || code == codes.FailedPrecondition) {
+			return rejectedInboundTask("the tenant cannot start a mission now: " + status.Convert(err).Message()), nil
+		}
+		if rerr != nil {
 			err = errors.Join(err, rerr)
 		}
 		return nil, fmt.Errorf("start the mission of agent %s: %w", req.Agent, err)

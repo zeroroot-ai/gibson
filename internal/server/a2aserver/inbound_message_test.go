@@ -266,3 +266,34 @@ func TestInboundRPC_AMessageToATaskIsRefusedAndStartsNothing(t *testing.T) {
 	assert.Empty(t, starts.got, "no mission started")
 	assert.Empty(t, starts.asked)
 }
+
+// A message that is not well formed is an invalid params error. It is never an
+// internal error, and an empty list never means all targets.
+func TestInboundRPC_AMalformedTargetListIsAnInvalidParamsError(t *testing.T) {
+	trusted := map[string]string{"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"}
+	for name, parts := range map[string]string{
+		"two lists":  `[{"data":{"targets":["a"]}},{"data":{"targets":["b"]}}]`,
+		"empty list": `[{"data":{"targets":[]}}]`,
+		"a string":   `[{"data":{"targets":"a"}}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			starts := &fakeStarts{}
+			// The fake start runs TargetsOf as the daemon does.
+			body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m","role":"ROLE_USER","parts":` + parts + `}}}`
+			h := NewInboundHandler(startsThatReadTargets{starts}, &recordingCards{})
+			rec := rpcCall(h, agentcall.InboundPathFor("recon"), body, trusted)
+			assert.Contains(t, rec.Body.String(), "invalid params")
+			assert.NotContains(t, rec.Body.String(), "internal error")
+		})
+	}
+}
+
+// startsThatReadTargets reads the target list of the message before it answers.
+type startsThatReadTargets struct{ *fakeStarts }
+
+func (s startsThatReadTargets) Start(ctx context.Context, req InboundStart) (*a2a.Task, error) {
+	if _, _, err := TargetsOf(req.Message); err != nil {
+		return nil, err
+	}
+	return s.fakeStarts.Start(ctx, req)
+}
