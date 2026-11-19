@@ -508,9 +508,9 @@ func TestA2AInbound(t *testing.T) {
 		})
 		_, err := f.identities.RevokeAgentIdentity(ctx, &agentidentityv1.RevokeAgentIdentityRequest{PrincipalId: revokedID})
 		require.NoError(t, err, "RevokeAgentIdentity")
-		// ext-authz caches the key descriptor for a short time, so the refusal comes
-		// within that time.
-		helpers.Eventually(t, 10*time.Minute, "ext-authz refuses the revoked identity", func() (bool, string) {
+		// The inbound route reads the key descriptor for each call, so the refusal
+		// comes at the next call. The wait covers the revoke itself.
+		helpers.Eventually(t, time.Minute, "ext-authz refuses the revoked identity", func() (bool, string) {
 			status, body := revoked.call(ctx, t, http.MethodGet, cardPath, nil, nil)
 			return status == http.StatusUnauthorized || status == http.StatusForbidden, fmt.Sprintf("HTTP %d: %s", status, body)
 		})
