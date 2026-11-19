@@ -57,14 +57,14 @@ func decode(t *testing.T, raw any) decodedResult {
 }
 
 // buildArtifact builds the artifact of findings with the builder, as the daemon does.
-func buildArtifact(t *testing.T, missionID string, findings ...finding.EnhancedFinding) (*a2a.Artifact, int) {
+func buildArtifact(t *testing.T, missionID string, findings ...finding.EnhancedFinding) (art *a2a.Artifact, size int) {
 	t.Helper()
 	b, err := NewResultBuilder(missionID)
 	require.NoError(t, err)
 	for _, f := range findings {
 		require.NoError(t, b.Add(f))
 	}
-	art, size, err := b.Artifact()
+	art, size, err = b.Artifact()
 	require.NoError(t, err)
 	return art, size
 }
