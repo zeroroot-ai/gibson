@@ -40,8 +40,9 @@ var ErrBusy = errors.New("a2a: too many results are in work for this caller, ret
 // responseHooks are functions that run after the response of a request is written.
 type responseHooks struct {
 	fns []func()
-	// rc sets the write deadline of the response. It is nil outside a real request.
-	rc *http.ResponseController
+	// setDeadline sets the write deadline of the response. It does nothing until the
+	// middleware sets it to the controller of the real response.
+	setDeadline func(time.Time) error
 }
 
 // The write deadline of an inbound response. A response has InboundWriteFloor to
@@ -68,11 +69,11 @@ func WriteTimeoutFor(size int64) time.Duration {
 // request.
 func ExtendWriteDeadline(ctx context.Context, size int64) {
 	h, ok := ctx.Value(hooksKey{}).(*responseHooks)
-	if !ok || h.rc == nil {
+	if !ok {
 		return
 	}
 	// A writer that cannot set a deadline keeps the deadline of the server.
-	_ = h.rc.SetWriteDeadline(time.Now().Add(WriteTimeoutFor(size)))
+	_ = h.setDeadline(time.Now().Add(WriteTimeoutFor(size)))
 }
 
 type hooksKey struct{}
@@ -94,7 +95,7 @@ func AfterResponse(ctx context.Context, fn func()) {
 // and the function that runs them. The middleware calls it for each request and runs
 // done after the response is written.
 func WithResponseHooks(ctx context.Context) (hooked context.Context, done func()) {
-	h := &responseHooks{}
+	h := &responseHooks{setDeadline: func(time.Time) error { return nil }}
 	return context.WithValue(ctx, hooksKey{}, h), func() {
 		for _, fn := range h.fns {
 			fn()
@@ -353,7 +354,7 @@ func inboundMiddleware(next http.Handler) http.Handler {
 		defer done()
 		// A result sets a longer deadline for its size (ExtendWriteDeadline).
 		if h, ok := hooked.Value(hooksKey{}).(*responseHooks); ok {
-			h.rc = rc
+			h.setDeadline = rc.SetWriteDeadline
 		}
 		next.ServeHTTP(w, req.WithContext(context.WithValue(hooked, inboundCtxKey{}, inboundCall{caller: c, agent: agent})))
 	})

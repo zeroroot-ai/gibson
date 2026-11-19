@@ -320,7 +320,7 @@ func (v *ComponentVerifier) precheckSignature(kid, token string) error {
 	v.mu.RLock()
 	cached, ok := v.cache[kid]
 	v.mu.RUnlock()
-	if !ok || cached.key == nil {
+	if !ok {
 		return nil
 	}
 	_, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
