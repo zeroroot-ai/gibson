@@ -1150,3 +1150,18 @@ func TestNewHarnessCallbackService_RequiresAnEventBus(t *testing.T) {
 		})
 	}
 }
+
+// Each mission status maps to the proto status and back. A paused mission and
+// a mission that waits for input keep their status, so a filter on either one
+// finds them.
+func TestMissionStatusProtoRoundTrip(t *testing.T) {
+	for _, status := range []MissionStatus{
+		MissionStatusSubmitted, MissionStatusWorking, MissionStatusCompleted, MissionStatusFailed,
+		MissionStatusCanceled, MissionStatusPaused, MissionStatusInputRequired,
+	} {
+		proto := missionStatusToProto(status)
+		require.NotEqual(t, harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED, proto, "status %s", status)
+		assert.Equal(t, status, missionStatusFromProto(proto))
+	}
+	assert.Empty(t, missionStatusFromProto(harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED))
+}
