@@ -60,7 +60,7 @@ func AllIndexDefinitions() []*IndexDefinition {
 //	0 (implicit) → original schema, no tenant_id field
 //	2             → added tenant_id AS tenant_id TAG SORTABLE (Phase 1)
 //	3             → added name_exact AS name_exact TAG for exact-name dedup
-//	                (FindOrCreateMission); the TEXT `name` field cannot be
+//	                (the mission store); the TEXT `name` field cannot be
 //	                exact-matched with TAG syntax. See gibson#617.
 const MissionIndexSchemaVersion = 3
 

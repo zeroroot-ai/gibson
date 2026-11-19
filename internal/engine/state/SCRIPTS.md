@@ -70,58 +70,6 @@ err := client.CascadeDeleteMission(ctx, "mission-abc123")
 
 ---
 
-### FindOrCreateMission (Application-Level Implementation)
-
-**Purpose**: Search for a mission by name, creating it only if not found. Prevents duplicate mission creation using distributed locking.
-
-**Implementation**: This is implemented at the application level (not as a Lua script) because FT.SEARCH doesn't participate in Lua script atomicity, which can cause race conditions.
-
-**Lock Pattern**:
-1. SETNX to acquire distributed lock on mission name
-2. Double-check with FT.SEARCH after acquiring lock
-3. Create mission if not found
-4. DEL to release lock
-
-**Parameters**:
-- `name`: Mission name to search for
-- `missionJSON`: JSON string of mission document to create
-- `newID`: ID to use for new mission if creation is needed
-
-**Returns**: `FindOrCreateMissionResult` struct:
-- `Created` (bool): Whether a new mission was created
-- `Key` (string): Mission key (e.g., `gibson:mission:<id>`)
-- `JSON` (string): Mission JSON string
-
-**Usage**:
-```go
-result, err := client.FindOrCreateMission(ctx, "vulnerability-scan", missionJSON, "mission-123")
-if result.Created {
-    // New mission was created
-} else {
-    // Existing mission was found
-}
-```
-
-**Search Behavior**:
-- Uses RediSearch FT.SEARCH with TAG field query
-- Escapes special characters in mission name: `- . [ ] ( ) + * ? ^ $ %`
-- Returns first matching mission if found
-- Creates new mission only if no matches found
-
-**Lock Details**:
-- Lock key: `gibson:lock:mission:name:<name>`
-- Lock TTL: 10 seconds (prevents deadlock if process crashes)
-- Lock wait: 100ms retry if lock is held by another process
-
-**Thread Safety**: Uses distributed locking to prevent race conditions. Multiple concurrent calls with the same name will:
-1. One acquires lock and creates (or finds) mission
-2. Others wait briefly then search for the mission created by first caller
-3. No duplicate missions created
-
-**Error Handling**: Returns error if lock acquisition, search, or creation fails.
-
----
-
 ## Script Design Principles
 
 ### Cluster Compatibility
@@ -136,7 +84,6 @@ Scripts use `redis.call()` which throws errors and stops execution on failure. T
 Scripts are designed to be idempotent where possible:
 - `IncrementAndGetRunNumber`: Safe to retry if client doesn't receive response
 - `CascadeDeleteMission`: Safe to call on non-existent mission
-- `FindOrCreateMission`: Uses distributed locking to prevent duplicates even with concurrent calls
 
 ### Large Dataset Handling
 Scripts that iterate over collections use cursor-based iteration to avoid blocking:
@@ -156,7 +103,6 @@ Run integration tests with a Redis instance:
 ```bash
 go test -v -run TestIncrementAndGetRunNumber
 go test -v -run TestCascadeDeleteMission
-go test -v -run TestFindOrCreateMission
 ```
 
 Run unit tests (no Redis needed):

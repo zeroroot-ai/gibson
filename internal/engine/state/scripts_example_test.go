@@ -60,47 +60,6 @@ func ExampleStateClient_CascadeDeleteMission() {
 	// Output: Mission and all related data deleted successfully
 }
 
-// ExampleStateClient_FindOrCreateMission demonstrates atomic mission lookup/creation.
-func ExampleStateClient_FindOrCreateMission() {
-	cfg := state.DefaultConfig()
-	cfg.URL = "redis://localhost:6379"
-
-	client, err := state.NewStateClient(cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer client.Close()
-
-	ctx := context.Background()
-
-	// Ensure indexes are created
-	if err := client.EnsureIndexes(ctx); err != nil {
-		log.Fatal(err)
-	}
-
-	missionName := "vulnerability-scan"
-	missionJSON := `{"id":"mission-123","name":"vulnerability-scan","status":"pending"}`
-	newID := "mission-123"
-
-	// Start from a clean slate so the example is deterministic regardless of
-	// prior state (FindOrCreateMission now exact-matches by name, so a leftover
-	// mission from an earlier run would otherwise be found instead of created).
-	_ = client.Client().Del(ctx, "gibson:mission:"+newID).Err()
-
-	// Try to find or create mission
-	result, err := client.FindOrCreateMission(ctx, missionName, missionJSON, newID)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if result.Created {
-		fmt.Println("Created new mission")
-	} else {
-		fmt.Println("Found existing mission")
-	}
-	// Output: Created new mission
-}
-
 // ExampleStateClient_RunScript demonstrates custom script execution.
 func ExampleStateClient_RunScript() {
 	cfg := state.DefaultConfig()
