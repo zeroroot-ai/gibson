@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -563,7 +564,10 @@ func TestWithIdentityLock_TheReaderRunsInTheSameTransaction(t *testing.T) {
 	err := newStore(db).WithIdentityLock(context.Background(), "acme", "agent_principal:9", func(r Reader) error {
 		var gerr error
 		got, gerr = r.Get(context.Background(), "recon")
-		return gerr
+		if gerr != nil {
+			return fmt.Errorf("get: %w", gerr)
+		}
+		return nil
 	})
 
 	require.NoError(t, err)

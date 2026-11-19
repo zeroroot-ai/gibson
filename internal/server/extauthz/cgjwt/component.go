@@ -278,6 +278,25 @@ func checkDescriptor(kid string, desc cachedDescriptor) error {
 	return nil
 }
 
+// descriptorFor reads the descriptor of a kid. A fresh read costs one query of the
+// daemon database. A token that the cached key rejects never causes it, so a caller
+// that knows a kid but not its key cannot load the database. The cache is read with
+// no regard to its age, because the kid names one key and a key never changes. The
+// status and the capabilities come from the fresh read, and the full check verifies
+// the signature again with the key of that read.
+func (v *ComponentVerifier) descriptorFor(ctx context.Context, kid, token string, fresh bool) (cachedDescriptor, error) {
+	if fresh {
+		if err := v.precheckSignature(kid, token); err != nil {
+			return cachedDescriptor{}, err
+		}
+	}
+	desc, err := v.resolve(ctx, kid, fresh)
+	if err != nil {
+		return cachedDescriptor{}, fmt.Errorf("%w: kid %s: %w", ErrUnknownKey, kid, err)
+	}
+	return desc, nil
+}
+
 // precheckSignature verifies the signature of a token with the cached key of its
 // kid. It does nothing for a kid that has no cached key, and the full check then
 // uses the key of the fresh read. It checks the signature and no claim.
@@ -318,20 +337,9 @@ func (v *ComponentVerifier) verify(ctx context.Context, token, method string, fr
 		return ComponentIdentity{}, fmt.Errorf("%w: missing kid", ErrMalformed)
 	}
 
-	// A fresh read costs one query of the daemon database. A token that the cached
-	// key rejects never causes it, so a caller that knows a kid but not its key
-	// cannot load the database. The cache is read with no regard to its age,
-	// because the kid names one key and a key never changes. The status and the
-	// capabilities come from the fresh read, and the signature is checked again
-	// with the key of that read.
-	if fresh {
-		if err := v.precheckSignature(kid, token); err != nil {
-			return ComponentIdentity{}, err
-		}
-	}
-	desc, err := v.resolve(ctx, kid, fresh)
+	desc, err := v.descriptorFor(ctx, kid, token, fresh)
 	if err != nil {
-		return ComponentIdentity{}, fmt.Errorf("%w: kid %s: %w", ErrUnknownKey, kid, err)
+		return ComponentIdentity{}, err
 	}
 	if err := checkDescriptor(kid, desc); err != nil {
 		return ComponentIdentity{}, err

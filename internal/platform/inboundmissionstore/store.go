@@ -188,27 +188,37 @@ func scanEntry(row scanner) (*Entry, error) {
 	return &e, nil
 }
 
-func (s *postgresStore) Publish(
-	ctx context.Context, tenant string, e Entry, onCreate func(ctx context.Context) error,
-) (*Entry, error) {
+// validatePublish checks an entry and returns the JSON of its targets and of its
+// target hashes.
+func validatePublish(e Entry) (targets, hashes []byte, err error) {
 	if e.Agent == "" || e.DefinitionID == "" || e.DefinitionHash == "" || len(e.TargetIDs) == 0 {
-		return nil, errors.New("inboundmissionstore: publish needs an agent, a definition with its hash and a target")
+		return nil, nil, errors.New("inboundmissionstore: publish needs an agent, a definition with its hash and a target")
 	}
 	if e.MaxActive < 1 {
-		return nil, errors.New("inboundmissionstore: publish needs a limit of at least one active mission")
+		return nil, nil, errors.New("inboundmissionstore: publish needs a limit of at least one active mission")
 	}
 	for _, id := range e.TargetIDs {
 		if e.TargetHashes[id] == "" {
-			return nil, fmt.Errorf("inboundmissionstore: publish needs the hash of target %s", id)
+			return nil, nil, fmt.Errorf("inboundmissionstore: publish needs the hash of target %s", id)
 		}
 	}
-	targets, err := json.Marshal(e.TargetIDs)
+	targets, err = json.Marshal(e.TargetIDs)
 	if err != nil {
-		return nil, fmt.Errorf("inboundmissionstore: encode the targets: %w", err)
+		return nil, nil, fmt.Errorf("inboundmissionstore: encode the targets: %w", err)
 	}
-	hashes, err := json.Marshal(e.TargetHashes)
+	hashes, err = json.Marshal(e.TargetHashes)
 	if err != nil {
-		return nil, fmt.Errorf("inboundmissionstore: encode the target hashes: %w", err)
+		return nil, nil, fmt.Errorf("inboundmissionstore: encode the target hashes: %w", err)
+	}
+	return targets, hashes, nil
+}
+
+func (s *postgresStore) Publish(
+	ctx context.Context, tenant string, e Entry, onCreate func(ctx context.Context) error,
+) (*Entry, error) {
+	targets, hashes, err := validatePublish(e)
+	if err != nil {
+		return nil, err
 	}
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {

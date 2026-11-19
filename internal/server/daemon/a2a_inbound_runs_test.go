@@ -521,7 +521,7 @@ func (b *hangingFindings) ReadFindings(
 ) error {
 	close(b.started)
 	<-ctx.Done()
-	return ctx.Err()
+	return fmt.Errorf("the read ended: %w", ctx.Err())
 }
 
 // A build that never ends stops after the build timeout. The caller gets a retryable
