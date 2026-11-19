@@ -208,6 +208,19 @@ func inboundEntryProto(e inboundmissionstore.Entry, staleReason string) *tenantv
 	}
 }
 
+// grantExists reports whether the stored tuple of a grant exists.
+func (s *InboundMissionService) grantExists(ctx context.Context, grant authz.Tuple) (bool, error) {
+	reader, ok := any(s.fga).(authz.TupleReader)
+	if !ok {
+		return false, errors.New("the authorizer cannot read stored tuples")
+	}
+	got, err := reader.ReadTuples(ctx, grant.User, grant.Relation, grant.Object)
+	if err != nil {
+		return false, fmt.Errorf("read the grant: %w", err)
+	}
+	return len(got) > 0, nil
+}
+
 // deleteStaleGrants deletes every granted_caller tuple of one object.
 func (s *InboundMissionService) deleteStaleGrants(ctx context.Context, object string) error {
 	stale, err := s.grantTuples(ctx, object)
@@ -603,18 +616,36 @@ func (s *InboundMissionService) grantLocked(
 	if err := s.requireSoleGrant(ctx, tenant, subject, object); err != nil {
 		return err
 	}
+	// The publication is read again inside the lock, before the write. A grant that
+	// was read for another publication writes nothing. Without this a late call for
+	// publication 1 would find the tuple of a call for publication 2 already there,
+	// write nothing, and then delete the tuple of the other call.
+	current, err := r.Get(ctx, agent)
+	if err != nil {
+		return inboundStatus(rpc, err)
+	}
+	if current.PublicationID != publicationID {
+		return status_grpc.Errorf(codes.Aborted, "%s: the publication of %s changed. Grant again", rpc, agent)
+	}
 	grant := authz.Tuple{User: subject, Relation: "granted_caller", Object: object}
+	// Whether the tuple exists before this call decides who may delete it.
+	existed, err := s.grantExists(ctx, grant)
+	if err != nil {
+		return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: read the grant: %v", rpc, err))
+	}
 	if err := s.fga.Write(ctx, []authz.Tuple{grant}); err != nil {
 		return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the grant: %v", rpc, err))
 	}
-	// The publication may have gone, or a new publication of the name may have
-	// replaced it, between the first read and the write. A grant that is meant for
-	// the old publication would land on the new one, so it is deleted and the call
-	// fails.
+	// The publication may still have gone or changed between the read and the write
+	// (an unpublish does not take the lock of the identity). The grant is deleted
+	// only when this call created it. A tuple that was there before belongs to
+	// another call.
 	now, err := r.Get(ctx, agent)
 	if err != nil || now.PublicationID != publicationID {
-		if derr := s.fga.Delete(ctx, []authz.Tuple{grant}); derr != nil {
-			return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the orphan grant: %v", rpc, derr))
+		if !existed {
+			if derr := s.fga.Delete(ctx, []authz.Tuple{grant}); derr != nil {
+				return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the orphan grant: %v", rpc, derr))
+			}
 		}
 		if err != nil {
 			return inboundStatus(rpc, err)

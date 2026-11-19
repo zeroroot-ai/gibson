@@ -868,7 +868,7 @@ func TestGrantInboundCaller_ReadsThePublicationThroughTheLockReader(t *testing.T
 	_, err := f.svc.GrantInboundCaller(f.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
 
 	require.NoError(t, err)
-	assert.Equal(t, before+1, f.store.readsInLock)
+	assert.Equal(t, before+2, f.store.readsInLock, "one read before the write and one after")
 }
 
 // A grant that was read for one publication must not land on a new publication of the
@@ -906,4 +906,47 @@ func TestUnpublishInboundMission_RunsUnderTheLockOfTheAgentName(t *testing.T) {
 		assert.True(t, h, "every FGA delete of an unpublish runs under the lock of the name")
 	}
 	assert.False(t, f.store.holdsAgentLock("recon"), "the lock ends with the call")
+}
+
+// Grant A reads publication 1 outside the lock. The name is unpublished and published
+// again as publication 2, and grant B for the same identity writes the tuple. When A
+// takes the lock, it must write nothing and delete nothing. Without the read before
+// the write, A found the tuple there, wrote nothing, and deleted the tuple of B.
+func TestGrantInboundCaller_AStaleGrantDoesNotDeleteTheGrantOfANewPublication(t *testing.T) {
+	f := publishedFixture(t)
+	f.fga.allow("tenant:acme", "belongs_to", "agent_principal:a1")
+	f.store.entries["recon"] = withPublication(f.store.entries["recon"], "pub-2") // publication 2 is current
+	tuple := authz.Tuple{User: "agent_principal:a1", Relation: "granted_caller", Object: reconObject}
+	f.fga.stored = []authz.Tuple{tuple} // the tuple of grant B
+
+	err := f.store.WithIdentityLock(context.Background(), "acme", "agent_principal:a1", func(r inboundmissionstore.Reader) error {
+		// A started with publication 1.
+		return f.svc.grantLocked(context.Background(), r, "acme", "pub-1", "recon", "agent_principal:a1", reconObject)
+	})
+
+	assert.Equal(t, codes.Aborted, code(err))
+	assert.Contains(t, f.fga.stored, tuple, "the grant of B stays")
+	assert.NotContains(t, f.fga.deleted, tuple, "A deletes nothing")
+}
+
+// A grant that finds its own tuple already there does not delete it when the
+// publication goes meanwhile. The tuple belongs to another call.
+func TestGrantInboundCaller_ATupleThatWasThereIsNotDeletedByTheOrphanCleanup(t *testing.T) {
+	f := publishedFixture(t)
+	f.fga.allow("tenant:acme", "belongs_to", "agent_principal:a1")
+	tuple := authz.Tuple{User: "agent_principal:a1", Relation: "granted_caller", Object: reconObject}
+	f.fga.stored = []authz.Tuple{tuple}
+	f.fga.afterWrite = func() { // an unpublish and a publish run after the pre-check
+		f.store.entries["recon"] = withPublication(f.store.entries["recon"], "pub-2")
+	}
+
+	_, err := f.svc.GrantInboundCaller(f.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
+
+	assert.Equal(t, codes.Aborted, code(err))
+	assert.NotContains(t, f.fga.deleted, tuple, "the tuple was there before this call")
+}
+
+func withPublication(e inboundmissionstore.Entry, id string) inboundmissionstore.Entry {
+	e.PublicationID = id
+	return e
 }
