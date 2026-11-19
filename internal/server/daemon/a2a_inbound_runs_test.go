@@ -286,11 +286,19 @@ type fakeMissionFindings struct {
 	asked    []string
 }
 
-func (f *fakeMissionFindings) MissionFindings(
-	_ context.Context, tenant string, missionID types.ID, _ int,
-) ([]finding.EnhancedFinding, error) {
+func (f *fakeMissionFindings) ReadFindings(
+	_ context.Context, tenant string, missionID types.ID, add func(finding.EnhancedFinding) error,
+) error {
 	f.asked = append(f.asked, tenant+"/"+missionID.String())
-	return f.findings, f.err
+	if f.err != nil {
+		return f.err
+	}
+	for _, fd := range f.findings {
+		if err := add(fd); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type taskFixture struct {
@@ -463,14 +471,15 @@ func TestInboundRuns_TaskFailures(t *testing.T) {
 	_, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
 	require.ErrorContains(t, err, "postgres is down")
 
-	// A result over the size limit fails with a clear error and is never truncated.
+	// A result of any size is built whole.
 	f.findings.err = nil
 	f.findings.findings = []finding.EnhancedFinding{{Finding: agent.Finding{
-		ID: types.NewID(), Evidence: []*typespb.Evidence{{Content: strings.Repeat("A", a2aserver.MaxInboundResultBytes+1)}},
+		ID: types.NewID(), Evidence: []*typespb.Evidence{{Content: strings.Repeat("A", 17<<20)}},
 	}}}
 	task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
-	require.ErrorIs(t, err, a2aserver.ErrResultTooLarge)
-	assert.Nil(t, task)
+	require.NoError(t, err, "no size limit")
+	require.Len(t, task.Artifacts, 1)
+	assert.Contains(t, string(task.Artifacts[0].Parts[0].Data().(json.RawMessage)), strings.Repeat("A", 17<<20))
 
 	// A mission ID that is not a UUID cannot name findings.
 	_, err = f.runs.taskOf(context.Background(), ownerCaller, brain.MissionSnapshot{ID: "not-a-uuid", Status: brain.MissionCompleted})
@@ -555,7 +564,9 @@ func TestPGMissionFindings_ReadsEveryPageOfTheMission(t *testing.T) {
 	}
 	p := &pager{all: all, pageSize: 2}
 
-	got, err := pgMissionFindings{store: p}.MissionFindings(context.Background(), "acme", mission, 1<<20)
+	var got []finding.EnhancedFinding
+	err := pgMissionFindings{store: p}.ReadFindings(context.Background(), "acme", mission,
+		func(f finding.EnhancedFinding) error { got = append(got, f); return nil })
 
 	require.NoError(t, err)
 	assert.Len(t, got, 5, "no finding is left out")
@@ -568,12 +579,20 @@ func TestPGMissionFindings_ReadsEveryPageOfTheMission(t *testing.T) {
 
 	// A store that reports more than it returns cannot loop for ever.
 	short := &pager{all: all[:2], pageSize: 2, total: 9}
-	got, err = pgMissionFindings{store: short}.MissionFindings(context.Background(), "acme", mission, 1<<20)
+	got = nil
+	err = pgMissionFindings{store: short}.ReadFindings(context.Background(), "acme", mission,
+		func(f finding.EnhancedFinding) error { got = append(got, f); return nil })
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 
-	_, err = pgMissionFindings{store: &pager{err: errors.New("db down")}}.MissionFindings(context.Background(), "acme", mission, 1<<20)
+	err = pgMissionFindings{store: &pager{err: errors.New("db down")}}.ReadFindings(context.Background(), "acme", mission,
+		func(finding.EnhancedFinding) error { return nil })
 	require.ErrorContains(t, err, "read the findings of mission")
+
+	// A failure of the consumer stops the read.
+	err = pgMissionFindings{store: &pager{all: all, pageSize: 2}}.ReadFindings(context.Background(), "acme", mission,
+		func(finding.EnhancedFinding) error { return errors.New("add failed") })
+	require.ErrorContains(t, err, "add failed")
 }
 
 // The definition and the targets must be what the admin approved. After a change,
@@ -718,24 +737,6 @@ func TestInboundRuns_MissionFinishedReadsTheWorld(t *testing.T) {
 	assert.True(t, finished(f.mission))
 }
 
-// The read stops when the size passes the limit. It does not load the findings
-// that remain.
-func TestPGMissionFindings_StopsReadingWhenTheSizePassesTheLimit(t *testing.T) {
-	all := make([]finding.EnhancedFinding, 0, 10)
-	for range 10 {
-		all = append(all, finding.EnhancedFinding{Finding: agent.Finding{
-			ID: types.NewID(), Evidence: []*typespb.Evidence{{Content: strings.Repeat("A", 100)}},
-		}})
-	}
-	p := &pager{all: all, pageSize: 2}
-
-	got, err := pgMissionFindings{store: p}.MissionFindings(context.Background(), "acme", types.NewID(), 350)
-
-	require.ErrorIs(t, err, a2aserver.ErrResultTooLarge)
-	assert.Nil(t, got)
-	assert.Len(t, p.queries, 2, "the read stopped after the page that passed the limit, not at the end")
-}
-
 // A finished mission builds its result one time. A repeated read comes from the
 // cache, also when the result is over the limit.
 func TestInboundRuns_TheResultOfAFinishedMissionIsBuiltOnce(t *testing.T) {
@@ -751,16 +752,6 @@ func TestInboundRuns_TheResultOfAFinishedMissionIsBuiltOnce(t *testing.T) {
 	}
 	assert.Len(t, f.findings.asked, 1, "the findings were read one time")
 
-	g := newTaskFixture(t)
-	g.startMission(ownerRef)
-	g.findings.err = fmt.Errorf("%w: over", a2aserver.ErrResultTooLarge)
-	g.end(brain.MissionCompleted)
-	for range 3 {
-		_, err := g.runs.Task(context.Background(), ownerCaller, a2a.TaskID(g.mission))
-		require.ErrorIs(t, err, a2aserver.ErrResultTooLarge)
-	}
-	assert.Len(t, g.findings.asked, 1, "a result over the limit is not built again")
-
 	h := newTaskFixture(t)
 	h.startMission(ownerRef)
 	h.findings.err = errors.New("postgres is down")
@@ -772,27 +763,47 @@ func TestInboundRuns_TheResultOfAFinishedMissionIsBuiltOnce(t *testing.T) {
 	assert.Len(t, h.findings.asked, 2, "a failure to read is tried again")
 }
 
-func TestResultCache_IsBoundedAndExpires(t *testing.T) {
+func TestResultCache_IsBoundedByCountAndByBytesAndExpires(t *testing.T) {
 	now := time.Unix(1000, 0)
 	c := &resultCache{now: func() time.Time { return now }}
 	for i := range resultCacheSize + 10 {
-		c.put(fmt.Sprintf("k%d", i), inboundResult{})
+		c.put(fmt.Sprintf("k%d", i), inboundResult{size: 10})
 	}
 	assert.Len(t, c.entries, resultCacheSize, "the cache holds at most its size")
-	assert.Len(t, c.order, resultCacheSize)
+	assert.Equal(t, resultCacheSize*10, c.bytes)
 	_, ok := c.get("k0")
 	assert.False(t, ok, "the oldest result went first")
 	_, ok = c.get(fmt.Sprintf("k%d", resultCacheSize+9))
 	assert.True(t, ok)
 
-	c.put("again", inboundResult{})
-	c.put("again", inboundResult{})
+	c.put("again", inboundResult{size: 10})
+	c.put("again", inboundResult{size: 10})
 	assert.Len(t, c.entries, resultCacheSize)
 
 	now = now.Add(resultCacheTTL + time.Second)
 	_, ok = c.get("again")
 	assert.False(t, ok, "a result expires")
 	assert.NotContains(t, c.entries, "again")
+}
+
+// The cache holds at most its byte budget. Old results go first, and a result over
+// the budget is not cached at all.
+func TestResultCache_NeverHoldsMoreThanTheByteBudget(t *testing.T) {
+	c := &resultCache{}
+	third := resultCacheBytes/3 + 1
+	c.put("a", inboundResult{size: third})
+	c.put("b", inboundResult{size: third})
+	c.put("c", inboundResult{size: third})
+	assert.LessOrEqual(t, c.bytes, resultCacheBytes)
+	_, ok := c.get("a")
+	assert.False(t, ok, "the oldest result made room")
+	_, ok = c.get("c")
+	assert.True(t, ok)
+
+	c.put("huge", inboundResult{size: resultCacheBytes + 1})
+	_, ok = c.get("huge")
+	assert.False(t, ok, "a result over the budget is not cached")
+	assert.LessOrEqual(t, c.bytes, resultCacheBytes)
 }
 
 // A tenant that is suspended or over its quota is a refusal of policy. The Task is

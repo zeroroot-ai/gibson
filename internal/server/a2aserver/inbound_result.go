@@ -4,8 +4,8 @@
 package a2aserver
 
 import (
+	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -13,23 +13,8 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 )
 
-// MaxInboundResultBytes is the size limit of the findings in the result of a Task.
-// A result over the limit fails with ErrResultTooLarge. The daemon never
-// truncates it, never drops evidence and never replaces it by a summary.
-const MaxInboundResultBytes = 16 << 20
-
-// ErrResultTooLarge reports a Task result that is over MaxInboundResultBytes.
-var ErrResultTooLarge = errors.New("a2a: the findings of the mission are over the size limit of a Task result")
-
 // FindingsArtifactName is the name of the artifact that holds the findings.
 const FindingsArtifactName = "findings"
-
-// inboundResult is the data of the findings artifact.
-type inboundResult struct {
-	MissionID string           `json:"mission_id"`
-	Summary   inboundSummary   `json:"summary"`
-	Findings  []inboundFinding `json:"findings"`
-}
 
 type inboundSummary struct {
 	Total      int            `json:"total"`
@@ -67,67 +52,81 @@ type inboundRepro struct {
 	EvidenceRef    string `json:"evidence_ref,omitempty"`
 }
 
-// FindingsArtifact builds the artifact that holds the findings of one mission:
-// a summary, and for each finding its ID, title, severity, target, all of its
-// evidence with the tier of each item, and its reproduction steps. The caller
-// passes the findings of that one mission, with the evidence from the one read
-// function. The builder adds no filter, no summary of the evidence and no
-// redaction. It returns ErrResultTooLarge when the encoded data is over limit.
-func FindingsArtifact(missionID string, findings []finding.EnhancedFinding, limit int) (*a2a.Artifact, error) {
-	res := inboundResult{
-		MissionID: missionID,
-		Summary:   inboundSummary{Total: len(findings), BySeverity: map[string]int{}},
-		Findings:  make([]inboundFinding, 0, len(findings)),
-	}
-	for _, f := range findings {
-		res.Summary.BySeverity[string(f.Severity)]++
-		out := inboundFinding{
-			ID: f.ID.String(), Title: f.Title, Description: f.Description, Severity: string(f.Severity),
-			Evidence: make([]inboundEvidence, 0, len(f.Evidence)), Reproduce: make([]inboundRepro, 0, len(f.ReproSteps)),
-		}
-		if f.TargetID != nil {
-			out.Target = f.TargetID.String()
-		}
-		for _, e := range f.Evidence {
-			out.Evidence = append(out.Evidence, inboundEvidence{
-				Tier: e.GetTier().String(), ToolCallID: e.GetToolCallId(), Type: e.GetType().String(),
-				Title: e.GetTitle(), Content: e.GetContent(), Metadata: e.GetMetadata(),
-			})
-		}
-		for _, s := range f.ReproSteps {
-			out.Reproduce = append(out.Reproduce, inboundRepro{
-				Step: s.StepNumber, Description: s.Description, ExpectedResult: s.ExpectedResult, EvidenceRef: s.EvidenceRef,
-			})
-		}
-		res.Findings = append(res.Findings, out)
-	}
-	body, err := json.Marshal(res)
+// ResultBuilder builds the findings artifact of one mission, one finding at a
+// time. It encodes each finding when the reader hands it over, and it keeps the
+// encoded text only, so the memory is the size of the result plus one finding. The
+// result has no size limit: it always holds all findings with all of their
+// evidence, with the tier of each item, in raw form. The A2A Task type holds the
+// artifact as one value and the JSON-RPC layer encodes the whole Task before it
+// writes, so the result cannot be written to the caller as it is read.
+type ResultBuilder struct {
+	id       string
+	buf      bytes.Buffer
+	count    int
+	severity map[string]int
+}
+
+// NewResultBuilder returns a builder for the mission.
+func NewResultBuilder(missionID string) (*ResultBuilder, error) {
+	id, err := json.Marshal(missionID)
 	if err != nil {
-		return nil, fmt.Errorf("encode the findings of mission %s: %w", missionID, err)
+		return nil, fmt.Errorf("encode the mission ID %q: %w", missionID, err)
 	}
-	if len(body) > limit {
-		return nil, fmt.Errorf("%w: %d bytes, limit %d bytes", ErrResultTooLarge, len(body), limit)
+	b := &ResultBuilder{id: missionID, severity: map[string]int{}}
+	b.buf.WriteString(`{"mission_id":`)
+	b.buf.Write(id)
+	b.buf.WriteString(`,"findings":[`)
+	return b, nil
+}
+
+// Add encodes one finding: its ID, title, severity, target, all of its evidence with
+// the tier of each item, and its reproduction steps. It adds no filter, no summary
+// of the evidence and no redaction.
+func (b *ResultBuilder) Add(f finding.EnhancedFinding) error {
+	out := inboundFinding{
+		ID: f.ID.String(), Title: f.Title, Description: f.Description, Severity: string(f.Severity),
+		Evidence: make([]inboundEvidence, 0, len(f.Evidence)), Reproduce: make([]inboundRepro, 0, len(f.ReproSteps)),
 	}
+	if f.TargetID != nil {
+		out.Target = f.TargetID.String()
+	}
+	for _, e := range f.Evidence {
+		out.Evidence = append(out.Evidence, inboundEvidence{
+			Tier: e.GetTier().String(), ToolCallID: e.GetToolCallId(), Type: e.GetType().String(),
+			Title: e.GetTitle(), Content: e.GetContent(), Metadata: e.GetMetadata(),
+		})
+	}
+	for _, s := range f.ReproSteps {
+		out.Reproduce = append(out.Reproduce, inboundRepro{
+			Step: s.StepNumber, Description: s.Description, ExpectedResult: s.ExpectedResult, EvidenceRef: s.EvidenceRef,
+		})
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return fmt.Errorf("encode finding %s of mission %s: %w", f.ID, b.id, err)
+	}
+	if b.count > 0 {
+		b.buf.WriteByte(',')
+	}
+	b.buf.Write(raw)
+	b.count++
+	b.severity[string(f.Severity)]++
+	return nil
+}
+
+// Artifact closes the result with its summary and returns the artifact and the
+// size of its data in bytes.
+func (b *ResultBuilder) Artifact() (*a2a.Artifact, int, error) {
+	summary, err := json.Marshal(inboundSummary{Total: b.count, BySeverity: b.severity})
+	if err != nil {
+		return nil, 0, fmt.Errorf("encode the summary of mission %s: %w", b.id, err)
+	}
+	b.buf.WriteString(`],"summary":`)
+	b.buf.Write(summary)
+	b.buf.WriteByte('}')
+	body := b.buf.Bytes()
 	return &a2a.Artifact{
 		ID: a2a.NewArtifactID(), Name: FindingsArtifactName,
 		Parts: a2a.ContentParts{a2a.NewDataPart(json.RawMessage(body))},
-	}, nil
-}
-
-// EstimateFindingBytes is the size of the text of a finding in its result: the
-// text fields, each evidence item and each reproduction step. It is a little below
-// the size of the JSON, which adds keys and quotes. A reader that stops at the
-// limit uses it to stop early. FindingsArtifact still measures the whole result.
-func EstimateFindingBytes(f finding.EnhancedFinding) int {
-	n := len(f.Title) + len(f.Description) + len(f.Severity)
-	for _, e := range f.Evidence {
-		n += len(e.GetTitle()) + len(e.GetContent()) + len(e.GetToolCallId())
-		for k, v := range e.GetMetadata() {
-			n += len(k) + len(v)
-		}
-	}
-	for _, s := range f.ReproSteps {
-		n += len(s.Description) + len(s.ExpectedResult) + len(s.EvidenceRef)
-	}
-	return n
+	}, len(body), nil
 }

@@ -82,10 +82,9 @@ func (r *inboundRuns) missionFinished(tenant string) func(missionID string) bool
 // missionFindingReader reads the findings of one mission with all of their
 // evidence, in the one read function that the Finding evidence epic added.
 type missionFindingReader interface {
-	// MissionFindings reads the findings in small pages and stops when their text
-	// passes maxBytes. It then returns a2aserver.ErrResultTooLarge and does not read
-	// the rest.
-	MissionFindings(ctx context.Context, tenant string, missionID types.ID, maxBytes int) ([]finding.EnhancedFinding, error)
+	// ReadFindings hands each finding of the mission to add, in pages. It keeps no
+	// finding after add returns.
+	ReadFindings(ctx context.Context, tenant string, missionID types.ID, add func(finding.EnhancedFinding) error) error
 }
 
 // findingPager is the part of pgstore.Store that reads a page of findings with
@@ -94,66 +93,65 @@ type findingPager interface {
 	FindWithEvidence(ctx context.Context, tenantID string, q pgstore.Query) ([]finding.EnhancedFinding, int, error)
 }
 
-// inboundFindingPage is the number of findings that one read holds. A page holds
-// all evidence of its findings, so the page is small. The read stops at the size
-// limit, and memory stays near the limit.
+// inboundFindingPage is the number of findings that one read holds. A page holds all
+// evidence of its findings, so the page is small, and the memory of a read is the
+// result plus one page.
 const inboundFindingPage = 25
 
 // pgMissionFindings reads every finding of one mission through
 // pgstore.Store.FindWithEvidence. It reads page after page, so no finding is left
-// out, and it stops as soon as the size passes the limit.
+// out. The result has no size limit.
 type pgMissionFindings struct{ store findingPager }
 
 var _ missionFindingReader = pgMissionFindings{}
 
-func (p pgMissionFindings) MissionFindings(
-	ctx context.Context, tenant string, missionID types.ID, maxBytes int,
-) ([]finding.EnhancedFinding, error) {
-	var all []finding.EnhancedFinding
-	size := 0
+func (p pgMissionFindings) ReadFindings(
+	ctx context.Context, tenant string, missionID types.ID, add func(finding.EnhancedFinding) error,
+) error {
+	read := 0
 	for {
 		page, total, err := p.store.FindWithEvidence(ctx, tenant,
-			pgstore.Query{MissionID: missionID, Limit: inboundFindingPage, Offset: len(all)})
+			pgstore.Query{MissionID: missionID, Limit: inboundFindingPage, Offset: read})
 		if err != nil {
-			return nil, fmt.Errorf("read the findings of mission %s: %w", missionID, err)
+			return fmt.Errorf("read the findings of mission %s: %w", missionID, err)
 		}
 		for _, f := range page {
-			size += a2aserver.EstimateFindingBytes(f)
-			if size > maxBytes {
-				return nil, fmt.Errorf("%w: the text of the findings is over %d bytes", a2aserver.ErrResultTooLarge, maxBytes)
+			if err := add(f); err != nil {
+				return err
 			}
 		}
-		all = append(all, page...)
-		if len(page) == 0 || len(all) >= total {
-			return all, nil
+		read += len(page)
+		if len(page) == 0 || read >= total {
+			return nil
 		}
 	}
 }
 
-// resultCacheSize is the most results that the cache keeps. resultCacheTTL is how
-// long a result stays. A finished mission can get a late finding, so the result
+// The result cache keeps the results of finished missions for a short time, so a
+// repeated read does not load the findings again. It is bounded by the number of
+// entries and by the total bytes of the results. A result that is larger than the
+// byte budget is not cached. A finished mission can get a late finding, so a result
 // does not stay for long.
 const (
-	resultCacheSize = 128
-	resultCacheTTL  = 2 * time.Minute
+	resultCacheSize  = 128
+	resultCacheBytes = 64 << 20
+	resultCacheTTL   = 2 * time.Minute
 )
 
-// inboundResult is the built result of a finished mission, or the failure to
-// build it.
+// inboundResult is the built result of a finished mission.
 type inboundResult struct {
 	artifact *a2a.Artifact
-	err      error
+	size     int
 	at       time.Time
 }
 
-// resultCache keeps the results of finished missions, by tenant and mission. It
-// holds at most resultCacheSize results, and the oldest one goes first. A failure
-// is kept too, so a repeated read of a result over the limit does not read the
-// findings again.
+// resultCache keeps the results of finished missions, by tenant and mission. The
+// oldest result goes first when the count or the bytes pass their bound.
 type resultCache struct {
 	mu      sync.Mutex
 	entries map[string]inboundResult
 	order   []string
+	bytes   int
 	now     func() time.Time
 }
 
@@ -178,7 +176,11 @@ func (c *resultCache) get(key string) (inboundResult, bool) {
 	return r, true
 }
 
+// put keeps a result. A result over the byte budget is not kept.
 func (c *resultCache) put(key string, r inboundResult) {
+	if r.size > resultCacheBytes {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil {
@@ -187,16 +189,20 @@ func (c *resultCache) put(key string, r inboundResult) {
 	if _, ok := c.entries[key]; ok {
 		c.drop(key)
 	}
-	for len(c.order) >= resultCacheSize {
+	for len(c.order) > 0 && (len(c.order) >= resultCacheSize || c.bytes+r.size > resultCacheBytes) {
 		c.drop(c.order[0])
 	}
 	r.at = c.clock()
 	c.entries[key] = r
+	c.bytes += r.size
 	c.order = append(c.order, key)
 }
 
 // drop removes one entry. The caller holds the lock.
 func (c *resultCache) drop(key string) {
+	if r, ok := c.entries[key]; ok {
+		c.bytes -= r.size
+	}
 	delete(c.entries, key)
 	c.order = slices.DeleteFunc(c.order, func(k string) bool { return k == key })
 }
@@ -320,8 +326,7 @@ const inputRequiredText = "the mission waits for a person in the tenant to decid
 // Task returns the Task of a mission that the caller started. The Task state is
 // the mission state, and a paused mission shows as working. A mission in a final
 // state has the findings of that one mission in its result, with all of their
-// evidence. A result over the size limit fails with a clear error and is never
-// truncated.
+// evidence. The result has no size limit.
 func (r *inboundRuns) Task(ctx context.Context, c a2aserver.InboundCaller, id a2a.TaskID) (*a2a.Task, error) {
 	m, err := r.ownedMission(ctx, c, string(id))
 	if err != nil {
@@ -355,36 +360,36 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 	}
 	key := c.Tenant + "/" + m.ID
 	if res, ok := r.results.get(key); ok {
-		return withResult(t, res)
+		return withResult(t, res), nil
 	}
-	res := r.buildResult(ctx, c.Tenant, missionID)
-	// A failure to read is not kept, because it may pass. A result over the limit is
-	// kept, because a second read gives the same answer.
-	if res.err == nil || errors.Is(res.err, a2aserver.ErrResultTooLarge) {
-		r.results.put(key, res)
+	res, err := r.buildResult(ctx, c.Tenant, missionID)
+	if err != nil {
+		return nil, err
 	}
-	return withResult(t, res)
+	r.results.put(key, res)
+	return withResult(t, res), nil
 }
 
-// buildResult reads the findings of a finished mission and builds the artifact.
-func (r *inboundRuns) buildResult(ctx context.Context, tenant string, missionID types.ID) inboundResult {
-	findings, err := r.findings.MissionFindings(ctx, tenant, missionID, a2aserver.MaxInboundResultBytes)
+// buildResult reads the findings of a finished mission, page by page, and builds
+// the artifact. The result always holds all findings with all of their evidence.
+func (r *inboundRuns) buildResult(ctx context.Context, tenant string, missionID types.ID) (inboundResult, error) {
+	b, err := a2aserver.NewResultBuilder(missionID.String())
 	if err != nil {
-		return inboundResult{err: fmt.Errorf("read the findings of mission %s: %w", missionID, err)}
+		return inboundResult{}, fmt.Errorf("build the result of mission %s: %w", missionID, err)
 	}
-	artifact, err := a2aserver.FindingsArtifact(missionID.String(), findings, a2aserver.MaxInboundResultBytes)
+	if err := r.findings.ReadFindings(ctx, tenant, missionID, b.Add); err != nil {
+		return inboundResult{}, fmt.Errorf("read the findings of mission %s: %w", missionID, err)
+	}
+	artifact, size, err := b.Artifact()
 	if err != nil {
-		return inboundResult{err: fmt.Errorf("build the result of mission %s: %w", missionID, err)}
+		return inboundResult{}, fmt.Errorf("build the result of mission %s: %w", missionID, err)
 	}
-	return inboundResult{artifact: artifact}
+	return inboundResult{artifact: artifact, size: size}, nil
 }
 
-func withResult(t *a2a.Task, res inboundResult) (*a2a.Task, error) {
-	if res.err != nil {
-		return nil, res.err
-	}
+func withResult(t *a2a.Task, res inboundResult) *a2a.Task {
 	t.Artifacts = []*a2a.Artifact{res.artifact}
-	return t, nil
+	return t
 }
 
 // Cancel ends a mission that the caller started. It ends no other mission: a

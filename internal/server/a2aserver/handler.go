@@ -175,10 +175,6 @@ func MapError(err error) error {
 		return a2a.ErrTaskNotCancelable
 	case errors.Is(err, ErrRefused):
 		return fmt.Errorf("%w: %w", a2a.ErrUnauthorized, err)
-	case errors.Is(err, ErrResultTooLarge):
-		// The caller needs the reason. The error holds the sizes and nothing of the
-		// findings.
-		return fmt.Errorf("%w: %w", a2a.ErrInvalidAgentResponse, err)
 	case errors.Is(err, a2a.ErrInvalidParams):
 		return err
 	default:

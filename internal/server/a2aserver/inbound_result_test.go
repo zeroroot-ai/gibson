@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -55,6 +56,19 @@ func decode(t *testing.T, raw any) decodedResult {
 	return out
 }
 
+// buildArtifact builds the artifact of findings with the builder, as the daemon does.
+func buildArtifact(t *testing.T, missionID string, findings ...finding.EnhancedFinding) (*a2a.Artifact, int) {
+	t.Helper()
+	b, err := NewResultBuilder(missionID)
+	require.NoError(t, err)
+	for _, f := range findings {
+		require.NoError(t, b.Add(f))
+	}
+	art, size, err := b.Artifact()
+	require.NoError(t, err)
+	return art, size
+}
+
 func sampleFindings() (full, bare finding.EnhancedFinding) {
 	target := types.NewID()
 	rawOutput := "PORT 22/tcp open\n\x00 raw bytes, secrets: AKIAEXAMPLE password=hunter2"
@@ -79,9 +93,9 @@ func sampleFindings() (full, bare finding.EnhancedFinding) {
 func TestFindingsArtifact_HoldsEachFindingWithAllEvidenceAndTheTierOfEachItem(t *testing.T) {
 	full, bare := sampleFindings()
 
-	art, err := FindingsArtifact("m-1", []finding.EnhancedFinding{full, bare}, MaxInboundResultBytes)
+	art, size := buildArtifact(t, "m-1", full, bare)
 
-	require.NoError(t, err)
+	assert.Positive(t, size)
 	assert.Equal(t, FindingsArtifactName, art.Name)
 	require.Len(t, art.Parts, 1)
 	got := decode(t, art.Parts[0].Data())
@@ -115,32 +129,27 @@ func TestFindingsArtifact_HoldsEachFindingWithAllEvidenceAndTheTierOfEachItem(t 
 }
 
 func TestFindingsArtifact_ForAMissionWithNoFindingHoldsAnEmptyResult(t *testing.T) {
-	art, err := FindingsArtifact("m-1", nil, MaxInboundResultBytes)
-	require.NoError(t, err)
+	art, _ := buildArtifact(t, "m-1")
 	got := decode(t, art.Parts[0].Data())
 	assert.Equal(t, 0, got.Summary.Total)
 	assert.NotNil(t, got.Findings, "the list is empty and not null")
 }
 
-// A result over the size limit fails with a clear error. The daemon never
-// truncates it and never drops evidence.
-func TestFindingsArtifact_AResultOverTheLimitFailsAndIsNeverTruncated(t *testing.T) {
-	full, _ := sampleFindings()
-	full.Evidence[0].Content = strings.Repeat("A", 4096)
-
-	art, err := FindingsArtifact("m-1", []finding.EnhancedFinding{full}, 1024)
-
-	require.ErrorIs(t, err, ErrResultTooLarge)
-	assert.Nil(t, art, "no partial result")
-	assert.Contains(t, err.Error(), "limit 1024 bytes")
-
-	// The same result passes when the limit holds it.
-	_, err = FindingsArtifact("m-1", []finding.EnhancedFinding{full}, MaxInboundResultBytes)
-	require.NoError(t, err)
-}
-
-func TestEstimateFindingBytes_CountsTheTextOfEachPart(t *testing.T) {
+// The result has no size limit. A result of many megabytes holds every finding with
+// every evidence item, whole, and the size that the builder reports is the size of the
+// data.
+func TestResultBuilder_HasNoSizeLimitAndKeepsEachEvidenceItemWhole(t *testing.T) {
 	full, bare := sampleFindings()
-	assert.Greater(t, EstimateFindingBytes(full), len(full.Evidence[0].Content), "the evidence counts")
-	assert.Equal(t, len("Banner")+len("low"), EstimateFindingBytes(bare))
+	full.Evidence[0].Content = strings.Repeat("A", 20<<20)
+
+	art, size := buildArtifact(t, "m-1", full, bare)
+
+	raw, ok := art.Parts[0].Data().(json.RawMessage)
+	require.True(t, ok)
+	assert.Equal(t, len(raw), size)
+	assert.Greater(t, size, 20<<20)
+	got := decode(t, art.Parts[0].Data())
+	require.Len(t, got.Findings, 2)
+	assert.Len(t, got.Findings[0].Evidence[0].Content, 20<<20, "the evidence is not cut")
+	assert.Equal(t, 2, got.Summary.Total)
 }

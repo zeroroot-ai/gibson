@@ -228,7 +228,6 @@ func TestInboundRPC_GetAndCancelRefusals(t *testing.T) {
 		{"get of a task that is not of the caller", getBody, ErrNotFound, "TASK_NOT_FOUND"},
 		{"cancel of a task that is not of the caller", cancelBody, ErrNotFound, "TASK_NOT_FOUND"},
 		{"cancel of a task in a final state", cancelBody, ErrNotCancelable, "TASK_NOT_CANCELABLE"},
-		{"get of a result over the size limit", getBody, ErrResultTooLarge, "over the size limit"},
 		{"cancel that fails inside", cancelBody, errors.New("redis is down"), "error"},
 	}
 	for _, tt := range tests {
