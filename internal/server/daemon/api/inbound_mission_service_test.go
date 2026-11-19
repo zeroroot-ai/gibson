@@ -36,6 +36,7 @@ type memInboundStore struct {
 	deleteErr   error
 	// readsInLock counts the reads that go through the reader of a lock.
 	readsInLock int
+	heldAgents  map[string]bool
 }
 
 func (m *memInboundStore) Publish(
@@ -122,6 +123,45 @@ func (m *memInboundStore) WithIdentityLock(_ context.Context, tenant, identity s
 	return fn(memReader{m: m, tenant: tenant})
 }
 
+// WithAgentLock runs fn while it holds a lock of the agent name, as the database does.
+func (m *memInboundStore) WithAgentLock(_ context.Context, tenant, agent string, fn func(inboundmissionstore.AgentTx) error) error {
+	m.lockMu.Lock()
+	if m.locks == nil {
+		m.locks = map[string]*sync.Mutex{}
+	}
+	if m.heldAgents == nil {
+		m.heldAgents = map[string]bool{}
+	}
+	l, ok := m.locks["agent:"+agent]
+	if !ok {
+		l = &sync.Mutex{}
+		m.locks["agent:"+agent] = l
+	}
+	m.lockMu.Unlock()
+	l.Lock()
+	defer l.Unlock()
+	m.lockMu.Lock()
+	m.heldAgents[agent] = true
+	m.lockMu.Unlock()
+	defer func() {
+		m.lockMu.Lock()
+		delete(m.heldAgents, agent)
+		m.lockMu.Unlock()
+	}()
+	return fn(memReader{m: m, tenant: tenant})
+}
+
+// holdsAgentLock reports whether a call holds the lock of the agent name now.
+func (m *memInboundStore) holdsAgentLock(agent string) bool {
+	m.lockMu.Lock()
+	defer m.lockMu.Unlock()
+	return m.heldAgents[agent]
+}
+
+func (r memReader) Delete(ctx context.Context, agent string) error {
+	return r.m.Delete(ctx, r.tenant, agent)
+}
+
 // memReader reads the memory store as the reader of a transaction does.
 type memReader struct {
 	m      *memInboundStore
@@ -186,6 +226,8 @@ type failingInboundFGA struct {
 	checkErr, writeErr, deleteErr, listErr error
 	// afterWrite runs after a write, as a parallel call would.
 	afterWrite func()
+	// onDelete runs before a delete.
+	onDelete func()
 	// readDelay slows each tuple read.
 	readDelay time.Duration
 }
@@ -217,6 +259,9 @@ func (f *failingInboundFGA) Write(ctx context.Context, t []authz.Tuple) error {
 }
 
 func (f *failingInboundFGA) Delete(ctx context.Context, t []authz.Tuple) error {
+	if f.onDelete != nil {
+		f.onDelete()
+	}
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
@@ -824,4 +869,41 @@ func TestGrantInboundCaller_ReadsThePublicationThroughTheLockReader(t *testing.T
 
 	require.NoError(t, err)
 	assert.Equal(t, before+1, f.store.readsInLock)
+}
+
+// A grant that was read for one publication must not land on a new publication of the
+// name. A publish that replaces the publication while the grant is written makes the
+// grant fail, and the grant is deleted.
+func TestGrantInboundCaller_ARepublishDuringTheWriteDeletesTheGrant(t *testing.T) {
+	f := publishedFixture(t)
+	f.fga.allow("tenant:acme", "belongs_to", "agent_principal:a1")
+	f.fga.afterWrite = func() {
+		e := f.store.entries["recon"]
+		e.PublicationID = "pub-new"
+		f.store.entries["recon"] = e
+	}
+
+	_, err := f.svc.GrantInboundCaller(f.ctx, &tenantv1.GrantInboundCallerRequest{Agent: "recon", IdentityId: "agent_principal:a1"})
+
+	assert.Equal(t, codes.Aborted, code(err))
+	assert.Contains(t, f.fga.deleted,
+		authz.Tuple{User: "agent_principal:a1", Relation: "granted_caller", Object: reconObject},
+		"the grant for the old publication is deleted")
+}
+
+// An unpublish takes the lock of the agent name, the lock that a publish takes, for
+// all its steps. A publish of the name cannot run in the middle of it.
+func TestUnpublishInboundMission_RunsUnderTheLockOfTheAgentName(t *testing.T) {
+	f := publishedFixture(t)
+	held := []bool{}
+	f.fga.onDelete = func() { held = append(held, f.store.holdsAgentLock("recon")) }
+
+	_, err := f.svc.UnpublishInboundMission(f.ctx, &tenantv1.UnpublishInboundMissionRequest{Agent: "recon"})
+
+	require.NoError(t, err)
+	require.NotEmpty(t, held)
+	for _, h := range held {
+		assert.True(t, h, "every FGA delete of an unpublish runs under the lock of the name")
+	}
+	assert.False(t, f.store.holdsAgentLock("recon"), "the lock ends with the call")
 }

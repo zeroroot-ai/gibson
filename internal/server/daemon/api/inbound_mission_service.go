@@ -356,6 +356,43 @@ func (s *InboundMissionService) grantTuples(ctx context.Context, object string) 
 	return tuples, nil
 }
 
+// unpublishLocked removes the tuples and the record of a publication. The caller holds
+// the lock of the agent name.
+func (s *InboundMissionService) unpublishLocked(
+	ctx context.Context, tx inboundmissionstore.AgentTx, tenant, agent, object string,
+) error {
+	const rpc = "UnpublishInboundMission"
+	if _, gerr := tx.Get(ctx, agent); gerr != nil {
+		return inboundStatus(rpc, gerr)
+	}
+	// The tuples go first. A failure here leaves the record in place, and the
+	// caller can retry.
+	grants, err := s.grantTuples(ctx, object)
+	if err != nil {
+		return status_grpc.Error(codes.Internal, rpc+": "+err.Error())
+	}
+	tuples := make([]authz.Tuple, 0, 1+len(grants))
+	tuples = append(tuples, authz.Tuple{User: "tenant:" + tenant, Relation: "owner", Object: object})
+	if err := s.fga.Delete(ctx, append(tuples, grants...)); err != nil {
+		return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the tuples: %v", rpc, err))
+	}
+	if err := tx.Delete(ctx, agent); err != nil {
+		return inboundStatus(rpc, err)
+	}
+	// A grant that a parallel call wrote after the first read is deleted now. The
+	// record is gone, so no new grant is written after this read.
+	late, err := s.grantTuples(ctx, object)
+	if err != nil {
+		return status_grpc.Error(codes.Internal, rpc+": "+err.Error())
+	}
+	if len(late) > 0 {
+		if err := s.fga.Delete(ctx, late); err != nil {
+			return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the late grants: %v", rpc, err))
+		}
+	}
+	return nil
+}
+
 // UnpublishInboundMission removes the mark, the caller grants and the owner
 // tuple. A grant that stayed would come back if the tenant published the same
 // agent name again.
@@ -371,33 +408,14 @@ func (s *InboundMissionService) UnpublishInboundMission(
 	if err != nil {
 		return nil, err
 	}
-	if _, gerr := s.store.Get(ctx, tenant, req.GetAgent()); gerr != nil {
-		return nil, inboundStatus(rpc, gerr)
-	}
-	// The tuples go first. A failure here leaves the record in place, and the
-	// caller can retry.
-	grants, err := s.grantTuples(ctx, object)
+	// The lock of the agent name is the lock that Publish takes, so a publish of
+	// the name never runs in the middle of an unpublish. The steps below run inside
+	// it.
+	err = s.store.WithAgentLock(ctx, tenant, req.GetAgent(), func(tx inboundmissionstore.AgentTx) error {
+		return s.unpublishLocked(ctx, tx, tenant, req.GetAgent(), object)
+	})
 	if err != nil {
-		return nil, status_grpc.Error(codes.Internal, rpc+": "+err.Error())
-	}
-	tuples := make([]authz.Tuple, 0, 1+len(grants))
-	tuples = append(tuples, authz.Tuple{User: "tenant:" + tenant, Relation: "owner", Object: object})
-	if err := s.fga.Delete(ctx, append(tuples, grants...)); err != nil {
-		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the tuples: %v", rpc, err))
-	}
-	if err := s.store.Delete(ctx, tenant, req.GetAgent()); err != nil {
-		return nil, inboundStatus(rpc, err)
-	}
-	// A grant that a parallel call wrote after the first read is deleted now. The
-	// record is gone, so no new grant is written after this read.
-	late, err := s.grantTuples(ctx, object)
-	if err != nil {
-		return nil, status_grpc.Error(codes.Internal, rpc+": "+err.Error())
-	}
-	if len(late) > 0 {
-		if err := s.fga.Delete(ctx, late); err != nil {
-			return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the late grants: %v", rpc, err))
-		}
+		return nil, grantStatus(rpc, err)
 	}
 	return &tenantv1.UnpublishInboundMissionResponse{}, nil
 }
@@ -428,15 +446,17 @@ func (s *InboundMissionService) GrantInboundCaller(
 	if !owned {
 		return nil, status_grpc.Errorf(codes.NotFound, "%s: %s is not of this tenant", rpc, subject)
 	}
-	// A grant on an agent that is not published is refused.
-	if _, err := s.store.Get(ctx, tenant, req.GetAgent()); err != nil {
+	// A grant on an agent that is not published is refused. The grant is for this
+	// publication. grantLocked compares the publication again when it writes.
+	pub, err := s.store.Get(ctx, tenant, req.GetAgent())
+	if err != nil {
 		return nil, inboundStatus(rpc, err)
 	}
 	// The check of the sole grant and the write are one step for the identity. Two
 	// parallel grants of one identity run one after the other, so the second one
 	// sees the first and is refused.
 	err = s.store.WithIdentityLock(ctx, tenant, subject, func(r inboundmissionstore.Reader) error {
-		return s.grantLocked(ctx, r, tenant, req.GetAgent(), subject, object)
+		return s.grantLocked(ctx, r, tenant, pub.PublicationID, req.GetAgent(), subject, object)
 	})
 	if err != nil {
 		return nil, grantStatus(rpc, err)
@@ -577,7 +597,7 @@ func grantStatus(rpc string, err error) error {
 // grantLocked checks the sole grant and writes the grant. The caller holds the lock
 // of the identity.
 func (s *InboundMissionService) grantLocked(
-	ctx context.Context, r inboundmissionstore.Reader, tenant, agent, subject, object string,
+	ctx context.Context, r inboundmissionstore.Reader, tenant, publicationID, agent, subject, object string,
 ) error {
 	const rpc = "GrantInboundCaller"
 	if err := s.requireSoleGrant(ctx, tenant, subject, object); err != nil {
@@ -587,14 +607,19 @@ func (s *InboundMissionService) grantLocked(
 	if err := s.fga.Write(ctx, []authz.Tuple{grant}); err != nil {
 		return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the grant: %v", rpc, err))
 	}
-	// The record may have gone between the first check and the write. A grant to a
-	// publication that is gone would come back with the next publish of the name, so
-	// the grant is deleted and the call fails.
-	if _, err := r.Get(ctx, agent); err != nil {
+	// The publication may have gone, or a new publication of the name may have
+	// replaced it, between the first read and the write. A grant that is meant for
+	// the old publication would land on the new one, so it is deleted and the call
+	// fails.
+	now, err := r.Get(ctx, agent)
+	if err != nil || now.PublicationID != publicationID {
 		if derr := s.fga.Delete(ctx, []authz.Tuple{grant}); derr != nil {
 			return status_grpc.Error(codes.Internal, fmt.Sprintf("%s: delete the orphan grant: %v", rpc, derr))
 		}
-		return inboundStatus(rpc, err)
+		if err != nil {
+			return inboundStatus(rpc, err)
+		}
+		return status_grpc.Errorf(codes.Aborted, "%s: the publication of %s changed while the grant was written. Grant again", rpc, agent)
 	}
 	return nil
 }

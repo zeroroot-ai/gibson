@@ -64,6 +64,7 @@ type fakeDB struct {
 	query    func(sql string) (datapool.Rows, error)
 	released int
 	seen     []string
+	lockKeys []string
 }
 
 func (d *fakeDB) For(context.Context, string) (conn, error) {
@@ -77,8 +78,11 @@ func (d *fakeDB) Release()          { d.released++ }
 func (d *fakeDB) InTx(_ context.Context, fn func(datapool.SQL) error) error {
 	return fn(d)
 }
-func (d *fakeDB) Exec(_ context.Context, sql string, _ ...any) (int64, error) {
+func (d *fakeDB) Exec(_ context.Context, sql string, args ...any) (int64, error) {
 	d.seen = append(d.seen, sql)
+	if strings.Contains(sql, "pg_advisory_xact_lock") && len(args) > 0 {
+		d.lockKeys = append(d.lockKeys, fmt.Sprint(args[0]))
+	}
 	return d.exec(sql)
 }
 func (d *fakeDB) QueryRow(_ context.Context, sql string, _ ...any) datapool.Row {
@@ -573,4 +577,36 @@ func TestWithIdentityLock_TheReaderRunsInTheSameTransaction(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "recon", got.Agent)
 	assert.Equal(t, 1, db.released, "the lock and the read share one connection")
+}
+
+// Publish and an unpublish of one agent name take the same lock key, so they run one
+// after the other. The unpublish deletes in the transaction that holds the lock.
+func TestWithAgentLock_TakesTheLockOfPublishAndDeletesInTheSameTransaction(t *testing.T) {
+	db := &fakeDB{exec: okExec, queryRow: func(string) datapool.Row { return fakeRow{values: rowOf(sample())} }}
+	_, err := newStore(db).Publish(context.Background(), "acme", sample(), nil)
+	require.NoError(t, err)
+	publishKey := db.lockKeys[0]
+
+	db2 := &fakeDB{exec: okExec}
+	err = newStore(db2).WithAgentLock(context.Background(), "acme", "recon", func(tx AgentTx) error {
+		return tx.Delete(context.Background(), "recon")
+	})
+
+	require.NoError(t, err)
+	require.Len(t, db2.lockKeys, 1)
+	assert.Equal(t, publishKey, db2.lockKeys[0], "the same lock key as Publish")
+	assert.Contains(t, db2.seen[0], "pg_advisory_xact_lock", "the lock comes first")
+	assert.Contains(t, strings.Join(db2.seen, "\n"), "DELETE FROM inbound_missions")
+	assert.Equal(t, 1, db2.released, "one connection")
+
+	none := &fakeDB{exec: func(sql string) (int64, error) {
+		if strings.HasPrefix(sql, "DELETE") {
+			return 0, nil
+		}
+		return 1, nil
+	}}
+	err = newStore(none).WithAgentLock(context.Background(), "acme", "recon", func(tx AgentTx) error {
+		return tx.Delete(context.Background(), "recon")
+	})
+	require.ErrorIs(t, err, ErrNotFound)
 }

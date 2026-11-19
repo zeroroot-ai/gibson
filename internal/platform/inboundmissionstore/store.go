@@ -104,6 +104,17 @@ type Store interface {
 	// reader that it gets. The reader runs in the same transaction, so fn holds one
 	// connection and not two.
 	WithIdentityLock(ctx context.Context, tenant, identity string, fn func(r Reader) error) error
+	// WithAgentLock runs fn while it holds the lock of one agent name, the lock that
+	// Publish takes. A publish and an unpublish of one name run one after the other.
+	// fn reads and deletes through the transaction that holds the lock.
+	WithAgentLock(ctx context.Context, tenant, agent string, fn func(tx AgentTx) error) error
+}
+
+// AgentTx reads and deletes the entry of the agent whose lock is held.
+type AgentTx interface {
+	Reader
+	// Delete removes the entry, or reports ErrNotFound.
+	Delete(ctx context.Context, agent string) error
 }
 
 // Reader reads published entries inside a transaction.
@@ -113,6 +124,21 @@ type Reader interface {
 }
 
 type txReader struct{ q datapool.SQL }
+
+func (r txReader) Delete(ctx context.Context, agent string) error {
+	return deleteEntry(ctx, r.q, agent)
+}
+
+func deleteEntry(ctx context.Context, q datapool.SQL, agent string) error {
+	n, err := q.Exec(ctx, `DELETE FROM inbound_missions WHERE agent = $1`, agent)
+	if err != nil {
+		return fmt.Errorf("inboundmissionstore: delete %s: %w", agent, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: %s", ErrNotFound, agent)
+	}
+	return nil
+}
 
 func (r txReader) Get(ctx context.Context, agent string) (*Entry, error) {
 	return getEntry(ctx, r.q, agent)
@@ -228,7 +254,7 @@ func (s *postgresStore) Publish(
 
 	var out *Entry
 	err = c.InTx(ctx, func(q datapool.SQL) error {
-		if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "inbound-agent:"+e.Agent); err != nil {
+		if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, agentLockKey(e.Agent)); err != nil {
 			return fmt.Errorf("lock the agent: %w", err)
 		}
 		inserted, err := q.Exec(ctx,
@@ -313,14 +339,7 @@ func (s *postgresStore) Delete(ctx context.Context, tenant, agent string) error 
 		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
 	}
 	defer c.Release()
-	n, err := c.SQL().Exec(ctx, `DELETE FROM inbound_missions WHERE agent = $1`, agent)
-	if err != nil {
-		return fmt.Errorf("inboundmissionstore: delete %s: %w", agent, err)
-	}
-	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrNotFound, agent)
-	}
-	return nil
+	return deleteEntry(ctx, c.SQL(), agent)
 }
 
 func (s *postgresStore) Reserve(
@@ -456,3 +475,25 @@ func (s *postgresStore) WithIdentityLock(ctx context.Context, tenant, identity s
 	}
 	return nil
 }
+
+func (s *postgresStore) WithAgentLock(ctx context.Context, tenant, agent string, fn func(tx AgentTx) error) error {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	err = c.InTx(ctx, func(q datapool.SQL) error {
+		if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, agentLockKey(agent)); err != nil {
+			return fmt.Errorf("lock the agent %s: %w", agent, err)
+		}
+		return fn(txReader{q: q})
+	})
+	if err != nil {
+		return fmt.Errorf("inbound agent lock %s: %w", agent, err)
+	}
+	return nil
+}
+
+// agentLockKey is the advisory lock key of an agent name. Publish and WithAgentLock
+// use the same key.
+func agentLockKey(agent string) string { return "inbound-agent:" + agent }
