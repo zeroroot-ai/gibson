@@ -55,9 +55,10 @@ func (s MissionStatus) IsActive() bool {
 }
 
 // Budget is the per-mission resource ceiling carried from CUE MissionConstraints
-// (ADR-0104). It is recorded here at projection; the budget/limit System that
-// enforces it (forcing MissionDone{budget_exceeded}) is gibson#849. Zero in any
-// field means "unlimited" for that dimension.
+// (ADR-0104). It is recorded here at projection. BudgetSystem (budget.go)
+// enforces it: it ends a mission over its budget with a MissionDone event whose
+// Outcome is MissionFailed and whose Reason starts with "budget exceeded". Zero
+// in any field means "unlimited" for that dimension.
 type Budget struct {
 	MaxExecutions int   // cap on dispatched WorkItems (the runaway guard)
 	MaxTokens     int64 // cumulative LLM token budget
