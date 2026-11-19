@@ -302,8 +302,7 @@ func inboundMiddleware(next http.Handler) http.Handler {
 		req.Body = http.MaxBytesReader(w, req.Body, MaxInboundRequestBytes)
 		hooked, done := WithResponseHooks(req.Context())
 		defer done()
-		req = req.WithContext(hooked)
-		next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), inboundCtxKey{}, inboundCall{caller: c, agent: agent})))
+		next.ServeHTTP(w, req.WithContext(context.WithValue(hooked, inboundCtxKey{}, inboundCall{caller: c, agent: agent})))
 	})
 }
 

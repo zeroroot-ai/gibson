@@ -486,14 +486,8 @@ func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (strin
 	// The pin is checked on the definition that this start loaded, before the
 	// target binding, the reservation of the budget and the write of the record. A
 	// definition that changed after the publication check is refused here.
-	if req.PinnedDefinitionHash != "" {
-		got, hashErr := definitionHash(def)
-		if hashErr != nil {
-			return "", hashErr
-		}
-		if got != req.PinnedDefinitionHash {
-			return "", grpcstatus.Error(grpccodes.FailedPrecondition, "the mission definition changed after it was published")
-		}
+	if pinErr := checkDefinitionPin(def, req.PinnedDefinitionHash); pinErr != nil {
+		return "", pinErr
 	}
 
 	m.logger.Debug("mission definition loaded",
@@ -525,18 +519,9 @@ func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (strin
 	}
 	resolvedTargetID := target.ID
 	targetRef := runTargetRef(target)
-	// The other targets get the same ownership check as the primary one. A target
-	// of another tenant is not found.
-	var additionalTargetIDs []types.ID
-	for _, id := range req.TargetIDs[1:] {
-		extra, extraErr := resolveTargetUUID(ctx, m.targetStore, id, resolveTargetCallerTenant(ctx))
-		if extraErr != nil {
-			return "", extraErr
-		}
-		if err := checkTargetPin(req.PinnedTargetHashes, id, extra); err != nil {
-			return "", err
-		}
-		additionalTargetIDs = append(additionalTargetIDs, extra.ID)
+	additionalTargetIDs, err := m.resolveExtraTargets(ctx, req)
+	if err != nil {
+		return "", err
 	}
 	m.logger.Debug("resolved target", "target_id", resolvedTargetID, "target_ref", targetRef)
 
@@ -1844,4 +1829,38 @@ func withDeciderSlotPin(mc harness.MissionContext, def *missionpb.MissionDefinit
 	return mc.WithNodeSlotOverrides(map[string]*agent.SlotConfig{
 		deciderSlot: {Provider: pin.Provider, Model: pin.Model},
 	})
+}
+
+// checkDefinitionPin refuses a definition whose hash is not the pinned one. An
+// empty pin means the start has no pin.
+func checkDefinitionPin(def *missionpb.MissionDefinition, pinned string) error {
+	if pinned == "" {
+		return nil
+	}
+	got, err := definitionHash(def)
+	if err != nil {
+		return err
+	}
+	if got != pinned {
+		return grpcstatus.Error(grpccodes.FailedPrecondition, "the mission definition changed after it was published")
+	}
+	return nil
+}
+
+// resolveExtraTargets resolves the targets after the first one. Each gets the same
+// ownership check and the same pin check as the primary target. A target of another
+// tenant is not found.
+func (m *missionManager) resolveExtraTargets(ctx context.Context, req api.RunMissionData) ([]types.ID, error) {
+	var ids []types.ID
+	for _, id := range req.TargetIDs[1:] {
+		extra, err := resolveTargetUUID(ctx, m.targetStore, id, resolveTargetCallerTenant(ctx))
+		if err != nil {
+			return nil, err
+		}
+		if err := checkTargetPin(req.PinnedTargetHashes, id, extra); err != nil {
+			return nil, err
+		}
+		ids = append(ids, extra.ID)
+	}
+	return ids, nil
 }

@@ -411,7 +411,7 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 		return res, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read the result: %w", err)
 	}
 	res, _ := v.(inboundResult)
 	return withResult(t, res), nil
@@ -453,10 +453,12 @@ func (g *resultGate) acquire(tenant, caller string) (release func(), ok bool) {
 		once.Do(func() {
 			g.mu.Lock()
 			defer g.mu.Unlock()
-			if g.tenants[tenant]--; g.tenants[tenant] == 0 {
+			g.tenants[tenant]--
+			if g.tenants[tenant] == 0 {
 				delete(g.tenants, tenant)
 			}
-			if g.callers[ck]--; g.callers[ck] == 0 {
+			g.callers[ck]--
+			if g.callers[ck] == 0 {
 				delete(g.callers, ck)
 			}
 		})

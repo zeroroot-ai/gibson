@@ -943,7 +943,7 @@ func TestResultGate_BoundsTheResultsPerTenantAndPerCaller(t *testing.T) {
 	assert.True(t, ok, "a permit that was given back is free")
 	r2()
 	r3()
-	assert.Equal(t, newResultGate(0, 0).tenantMax, 1, "a bound under 1 is 1")
+	assert.Equal(t, 1, newResultGate(0, 0).tenantMax, "a bound under 1 is 1")
 	var none *resultGate
 	_, ok = none.acquire("acme", "a")
 	assert.True(t, ok, "a nil gate bounds nothing")

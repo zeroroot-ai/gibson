@@ -205,6 +205,24 @@ func inboundEntryProto(e inboundmissionstore.Entry, staleReason string) *tenantv
 	}
 }
 
+// publishTargets checks the limit and the target list of a publish request. It
+// returns the targets sorted.
+func publishTargets(rpc string, req *tenantv1.PublishInboundMissionRequest) ([]string, error) {
+	if req.GetMaxActiveMissions() < 1 {
+		return nil, status_grpc.Errorf(codes.InvalidArgument,
+			"%s: max_active_missions is required. Set the most missions that may run or wait at one time", rpc)
+	}
+	targets := slices.Clone(req.GetTargetIds())
+	if len(targets) == 0 || len(targets) > maxInboundTargets {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: give between 1 and %d targets", rpc, maxInboundTargets)
+	}
+	slices.Sort(targets)
+	if len(slices.Compact(slices.Clone(targets))) != len(targets) {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: a target appears two times", rpc)
+	}
+	return targets, nil
+}
+
 // PublishInboundMission saves the mark and writes the owner tuple of the object.
 // The tuple goes after the store, so a retry after a failure is safe.
 func (s *InboundMissionService) PublishInboundMission(
@@ -219,17 +237,9 @@ func (s *InboundMissionService) PublishInboundMission(
 	if err != nil {
 		return nil, err
 	}
-	if req.GetMaxActiveMissions() < 1 {
-		return nil, status_grpc.Errorf(codes.InvalidArgument,
-			"%s: max_active_missions is required. Set the most missions that may run or wait at one time", rpc)
-	}
-	targets := slices.Clone(req.GetTargetIds())
-	if len(targets) == 0 || len(targets) > maxInboundTargets {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: give between 1 and %d targets", rpc, maxInboundTargets)
-	}
-	slices.Sort(targets)
-	if len(slices.Compact(slices.Clone(targets))) != len(targets) {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: a target appears two times", rpc)
+	targets, err := publishTargets(rpc, req)
+	if err != nil {
+		return nil, err
 	}
 	def, err := s.source.Definition(ctx, req.GetMissionDefinitionId())
 	switch {
