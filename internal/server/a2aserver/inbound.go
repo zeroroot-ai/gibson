@@ -273,8 +273,10 @@ func (h *inboundRPC) SendMessage(ctx context.Context, req *a2a.SendMessageReques
 
 // GetTask returns the Task of a mission that the caller started. It needs no grant:
 // a caller keeps the read of its own missions after an unpublish or a revoke of its
-// grant. The ownership check of the runs decides. A revoked identity does not reach
-// this point, because ext-authz refuses it.
+// grant. The ownership check of the runs decides. A revoke of the whole identity ends
+// its access: ext-authz refuses the identity, so it cannot read, cancel or start. The
+// missions that run at that time continue, as after an unpublish. A tenant admin can
+// stop them in the dashboard.
 func (h *inboundRPC) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Task, error) {
 	c, agent, err := h.callOf(ctx)
 	if err != nil {

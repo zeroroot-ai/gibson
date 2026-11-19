@@ -112,7 +112,9 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 	// Revoke the Capability Grant rows of the principal first. A revoked agent row
 	// has no key descriptor, so the signed token of the principal fails at once,
 	// and the principal can start no mission. The call is safe to repeat. When it
-	// fails, nothing else is revoked, and the caller can retry.
+	// fails, nothing else is revoked, and the caller can retry. A revoke ends the
+	// access of the identity. The missions that it started continue, as after an
+	// unpublish, and a tenant admin can stop them in the dashboard.
 	if s.principalRevoker == nil {
 		return nil, status_grpc.Error(codes.Unavailable, "the capability grant store is not configured; nothing was revoked")
 	}
