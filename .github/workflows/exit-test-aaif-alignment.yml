@@ -180,24 +180,38 @@ jobs:
           gibson/.github/scripts/run-e2e-job.sh gibson-e2e-aaif-a2a 'TestAAIFAlignment_A2ADelegation$' 20m \
             2>&1 | tee "$E2E_OUT/aaif-a2a.log"
 
-      # Point 10. The metrics listener of the daemon speaks TLS on port 9090. The
-      # check reads it through a port-forward and counts the spans.
+      # Point 10. The metrics listener of the daemon (port 9090) speaks TLS and
+      # demands a client certificate. The step reads it as the cluster scraper
+      # does: with the client certificate of the Secret gibson-metrics-scraper-tls
+      # (the one the ServiceMonitor names) and the CA of gibson-daemon-metrics-tls,
+      # and with the service name of the daemon as the server name. It does not
+      # skip the verification. A port-forward carries the connection. A call that
+      # ext-authz or the router refused has no tenant. The daemon counts it in
+      # gibson_gateway_llm_refused_total and not as a drop.
       - name: The trace receiver of the daemon dropped no span
         if: ${{ !cancelled() }}
         working-directory: gibson
         run: |
           set -euo pipefail
           bash tests/fixtures/mockprovider/check-drop-counter.sh --selftest
+          tls=$(mktemp -d)
+          trap 'rm -rf "$tls"; kill "${pf:-0}" 2>/dev/null || true' EXIT
+          get() { kubectl -n "$NS" get secret "$1" -o jsonpath="{.data.$2}" | base64 -d; }
+          get gibson-metrics-scraper-tls 'tls\.crt' > "$tls/client.crt"
+          get gibson-metrics-scraper-tls 'tls\.key' > "$tls/client.key"
+          get gibson-daemon-metrics-tls 'ca\.crt' > "$tls/ca.crt"
+          host="gibson-gibson-workloads.${NS}.svc"
           pod=$(kubectl -n "$NS" get pod -l app.kubernetes.io/component=daemon -o name | head -n 1)
           kubectl -n "$NS" port-forward "$pod" 19090:9090 >/tmp/pf-metrics.log 2>&1 &
           pf=$!
-          trap 'kill "$pf" 2>/dev/null || true' EXIT
           for _ in $(seq 1 30); do
-            curl -sk -o /tmp/daemon-metrics.txt "https://127.0.0.1:19090/metrics" && break
+            curl -sf --cacert "$tls/ca.crt" --cert "$tls/client.crt" --key "$tls/client.key" \
+              --connect-to "${host}:9090:127.0.0.1:19090" -o /tmp/daemon-metrics.txt \
+              "https://${host}:9090/metrics" && break
             sleep 2
           done
           if [ ! -s /tmp/daemon-metrics.txt ]; then
-            echo "::error::the metrics listener of the daemon gave no answer on port 9090"
+            echo "::error::the metrics listener of the daemon gave no answer on port 9090 to the scraper certificate"
             cat /tmp/pf-metrics.log || true
             exit 1
           fi
