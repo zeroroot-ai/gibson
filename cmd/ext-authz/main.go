@@ -902,7 +902,7 @@ func parseSVIDList(name, raw string) ([]spiffeid.ID, []string, error) {
 //     model call or an A2A call. With it unset, no gateway call is accepted.
 //
 // Spec: security-hardening R13 - the peer identities are fixed at startup.
-func buildPeerPolicy() (tlsconfig.Authorizer, []string, []string, error) {
+func buildPeerPolicy() (authz tlsconfig.Authorizer, edgeSVIDs, gatewaySVIDs []string, err error) {
 	rawEdge := os.Getenv("EXT_AUTHZ_ENVOY_SVID")
 	if rawEdge == "" {
 		return nil, nil, nil, errors.New("EXT_AUTHZ_ENVOY_SVID required (e.g. spiffe://example.org/ns/gibson/sa/gibson-envoy)")

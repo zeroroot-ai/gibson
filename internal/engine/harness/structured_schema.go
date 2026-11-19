@@ -88,7 +88,7 @@ func convertSchemaFieldToSDK(f schema.JSON) *types.JSONSchema {
 // call that asks the model for structured output. Each object lists all of its
 // properties as required and refuses other properties, as strict structured
 // output needs.
-func StructuredSchema(schemaType any) (string, json.RawMessage, error) {
+func StructuredSchema(schemaType any) (schemaName string, schemaJSON json.RawMessage, err error) {
 	t := reflect.TypeOf(schemaType)
 	if t == nil {
 		return "", nil, fmt.Errorf("schema type cannot be nil")

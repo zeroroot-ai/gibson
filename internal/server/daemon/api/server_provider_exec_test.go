@@ -115,7 +115,7 @@ func (e *stubBudgetEnforcer) Check(_ context.Context, _ int64) (*budget.Status, 
 	return nil, e.checkErr
 }
 
-func (e *stubBudgetEnforcer) Record(_ context.Context, tokens int64, _ int64) error {
+func (e *stubBudgetEnforcer) Record(_ context.Context, tokens, _ int64) error {
 	e.recordCalls++
 	e.recordedTotal += tokens
 	return nil

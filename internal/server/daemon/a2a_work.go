@@ -46,7 +46,7 @@ func a2aTaskID(req brain.DispatchRequest) types.ID {
 // trackWork returns the context of one dispatch. For A2A work the context can
 // be canceled by CancelWork. The release function ends the context and drops
 // the entry.
-func (b *brainExecutor) trackWork(parent context.Context, req brain.DispatchRequest) (context.Context, func()) {
+func (b *brainExecutor) trackWork(parent context.Context, req brain.DispatchRequest) (workCtx context.Context, release func()) {
 	if req.ParentID == "" {
 		return parent, func() {}
 	}

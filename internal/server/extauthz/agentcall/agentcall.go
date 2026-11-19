@@ -76,7 +76,7 @@ func ClaimedRoute(headers map[string]string) (tenant, agent, bank, reason string
 	return tenant, agent, bank, ""
 }
 
-func readValue(headers map[string]string, name string, required bool) (string, string) {
+func readValue(headers map[string]string, name string, required bool) (value, reason string) {
 	v := strings.TrimSpace(headers[name])
 	switch {
 	case v == "" && required:

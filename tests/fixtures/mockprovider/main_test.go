@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func do(t *testing.T, srv *httptest.Server, method, path, body string) (int, string) {
+func do(t *testing.T, srv *httptest.Server, method, path, body string) (status int, reply string) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, srv.URL+path, strings.NewReader(body))
 	if err != nil {

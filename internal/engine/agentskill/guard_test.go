@@ -14,7 +14,7 @@ import (
 
 func get(t *testing.T, p *Puller, url string) error {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, http.NoBody)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}

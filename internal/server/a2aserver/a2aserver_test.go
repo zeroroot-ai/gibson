@@ -205,7 +205,7 @@ func TestUnsupportedMethods(t *testing.T) {
 }
 
 func cardRequest(path string, mutate func(*http.Request)) *http.Request {
-	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req := httptest.NewRequest(http.MethodGet, path, http.NoBody)
 	trustedHeaders(req)
 	if mutate != nil {
 		mutate(req)

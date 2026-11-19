@@ -2656,8 +2656,8 @@ func missionStatusToProto(status MissionStatus) harnesspb.MissionStatus {
 // missionStatusFromProto converts a proto MissionStatus to the internal status.
 // It is the inverse of missionStatusToProto. The proto enum names PENDING and
 // RUNNING stay in the SDK until the SDK renames them.
-func missionStatusFromProto(status harnesspb.MissionStatus) MissionStatus {
-	switch status {
+func missionStatusFromProto(state harnesspb.MissionStatus) MissionStatus {
+	switch state {
 	case harnesspb.MissionStatus_MISSION_STATUS_SUBMITTED:
 		return MissionStatusSubmitted
 	case harnesspb.MissionStatus_MISSION_STATUS_WORKING:

@@ -38,7 +38,7 @@ func TestModelGatewayHTTPClient_TrustsOnlyTheGivenCA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("modelGatewayHTTPClient: %v", err)
 	}
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, http.NoBody)
 	resp, err := c.Do(req)
 	if err != nil {
 		t.Fatalf("a gateway of the trusted CA was refused: %v", err)
@@ -54,7 +54,7 @@ func TestModelGatewayHTTPClient_TrustsOnlyTheGivenCA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req2, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req2, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, http.NoBody)
 	if resp, err := c2.Do(req2); err == nil {
 		_ = resp.Body.Close()
 		t.Fatal("a gateway that another CA signed was trusted")

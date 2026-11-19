@@ -44,31 +44,31 @@ func (m *memSkillStore) Publish(
 	return &e, nil
 }
 
-func (m *memSkillStore) List(_ context.Context, _, name string, all bool) ([]agentskillstore.Entry, error) {
+func (m *memSkillStore) List(_ context.Context, _, skillName string, all bool) ([]agentskillstore.Entry, error) {
 	var out []agentskillstore.Entry
 	for _, e := range m.entries {
-		if (name == "" || e.Name == name) && (all || e.Current) {
+		if (skillName == "" || e.Name == skillName) && (all || e.Current) {
 			out = append(out, e)
 		}
 	}
 	return out, nil
 }
 
-func (m *memSkillStore) Get(_ context.Context, _, name, digest string) (*agentskillstore.Entry, error) {
+func (m *memSkillStore) Get(_ context.Context, _, skillName, digest string) (*agentskillstore.Entry, error) {
 	for _, e := range m.entries {
-		if e.Name == name && ((digest == "" && e.Current) || e.Digest == digest) {
+		if e.Name == skillName && ((digest == "" && e.Current) || e.Digest == digest) {
 			return &e, nil
 		}
 	}
-	return nil, fmt.Errorf("%w: %s", agentskillstore.ErrNotFound, name)
+	return nil, fmt.Errorf("%w: %s", agentskillstore.ErrNotFound, skillName)
 }
 
 func (m *memSkillStore) Resolve(context.Context, string, string, string) (string, error) {
 	return "", nil
 }
 
-func (m *memSkillStore) Load(ctx context.Context, tenant, name, digest string) (*agentskillstore.Loaded, error) {
-	e, err := m.Get(ctx, tenant, name, digest)
+func (m *memSkillStore) Load(ctx context.Context, tenant, skillName, digest string) (*agentskillstore.Loaded, error) {
+	e, err := m.Get(ctx, tenant, skillName, digest)
 	if err != nil {
 		return nil, err
 	}
@@ -81,18 +81,18 @@ func (m *memSkillStore) ReadFile(context.Context, string, string, string, string
 	return nil, nil
 }
 
-func (m *memSkillStore) Delete(_ context.Context, _, name string) (int64, error) {
+func (m *memSkillStore) Delete(_ context.Context, _, skillName string) (int64, error) {
 	var kept []agentskillstore.Entry
 	var n int64
 	for _, e := range m.entries {
-		if e.Name == name {
+		if e.Name == skillName {
 			n++
 			continue
 		}
 		kept = append(kept, e)
 	}
 	if n == 0 {
-		return 0, fmt.Errorf("%w: %s", agentskillstore.ErrNotFound, name)
+		return 0, fmt.Errorf("%w: %s", agentskillstore.ErrNotFound, skillName)
 	}
 	m.entries = kept
 	return n, nil
@@ -110,9 +110,9 @@ func (r *recordingAuthorizer) Delete(_ context.Context, t []authz.Tuple) error {
 }
 
 func (r *recordingAuthorizer) ListUsersOfType(
-	ctx context.Context, objectType, object, relation, userType string,
+	_ context.Context, objectType, object, relation, userType string,
 ) ([]string, error) {
-	return r.fakeAuthorizer.users[objectType+"|"+object+"|"+relation], nil
+	return r.users[objectType+"|"+object+"|"+relation], nil
 }
 
 type fakeSkillSecrets struct {
@@ -120,11 +120,11 @@ type fakeSkillSecrets struct {
 	asked  []string
 }
 
-func (f *fakeSkillSecrets) Resolve(_ context.Context, name string) ([]byte, error) {
-	f.asked = append(f.asked, name)
-	v, ok := f.values[name]
+func (f *fakeSkillSecrets) Resolve(_ context.Context, secretName string) ([]byte, error) {
+	f.asked = append(f.asked, secretName)
+	v, ok := f.values[secretName]
 	if !ok {
-		return nil, fmt.Errorf("secret %q not found", name)
+		return nil, fmt.Errorf("secret %q not found", secretName)
 	}
 	return v, nil
 }
@@ -132,15 +132,15 @@ func (f *fakeSkillSecrets) Resolve(_ context.Context, name string) ([]byte, erro
 type fakeSharedSkills struct{ entries map[string]SharedAgentSkill }
 
 func (f *fakeSharedSkills) Names() []string {
-	var out []string
+	out := make([]string, 0, len(f.entries))
 	for n := range f.entries {
 		out = append(out, n)
 	}
 	return out
 }
 
-func (f *fakeSharedSkills) Get(name string) (SharedAgentSkill, bool) {
-	e, ok := f.entries[name]
+func (f *fakeSharedSkills) Get(skillName string) (SharedAgentSkill, bool) {
+	e, ok := f.entries[skillName]
 	return e, ok
 }
 

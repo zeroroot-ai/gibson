@@ -32,7 +32,7 @@ func (s *stubProbe) Check(context.Context) error {
 func probeStatus(t *testing.T, h http.Handler, method, path string) int {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+	h.ServeHTTP(rec, httptest.NewRequest(method, path, http.NoBody))
 	return rec.Code
 }
 

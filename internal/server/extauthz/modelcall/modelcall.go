@@ -79,7 +79,7 @@ func RouteHeaders(tenant, provider string) []RouteHeader {
 	}
 }
 
-func readRouteHeader(headers map[string]string, name string) (string, string) {
+func readRouteHeader(headers map[string]string, name string) (value, reason string) {
 	v := strings.TrimSpace(headers[name])
 	switch {
 	case v == "":
