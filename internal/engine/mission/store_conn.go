@@ -25,6 +25,41 @@ import (
 // No tenant prefix is embedded in any key — the per-tenant client is the isolation boundary.
 type ConnBoundMissionStore struct {
 	rdb *goredis.Client
+	// recorder and tenant tie each mission this store creates to its tenant in
+	// the authorization store. Both are zero for a store that only reads.
+	recorder TenantRecorder
+	tenant   string
+}
+
+// TenantRecorder ties a mission to its tenant in the authorization store. The
+// tuple (tenant:<tenant>, belongs_to, mission:<id>) is what a grant of an Agent
+// Skill or an outside agent to a mission checks, and what the viewer and admin
+// relations of a mission derive from.
+//
+// Record must be idempotent. Forget must treat an absent tuple as success.
+type TenantRecorder interface {
+	Record(ctx context.Context, tenant string, missionID types.ID) error
+	Forget(ctx context.Context, tenant string, missionID types.ID) error
+}
+
+// WithTenantRecorder returns the store set to record the tenant of each mission
+// it creates. The record is written BEFORE the mission, and a failed write
+// creates no mission. A mission that exists without its tuple is the defect
+// this prevents, so each store that creates missions must be built with it.
+func (s *ConnBoundMissionStore) WithTenantRecorder(rec TenantRecorder, tenant string) *ConnBoundMissionStore {
+	s.recorder, s.tenant = rec, tenant
+	return s
+}
+
+// recordTenant writes the tenant tuple of a mission about to be created.
+func (s *ConnBoundMissionStore) recordTenant(ctx context.Context, id types.ID) error {
+	if s.recorder == nil {
+		return nil
+	}
+	if err := s.recorder.Record(ctx, s.tenant, id); err != nil {
+		return fmt.Errorf("record the tenant of mission %s: %w", id, err)
+	}
+	return nil
 }
 
 // NewConnBoundMissionStore creates a MissionStore backed by the given tenant-bound client.
@@ -87,6 +122,11 @@ func (s *ConnBoundMissionStore) Save(ctx context.Context, mission *Mission) erro
 	data, err := json.Marshal(mission)
 	if err != nil {
 		return fmt.Errorf("failed to marshal mission: %w", err)
+	}
+
+	// The tuple first: with no tuple there is no mission.
+	if err := s.recordTenant(ctx, mission.ID); err != nil {
+		return err
 	}
 
 	pipe := s.rdb.Pipeline()
@@ -269,6 +309,12 @@ func (s *ConnBoundMissionStore) Delete(ctx context.Context, id types.ID) error {
 	pipe.SRem(ctx, cbMissionByNameKey(mission.Name), id.String())
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("failed to delete mission: %w", err)
+	}
+	// The record is gone, so the tuple goes. An absent tuple is not an error.
+	if s.recorder != nil {
+		if err := s.recorder.Forget(ctx, s.tenant, id); err != nil {
+			return fmt.Errorf("forget the tenant of mission %s: %w", id, err)
+		}
 	}
 	return nil
 }
@@ -470,7 +516,10 @@ func (s *ConnBoundMissionStore) FindOrCreateByName(ctx context.Context, mission 
 		}
 	}
 
-	// Create new mission.
+	// Create new mission. The tuple first: with no tuple there is no mission.
+	if err := s.recordTenant(ctx, mission.ID); err != nil {
+		return nil, false, err
+	}
 	pipe := s.rdb.Pipeline()
 	pipe.Do(ctx, "JSON.SET", cbMissionKey(mission.ID), "$", string(data))
 	pipe.SAdd(ctx, cbMissionByTargetKey(mission.TargetID), mission.ID.String())

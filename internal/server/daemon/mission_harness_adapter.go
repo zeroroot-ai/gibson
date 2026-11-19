@@ -75,7 +75,7 @@ func (a *missionHarnessAdapter) storeForCtx(ctx context.Context) (mission.Missio
 	if err != nil {
 		return nil, func() {}, status.Errorf(codes.Unavailable, "mission store: acquire conn: %v", err)
 	}
-	store := mission.NewConnBoundMissionStore(conn.Redis)
+	store := a.daemon.newMissionStore(conn.Redis, tenant.String())
 	return store, func() { conn.Release() }, nil
 }
 

@@ -171,6 +171,10 @@ type missionManager struct {
 	// after the manager, so the manager reads it at mission start. A mission
 	// pins the digest of each Agent Skill that it lists (gibson#1375).
 	skillStore func() agentskillstore.Store
+	// recorderFn returns the recorder that ties each mission to its tenant in
+	// the authorization store. The daemon sets it. A nil value, or a nil result,
+	// records nothing (a unit test manager).
+	recorderFn func() mission.TenantRecorder
 
 	// authzStore records the owning user per run so that HarnessCallbackService.Authorize
 	// can resolve run_id → (user_id, tenant_id) during component callbacks.
@@ -286,8 +290,16 @@ func (m *missionManager) missionStoreFor(ctx context.Context, tenant auth.Tenant
 		}
 		return nil, func() {}, fmt.Errorf("mission manager: acquire conn for tenant %s: %w", tenant, err)
 	}
-	store := mission.NewConnBoundMissionStore(conn.Redis)
+	store := newMissionStoreWith(conn.Redis, m.tenantRecorder(), tenant.String())
 	return store, func() { conn.Release() }, nil
+}
+
+// tenantRecorder returns the recorder of the manager, or nil.
+func (m *missionManager) tenantRecorder() mission.TenantRecorder {
+	if m.recorderFn == nil {
+		return nil
+	}
+	return m.recorderFn()
 }
 
 // runStoreFor acquires a per-tenant Conn from the pool and returns a
