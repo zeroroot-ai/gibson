@@ -90,7 +90,7 @@ func (v *Verifier) VerifyDaemonCall(ctx context.Context, token string) (DaemonCa
 		case errors.Is(err, jwt.ErrTokenSignatureInvalid):
 			return DaemonCall{}, fmt.Errorf("%w: %w", ErrSignature, err)
 		case errors.Is(err, ErrUnknownKey):
-			return DaemonCall{}, err
+			return DaemonCall{}, fmt.Errorf("verify the daemon call grant: %w", err)
 		}
 		return DaemonCall{}, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}

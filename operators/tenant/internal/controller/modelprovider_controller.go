@@ -96,7 +96,10 @@ func (r *ModelProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	var mp gibsonv1alpha1.ModelProvider
 	if err := r.Get(ctx, req.NamespacedName, &mp); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("get the model provider: %w", err)
 	}
 
 	if !mp.DeletionTimestamp.IsZero() {
@@ -367,7 +370,10 @@ func (r *ModelProviderReconciler) reconcileDelete(ctx context.Context, mp *gibso
 	patch := client.MergeFrom(mp.DeepCopy())
 	controllerutil.RemoveFinalizer(mp, gibsonv1alpha1.ModelProviderFinalizer)
 	if err := r.Patch(ctx, mp, patch); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("remove the finalizer: %w", err)
 	}
 	return ctrl.Result{}, nil
 }
@@ -427,8 +433,11 @@ func (r *ModelProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("modelprovider-controller")
 	}
-	return ctrl.NewControllerManagedBy(mgr).
+	if err := ctrl.NewControllerManagedBy(mgr).
 		For(&gibsonv1alpha1.ModelProvider{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("modelprovider").
-		Complete(r)
+		Complete(r); err != nil {
+		return fmt.Errorf("set up the model provider controller: %w", err)
+	}
+	return nil
 }

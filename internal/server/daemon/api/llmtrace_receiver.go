@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -260,7 +261,7 @@ var errDropped = errors.New("the span was dropped")
 func (r *TraceReceiver) deliver(ctx context.Context, attrs []*commonpb.KeyValue) error {
 	obs, err := llmtrace.FromSpan(llmtrace.Span{Attributes: spanAttributes(attrs)})
 	if errors.Is(err, llmtrace.ErrNotAModelCall) {
-		return err
+		return fmt.Errorf("read the span: %w", err)
 	}
 	// A call that the gateway refused before it had a tenant is counted by
 	// itself. It is neither a request that the daemon should store nor a drop.

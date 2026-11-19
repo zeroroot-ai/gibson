@@ -181,7 +181,7 @@ func (s *postgresStore) Publish(
 	}
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("agent skill store: acquire conn: %w", err)
 	}
 	defer c.Release()
 
@@ -231,7 +231,7 @@ func (s *postgresStore) Publish(
 func (s *postgresStore) List(ctx context.Context, tenant, name string, allVersions bool) ([]Entry, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("agent skill store: acquire conn: %w", err)
 	}
 	defer c.Release()
 
@@ -261,7 +261,7 @@ func (s *postgresStore) List(ctx context.Context, tenant, name string, allVersio
 func (s *postgresStore) Get(ctx context.Context, tenant, name, digest string) (*Entry, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("agent skill store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	return getEntry(ctx, c.SQL(), name, digest)
@@ -295,7 +295,7 @@ func (s *postgresStore) Resolve(ctx context.Context, tenant, missionID, name str
 	}
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("agent skill store: acquire conn: %w", err)
 	}
 	defer c.Release()
 
@@ -333,7 +333,7 @@ func (s *postgresStore) Load(ctx context.Context, tenant, name, digest string) (
 	}
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("agent skill store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	q := c.SQL()
@@ -378,7 +378,7 @@ func (s *postgresStore) ReadFile(ctx context.Context, tenant, name, digest, path
 	}
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("agent skill store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	q := c.SQL()
@@ -412,7 +412,7 @@ func readFile(ctx context.Context, q datapool.SQL, digest, path string) ([]byte,
 func (s *postgresStore) Delete(ctx context.Context, tenant, name string) (int64, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("agent skill store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	// The files and the pins cascade on the foreign key.

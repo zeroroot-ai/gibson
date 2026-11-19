@@ -80,7 +80,10 @@ func (r *OutsideAgentSyncRunnable) SetupWithManager(mgr manager.Manager) error {
 	if r.Client == nil {
 		r.Client = mgr.GetClient()
 	}
-	return mgr.Add(r)
+	if err := mgr.Add(r); err != nil {
+		return fmt.Errorf("add the outside agent sync: %w", err)
+	}
+	return nil
 }
 
 // Start runs the loop until the manager context ends.

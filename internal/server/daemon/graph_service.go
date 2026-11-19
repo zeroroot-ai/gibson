@@ -28,6 +28,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -134,7 +135,7 @@ func findingStoreError(err error) error {
 	var notProvisioned *datapool.NotProvisionedError
 	var evicted *datapool.EvictedError
 	if errors.As(err, &notProvisioned) || errors.As(err, &evicted) {
-		return datapool.MapPoolError(err)
+		return fmt.Errorf("graph service: %w", datapool.MapPoolError(err))
 	}
 	return status.Errorf(codes.Internal, "findings query failed: %v", err)
 }

@@ -108,7 +108,7 @@ func (s *Store) Find(ctx context.Context, tenantID string, q Query) ([]finding.E
 	}
 	c, err := s.conns.For(ctx, tenantID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("finding store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	return findPage(ctx, c.SQL(), where, args, q)
@@ -158,7 +158,7 @@ func (s *Store) FindWithEvidence(ctx context.Context, tenantID string, q Query) 
 	}
 	c, err := s.conns.For(ctx, tenantID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("finding store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	sql := c.SQL()
@@ -258,7 +258,7 @@ func (s *Store) CountBy(ctx context.Context, tenantID, by string, window time.Du
 	stmt += ` GROUP BY label ORDER BY count(*) DESC, label`
 	c, err := s.conns.For(ctx, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("finding store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	rows, err := c.SQL().Query(ctx, stmt, args...)
@@ -288,7 +288,7 @@ func (s *Store) CountBy(ctx context.Context, tenantID, by string, window time.Du
 func (s *Store) DailyCounts(ctx context.Context, tenantID string, days int) (map[string]uint64, error) {
 	c, err := s.conns.For(ctx, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("finding store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	rows, err := c.SQL().Query(ctx, `

@@ -171,7 +171,10 @@ func (b *brainExecutor) awaitMissionGate(ctx context.Context, eng *brain.Engine,
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, missionGateAwaitTimeout)
 	defer cancel()
-	return b.gate(eng.World.Tenant).AwaitOpen(waitCtx, req.MissionID)
+	if err := b.gate(eng.World.Tenant).AwaitOpen(waitCtx, req.MissionID); err != nil {
+		return fmt.Errorf("wait for the mission gate: %w", err)
+	}
+	return nil
 }
 
 // Dispatch (brain.Dispatcher) launches the work off the tick and reports back via

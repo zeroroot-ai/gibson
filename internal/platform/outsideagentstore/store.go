@@ -111,7 +111,7 @@ func (s *postgresStore) Register(ctx context.Context, tenant string, e Entry) (*
 	}
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("outside agent store: acquire conn: %w", err)
 	}
 	defer c.Release()
 
@@ -144,7 +144,7 @@ func (s *postgresStore) Register(ctx context.Context, tenant string, e Entry) (*
 func (s *postgresStore) List(ctx context.Context, tenant string) ([]Entry, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("outside agent store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	rows, err := c.SQL().Query(ctx, `SELECT `+columns+` FROM outside_agents ORDER BY name ASC`)
@@ -169,7 +169,7 @@ func (s *postgresStore) List(ctx context.Context, tenant string) ([]Entry, error
 func (s *postgresStore) Get(ctx context.Context, tenant, name string) (*Entry, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("outside agent store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	e, err := scanEntry(c.SQL().QueryRow(ctx, `SELECT `+columns+` FROM outside_agents WHERE name = $1`, name))
@@ -185,7 +185,7 @@ func (s *postgresStore) Get(ctx context.Context, tenant, name string) (*Entry, e
 func (s *postgresStore) Delete(ctx context.Context, tenant, name string) error {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return err
+		return fmt.Errorf("outside agent store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	n, err := c.SQL().Exec(ctx, `DELETE FROM outside_agents WHERE name = $1`, name)

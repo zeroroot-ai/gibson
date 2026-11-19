@@ -224,7 +224,7 @@ func (s *Store) Store(ctx context.Context, tenantID string, f finding.EnhancedFi
 	}
 	c, err := s.conns.For(ctx, tenantID)
 	if err != nil {
-		return err
+		return fmt.Errorf("finding store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	err = c.InTx(ctx, func(tx datapool.SQL) error {
@@ -258,7 +258,7 @@ func (s *Store) Get(ctx context.Context, tenantID string, id types.ID) (*finding
 	}
 	c, err := s.conns.For(ctx, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("finding store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	var doc []byte
@@ -282,7 +282,7 @@ func (s *Store) GetWithEvidence(ctx context.Context, tenantID string, id types.I
 	}
 	c, err := s.conns.For(ctx, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("finding store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	sql := c.SQL()
@@ -365,7 +365,7 @@ func (s *Store) ListBySeverity(
 func (s *Store) query(ctx context.Context, tenantID, sql string, args ...any) ([]finding.EnhancedFinding, error) {
 	c, err := s.conns.For(ctx, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("finding store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	rows, err := c.SQL().Query(ctx, sql, args...)

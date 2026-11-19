@@ -5,6 +5,7 @@ package agentskill
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -22,7 +23,10 @@ func get(t *testing.T, p *Puller, url string) error {
 	if err == nil {
 		_ = resp.Body.Close()
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("send the request: %w", err)
+	}
+	return nil
 }
 
 // The tenant Puller refuses each address class after name resolution. The hosts

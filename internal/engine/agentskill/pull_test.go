@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -55,7 +56,11 @@ func testPuller() *agentskill.Puller {
 
 func pull(t *testing.T, ref string) (*agentskill.Pulled, error) {
 	t.Helper()
-	return testPuller().Pull(context.Background(), ref, "web-recon", authn.DefaultKeychain)
+	pulled, err := testPuller().Pull(context.Background(), ref, "web-recon", authn.DefaultKeychain)
+	if err != nil {
+		return nil, fmt.Errorf("pull %s: %w", ref, err)
+	}
+	return pulled, nil
 }
 
 func rawImage(t *testing.T, cfg, layer types.MediaType, tarBytes []byte, layers int) v1.Image {

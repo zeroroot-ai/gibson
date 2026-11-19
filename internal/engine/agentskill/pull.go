@@ -73,7 +73,11 @@ func (h httpsOnly) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL.Scheme != "https" {
 		return nil, fmt.Errorf("agentskill: refusing a %q request to %s: HTTPS only", req.URL.Scheme, req.URL.Host)
 	}
-	return h.inner.RoundTrip(req)
+	resp, err := h.inner.RoundTrip(req)
+	if err != nil {
+		return nil, fmt.Errorf("agentskill: round trip to %s: %w", req.URL.Host, err)
+	}
+	return resp, nil
 }
 
 // Pull reads the image that reference names, and validates the folder in it.

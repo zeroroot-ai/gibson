@@ -69,7 +69,7 @@ func (c combinedLister) ListTools(ctx context.Context, tenant string) ([]ToolEnt
 	for _, l := range c {
 		entries, err := l.ListTools(ctx, tenant)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("catalog: list tools: %w", err)
 		}
 		out = append(out, entries...)
 	}
@@ -185,7 +185,11 @@ func idFor(en ToolEntry) (toolid.ID, error) {
 	case toolid.SourceNative:
 		return toolid.ForNative(en.Tool)
 	case toolid.SourceSkill:
-		return toolid.ForSkill(en.Tool)
+		id, err := toolid.ForSkill(en.Tool)
+		if err != nil {
+			return toolid.ID{}, fmt.Errorf("catalog: skill id: %w", err)
+		}
+		return id, nil
 	default:
 		return toolid.ID{}, fmt.Errorf("catalog: unknown source %q", en.Source)
 	}

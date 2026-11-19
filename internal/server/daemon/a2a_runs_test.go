@@ -13,6 +13,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +65,11 @@ func (h headerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	set("x-gibson-task", h.call.task)
 	set("x-gibson-route-agent", h.call.agent)
 	set("x-gibson-route-bank", h.call.bank)
-	return h.next.RoundTrip(r)
+	resp, err := h.next.RoundTrip(r)
+	if err != nil {
+		return nil, fmt.Errorf("round trip: %w", err)
+	}
+	return resp, nil
 }
 
 // a2aEnv is a World, a brain executor with one live mission, the runs and the

@@ -78,5 +78,9 @@ func (r daemonSecretReader) Resolve(ctx context.Context, name string) ([]byte, e
 	if r.d.secretsService == nil {
 		return nil, errors.New("the secrets broker is not ready")
 	}
-	return r.d.secretsService.Resolve(ctx, name)
+	value, err := r.d.secretsService.Resolve(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("resolve the secret: %w", err)
+	}
+	return value, nil
 }

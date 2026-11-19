@@ -99,7 +99,7 @@ func ValidateOutsideAgentURL(ctx context.Context, r netguard.Resolver, raw strin
 		return nil, errors.New("the URL must not hold a query or a fragment")
 	}
 	if err := netguard.CheckHost(ctx, r, u.Hostname(), outsideAgentAddressHint); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("the URL host is refused: %w", err)
 	}
 	return u, nil
 }

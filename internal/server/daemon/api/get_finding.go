@@ -11,6 +11,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -53,7 +54,7 @@ func (s *DaemonServer) GetFinding(ctx context.Context, req *tenantv1.GetFindingR
 		case errors.Is(err, finding.ErrNotFound):
 			return nil, status_grpc.Error(codes.NotFound, "GetFinding: no such finding")
 		case errors.As(err, &notProvisioned), errors.As(err, &evicted):
-			return nil, datapool.MapPoolError(err)
+			return nil, fmt.Errorf("get finding: %w", datapool.MapPoolError(err))
 		}
 		return nil, status_grpc.Errorf(codes.Internal, "GetFinding: %v", err)
 	}

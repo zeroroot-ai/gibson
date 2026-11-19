@@ -91,7 +91,7 @@ func (s *DaemonServer) ExportFindings(ctx context.Context, req *tenantv1.ExportF
 			var notProvisioned *datapool.NotProvisionedError
 			var evicted *datapool.EvictedError
 			if errors.As(err, &notProvisioned) || errors.As(err, &evicted) {
-				return nil, datapool.MapPoolError(err)
+				return nil, fmt.Errorf("export findings: %w", datapool.MapPoolError(err))
 			}
 			return nil, status_grpc.Errorf(codes.Internal, "ExportFindings: findings query failed: %v", err)
 		}
