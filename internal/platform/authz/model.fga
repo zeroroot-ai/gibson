@@ -604,6 +604,30 @@ type outside_agent
     define can_call: granted_mission
     define can_manage: admin from owner
 
+# published_mission — a mission definition that a tenant published for inbound
+# A2A calls (epic gibson#1367, gibson#1408).
+#
+# The object is tenant-qualified and keyed by the agent name that the outside
+# client addresses: "published_mission:<tenant>/<agent>"
+# (authz.PublishedMissionObject). The owner tuple is the mark "published for
+# inbound". ext-authz reads the can_originate relation of the caller on it.
+#
+# NO DEFAULT GRANT. The type admits no tenant#member and no user on a call
+# relation. A tenant admin grants one enrolled agent identity (the kind agent,
+# made with CreateAgentIdentity) the right to use ONE published definition:
+#
+#   tenant:acme                    | owner          | published_mission:acme/recon
+#   agent_principal:agent-abc-123  | granted_caller | published_mission:acme/recon
+#
+# The Capability Grant ceiling mission:originate is a second, separate
+# condition. ext-authz checks it with this relation.
+type published_mission
+  relations
+    define owner: [tenant]
+    define granted_caller: [agent_principal]
+    define can_originate: granted_caller
+    define can_manage: admin from owner
+
 # ----------------------------------------------------------------------
 # Conditions — OpenFGA CEL predicates for contextual tuple evaluation.
 # Added for instant-session-revocation (gibson#627).

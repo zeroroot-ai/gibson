@@ -1714,6 +1714,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if err := d.registerOutsideAgent(ctx, srv, pageKeys); err != nil {
 		return nil, err
 	}
+	if err := d.registerInboundMission(ctx, srv, pageKeys); err != nil {
+		return nil, err
+	}
 	// The tenant operator pulls the outside agent records and their credential
 	// through the two operator RPCs (gibson#1403).
 	daemonSvc.WithOutsideAgentOperatorSource(d.outsideAgents)

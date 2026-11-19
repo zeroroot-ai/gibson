@@ -176,6 +176,25 @@ func OutsideAgentObject(tenant, name string) (string, error) {
 	return "outside_agent:" + tenant + TenantQualifiedSep + name, nil
 }
 
+// ErrInvalidPublishedMissionObject marks an agent name, or a tenant, that cannot
+// form a published mission object.
+var ErrInvalidPublishedMissionObject = errors.New("invalid published mission object")
+
+// PublishedMissionObject returns the FGA object of one mission definition that a
+// tenant published for inbound A2A calls: "published_mission:<tenant>/<agent>".
+// The tenant segment MUST come from the authenticated context or from the
+// verified key descriptor of the caller, never from a request body. The agent
+// segment is the name that the caller addresses.
+func PublishedMissionObject(tenant, agent string) (string, error) {
+	if err := validateTeamSegment("tenant", tenant); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidPublishedMissionObject, err)
+	}
+	if err := validateTeamSegment("agent", agent); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidPublishedMissionObject, err)
+	}
+	return "published_mission:" + tenant + TenantQualifiedSep + agent, nil
+}
+
 // ModelObject is the model counterpart of ProviderObject.
 func ModelObject(tenant, name string) (string, error) {
 	return modelAccessObject("model", tenant, name)

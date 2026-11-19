@@ -49,6 +49,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto/providers"
+	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
@@ -474,6 +475,9 @@ type daemonImpl struct {
 	agentSkills agentskillstore.Store
 	// outsideAgents is the outside agent store. registerOutsideAgent sets it.
 	outsideAgents outsideagentstore.Store
+	// inboundMissions is the store of the mission definitions published for inbound
+	// A2A calls. registerInboundMission sets it.
+	inboundMissions inboundmissionstore.Store
 	// sharedAgentSkills is the operator source of Agent Skills. registerAgentSkill
 	// sets it.
 	sharedAgentSkills *SharedAgentSkills

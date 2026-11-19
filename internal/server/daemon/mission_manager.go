@@ -790,9 +790,24 @@ func (m *missionManager) startRun(
 // loadRunDefinition loads a mission definition by friendly name, falling back
 // to an ID-based lookup across all definitions (the caller may supply either).
 func (m *missionManager) loadRunDefinition(ctx context.Context, defStore mission.MissionStore, missionDefinitionID string) (*missionpb.MissionDefinition, error) {
-	def, err := defStore.GetDefinition(ctx, missionDefinitionID)
+	def, err := findMissionDefinition(ctx, defStore, missionDefinitionID)
 	if err != nil {
 		m.logger.Error("failed to load mission definition", "error", err, "mission_definition_id", missionDefinitionID)
+		return nil, err
+	}
+	return def, nil
+}
+
+// errMissionDefinitionNotFound marks a definition that the tenant does not have.
+var errMissionDefinitionNotFound = errors.New("mission definition not found")
+
+// findMissionDefinition loads a mission definition by friendly name, falling
+// back to an ID-based lookup across all definitions. Mission start and the
+// publish of a definition for inbound calls use it, so both find a definition
+// the same way.
+func findMissionDefinition(ctx context.Context, defStore mission.MissionStore, missionDefinitionID string) (*missionpb.MissionDefinition, error) {
+	def, err := defStore.GetDefinition(ctx, missionDefinitionID)
+	if err != nil {
 		return nil, fmt.Errorf("failed to load mission definition %s: %w", missionDefinitionID, err)
 	}
 	if def == nil {
@@ -807,7 +822,7 @@ func (m *missionManager) loadRunDefinition(ctx context.Context, defStore mission
 			}
 		}
 		if def == nil {
-			return nil, fmt.Errorf("mission definition not found: %s", missionDefinitionID)
+			return nil, fmt.Errorf("%w: %s", errMissionDefinitionNotFound, missionDefinitionID)
 		}
 	}
 	return def, nil
