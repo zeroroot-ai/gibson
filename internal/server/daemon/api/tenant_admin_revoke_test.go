@@ -231,6 +231,12 @@ func TestServiceAccountInTenantScope(t *testing.T) {
 type fakePrincipalRevoker struct {
 	calls []string
 	err   error
+	// revokedRows is whether the tenant has revoked rows of the principal.
+	revokedRows bool
+}
+
+func (f *fakePrincipalRevoker) PrincipalRevokedInTenant(context.Context, string, string) (bool, error) {
+	return f.revokedRows, nil
 }
 
 func (f *fakePrincipalRevoker) RevokePrincipal(_ context.Context, tenantID, principalRef string) error {
@@ -367,4 +373,30 @@ func TestRevokeAgentIdentity_AFailedFGACleanupIsUnavailable(t *testing.T) {
 			assert.Contains(t, status.Convert(err).Message(), "access is blocked")
 		})
 	}
+}
+
+// A retry of a revoke can find the IdP account gone and the belongs_to tuple gone. The
+// revoked rows of the principal in the tenant prove that it was the tenant's, so the
+// retry finishes the cleanup of the other tuples. A principal with no such rows is
+// still not found.
+func TestRevokeAgentIdentity_ARetryFinishesTheCleanupFromTheRevokedRows(t *testing.T) {
+	grant := authz.Tuple{User: "agent_principal:gone-id", Relation: "granted_caller", Object: "published_mission:acme/recon"}
+	setup := func(rows bool) (*DaemonServer, *fakeAuthorizer) {
+		az := newFakeAuthorizer() // no belongs_to tuple
+		az.stored = []authz.Tuple{grant}
+		fakeidp := &fakeIDPClient{deleteFn: func(context.Context, string) error { return idp.ErrNotFound }}
+		return newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az).
+			WithPrincipalRevoker(&fakePrincipalRevoker{revokedRows: rows}), az
+	}
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
+
+	srv, az := setup(true)
+	_, err := srv.RevokeAgentIdentity(ctx, &tenantpb.RevokeAgentIdentityRequest{PrincipalId: "agent_principal:gone-id"})
+	require.NoError(t, err)
+	assert.Contains(t, az.deleted, grant, "the inbound grant is cleaned from the revoked rows")
+
+	srv, az = setup(false)
+	_, err = srv.RevokeAgentIdentity(ctx, &tenantpb.RevokeAgentIdentityRequest{PrincipalId: "agent_principal:gone-id"})
+	assert.Equal(t, codes.NotFound, status.Code(err), "no revoked rows, so no proof of the tenant")
+	assert.Empty(t, az.deleted)
 }

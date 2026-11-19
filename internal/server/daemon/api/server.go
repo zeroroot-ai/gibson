@@ -466,6 +466,10 @@ type missionDraftStoreIface interface {
 // implementation.
 type PrincipalRevoker interface {
 	RevokePrincipal(ctx context.Context, tenantID, principalRef string) error
+	// PrincipalRevokedInTenant reports whether the tenant has revoked rows of the
+	// principal. A revoked row proves that the principal belonged to the tenant, so a
+	// retry of a revoke can finish its cleanup when no other record is left.
+	PrincipalRevokedInTenant(ctx context.Context, tenantID, principalRef string) (bool, error)
 }
 
 // WithPrincipalRevoker sets the revoker of the Capability Grant rows of a

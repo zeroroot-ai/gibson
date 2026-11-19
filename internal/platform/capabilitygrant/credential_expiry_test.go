@@ -245,3 +245,20 @@ func TestStore_EveryTenantFacingStatementNamesTheTenant(t *testing.T) {
 		})
 	}
 }
+
+func TestPrincipalRevokedInTenant(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("capability_grant_agents WHERE tenant_id = \\$1 AND principal_ref = \\$2 AND status = 'revoked'").
+		WithArgs("acme", "agent_principal:acct-1").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	revoked, err := m.svc.PrincipalRevokedInTenant(context.Background(), "acme", "agent_principal:acct-1")
+	require.NoError(t, err)
+	assert.True(t, revoked)
+
+	_, err = m.svc.PrincipalRevokedInTenant(context.Background(), "", "agent_principal:acct-1")
+	require.Error(t, err, "the tenant is required")
+
+	m.mock.ExpectQuery("capability_grant_agents").WillReturnError(errors.New("db down"))
+	_, err = m.svc.PrincipalRevokedInTenant(context.Background(), "acme", "agent_principal:acct-1")
+	require.ErrorContains(t, err, "db down")
+}

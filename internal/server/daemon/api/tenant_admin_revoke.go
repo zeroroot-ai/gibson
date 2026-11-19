@@ -85,7 +85,21 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 		// gibson#606).
 		orphan, lerr := s.serviceAccountInTenantScope(ctx, tenantID, fgaType, accountID)
 		if lerr != nil || !orphan {
-			return nil, status_grpc.Error(codes.NotFound, "principal not found")
+			// A retry of a revoke can find the IdP account gone and the belongs_to
+			// tuple gone. The revoked rows of the principal in this tenant prove that
+			// it was the tenant's, so the cleanup of the other tuples can go on.
+			revoked := false
+			if s.principalRevoker != nil {
+				var rerr error
+				revoked, rerr = s.principalRevoker.PrincipalRevokedInTenant(ctx, tenantID, req.PrincipalId)
+				if rerr != nil {
+					s.logger.WarnContext(ctx, "RevokeAgentIdentity: could not read the revoked rows",
+						slog.String("tenant_id", tenantID), slog.String("error", rerr.Error()))
+				}
+			}
+			if !revoked {
+				return nil, status_grpc.Error(codes.NotFound, "principal not found")
+			}
 		}
 		s.logger.WarnContext(ctx, "RevokeAgentIdentity: principal has no belongs_to tuple; revoking orphaned IdP account",
 			slog.String("tenant_id", tenantID),

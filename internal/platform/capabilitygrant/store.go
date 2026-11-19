@@ -884,6 +884,22 @@ func (s *CapabilityGrantStore) ReassignOwner(ctx context.Context, tenantID, prin
 	return total, nil
 }
 
+// PrincipalRevokedInTenant reports whether the tenant has a revoked agent row of the
+// principal. The row proves that the principal belonged to the tenant.
+func (s *CapabilityGrantStore) PrincipalRevokedInTenant(ctx context.Context, tenantID, principalRef string) (bool, error) {
+	if tenantID == "" || principalRef == "" {
+		return false, errors.New("capabilitygrant: PrincipalRevokedInTenant: tenant and principal are required")
+	}
+	var revoked bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM capability_grant_agents WHERE tenant_id = $1 AND principal_ref = $2 AND status = 'revoked')`,
+		tenantID, principalRef).Scan(&revoked)
+	if err != nil {
+		return false, fmt.Errorf("capabilitygrant: PrincipalRevokedInTenant %q: %w", principalRef, err)
+	}
+	return revoked, nil
+}
+
 // RevokePrincipal sets each grant, each agent row and each host row of the
 // principal in the tenant to revoked, in one transaction. It returns the number
 // of rows that changed. A principal with no row changes nothing, and a second call

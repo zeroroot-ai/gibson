@@ -585,6 +585,15 @@ func (s *CapabilityGrantService) RevokePrincipal(ctx context.Context, tenantID, 
 	return nil
 }
 
+// PrincipalRevokedInTenant reports whether the tenant has revoked rows of the principal.
+func (s *CapabilityGrantService) PrincipalRevokedInTenant(ctx context.Context, tenantID, principalRef string) (bool, error) {
+	revoked, err := s.store.PrincipalRevokedInTenant(ctx, tenantID, principalRef)
+	if err != nil {
+		return false, fmt.Errorf("capabilitygrant: principal revoked in tenant: %w", err)
+	}
+	return revoked, nil
+}
+
 // ActiveCapabilityNames returns the names of the active grants of the principal.
 // An identity that has not enrolled has none.
 func (s *CapabilityGrantService) ActiveCapabilityNames(ctx context.Context, tenantID, principalRef string) ([]string, error) {
