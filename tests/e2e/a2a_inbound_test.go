@@ -205,8 +205,59 @@ type rpcResult struct {
 		} `json:"task"`
 	} `json:"result"`
 	Error *struct {
+		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+// The JSON-RPC error codes that the inbound endpoint answers.
+const (
+	codeTaskNotFound     = -32001
+	codePermissionDenied = -31403
+	rejectedState        = "TASK_STATE_REJECTED"
+	notAvailableText     = "the agent is not available for inbound calls"
+)
+
+// requireError checks that the answer is HTTP 200 with the JSON-RPC error code.
+func requireError(t *testing.T, status int, body []byte, code int, why string) {
+	t.Helper()
+	require.Equal(t, http.StatusOK, status, "%s: %s", why, body)
+	r := decodeRPC(t, body)
+	require.NotNil(t, r.Error, "%s: %s", why, body)
+	require.Equal(t, code, r.Error.Code, "%s: %s", why, body)
+}
+
+// requireRejected checks that the answer is HTTP 200 with a rejected Task that holds
+// the generic text. A caller with no grant and an agent that is not published get this.
+func requireRejected(t *testing.T, status int, body []byte, why string) {
+	t.Helper()
+	require.Equal(t, http.StatusOK, status, "%s: %s", why, body)
+	r := decodeRPC(t, body)
+	require.Nil(t, r.Error, "%s: %s", why, body)
+	require.NotNil(t, r.Result.Task, "%s: %s", why, body)
+	require.Equal(t, rejectedState, r.Result.Task.Status.State, "%s: %s", why, body)
+	require.Contains(t, string(body), notAvailableText, "%s: %s", why, body)
+}
+
+// decodeTaskRPC decodes the answer of GetTask or CancelTask. The handler puts the
+// Task directly in "result". Only SendMessage wraps it as {"task": ...}, so
+// decodeRPC reads SendMessage answers and this reads the others. The Task goes to
+// Result.Task, so the callers read both the same way.
+func decodeTaskRPC(t *testing.T, body []byte) rpcResult {
+	t.Helper()
+	var raw struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(body, &raw), "decode the JSON-RPC answer: %s", body)
+	r := rpcResult{Error: raw.Error}
+	if len(raw.Result) > 0 && string(raw.Result) != "null" {
+		require.NoError(t, json.Unmarshal(raw.Result, &r.Result.Task), "decode the Task: %s", body)
+	}
+	return r
 }
 
 func decodeRPC(t *testing.T, body []byte) rpcResult {
@@ -270,7 +321,7 @@ func (f *inboundFixture) waitState(t *testing.T, c *inboundClient, id, want stri
 		if status != http.StatusOK {
 			return false, fmt.Sprintf("HTTP %d: %s", status, body)
 		}
-		last = decodeRPC(t, body)
+		last = decodeTaskRPC(t, body)
 		if last.Result.Task == nil {
 			return false, string(body)
 		}
@@ -377,7 +428,7 @@ func TestA2AInbound(t *testing.T) {
 	t.Run("a client with no token gets no card", func(t *testing.T) {
 		anonymous := &inboundClient{edge: f.edge}
 		status, body := anonymous.call(ctx, t, http.MethodGet, cardPath, nil, nil)
-		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "body: %s", body)
+		require.Equal(t, http.StatusUnauthorized, status, "body: %s", body)
 		require.NotContains(t, string(body), inboundAgent, "no card text reaches a client with no token")
 	})
 
@@ -456,7 +507,7 @@ func TestA2AInbound(t *testing.T) {
 
 	t.Run("an agent with no published definition is refused", func(t *testing.T) {
 		status, body := caller.rpc(ctx, t, inboundUnpublished, "SendMessage", sendParams("scan"), nil)
-		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "body: %s", body)
+		requireRejected(t, status, body, "an agent that is not published")
 	})
 
 	t.Run("a Task cancel ends the mission and only the mission of the caller", func(t *testing.T) {
@@ -474,25 +525,27 @@ func TestA2AInbound(t *testing.T) {
 			status, body = other.rpc(ctx, t, inboundAgent, "CancelTask", `{"id":"`+id+`"}`, nil)
 			return status == http.StatusOK, fmt.Sprintf("HTTP %d: %s", status, body)
 		})
-		require.NotNil(t, decodeRPC(t, body).Error, "another caller cannot cancel the mission: %s", body)
+		requireError(t, status, body, codeTaskNotFound, "another caller cannot cancel the mission")
 		f.waitState(t, caller, id, "TASK_STATE_WORKING")
 
 		status, body = caller.rpc(ctx, t, inboundAgent, "CancelTask", `{"id":"`+id+`"}`, nil)
 		require.Equal(t, http.StatusOK, status, "CancelTask: %s", body)
-		require.Equal(t, "TASK_STATE_CANCELED", decodeRPC(t, body).Result.Task.Status.State)
+		require.Equal(t, "TASK_STATE_CANCELED", decodeTaskRPC(t, body).Result.Task.Status.State)
 		f.waitState(t, caller, id, "TASK_STATE_CANCELED")
 		work.Complete()
 	})
 
-	t.Run("a caller with no grant to the definition is refused", func(t *testing.T) {
-		helpers.Eventually(t, time.Minute, "ext-authz refuses the caller with no grant", func() (bool, string) {
+	t.Run("a caller with no grant to the definition gets a rejected Task and no card", func(t *testing.T) {
+		// The answer is the one of an agent that is not published: HTTP 404 for the
+		// card, and a rejected Task with the same text for a message.
+		helpers.Eventually(t, time.Minute, "the daemon answers the caller with no grant", func() (bool, string) {
 			status, body := noGrant.call(ctx, t, http.MethodGet, cardPath, nil, nil)
-			return status == http.StatusForbidden, fmt.Sprintf("HTTP %d: %s", status, body)
+			return status == http.StatusNotFound, fmt.Sprintf("HTTP %d: %s", status, body)
 		})
-		// The daemon decides the grant of a start, so the answer is a JSON-RPC error.
-		status, body := noGrant.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"), nil)
-		require.Equal(t, http.StatusOK, status, "body: %s", body)
-		require.NotNil(t, decodeRPC(t, body).Error, "a caller with no grant starts no mission: %s", body)
+		status, body := noGrant.call(ctx, t, http.MethodGet, "/a2a/inbound/"+inboundUnpublished+"/.well-known/agent-card.json", nil, nil)
+		require.Equal(t, http.StatusNotFound, status, "the card of an agent that is not published: %s", body)
+		status, body = noGrant.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"), nil)
+		requireRejected(t, status, body, "a caller with no grant starts no mission")
 	})
 
 	t.Run("after its grant is revoked a caller keeps the read and nothing else", func(t *testing.T) {
@@ -517,14 +570,14 @@ func TestA2AInbound(t *testing.T) {
 
 		status, body := keeper.rpc(ctx, t, inboundAgent, "GetTask", `{"id":"`+id+`"}`, nil)
 		require.Equal(t, http.StatusOK, status, "body: %s", body)
-		require.Equal(t, "TASK_STATE_COMPLETED", decodeRPC(t, body).Result.Task.Status.State, "the read stays")
-		_, body = keeper.rpc(ctx, t, inboundAgent, "CancelTask", `{"id":"`+id+`"}`, nil)
-		require.NotNil(t, decodeRPC(t, body).Error, "the cancel needs the live grant: %s", body)
-		_, body = keeper.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"), nil)
-		require.NotNil(t, decodeRPC(t, body).Error, "a new start is refused: %s", body)
+		require.Equal(t, "TASK_STATE_COMPLETED", decodeTaskRPC(t, body).Result.Task.Status.State, "the read stays")
+		status, body = keeper.rpc(ctx, t, inboundAgent, "CancelTask", `{"id":"`+id+`"}`, nil)
+		requireError(t, status, body, codePermissionDenied, "the cancel needs the live grant")
+		status, body = keeper.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"), nil)
+		requireRejected(t, status, body, "a new start is refused")
 		// The read of a task of another caller is not found.
-		_, body = keeper.rpc(ctx, t, inboundAgent, "GetTask", `{"id":"`+doneTask+`"}`, nil)
-		require.NotNil(t, decodeRPC(t, body).Error, "the task of another caller is not found: %s", body)
+		status, body = keeper.rpc(ctx, t, inboundAgent, "GetTask", `{"id":"`+doneTask+`"}`, nil)
+		requireError(t, status, body, codeTaskNotFound, "the task of another caller is not found")
 	})
 
 	t.Run("a caller with no ceiling is refused", func(t *testing.T) {
@@ -548,10 +601,10 @@ func TestA2AInbound(t *testing.T) {
 		// comes at the next call. The wait covers the revoke itself.
 		helpers.Eventually(t, time.Minute, "ext-authz refuses the revoked identity", func() (bool, string) {
 			status, body := revoked.call(ctx, t, http.MethodGet, cardPath, nil, nil)
-			return status == http.StatusUnauthorized || status == http.StatusForbidden, fmt.Sprintf("HTTP %d: %s", status, body)
+			return status == http.StatusUnauthorized, fmt.Sprintf("HTTP %d: %s", status, body)
 		})
 		status, body := revoked.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"), nil)
-		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "body: %s", body)
+		require.Equal(t, http.StatusUnauthorized, status, "body: %s", body)
 	})
 
 	t.Run("a call with a Zitadel token and no Capability Grant is refused", func(t *testing.T) {
@@ -560,9 +613,9 @@ func TestA2AInbound(t *testing.T) {
 		// whatever the token, because the inbound route accepts the grant only.
 		status, body := anonymous.call(ctx, t, http.MethodGet, cardPath, nil,
 			map[string]string{"Authorization": "Bearer " + strings.Repeat("a", 40)})
-		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "body: %s", body)
+		require.Equal(t, http.StatusUnauthorized, status, "body: %s", body)
 		status, body = anonymous.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"),
 			map[string]string{"Authorization": "Bearer " + strings.Repeat("a", 40)})
-		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "body: %s", body)
+		require.Equal(t, http.StatusUnauthorized, status, "body: %s", body)
 	})
 }
