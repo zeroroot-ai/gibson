@@ -81,10 +81,18 @@ type InboundRuns interface {
 	// under the agent name, and it returns the Task of the mission. A message that
 	// the policy refuses gets a Task in the state rejected, and no mission starts.
 	Start(ctx context.Context, req InboundStart) (*a2a.Task, error)
+	// Task returns the Task of a mission that the caller started. The Task state
+	// is the mission state. A finished mission has the findings of that mission in
+	// its result. A mission of another caller is not found.
+	Task(ctx context.Context, caller InboundCaller, id a2a.TaskID) (*a2a.Task, error)
+	// Cancel ends a mission that the caller started, and it returns its Task. It
+	// never ends the mission of another caller. A mission in a final state cannot
+	// be canceled (ErrNotCancelable).
+	Cancel(ctx context.Context, caller InboundCaller, id a2a.TaskID) (*a2a.Task, error)
 }
 
 // inboundRPC is the a2asrv.RequestHandler of the inbound listener. It serves
-// SendMessage. Every other method is not supported.
+// SendMessage, GetTask and CancelTask. Every other method is not supported.
 type inboundRPC struct {
 	UnsupportedMethods
 	runs InboundRuns
@@ -100,6 +108,13 @@ func (h *inboundRPC) callOf(ctx context.Context) (InboundCaller, string, error) 
 	return c, agent, nil
 }
 
+// ErrApprovalAnswer reports a message that names a Task. A message to a Task is
+// how an A2A client answers a request for input. An inbound caller can never
+// answer an approval. The Task shows input-required, and a person in the tenant
+// decides in the dashboard.
+var ErrApprovalAnswer = fmt.Errorf("%w: a message to a task cannot answer an approval, "+
+	"a person in the tenant decides in the dashboard", ErrRefused)
+
 // SendMessage starts a mission for the published agent in the path.
 func (h *inboundRPC) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
 	c, agent, err := h.callOf(ctx)
@@ -109,6 +124,9 @@ func (h *inboundRPC) SendMessage(ctx context.Context, req *a2a.SendMessageReques
 	if req == nil || req.Message == nil || len(req.Message.Parts) == 0 {
 		return nil, fmt.Errorf("%w: the request holds no message", a2a.ErrInvalidParams)
 	}
+	if req.Message.TaskID != "" {
+		return nil, MapError(ErrApprovalAnswer)
+	}
 	task, err := h.runs.Start(ctx, InboundStart{Caller: c, Agent: agent, Message: req.Message})
 	if err != nil {
 		return nil, MapError(err)
@@ -116,14 +134,36 @@ func (h *inboundRPC) SendMessage(ctx context.Context, req *a2a.SendMessageReques
 	return task, nil
 }
 
-// GetTask is not served yet.
-func (h *inboundRPC) GetTask(context.Context, *a2a.GetTaskRequest) (*a2a.Task, error) {
-	return nil, a2a.ErrUnsupportedOperation
+// GetTask returns the Task of a mission that the caller started.
+func (h *inboundRPC) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Task, error) {
+	c, _, err := h.callOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req == nil || req.ID == "" {
+		return nil, fmt.Errorf("%w: the request names no task", a2a.ErrInvalidParams)
+	}
+	t, err := h.runs.Task(ctx, c, req.ID)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	return t, nil
 }
 
-// CancelTask is not served yet.
-func (h *inboundRPC) CancelTask(context.Context, *a2a.CancelTaskRequest) (*a2a.Task, error) {
-	return nil, a2a.ErrUnsupportedOperation
+// CancelTask ends a mission that the caller started.
+func (h *inboundRPC) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*a2a.Task, error) {
+	c, _, err := h.callOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req == nil || req.ID == "" {
+		return nil, fmt.Errorf("%w: the request names no task", a2a.ErrInvalidParams)
+	}
+	t, err := h.runs.Cancel(ctx, c, req.ID)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	return t, nil
 }
 
 // NewInboundHandler returns the HTTP handler of the inbound listener. The JSON-RPC

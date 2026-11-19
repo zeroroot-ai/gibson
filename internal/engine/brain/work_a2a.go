@@ -51,3 +51,26 @@ func TaskStateFromWork(s WorkState) a2a.TaskState {
 	}
 	return a2a.TaskStateFailed
 }
+
+// TaskStateFromMission maps the state of a mission to the A2A Task state that an
+// inbound caller reads (ADR-0175). The names of the mission states are the names
+// of the A2A Task states, so the Task state is the mission state. One state has
+// no A2A name: a paused mission shows as working, because the mission is not
+// finished and a caller can do nothing about the pause.
+func TaskStateFromMission(s MissionStatus) a2a.TaskState {
+	switch s {
+	case MissionSubmitted:
+		return a2a.TaskStateSubmitted
+	case MissionWorking, MissionPaused:
+		return a2a.TaskStateWorking
+	case MissionInputRequired:
+		return a2a.TaskStateInputRequired
+	case MissionCompleted:
+		return a2a.TaskStateCompleted
+	case MissionCanceled:
+		return a2a.TaskStateCanceled
+	case MissionFailed:
+		// A failed mission reports the failed state.
+	}
+	return a2a.TaskStateFailed
+}

@@ -9,10 +9,16 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/google/uuid"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"github.com/zeroroot-ai/gibson/internal/server/a2aserver"
@@ -38,6 +44,61 @@ type missionStarter interface {
 type inboundRuns struct {
 	published inboundmissionstore.Store
 	starter   missionStarter
+	registry  *brain.Registry
+	findings  missionFindingReader
+	// stop ends a running mission of the tenant on the context.
+	stop func(ctx context.Context, missionID string) error
+
+	mu      sync.Mutex
+	pending map[string]inboundPending
+}
+
+// inboundPendingTTL is how long a started mission may be missing from the World.
+// The World folds the start of a mission on its next tick, so a mission is
+// missing for a moment only.
+const inboundPendingTTL = time.Minute
+
+// inboundPending is a mission that the daemon started and the World has not
+// folded. It keeps the owner, so the caller can read its own Task at once.
+type inboundPending struct {
+	tenant, owner string
+	at            time.Time
+}
+
+// missionFindingReader reads the findings of one mission with all of their
+// evidence, in the one read function that the Finding evidence epic added.
+type missionFindingReader interface {
+	MissionFindings(ctx context.Context, tenant string, missionID types.ID) ([]finding.EnhancedFinding, error)
+}
+
+// findingPager is the part of pgstore.Store that reads a page of findings with
+// their evidence.
+type findingPager interface {
+	FindWithEvidence(ctx context.Context, tenantID string, q pgstore.Query) ([]finding.EnhancedFinding, int, error)
+}
+
+// pgMissionFindings reads every finding of one mission through
+// pgstore.Store.FindWithEvidence. It reads page after page, so no finding is
+// left out.
+type pgMissionFindings struct{ store findingPager }
+
+var _ missionFindingReader = pgMissionFindings{}
+
+func (p pgMissionFindings) MissionFindings(
+	ctx context.Context, tenant string, missionID types.ID,
+) ([]finding.EnhancedFinding, error) {
+	var all []finding.EnhancedFinding
+	for {
+		page, total, err := p.store.FindWithEvidence(ctx, tenant,
+			pgstore.Query{MissionID: missionID, Limit: pgstore.MaxPageSize, Offset: len(all)})
+		if err != nil {
+			return nil, fmt.Errorf("read the findings of mission %s: %w", missionID, err)
+		}
+		all = append(all, page...)
+		if len(page) == 0 || len(all) >= total {
+			return all, nil
+		}
+	}
 }
 
 var _ a2aserver.InboundRuns = (*inboundRuns)(nil)
@@ -87,10 +148,141 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	if err != nil {
 		return nil, err
 	}
+	r.remember(missionID, c)
 	return &a2a.Task{
 		ID: a2a.TaskID(missionID), ContextID: missionID,
 		Status: a2a.TaskStatus{State: a2a.TaskStateSubmitted},
 	}, nil
+}
+
+func (r *inboundRuns) remember(missionID string, c a2aserver.InboundCaller) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pending == nil {
+		r.pending = map[string]inboundPending{}
+	}
+	for k, v := range r.pending {
+		if time.Since(v.at) > inboundPendingTTL {
+			delete(r.pending, k)
+		}
+	}
+	r.pending[missionID] = inboundPending{tenant: c.Tenant, owner: c.Subject, at: time.Now()}
+}
+
+func (r *inboundRuns) isPending(missionID string, c a2aserver.InboundCaller) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.pending[missionID]
+	return ok && p.tenant == c.Tenant && p.owner == c.Subject && time.Since(p.at) <= inboundPendingTTL
+}
+
+// ownedMission returns the snapshot of a mission that the caller started. A
+// mission that another caller started, a mission that no inbound call started
+// and a mission that does not exist all give ErrNotFound, so the caller learns
+// nothing about them. A mission that the World has not folded yet gives the
+// snapshot of a submitted mission.
+func (r *inboundRuns) ownedMission(c a2aserver.InboundCaller, id string) (brain.MissionSnapshot, error) {
+	eng, ok := api.TenantEngine(r.registry, c.Tenant)
+	if !ok {
+		return brain.MissionSnapshot{}, a2aserver.ErrNotFound
+	}
+	for _, m := range eng.Missions() {
+		if m.ID != id {
+			continue
+		}
+		if m.CreatedBy != inboundPrincipal(c.Subject) {
+			return brain.MissionSnapshot{}, a2aserver.ErrNotFound
+		}
+		r.forget(id)
+		return m, nil
+	}
+	if r.isPending(id, c) {
+		return brain.MissionSnapshot{ID: id, Status: brain.MissionSubmitted}, nil
+	}
+	return brain.MissionSnapshot{}, a2aserver.ErrNotFound
+}
+
+func (r *inboundRuns) forget(id string) {
+	r.mu.Lock()
+	delete(r.pending, id)
+	r.mu.Unlock()
+}
+
+// inputRequiredText is the message of a Task that waits for an approval. An
+// outside caller cannot answer it.
+const inputRequiredText = "the mission waits for a person in the tenant to decide in the dashboard"
+
+// Task returns the Task of a mission that the caller started. The Task state is
+// the mission state, and a paused mission shows as working. A mission in a final
+// state has the findings of that one mission in its result, with all of their
+// evidence. A result over the size limit fails with a clear error and is never
+// truncated.
+func (r *inboundRuns) Task(ctx context.Context, c a2aserver.InboundCaller, id a2a.TaskID) (*a2a.Task, error) {
+	m, err := r.ownedMission(c, string(id))
+	if err != nil {
+		return nil, err
+	}
+	return r.taskOf(ctx, c, m)
+}
+
+func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m brain.MissionSnapshot) (*a2a.Task, error) {
+	now := time.Now().UTC()
+	t := &a2a.Task{
+		ID: a2a.TaskID(m.ID), ContextID: m.ID,
+		Status: a2a.TaskStatus{State: brain.TaskStateFromMission(m.Status), Timestamp: &now},
+	}
+	switch m.Status {
+	case brain.MissionInputRequired:
+		t.Status.Message = a2a.NewMessageForTask(a2a.MessageRoleAgent, t, a2a.NewTextPart(inputRequiredText))
+	case brain.MissionFailed, brain.MissionCanceled:
+		if m.Reason != "" {
+			t.Status.Message = a2a.NewMessageForTask(a2a.MessageRoleAgent, t, a2a.NewTextPart(m.Reason))
+		}
+	case brain.MissionSubmitted, brain.MissionWorking, brain.MissionPaused, brain.MissionCompleted:
+		// These states have no message.
+	}
+	if !m.Status.IsTerminal() {
+		return t, nil
+	}
+	missionID, err := types.ParseID(m.ID)
+	if err != nil {
+		return nil, fmt.Errorf("the mission ID %q is not a UUID: %w", m.ID, err)
+	}
+	findings, err := r.findings.MissionFindings(ctx, c.Tenant, missionID)
+	if err != nil {
+		return nil, err
+	}
+	artifact, err := a2aserver.FindingsArtifact(m.ID, findings, a2aserver.MaxInboundResultBytes)
+	if err != nil {
+		return nil, err
+	}
+	t.Artifacts = []*a2a.Artifact{artifact}
+	return t, nil
+}
+
+// Cancel ends a mission that the caller started. It ends no other mission: a
+// mission of another caller is not found. A mission in a final state cannot be
+// canceled.
+func (r *inboundRuns) Cancel(ctx context.Context, c a2aserver.InboundCaller, id a2a.TaskID) (*a2a.Task, error) {
+	m, err := r.ownedMission(c, string(id))
+	if err != nil {
+		return nil, err
+	}
+	if m.Status.IsTerminal() {
+		return nil, a2aserver.ErrNotCancelable
+	}
+	tenant, err := auth.NewTenantID(c.Tenant)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the tenant of the caller is not valid", a2aserver.ErrRefused)
+	}
+	if err := r.stop(auth.ContextWithTenant(ctx, tenant), m.ID); err != nil {
+		return nil, fmt.Errorf("end mission %s: %w", m.ID, err)
+	}
+	// The stop submitted the end of the mission, so the Task is canceled. The
+	// World folds it on its next tick.
+	m.Status = brain.MissionCanceled
+	m.Reason = "canceled by " + c.Subject
+	return r.taskOf(ctx, c, m)
 }
 
 // inboundPrincipal is the creator that a mission records for an inbound caller.

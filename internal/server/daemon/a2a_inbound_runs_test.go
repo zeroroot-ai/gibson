@@ -5,16 +5,26 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"github.com/zeroroot-ai/gibson/internal/server/a2aserver"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -231,3 +241,296 @@ func TestRejectedInboundTask_HoldsNoMissionAndAReason(t *testing.T) {
 }
 
 var _ missionStarter = (*api.DaemonServer)(nil)
+
+// ---- Task and Cancel ----------------------------------------------------
+
+type fakeMissionFindings struct {
+	findings []finding.EnhancedFinding
+	err      error
+	asked    []string
+}
+
+func (f *fakeMissionFindings) MissionFindings(
+	_ context.Context, tenant string, missionID types.ID,
+) ([]finding.EnhancedFinding, error) {
+	f.asked = append(f.asked, tenant+"/"+missionID.String())
+	return f.findings, f.err
+}
+
+type taskFixture struct {
+	runs     *inboundRuns
+	eng      *brain.Engine
+	findings *fakeMissionFindings
+	stopped  []string
+	stopCtx  context.Context
+	stopErr  error
+	mission  string
+}
+
+func newTaskFixture(t *testing.T) *taskFixture {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	f := &taskFixture{
+		findings: &fakeMissionFindings{},
+		mission:  types.NewID().String(),
+	}
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	f.eng = reg.For("acme")
+	f.runs = &inboundRuns{
+		registry: reg, findings: f.findings,
+		stop: func(ctx context.Context, id string) error {
+			f.stopCtx = ctx
+			f.stopped = append(f.stopped, id)
+			return f.stopErr
+		},
+	}
+	return f
+}
+
+// startMission folds the start of a mission that the principal created.
+func (f *taskFixture) startMission(created principal.Principal) {
+	f.eng.Submit(brain.MissionStarted{ID: f.mission, RunID: "run-1", TenantID: "acme", CreatedBy: created})
+	f.eng.Tick()
+}
+
+func (f *taskFixture) end(outcome brain.MissionStatus) {
+	f.eng.Submit(brain.MissionDone{ID: f.mission, RunID: "run-1", Outcome: outcome, Reason: "why"})
+	f.eng.Tick()
+}
+
+var (
+	ownerCaller = a2aserver.InboundCaller{Tenant: "acme", Subject: inboundCallerRef}
+	otherCaller = a2aserver.InboundCaller{Tenant: "acme", Subject: "agent_principal:other"}
+	ownerRef    = inboundPrincipal(inboundCallerRef)
+)
+
+func TestInboundRuns_TaskStateIsTheMissionState(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+
+	task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateWorking, task.Status.State)
+	assert.Equal(t, a2a.TaskID(f.mission), task.ID)
+	assert.Equal(t, f.mission, task.ContextID)
+	assert.Empty(t, task.Artifacts, "a running mission has no result yet")
+	assert.Empty(t, f.findings.asked)
+
+	// A paused mission shows as working.
+	f.eng.Submit(brain.MissionPauseRequested{ID: f.mission, RunID: "run-1"})
+	f.eng.Tick()
+	task, err = f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateWorking, task.Status.State, "paused shows as working")
+}
+
+func TestInboundRuns_ATaskInAFinalStateHoldsTheFindingsOfThatMission(t *testing.T) {
+	for outcome, want := range map[brain.MissionStatus]a2a.TaskState{
+		brain.MissionCompleted: a2a.TaskStateCompleted,
+		brain.MissionFailed:    a2a.TaskStateFailed,
+		brain.MissionCanceled:  a2a.TaskStateCanceled,
+	} {
+		t.Run(string(outcome), func(t *testing.T) {
+			f := newTaskFixture(t)
+			f.startMission(ownerRef)
+			f.findings.findings = []finding.EnhancedFinding{{Finding: agent.Finding{
+				ID: types.NewID(), Title: "Open SSH", Severity: agent.SeverityHigh,
+				Evidence: []*typespb.Evidence{{Title: "nmap", Content: "raw", Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED}},
+			}}}
+			f.end(outcome)
+
+			task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+
+			require.NoError(t, err)
+			assert.Equal(t, want, task.Status.State)
+			assert.Equal(t, []string{"acme/" + f.mission}, f.findings.asked, "the findings of this one mission")
+			require.Len(t, task.Artifacts, 1)
+			body, err := json.Marshal(task.Artifacts[0].Parts[0].Data())
+			require.NoError(t, err)
+			assert.Contains(t, string(body), "EVIDENCE_TIER_RECORDED")
+			assert.Contains(t, string(body), `"content":"raw"`)
+			if outcome != brain.MissionCompleted {
+				require.NotNil(t, task.Status.Message)
+				assert.Equal(t, "why", a2aserver.TextOf(task.Status.Message))
+			}
+		})
+	}
+}
+
+func TestInboundRuns_ATaskThatWaitsForAnApprovalShowsInputRequired(t *testing.T) {
+	f := newTaskFixture(t)
+	task, err := f.runs.taskOf(context.Background(), ownerCaller,
+		brain.MissionSnapshot{ID: f.mission, Status: brain.MissionInputRequired})
+
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateInputRequired, task.Status.State)
+	assert.Contains(t, a2aserver.TextOf(task.Status.Message), "a person in the tenant to decide in the dashboard")
+}
+
+func TestInboundRuns_TaskNeverShowsTheMissionOfAnotherCaller(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.end(brain.MissionCompleted)
+
+	for name, id := range map[string]string{"another caller": f.mission, "a mission that does not exist": types.NewID().String()} {
+		_, err := f.runs.Task(context.Background(), otherCaller, a2a.TaskID(id))
+		assert.ErrorIs(t, err, a2aserver.ErrNotFound, name)
+	}
+	assert.Empty(t, f.findings.asked, "the findings of another caller are never read")
+
+	// A mission that a person started has no inbound owner, so no caller reads it.
+	g := newTaskFixture(t)
+	g.startMission(principal.Principal{Kind: principal.User, ID: "u1"})
+	_, err := g.runs.Task(context.Background(), ownerCaller, a2a.TaskID(g.mission))
+	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+}
+
+func TestInboundRuns_ARunThatTheWorldHasNotFoldedBelongsToItsCaller(t *testing.T) {
+	f := newTaskFixture(t)
+	f.runs.remember(f.mission, ownerCaller)
+
+	task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
+
+	_, err = f.runs.Task(context.Background(), otherCaller, a2a.TaskID(f.mission))
+	assert.ErrorIs(t, err, a2aserver.ErrNotFound, "another caller reads nothing of it")
+
+	// The entry lapses with time, and the World is the record after that.
+	f.runs.pending[f.mission] = inboundPending{tenant: "acme", owner: inboundCallerRef, at: time.Now().Add(-2 * inboundPendingTTL)}
+	_, err = f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+	f.runs.remember("other-mission", ownerCaller)
+	assert.NotContains(t, f.runs.pending, f.mission, "a lapsed entry is dropped")
+
+	// Once the World holds the mission, the entry is dropped.
+	g := newTaskFixture(t)
+	g.runs.remember(g.mission, ownerCaller)
+	g.startMission(ownerRef)
+	_, err = g.runs.Task(context.Background(), ownerCaller, a2a.TaskID(g.mission))
+	require.NoError(t, err)
+	assert.NotContains(t, g.runs.pending, g.mission)
+}
+
+func TestInboundRuns_TaskFailures(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.end(brain.MissionCompleted)
+
+	f.findings.err = errors.New("postgres is down")
+	_, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	require.ErrorContains(t, err, "postgres is down")
+
+	// A result over the size limit fails with a clear error and is never truncated.
+	f.findings.err = nil
+	f.findings.findings = []finding.EnhancedFinding{{Finding: agent.Finding{
+		ID: types.NewID(), Evidence: []*typespb.Evidence{{Content: strings.Repeat("A", a2aserver.MaxInboundResultBytes+1)}},
+	}}}
+	task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	require.ErrorIs(t, err, a2aserver.ErrResultTooLarge)
+	assert.Nil(t, task)
+
+	// A mission ID that is not a UUID cannot name findings.
+	_, err = f.runs.taskOf(context.Background(), ownerCaller, brain.MissionSnapshot{ID: "not-a-uuid", Status: brain.MissionCompleted})
+	require.ErrorContains(t, err, "is not a UUID")
+}
+
+func TestInboundRuns_CancelEndsTheMissionOfTheCaller(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+
+	task, err := f.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateCanceled, task.Status.State)
+	assert.Equal(t, []string{f.mission}, f.stopped)
+	tenant, ok := auth.TenantFromContext(f.stopCtx)
+	require.True(t, ok)
+	assert.Equal(t, "acme", tenant.String(), "the stop runs for the tenant of the caller")
+}
+
+// A Task cancel ends only the mission that the caller's own message started.
+func TestInboundRuns_CancelNeverEndsTheMissionOfAnotherCaller(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+
+	_, err := f.runs.Cancel(context.Background(), otherCaller, a2a.TaskID(f.mission))
+	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+	_, err = f.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(types.NewID().String()))
+	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+	assert.Empty(t, f.stopped, "no mission ended")
+
+	// A mission that a person started is not the mission of any inbound caller.
+	g := newTaskFixture(t)
+	g.startMission(principal.Principal{Kind: principal.User, ID: "u1"})
+	_, err = g.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(g.mission))
+	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+	assert.Empty(t, g.stopped)
+}
+
+func TestInboundRuns_CancelRefusals(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.end(brain.MissionCompleted)
+	_, err := f.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	assert.ErrorIs(t, err, a2aserver.ErrNotCancelable, "a mission in a final state cannot be canceled")
+	assert.Empty(t, f.stopped)
+
+	g := newTaskFixture(t)
+	g.startMission(ownerRef)
+	g.stopErr = errors.New("not running here")
+	_, err = g.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(g.mission))
+	assert.ErrorContains(t, err, "not running here")
+}
+
+// pager answers the pages of FindWithEvidence from a list of findings.
+type pager struct {
+	all      []finding.EnhancedFinding
+	pageSize int
+	err      error
+	queries  []pgstore.Query
+	total    int
+}
+
+func (p *pager) FindWithEvidence(_ context.Context, _ string, q pgstore.Query) ([]finding.EnhancedFinding, int, error) {
+	p.queries = append(p.queries, q)
+	if p.err != nil {
+		return nil, 0, p.err
+	}
+	end := min(q.Offset+p.pageSize, len(p.all))
+	total := len(p.all)
+	if p.total != 0 {
+		total = p.total
+	}
+	return p.all[q.Offset:end], total, nil
+}
+
+func TestPGMissionFindings_ReadsEveryPageOfTheMission(t *testing.T) {
+	mission := types.NewID()
+	var all []finding.EnhancedFinding
+	for range 5 {
+		all = append(all, finding.EnhancedFinding{Finding: agent.Finding{ID: types.NewID()}})
+	}
+	p := &pager{all: all, pageSize: 2}
+
+	got, err := pgMissionFindings{store: p}.MissionFindings(context.Background(), "acme", mission)
+
+	require.NoError(t, err)
+	assert.Len(t, got, 5, "no finding is left out")
+	require.Len(t, p.queries, 3)
+	for i, q := range p.queries {
+		assert.Equal(t, mission, q.MissionID, "only the findings of that mission")
+		assert.Equal(t, pgstore.MaxPageSize, q.Limit)
+		assert.Equal(t, i*2, q.Offset)
+	}
+
+	// A store that reports more than it returns cannot loop for ever.
+	short := &pager{all: all[:2], pageSize: 2, total: 9}
+	got, err = pgMissionFindings{store: short}.MissionFindings(context.Background(), "acme", mission)
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+
+	_, err = pgMissionFindings{store: &pager{err: errors.New("db down")}}.MissionFindings(context.Background(), "acme", mission)
+	require.ErrorContains(t, err, "read the findings of mission")
+}

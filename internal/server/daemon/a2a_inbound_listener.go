@@ -13,6 +13,8 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentcard"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
@@ -106,7 +108,16 @@ func (d *daemonImpl) buildA2AInboundServer(ctx context.Context) (*httpSubsystem,
 	if d.daemonServer == nil {
 		return nil, fmt.Errorf("%s: the daemon server is not available", label)
 	}
-	runs := &inboundRuns{published: d.inboundMissions, starter: d.daemonServer}
+	if d.brainRegistry == nil || d.pool == nil {
+		return nil, fmt.Errorf("%s: the brain and the data pool are not available", label)
+	}
+	runs := &inboundRuns{
+		published: d.inboundMissions, starter: d.daemonServer, registry: d.brainRegistry,
+		findings: pgMissionFindings{store: pgstore.New(func() datapool.Pool { return d.pool })},
+		stop: func(ctx context.Context, missionID string) error {
+			return d.StopMissionWithManager(ctx, missionID, false)
+		},
+	}
 	handler := a2aserver.NewInboundHandler(runs,
 		publishedCards{published: d.inboundMissions, registry: d.compRegistry, baseURL: baseURL})
 	lis, err := listenTLS(label, addr, tlsCfg)

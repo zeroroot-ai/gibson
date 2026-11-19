@@ -73,3 +73,23 @@ func TestWorkStateRoundTrip_KeepsCanceledAndInputRequired(t *testing.T) {
 		}
 	}
 }
+
+// The Task state is the mission state. Paused is the one state with no A2A name,
+// and it shows as working.
+func TestTaskStateFromMission_EachMissionState(t *testing.T) {
+	cases := map[MissionStatus]a2a.TaskState{
+		MissionSubmitted:     a2a.TaskStateSubmitted,
+		MissionWorking:       a2a.TaskStateWorking,
+		MissionPaused:        a2a.TaskStateWorking,
+		MissionInputRequired: a2a.TaskStateInputRequired,
+		MissionCompleted:     a2a.TaskStateCompleted,
+		MissionFailed:        a2a.TaskStateFailed,
+		MissionCanceled:      a2a.TaskStateCanceled,
+		MissionStatus("???"): a2a.TaskStateFailed,
+	}
+	for state, want := range cases {
+		if got := TaskStateFromMission(state); got != want {
+			t.Errorf("TaskStateFromMission(%q) = %q, want %q", state, got, want)
+		}
+	}
+}

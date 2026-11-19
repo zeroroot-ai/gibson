@@ -90,6 +90,7 @@ func inboundListenerDaemon(t *testing.T, mutate func(d *daemonImpl)) *daemonImpl
 		d.inboundMissions = publishedFor("recon")
 		d.compRegistry = cardRegistry{}
 		d.daemonServer = api.NewDaemonServer(nil, nil, nil)
+		d.pool = stubPool{}
 		if mutate != nil {
 			mutate(d)
 		}
@@ -118,6 +119,10 @@ func TestBuildA2AInboundServer_RefusesAnIncompleteSetup(t *testing.T) {
 			"not available"},
 		{"no daemon server", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.daemonServer = nil },
 			"the daemon server is not available"},
+		{"no brain registry", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.brainRegistry = nil },
+			"the brain and the data pool are not available"},
+		{"no data pool", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.pool = nil },
+			"the brain and the data pool are not available"},
 		{"no SPIFFE config", svid, "127.0.0.1:0", publicURL, func(d *daemonImpl) { d.config.Auth.SPIFFE = nil },
 			"SPIFFE is not configured"},
 		{"another trust domain", "spiffe://other.org/platform/envoy", "127.0.0.1:0", publicURL, nil, "not in the trust domain"},
