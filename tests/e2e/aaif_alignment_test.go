@@ -385,28 +385,30 @@ func aaifOpenResponsesPoints(
 		require.Equal(t, wantMockPath, last.Path)
 		require.Regexp(t, `"stream"\s*:\s*true`, last.Body, "the provider must get a request with stream true")
 
-		// The streamed call is a new event with its own call id, not the one of
-		// the call before.
-		helpers.Eventually(t, aaifTraceTimeout, "a new llm_call.observed event for the streamed call", func() (bool, string) {
-			n := len(s.observedCalls(t, work.MissionID))
-			return n > callsBefore, fmt.Sprintf("%d events, %d before the stream", n, callsBefore)
+		// The streamed call is a new event that did not fail, with its own call
+		// id. A failed call is a record too, so a wait for any new event could
+		// stop on one.
+		var streamed *helpers.ObservedLlmCall
+		helpers.Eventually(t, aaifTraceTimeout, "a new llm_call.observed event for the streamed call that did not fail", func() (bool, string) {
+			calls := s.observedCalls(t, work.MissionID)
+			for i := callsBefore; i < len(calls); i++ {
+				if !calls[i].Failed() {
+					streamed = &calls[i]
+					return true, ""
+				}
+			}
+			return false, fmt.Sprintf("%d events, %d before the stream, none new that ended well", len(calls), callsBefore)
 		})
-		calls := s.observedCalls(t, work.MissionID)
 		seen := map[string]bool{}
-		for _, call := range calls {
+		all := s.observedCalls(t, work.MissionID)
+		for _, call := range all {
 			seen[call.CallID] = true
 		}
-		require.Len(t, seen, len(calls), "each call must have its own call id")
-		var streamed *helpers.ObservedLlmCall
-		for i := callsBefore; i < len(calls); i++ {
-			if !calls[i].Failed() {
-				streamed = &calls[i]
-			}
-		}
-		require.NotNil(t, streamed, "a call that ended well must be among the new events: %d new", len(calls)-callsBefore)
+		require.Len(t, seen, len(all), "each call must have its own call id")
 		requireCallPoints(t, *streamed, aaifMockReply)
 		if wantCost {
 			require.NotEmpty(t, streamed.Cost, "the event must hold the cost of a priced model")
+			require.NotEqual(t, "0", streamed.Cost, "an unknown cost is empty and never 0")
 		}
 	})
 }
