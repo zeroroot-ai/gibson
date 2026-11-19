@@ -92,7 +92,7 @@ func TestWorkDispatchedSummaryHoldsTheTargetAndTheParent(t *testing.T) {
 // A failed call holds its status. The wait for a good call skips it.
 func TestParseLlmCallObserved_ReadsTheStatusOfAFailedCall(t *testing.T) {
 	failed, err := ParseLlmCallObserved(fmt.Sprintf("%+v", brain.LlmCallObserved{
-		CallID: "c1", Completion: "route not found", HTTPStatus: 404,
+		CallID: "c1", ErrorText: "route not found", HTTPStatus: 404,
 	}))
 	require.NoError(t, err)
 	require.Equal(t, 404, failed.HTTPStatus)
