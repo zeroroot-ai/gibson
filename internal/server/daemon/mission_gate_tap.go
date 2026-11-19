@@ -45,6 +45,12 @@ import (
 //
 // The write never removes an open gate that is correct. Opening a gate that is
 // open sends no write. Closing is one delete (authz.MissionGateWriter).
+//
+// A close that fails after all attempts is tried again later, with a growing
+// wait, until it succeeds or the daemon stops. A mission that ended gets no
+// later event, so without the retry its gate would stay open. A later value of
+// the mission stops the retry. A failed open needs no retry: an absent tuple
+// refuses each call (fail closed), and the next event writes again.
 
 var missionGateWriteFailedTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name: "gibson_mission_gate_write_failed_total",
@@ -63,12 +69,27 @@ const (
 	// missionGateAwaitTimeout bounds the wait of a work item for the gate. It is
 	// longer than all attempts of one write, at their longest.
 	missionGateAwaitTimeout = 90 * time.Second
+	// missionGateRetryMax bounds the wait between two retries of a failed close.
+	missionGateRetryMax = 5 * time.Minute
 )
+
+// missionGateRetryDelay is the wait before retry n of a failed close (n starts
+// at 1). It doubles from 2 seconds up to missionGateRetryMax.
+func missionGateRetryDelay(retry int) time.Duration {
+	d := 2 * time.Second
+	for i := 1; i < retry && d < missionGateRetryMax; i++ {
+		d *= 2
+	}
+	return min(d, missionGateRetryMax)
+}
 
 type missionGateWrite struct {
 	mission string
 	active  bool
 	seq     uint64
+	// retry is the number of the retry of a failed close. It is 0 for the
+	// first write.
+	retry int
 }
 
 // gateState is what the tap knows about the gate of one mission.
@@ -101,6 +122,11 @@ type missionGateTap struct {
 	// backoff is the wait before attempt n+1 (n starts at 1). A test injects a
 	// short one.
 	backoff func(attempt int) time.Duration
+	// retryDelay is the wait before retry n of a failed close (n starts at 1).
+	// done ends the retries. It is the done channel of the daemon context. A
+	// test injects both.
+	retryDelay func(retry int) time.Duration
+	done       <-chan struct{}
 
 	mu       sync.Mutex
 	states   map[string]*gateState
@@ -237,8 +263,39 @@ func (t *missionGateTap) write(ctx context.Context, w missionGateWrite) {
 		}
 	}
 	missionGateWriteFailedTotal.Inc()
-	t.logger.Error("mission gate write failed", "mission", w.mission, "active", w.active, "error", err)
+	t.logger.Error("mission gate write failed", "mission", w.mission, "active", w.active,
+		"retry", w.retry, "error", err)
 	t.finish(w, err)
+	if !w.active {
+		go t.retryClose(w)
+	}
+}
+
+// retryClose queues a failed close again after a wait. It stops when the daemon
+// stops, or when a later value of the mission replaced this one.
+func (t *missionGateTap) retryClose(w missionGateWrite) {
+	w.retry++
+	timer := time.NewTimer(t.retryDelay(w.retry))
+	defer timer.Stop()
+	select {
+	case <-t.done:
+		return
+	case <-timer.C:
+	}
+	t.mu.Lock()
+	if st := t.states[w.mission]; st == nil || st.seq != w.seq {
+		t.mu.Unlock()
+		return
+	}
+	t.queue = append(t.queue, w)
+	start := !t.draining
+	if start {
+		t.draining = true
+	}
+	t.mu.Unlock()
+	if start {
+		go t.drain(t.ctx)
+	}
 }
 
 // finish records the end of a write and wakes the waiters. A write that a later
@@ -249,6 +306,10 @@ func (t *missionGateTap) finish(w missionGateWrite, err error) {
 	if st := t.states[w.mission]; st != nil {
 		if err == nil && w.seq > st.doneSeq {
 			st.doneSeq = w.seq
+		}
+		if err == nil && st.seq == w.seq {
+			// A retry wrote the value. The tap knows the gate again.
+			st.err, st.known = nil, true
 		}
 		if err != nil && st.seq == w.seq {
 			st.err, st.known = err, false
@@ -312,14 +373,16 @@ func InstallMissionGate(ctx context.Context, tenant string, eng *brain.Engine, w
 	// The writes outlive the caller on purpose: the tap lives as long as the engine.
 	bg := context.WithoutCancel(ctx)
 	tap := &missionGateTap{
-		ctx:     bg,
-		tenant:  tenant,
-		eng:     eng,
-		writer:  writer,
-		logger:  logger.With("component", "mission-gate", "tenant", tenant),
-		backoff: func(attempt int) time.Duration { return time.Duration(attempt) * 200 * time.Millisecond },
-		states:  map[string]*gateState{},
-		notify:  make(chan struct{}),
+		ctx:        bg,
+		tenant:     tenant,
+		eng:        eng,
+		writer:     writer,
+		logger:     logger.With("component", "mission-gate", "tenant", tenant),
+		backoff:    func(attempt int) time.Duration { return time.Duration(attempt) * 200 * time.Millisecond },
+		retryDelay: missionGateRetryDelay,
+		done:       ctx.Done(),
+		states:     map[string]*gateState{},
+		notify:     make(chan struct{}),
 	}
 	tap.sweep(bg)
 	eng.Subscribe(tap.apply)

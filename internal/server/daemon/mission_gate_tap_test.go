@@ -71,14 +71,15 @@ func (g *gateRecorder) count() int {
 
 func newGateTap(eng *brain.Engine, w missionGateWriter) *missionGateTap {
 	tap := &missionGateTap{
-		ctx:     context.Background(),
-		tenant:  "acme",
-		eng:     eng,
-		writer:  w,
-		logger:  slog.New(slog.DiscardHandler),
-		backoff: func(int) time.Duration { return time.Millisecond },
-		states:  map[string]*gateState{},
-		notify:  make(chan struct{}),
+		ctx:        context.Background(),
+		tenant:     "acme",
+		eng:        eng,
+		writer:     w,
+		logger:     slog.New(slog.DiscardHandler),
+		backoff:    func(int) time.Duration { return time.Millisecond },
+		retryDelay: func(int) time.Duration { return time.Millisecond },
+		states:     map[string]*gateState{},
+		notify:     make(chan struct{}),
 	}
 	eng.Subscribe(tap.apply)
 	return tap
@@ -458,4 +459,85 @@ func hasWorkCompleted(eng *brain.Engine, id string) bool {
 		}
 	}
 	return false
+}
+
+// A close that fails after all attempts is tried again until it succeeds. A
+// mission that ended gets no later event, so without the retry its gate would
+// stay open.
+func TestMissionGate_AFailedCloseOfAnEndedMissionIsRetried(t *testing.T) {
+	g := &gateRecorder{}
+	eng := newGateEngine(t, g)
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	waitWrites(t, g, 1)
+
+	g.mu.Lock()
+	g.failNext = 3 * missionGateAttempts // three rounds of attempts fail
+	g.mu.Unlock()
+	eng.Submit(brain.MissionDone{ID: "m1", RunID: "r1", Outcome: brain.MissionFailed})
+	eng.Tick()
+	waitWrites(t, g, 2)
+	if got := g.actives(); !equalBools(got, []bool{true, false}) {
+		t.Fatalf("writes = %v, want [true false]", got)
+	}
+}
+
+// A later value of the mission stops the retry of a failed close.
+func TestMissionGate_ALaterValueStopsTheRetry(t *testing.T) {
+	g := &gateRecorder{}
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	tap := newGateTap(eng, g)
+	release := make(chan struct{})
+	tap.retryDelay = func(int) time.Duration { <-release; return time.Millisecond }
+
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	waitWrites(t, g, 1)
+	g.mu.Lock()
+	g.failNext = missionGateAttempts
+	g.mu.Unlock()
+	eng.Submit(brain.MissionPauseRequested{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	time.Sleep(50 * time.Millisecond) // the close fails and its retry waits
+	eng.Submit(brain.MissionResumed{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	waitWrites(t, g, 2)
+	close(release)
+	time.Sleep(50 * time.Millisecond)
+	if got := g.actives(); !equalBools(got, []bool{true, true}) {
+		t.Fatalf("writes = %v, want [true true]: the stale close must not run", got)
+	}
+}
+
+// The retry ends when the daemon stops.
+func TestMissionGate_TheRetryEndsWhenTheDaemonStops(t *testing.T) {
+	g := &gateRecorder{}
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	tap := newGateTap(eng, g)
+	stop := make(chan struct{})
+	tap.done = stop
+	tap.retryDelay = func(int) time.Duration { return time.Hour }
+	close(stop)
+	done := make(chan struct{})
+	go func() {
+		tap.retryClose(missionGateWrite{mission: "m1", seq: 1})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the retry did not end when the daemon stopped")
+	}
+}
+
+func TestMissionGateRetryDelay_GrowsToTheBound(t *testing.T) {
+	if got := missionGateRetryDelay(1); got != 2*time.Second {
+		t.Errorf("retry 1 = %v, want 2s", got)
+	}
+	if got := missionGateRetryDelay(3); got != 8*time.Second {
+		t.Errorf("retry 3 = %v, want 8s", got)
+	}
+	if got := missionGateRetryDelay(100); got != missionGateRetryMax {
+		t.Errorf("retry 100 = %v, want %v", got, missionGateRetryMax)
+	}
 }
