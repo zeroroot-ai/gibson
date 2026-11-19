@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // startDescriptorServer serves the per-kid descriptor (a JWKS superset) the
@@ -669,4 +671,39 @@ func TestComponentVerifyFresh_ReadsTheDescriptorOfTheDaemonForEachCall(t *testin
 	if _, err := v.Verify(context.Background(), mint(), testMethod); !errors.Is(err, ErrUnknownKey) {
 		t.Fatalf("Verify after a failed fresh read must not use the dropped cache entry: %v", err)
 	}
+}
+
+// A token that the cached key rejects causes no fresh read. Without this a caller
+// that knows a kid could make the daemon read its database for each forged token.
+func TestComponentVerifyFresh_AForgedTokenCausesNoFreshRead(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	_, other := mustGenKey(t)
+	var reads atomic.Int64
+	doc := map[string]any{
+		"keys": []map[string]string{{
+			"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pub), "kid": "agent-1",
+		}},
+		"principal": "agent_principal:9", "tenant": "acme", "status": "active",
+	}
+	body, _ := json.Marshal(doc)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reads.Add(1)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+	exp := time.Now().Add(55 * time.Second)
+
+	_, err := v.VerifyFresh(context.Background(), mintAgentJWT(t, priv, "agent-1", "agent+jwt", exp), testMethod)
+	require.NoError(t, err, "the first call fills the cache")
+	require.EqualValues(t, 1, reads.Load())
+
+	_, err = v.VerifyFresh(context.Background(), mintAgentJWT(t, other, "agent-1", "agent+jwt", exp), testMethod)
+
+	require.ErrorIs(t, err, ErrSignature)
+	assert.EqualValues(t, 1, reads.Load(), "a forged token makes no fresh read")
+
+	_, err = v.VerifyFresh(context.Background(), mintAgentJWT(t, priv, "agent-1", "agent+jwt", exp), testMethod)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, reads.Load(), "a good token still reads the status fresh")
 }

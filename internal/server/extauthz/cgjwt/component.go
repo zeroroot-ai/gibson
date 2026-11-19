@@ -278,6 +278,33 @@ func checkDescriptor(kid string, desc cachedDescriptor) error {
 	return nil
 }
 
+// precheckSignature verifies the signature of a token with the cached key of its
+// kid. It does nothing for a kid that has no cached key, and the full check then
+// uses the key of the fresh read. It checks the signature and no claim.
+func (v *ComponentVerifier) precheckSignature(kid, token string) error {
+	v.mu.RLock()
+	cached, ok := v.cache[kid]
+	v.mu.RUnlock()
+	if !ok || cached.key == nil {
+		return nil
+	}
+	_, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
+		if t.Method.Alg() != jwt.SigningMethodEdDSA.Alg() {
+			return nil, fmt.Errorf("%w: unexpected alg %q", ErrSignature, t.Method.Alg())
+		}
+		return cached.key, nil
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}), jwt.WithoutClaimsValidation())
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, jwt.ErrTokenSignatureInvalid) || errors.Is(err, jwt.ErrSignatureInvalid) {
+		componentRejectedTotal.WithLabelValues("signature").Inc()
+		return fmt.Errorf("%w: %w", ErrSignature, err)
+	}
+	componentRejectedTotal.WithLabelValues("malformed").Inc()
+	return fmt.Errorf("%w: %w", ErrMalformed, err)
+}
+
 func (v *ComponentVerifier) verify(ctx context.Context, token, method string, fresh bool) (ComponentIdentity, error) {
 	// Peek the header for kid + typ without trusting the signature yet.
 	kid, typ, err := peekHeader(token)
@@ -291,6 +318,17 @@ func (v *ComponentVerifier) verify(ctx context.Context, token, method string, fr
 		return ComponentIdentity{}, fmt.Errorf("%w: missing kid", ErrMalformed)
 	}
 
+	// A fresh read costs one query of the daemon database. A token that the cached
+	// key rejects never causes it, so a caller that knows a kid but not its key
+	// cannot load the database. The cache is read with no regard to its age,
+	// because the kid names one key and a key never changes. The status and the
+	// capabilities come from the fresh read, and the signature is checked again
+	// with the key of that read.
+	if fresh {
+		if err := v.precheckSignature(kid, token); err != nil {
+			return ComponentIdentity{}, err
+		}
+	}
 	desc, err := v.resolve(ctx, kid, fresh)
 	if err != nil {
 		return ComponentIdentity{}, fmt.Errorf("%w: kid %s: %w", ErrUnknownKey, kid, err)
