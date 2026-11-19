@@ -362,7 +362,9 @@ func (r *inboundRuns) Task(ctx context.Context, c a2aserver.InboundCaller, agent
 	return r.taskOf(ctx, c, m)
 }
 
-func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m brain.MissionSnapshot) (*a2a.Task, error) {
+// statusTask is the Task of a mission with its state and its message, and no
+// result.
+func statusTask(m brain.MissionSnapshot) *a2a.Task {
 	now := time.Now().UTC()
 	t := &a2a.Task{
 		ID: a2a.TaskID(m.ID), ContextID: m.ID,
@@ -378,6 +380,13 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 	case brain.MissionSubmitted, brain.MissionWorking, brain.MissionPaused, brain.MissionCompleted:
 		// These states have no message.
 	}
+	return t
+}
+
+// taskOf is the Task of a mission. A mission in a final state also has its result.
+// The result cache holds only results of missions in a final state.
+func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m brain.MissionSnapshot) (*a2a.Task, error) {
+	t := statusTask(m)
 	if !m.Status.IsTerminal() {
 		return t, nil
 	}
@@ -506,10 +515,12 @@ func (r *inboundRuns) Cancel(ctx context.Context, c a2aserver.InboundCaller, age
 		return nil, fmt.Errorf("end mission %s: %w", m.ID, err)
 	}
 	// The stop submitted the end of the mission, so the Task is canceled. The
-	// World folds it on its next tick.
+	// World folds it on its next tick. The answer holds the status and no result:
+	// the findings of a mission that is still ending are not final, so they are not
+	// built and not cached. A read of the Task after the end gives the result.
 	m.Status = brain.MissionCanceled
 	m.Reason = "canceled by " + c.Subject
-	return r.taskOf(ctx, c, m)
+	return statusTask(m), nil
 }
 
 // pinsOf returns the pinned hash of each target that the mission uses.

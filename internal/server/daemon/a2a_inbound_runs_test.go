@@ -512,6 +512,27 @@ func TestInboundRuns_CancelEndsTheMissionOfTheCaller(t *testing.T) {
 	assert.Equal(t, "acme", tenant.String(), "the stop runs for the tenant of the caller")
 }
 
+// A cancel answers with the status. It builds no result and writes no cache entry,
+// because the findings of a mission that is still ending are not final. A gate with
+// no free permit must not turn a stopped mission into a busy error either.
+func TestInboundRuns_CancelBuildsNoResult(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	f.runs.gate = newResultGate(1, 1)
+	hold, ok := f.runs.gate.acquire("acme", ownerCaller.Subject)
+	require.True(t, ok)
+	defer hold()
+
+	task, err := f.runs.Cancel(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
+
+	require.NoError(t, err, "the stop must not end in a busy error")
+	assert.Equal(t, a2a.TaskStateCanceled, task.Status.State)
+	assert.Empty(t, task.Artifacts, "a cancel answers with no result")
+	assert.Empty(t, f.findings.asked, "a cancel reads no findings")
+	_, cached := f.runs.results.get("acme/" + f.mission)
+	assert.False(t, cached, "the cache holds no result of a mission that is not final")
+}
+
 // A Task cancel ends only the mission that the caller's own message started.
 func TestInboundRuns_CancelNeverEndsTheMissionOfAnotherCaller(t *testing.T) {
 	f := newTaskFixture(t)
