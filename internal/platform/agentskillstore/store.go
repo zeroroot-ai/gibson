@@ -269,11 +269,6 @@ type PageKey struct {
 	Digest      string
 }
 
-// KeyOf returns the position of an entry.
-func KeyOf(e Entry) PageKey {
-	return PageKey{Name: e.Name, PublishedAt: e.PublishedAt, Digest: e.Digest}
-}
-
 func (s *postgresStore) ListPage(
 	ctx context.Context, tenant, name string, allVersions bool, after *PageKey, limit int,
 ) ([]Entry, error) {

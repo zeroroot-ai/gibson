@@ -471,7 +471,7 @@ func TestListPage(t *testing.T) {
 			scrEntryRow("a", "sha256:1", "{}", true), scrEntryRow("b", "sha256:2", "{}", true),
 		}}, nil
 	}}
-	after := KeyOf(Entry{Name: "a", Digest: "sha256:0", PublishedAt: time.Unix(10, 0)})
+	after := PageKey{Name: "a", Digest: "sha256:0", PublishedAt: time.Unix(10, 0)}
 
 	got, err := scrStore(db).ListPage(context.Background(), "acme", "", true, &after, 2)
 

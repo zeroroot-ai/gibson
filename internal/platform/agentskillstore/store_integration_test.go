@@ -269,7 +269,8 @@ func TestStore_Integration_ListPageWalksTheListOrder(t *testing.T) {
 			break
 		}
 		got = append(got, page...)
-		key := agentskillstore.KeyOf(page[len(page)-1])
+		last := page[len(page)-1]
+		key := agentskillstore.PageKey{Name: last.Name, PublishedAt: last.PublishedAt, Digest: last.Digest}
 		after = &key
 	}
 	require.Len(t, got, len(want))
