@@ -340,6 +340,9 @@ func (g *GatewayAccess) StreamResponse(ctx context.Context, r modelclient.Reques
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return "", false, fmt.Errorf("the gateway answered %d: %s", resp.StatusCode, b)
 	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		return "", false, fmt.Errorf("the gateway answered with content type %q, not a stream", ct)
+	}
 	var text strings.Builder
 	completed := false
 	sc := bufio.NewScanner(resp.Body)

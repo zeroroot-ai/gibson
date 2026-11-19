@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"log/slog"
@@ -26,6 +27,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
+	enginemission "github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
 	"github.com/zeroroot-ai/gibson/internal/engine/target"
@@ -1240,6 +1242,13 @@ func containsString(haystack []string, needle string) bool {
 // codes.Internal, causing the dashboard to receive a 500 instead of a 412.
 // Spec: per-tenant-data-plane-completion Req 8.1–8.3.
 func preserveStatus(err error, internalMsg string) error {
+	// A mission whose tenant could not be recorded was not created. The
+	// authorization store failed, so the caller retries: Unavailable. The check
+	// comes first because a handler that maps a message by its text (a message
+	// that holds "not found") would give this error the wrong code.
+	if errors.Is(err, enginemission.ErrTenantRecordFailed) {
+		return status_grpc.Errorf(codes.Unavailable, "%s: %v", internalMsg, err)
+	}
 	if _, ok := status_grpc.FromError(err); ok {
 		// err already has a gRPC status code — preserve it.
 		return err
@@ -2238,6 +2247,13 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 	if err != nil {
 		s.logger.Error("failed to create mission", "error", err, "name", req.Name)
 
+		// A mission whose tenant could not be recorded was not created, and the
+		// caller retries. The typed error comes first: a message of the
+		// authorization store may hold any of the words below.
+		if errors.Is(err, enginemission.ErrTenantRecordFailed) {
+			return nil, preserveStatus(err, "failed to create mission")
+		}
+
 		// Map errors to appropriate gRPC codes
 		if strings.Contains(err.Error(), "not found") {
 			return nil, status_grpc.Errorf(codes.NotFound, "%v", err)
@@ -2258,39 +2274,9 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 		"mission_definition_id", result.MissionDefinitionID,
 	)
 
-	// Write the FGA `mission:<id> belongs_to tenant:<tenant>` tuple so the
-	// cascading viewer/admin relations declared in model.fga resolve for
-	// every tenant member/admin without per-user grants. This is the only
-	// tuple the daemon writes on mission creation; per-user "share with"
-	// grants land separately when that UI ships.
-	//
-	// This write is REQUIRED: without the belongs_to tuple, the FGA model
-	// relation `define viewer: [user] or admin or member from belongs_to`
-	// cannot resolve for tenant members — leaving the mission permanently
-	// inaccessible to all ListCheckpoints / GetCheckpoint callers.
-	//
-	// Spec: mission-checkpointing R13/R14/R15/R16, model.fga `type mission`.
-	if s.authorizer != nil {
-		tenantID := auth.TenantStringFromContext(ctx)
-		if tenantID == "" {
-			return nil, status_grpc.Error(codes.Internal, "CreateMission: no tenant in context — cannot write FGA belongs_to tuple")
-		}
-		tuple := authz.Tuple{
-			User:     "tenant:" + tenantID,
-			Relation: "belongs_to",
-			Object:   "mission:" + result.MissionID,
-		}
-		if writeErr := s.authorizer.Write(ctx, []authz.Tuple{tuple}); writeErr != nil {
-			return nil, status_grpc.Errorf(codes.Internal,
-				"CreateMission: failed to write FGA belongs_to tuple for mission %s: %v",
-				result.MissionID, writeErr,
-			)
-		}
-		s.logger.Debug("CreateMission: mission belongs_to tuple written",
-			"mission_id", result.MissionID,
-			"tenant_id", tenantID,
-		)
-	}
+	// The tuple (tenant:<tenant>, belongs_to, mission:<id>) is written by the
+	// mission store when it creates the record (mission.TenantRecorder), for
+	// every path that creates a mission, before the mission exists.
 
 	// Build proto Mission response
 	protoMission := &daemonpb.Mission{

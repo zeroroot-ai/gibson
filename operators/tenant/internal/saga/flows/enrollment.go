@@ -292,11 +292,12 @@ func (s *deleteAgentFGAStep) Provision(ctx context.Context, obj saga.Conditioned
 	}
 	// Delete the same canonical tuples Provision writes (gibson#694).
 	tuples := componentGrantTuples(ae)
-	err = s.deps.FGA.Delete(ctx, tuples)
-	if err == nil || errors.Is(err, clients.ErrNotFound) {
-		return true, nil
+	// The client ignores a tuple that is already gone. An error here is a real
+	// one, such as an unknown store, and the step must fail and retry.
+	if err := s.deps.FGA.Delete(ctx, tuples); err != nil {
+		return false, fmt.Errorf("delete the component grant tuples: %w", err)
 	}
-	return false, err
+	return true, nil
 }
 
 // AgentEnrollment ConditionedObject conformance check.

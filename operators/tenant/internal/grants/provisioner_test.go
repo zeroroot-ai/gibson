@@ -173,14 +173,15 @@ func TestDeprovision_DeletesTuples(t *testing.T) {
 	}
 }
 
-// Deprovision treats a not-found from Delete as success (idempotent teardown).
-func TestDeprovision_NotFoundIsSuccess(t *testing.T) {
+// Deprovision returns an error from Delete, a not-found included. The client
+// ignores an absent tuple, so a not-found here is a real fault.
+func TestDeprovision_NotFoundIsAnError(t *testing.T) {
 	fake := newRecordingFGA()
 	fake.deleteErr = errNotFound
 	p := New(fake, isNotFound)
 
-	if err := p.Deprovision(context.Background(), []fga.Tuple{PlatformRegistrationTuple("acme")}); err != nil {
-		t.Fatalf("NotFound from Delete must be success, got %v", err)
+	if err := p.Deprovision(context.Background(), []fga.Tuple{PlatformRegistrationTuple("acme")}); err == nil {
+		t.Fatal("a not-found from Delete must be an error")
 	}
 }
 

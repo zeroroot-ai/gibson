@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/missiontest"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
@@ -135,8 +136,8 @@ func TestPerTenantMissionIsolation_CrossTenantGetReturnsNotFound(t *testing.T) {
 	defer connA.Release()
 	defer connB.Release()
 
-	storeA := mission.NewConnBoundMissionStore(connA.Redis)
-	storeB := mission.NewConnBoundMissionStore(connB.Redis)
+	storeA := mission.NewConnBoundMissionStore(connA.Redis).WithTenantRecorder(missiontest.NewRecorder(), tenantA.String())
+	storeB := mission.NewConnBoundMissionStore(connB.Redis).WithTenantRecorder(missiontest.NewRecorder(), tenantB.String())
 
 	mA := &mission.Mission{
 		ID:       types.NewID(),

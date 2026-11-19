@@ -86,6 +86,7 @@ func TestE2EPeerPolicy_CoversTheAAIFExitTests(t *testing.T) {
 		"/gibson.tenant.v1.TenantService/GetFinding",
 		"/gibson.tenant.v1.TenantService/ExportFindings",
 		"/gibson.world.v1.WorldService/GetTimeline",
+		"/gibson.world.v1.WorldService/GetLlmCall",
 	} {
 		if !policy[m] {
 			t.Errorf("the runner policy does not allow %s, which an AAIF exit test calls", m)

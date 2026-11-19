@@ -491,3 +491,52 @@ func TestListAgentSkillGrants_Refusals(t *testing.T) {
 	_, err = f.svc.ListAgentSkillGrants(context.Background(), &tenantv1.ListAgentSkillGrantsRequest{Name: "a"})
 	assert.Equal(t, codes.PermissionDenied, code(err))
 }
+
+// strictDeleteFGA fails a delete of a tuple that is absent, as OpenFGA does when
+// a request does not ask to ignore a missing delete. A caller that deletes a
+// tuple that no write made fails against it. The first Agent Skills exit test
+// run met this: it deleted a name that was never published.
+type strictDeleteFGA struct {
+	*recordingAuthorizer
+	present map[authz.Tuple]bool
+}
+
+func (s *strictDeleteFGA) Delete(ctx context.Context, tuples []authz.Tuple) error {
+	for _, t := range tuples {
+		if !s.present[t] {
+			return fmt.Errorf("cannot delete a tuple which does not exist: %+v", t)
+		}
+	}
+	for _, t := range tuples {
+		delete(s.present, t)
+	}
+	return s.recordingAuthorizer.Delete(ctx, tuples)
+}
+
+func TestDeleteAgentSkill_AnUnknownNameIsNotFoundAndTouchesNoTuple(t *testing.T) {
+	f := newSkillFixture(t, nil)
+	strict := &strictDeleteFGA{recordingAuthorizer: f.fga, present: map[authz.Tuple]bool{}}
+	svc, err := NewAgentSkillService(f.store, func(context.Context, string, string, authn.Keychain) (*agentskill.Pulled, error) {
+		return nil, nil
+	}, strict, f.secrets, f.shared, testPageKeys(t))
+	require.NoError(t, err)
+
+	_, err = svc.DeleteAgentSkill(f.ctx, &tenantv1.DeleteAgentSkillRequest{Name: "never-published"})
+	assert.Equal(t, codes.NotFound, code(err), "a name that no version holds is NotFound, not Internal")
+	assert.Empty(t, f.fga.deleted, "no tuple is deleted for a name that does not exist")
+}
+
+func TestDeleteAgentSkill_APublishedNameDeletesAgainstAStrictFGA(t *testing.T) {
+	f := newSkillFixture(t, nil)
+	f.store.entries = []agentskillstore.Entry{{Name: "a", Digest: "sha256:02", Current: true}}
+	owner := authz.Tuple{User: "tenant:acme", Relation: "owner", Object: "agent_skill:acme/a"}
+	strict := &strictDeleteFGA{recordingAuthorizer: f.fga, present: map[authz.Tuple]bool{owner: true}}
+	svc, err := NewAgentSkillService(f.store, func(context.Context, string, string, authn.Keychain) (*agentskill.Pulled, error) {
+		return nil, nil
+	}, strict, f.secrets, f.shared, testPageKeys(t))
+	require.NoError(t, err)
+
+	_, err = svc.DeleteAgentSkill(f.ctx, &tenantv1.DeleteAgentSkillRequest{Name: "a"})
+	require.NoError(t, err)
+	assert.False(t, strict.present[owner], "the owner tuple is gone")
+}

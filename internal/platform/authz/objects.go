@@ -605,6 +605,14 @@ func MissionObject(missionID string) string {
 	return "mission:" + missionID
 }
 
+// MissionBelongsToTuple builds the tuple that ties a mission to its tenant:
+// (tenant:<tenant>, belongs_to, mission:<id>). The viewer and admin relations of
+// a mission, and the checks that a grant names a mission of the tenant of the
+// caller (Agent Skills, outside agents), read it.
+func MissionBelongsToTuple(tenant, missionID string) Tuple {
+	return Tuple{User: "tenant:" + tenant, Relation: "belongs_to", Object: MissionObject(missionID)}
+}
+
 // MissionActiveTuple builds the ConditionalTuple that sets the model call gate
 // of a mission. The subject is the tenant of the mission, so a tuple of one
 // tenant never opens a mission of another tenant. active is true while the

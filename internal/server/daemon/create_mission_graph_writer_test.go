@@ -100,6 +100,7 @@ func TestCreateMission_MaterializesViaGraphWriter(t *testing.T) {
 		pool:          pool,
 		graphWriter:   writer,
 		brainRegistry: reg,
+		authorizer:    &fakeAuthorizer{},
 	}
 
 	missionDefinitionID := types.NewID().String()

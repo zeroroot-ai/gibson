@@ -18,6 +18,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agentskill"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
@@ -138,6 +139,14 @@ func agentSkillStatus(ctx context.Context, rpc string, err error) error {
 	var blocked *netguard.BlockedAddressError
 	if errors.As(err, &blocked) {
 		return status_grpc.Error(codes.InvalidArgument, rpc+": "+netguard.RedactBlocked(ctx, err).Error())
+	}
+	// A tenant with no data plane has no Agent Skills. The datapool documents
+	// that a handler answers NotFound for it. The second run of the Agent Skills
+	// exit test asked for the skills of a tenant that does not exist and read
+	// Internal.
+	var notProvisioned *datapool.NotProvisionedError
+	if errors.As(err, &notProvisioned) {
+		return status_grpc.Error(codes.NotFound, rpc+": the tenant has no Agent Skills store")
 	}
 	switch {
 	case errors.Is(err, agentskill.ErrOverLimit):
@@ -460,6 +469,12 @@ func (s *AgentSkillService) DeleteAgentSkill(
 	object, err := authz.AgentSkillObject(tenant, req.GetName())
 	if err != nil {
 		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
+	}
+	// A name that no version holds is NotFound, before any tuple work. The first
+	// run of the Agent Skills exit test deleted a name that was never published
+	// and read Internal from FGA.
+	if _, gerr := s.store.Get(ctx, tenant, req.GetName(), ""); gerr != nil {
+		return nil, agentSkillStatus(ctx, rpc, gerr)
 	}
 	// The tuples go first. A failure here leaves the content in place, and the
 	// caller can retry.

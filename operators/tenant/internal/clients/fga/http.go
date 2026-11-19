@@ -120,14 +120,15 @@ func (c *HTTPClient) Delete(ctx context.Context, tuples []Tuple) error {
 		"authorization_model_id": c.modelID,
 		"deletes": map[string]any{
 			"tuple_keys": toTupleKeys(tuples),
+			// OpenFGA (1.10 and later) refuses the whole batch when one tuple
+			// to delete is absent, unless the deletes object says to ignore a
+			// missing tuple. The old mapping of that refusal to success left
+			// the present tuples of a mixed batch in the store. A real error,
+			// such as an unknown store, now stays an error.
+			"on_missing": "ignore",
 		},
 	}
 	err := c.doJSON(ctx, fmt.Sprintf("/stores/%s/write", c.storeID), body, nil)
-	// Delete of non-existent tuple is idempotent.
-	if err != nil && errors.Is(err, clients.ErrNotFound) {
-		metrics.ObserveSubsystemCall("fga", "Delete", start, nil)
-		return nil
-	}
 	metrics.ObserveSubsystemCall("fga", "Delete", start, err)
 	return err
 }
@@ -341,6 +342,13 @@ func (c *HTTPClient) doJSON(ctx context.Context, path string, body any, out any)
 	}
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
+		// OpenFGA answers 404 for a store that does not exist and for a model
+		// that does not exist. A tuple that does not exist is no 404: a delete
+		// sets on_missing to ignore. Only the store code says the store is gone,
+		// and with the store gone its tuples are gone too (ErrStoreNotFound).
+		if fgaErrorCode(raw) == fgaStoreNotFoundCode {
+			return fmt.Errorf("fga %d: %w: %w", resp.StatusCode, ErrStoreNotFound, clients.ErrNotFound)
+		}
 		return fmt.Errorf("fga %d: %w", resp.StatusCode, clients.ErrNotFound)
 	case resp.StatusCode == http.StatusConflict:
 		return fmt.Errorf("fga %d: %w", resp.StatusCode, clients.ErrAlreadyExists)
@@ -382,4 +390,23 @@ func containsAny(s string, subs []string) bool {
 		}
 	}
 	return false
+}
+
+// ErrStoreNotFound marks a 404 of OpenFGA whose code is store_id_not_found: the
+// store does not exist, so no tuple of it exists either. A 404 for the model
+// (latest_authorization_model_not_found) does not carry it: the store and its
+// tuples are still there.
+var ErrStoreNotFound = errors.New("fga: the store does not exist")
+
+const fgaStoreNotFoundCode = "store_id_not_found"
+
+// fgaErrorCode reads the code of an OpenFGA error body, or "".
+func fgaErrorCode(raw []byte) string {
+	var e struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return ""
+	}
+	return e.Code
 }

@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,6 +19,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -84,7 +86,7 @@ func newAuthzReconciler(t *testing.T, fgaClient fga.Client, seed ...client.Objec
 		WithScheme(s).
 		WithObjects(seed...).
 		Build()
-	return &ConnectorInstanceAuthzReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, FGA: fgaClient}
+	return &ConnectorInstanceAuthzReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, FGA: fgaClient, Recorder: events.NewFakeRecorder(10)}
 }
 
 func connectorCR(name, namespace string, finalizers ...string) *connectorv1alpha1.ConnectorInstance {
@@ -215,6 +217,72 @@ func TestConnectorAuthz_FGAFailureBlocksDeletion(t *testing.T) {
 	}
 }
 
+// deleteErrFGA answers every Delete with err.
+type deleteErrFGA struct {
+	authzStubFGA
+	err error
+}
+
+func (s *deleteErrFGA) Delete(_ context.Context, _ []fga.Tuple) error { return s.err }
+
+func deletingConnector(t *testing.T, fgaClient fga.Client) *ConnectorInstanceAuthzReconciler {
+	t.Helper()
+	r := newAuthzReconciler(t, fgaClient, connectorCR("gitlab", "tenant-acme", connectorAuthzFinalizer))
+	var ci connectorv1alpha1.ConnectorInstance
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "gitlab", Namespace: "tenant-acme"}, &ci); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if err := r.Delete(context.Background(), &ci); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	return r
+}
+
+// A 404 for the STORE: the store does not exist, so its tuples do not exist, and
+// the finalizer completes. Before this a ConnectorInstance stayed Terminating
+// with a requeue with backoff and no end, and could block the deletion of the
+// namespace of its tenant.
+func TestConnectorAuthz_StoreNotFoundReleasesTheFinalizer(t *testing.T) {
+	r := deletingConnector(t, &deleteErrFGA{err: fmt.Errorf("fga 404: %w: %w", fga.ErrStoreNotFound, clients.ErrNotFound)})
+
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "gitlab", Namespace: "tenant-acme"}})
+	if err != nil || res.RequeueAfter != 0 {
+		t.Fatalf("Reconcile = (%+v, %v), want a clean finish", res, err)
+	}
+	var ci connectorv1alpha1.ConnectorInstance
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "gitlab", Namespace: "tenant-acme"}, &ci); err == nil {
+		t.Fatal("the finalizer must be released when the store is gone")
+	}
+}
+
+// Any other 404 is the model, not the tuples. The finalizer stays, the backoff
+// stops, a Warning event says why, and the controller checks again later.
+func TestConnectorAuthz_OtherNotFoundBlocksWithAnEventAndNoBackoff(t *testing.T) {
+	r := deletingConnector(t, &deleteErrFGA{err: fmt.Errorf("fga 404: %w", clients.ErrNotFound)})
+	rec := events.NewFakeRecorder(10)
+	r.Recorder = rec
+
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "gitlab", Namespace: "tenant-acme"}})
+	if err != nil {
+		t.Fatalf("a blocked finalizer must not return an error (that is the hot backoff): %v", err)
+	}
+	if res.RequeueAfter != connectorAuthzBlockedRequeue {
+		t.Fatalf("RequeueAfter = %v, want %v", res.RequeueAfter, connectorAuthzBlockedRequeue)
+	}
+	var ci connectorv1alpha1.ConnectorInstance
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "gitlab", Namespace: "tenant-acme"}, &ci); err != nil {
+		t.Fatalf("the CR must stay with its finalizer: %v", err)
+	}
+	select {
+	case ev := <-rec.Events:
+		if !strings.Contains(ev, "FGATuplesBlocked") {
+			t.Fatalf("event = %q", ev)
+		}
+	default:
+		t.Fatal("no Warning event for a blocked finalizer")
+	}
+}
+
 func TestConnectorAuthz_NonTenantNamespaceIsIgnored(t *testing.T) {
 	stub := &authzStubFGA{}
 	r := newAuthzReconciler(t, stub, connectorCR("gitlab", "gibson-system"))
@@ -312,7 +380,7 @@ func TestConnectorAuthz_SetupWithManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager: %v", err)
 	}
-	r := &ConnectorInstanceAuthzReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: mgr.GetClient(), Scheme: s, FGA: &authzStubFGA{}}
+	r := &ConnectorInstanceAuthzReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: mgr.GetClient(), Scheme: s, FGA: &authzStubFGA{}, Recorder: events.NewFakeRecorder(1)}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatalf("SetupWithManager: %v", err)
 	}

@@ -146,7 +146,9 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			// publishes, lists, reads, grants and deletes an Agent Skill as
 			// the tenant admin. It calls a tool and submits a finding as an
 			// outside component, resolves a model and an agent, reads and
-			// exports a finding, and reads the Timeline of a mission.
+			// exports a finding, reads the Timeline of a mission, and reads one
+			// model call with its transcript (GetLlmCall, the RPC of the
+			// dashboard call view).
 			"/gibson.tenant.v1.AgentSkillService/PublishAgentSkill": true,
 			"/gibson.tenant.v1.AgentSkillService/ListAgentSkills":   true,
 			"/gibson.tenant.v1.AgentSkillService/GetAgentSkill":     true,
@@ -159,6 +161,7 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.tenant.v1.TenantService/GetFinding":            true,
 			"/gibson.tenant.v1.TenantService/ExportFindings":        true,
 			"/gibson.world.v1.WorldService/GetTimeline":             true,
+			"/gibson.world.v1.WorldService/GetLlmCall":              true,
 		},
 	}
 }

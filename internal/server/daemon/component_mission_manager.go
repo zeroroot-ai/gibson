@@ -52,7 +52,7 @@ type componentMissionManager struct {
 	// acquired Conn. Defaults to the RedisJSON-backed implementations; tests
 	// override it to inject in-memory fakes, since RedisJSON (JSON.SET/GET) has
 	// no in-process server (miniredis does not implement it).
-	storeFactory func(conn *datapool.Conn) (mission.MissionStore, mission.ReservationLedger)
+	storeFactory func(conn *datapool.Conn, rec mission.TenantRecorder, tenant string) (mission.MissionStore, mission.ReservationLedger)
 	// runStoreFactory builds the per-tenant run store from an acquired Conn.
 	// Same RedisJSON-injection reason as storeFactory.
 	runStoreFactory func(conn *datapool.Conn) mission.MissionRunStore
@@ -73,8 +73,8 @@ func newComponentMissionManager(d *daemonImpl) *componentMissionManager {
 
 // defaultMissionStoreFactory is the production store+ledger constructor: both
 // bound to the acquired tenant Conn's Redis client.
-func defaultMissionStoreFactory(conn *datapool.Conn) (mission.MissionStore, mission.ReservationLedger) {
-	return mission.NewConnBoundMissionStore(conn.Redis), mission.NewRedisReservationLedger(conn.Redis)
+func defaultMissionStoreFactory(conn *datapool.Conn, rec mission.TenantRecorder, tenant string) (mission.MissionStore, mission.ReservationLedger) {
+	return newMissionStoreWith(conn.Redis, rec, tenant), mission.NewRedisReservationLedger(conn.Redis)
 }
 
 // defaultMissionRunStoreFactory is the production run-store constructor.
@@ -228,7 +228,7 @@ func (m *componentMissionManager) tenantConn(ctx context.Context, tenant string)
 	if connErr != nil {
 		return nil, nil, func() {}, status.Errorf(codes.Unavailable, "mission store: acquire conn: %v", connErr)
 	}
-	store, ledger := m.storeFactory(conn)
+	store, ledger := m.storeFactory(conn, m.daemon.missionTenantRecorder(), ctxTenant.String())
 	return store, ledger, func() { conn.Release() }, nil
 }
 

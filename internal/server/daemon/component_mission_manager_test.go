@@ -107,7 +107,7 @@ func newCMMTest(t *testing.T, store mission.MissionStore, ledger mission.Reserva
 	}
 	return &componentMissionManager{
 		daemon: d,
-		storeFactory: func(*datapool.Conn) (mission.MissionStore, mission.ReservationLedger) {
+		storeFactory: func(*datapool.Conn, mission.TenantRecorder, string) (mission.MissionStore, mission.ReservationLedger) {
 			return store, ledger
 		},
 		runStoreFactory: func(*datapool.Conn) mission.MissionRunStore {

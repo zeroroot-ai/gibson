@@ -15,6 +15,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/missiontest"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
@@ -316,6 +317,7 @@ func runExistingManager(t *testing.T, rec *mission.Mission, target *types.Target
 		brainRegistry:  brain.NewRegistry(brainCtx, braintest.StoreFactory()),
 		pool:           &runExistingPool{rdb: rdb},
 		activeMissions: make(map[auth.TenantID]map[string]*activeMission),
+		recorderFn:     func() mission.TenantRecorder { return missiontest.NewRecorder() },
 		targetStore: &fakeTargetStore{get: func(_ context.Context, got types.ID) (*types.Target, error) {
 			if target != nil && got == target.ID {
 				return target, nil
@@ -324,7 +326,7 @@ func runExistingManager(t *testing.T, rec *mission.Mission, target *types.Target
 		}},
 	}
 	if rec != nil {
-		if err := mission.NewConnBoundMissionStore(rdb).Save(context.Background(), rec); err != nil {
+		if err := mission.NewConnBoundMissionStore(rdb).WithTenantRecorder(missiontest.NewRecorder(), "tenant-a").Save(context.Background(), rec); err != nil {
 			t.Fatalf("seed mission: %v", err)
 		}
 		// The keys are uuid-scoped, so this removes only what this test wrote.

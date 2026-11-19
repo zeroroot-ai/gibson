@@ -206,12 +206,19 @@ jobs:
       # daemon rollout.
       # allow_private_llm_endpoints: the test saves a provider at the mock
       # address in the cluster, which the base_url check refuses by default.
+      # gateway.inClusterProviders opens the network policy of the proxy to the
+      # mock provider and to no other pod (the namespace gibson-e2e-mock, the pod
+      # label app=mock-provider, the container port 8443 of the TLS front). The
+      # mission of this test calls its model through the agentgateway, so without
+      # the entry the proxy cannot reach the mock and answers 503 connection
+      # timed out (run 44594937895). The same entry is in the aaif-exit-cluster
+      # action.
       - name: Point the daemon at the test-mode image with authz off + fixtures on
         working-directory: hosted
         run: |
           set -euo pipefail
           kubectl -n argocd patch application gibson --type json -p '[
-              {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n      - platform/e2e-member\n"},
+              {"op":"add","path":"/spec/source/helm/values","value":"gateway:\n  inClusterProviders:\n    - namespace: gibson-e2e-mock\n      podLabels:\n        app: mock-provider\n      ports:\n        - 8443\ngibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n      - platform/e2e-member\n"},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"model-gate","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},

@@ -3070,7 +3070,7 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		return api.CreateMissionResultData{}, datapool.MapPoolError(connMissionErr)
 	}
 	defer connForMission.Release()
-	mStoreForMission := mission.NewConnBoundMissionStore(connForMission.Redis)
+	mStoreForMission := d.newMissionStore(connForMission.Redis, tenantForMission.String())
 
 	// Create the mission record directly against the per-tenant store.
 	// TenantID MUST be stamped: the ListMissions gRPC handler filters by

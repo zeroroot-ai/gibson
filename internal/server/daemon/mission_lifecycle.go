@@ -68,6 +68,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 		// the per-tenant belief source, rather than threaded through the ctor.
 		missionManagerInstance.mgr.beliefs = d.tenantBeliefs
 		missionManagerInstance.mgr.skillStore = d.agentSkillStore
+		missionManagerInstance.mgr.recorderFn = d.missionTenantRecorder
 
 		d.logger.Info(context.Background(), "mission manager initialized")
 	})

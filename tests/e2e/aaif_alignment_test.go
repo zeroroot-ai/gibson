@@ -55,6 +55,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -327,6 +328,17 @@ func itemsContain(c helpers.ObservedLlmCall, want string) bool {
 	return false
 }
 
+// requirePositiveCost checks that the cost of a priced model parses as a number
+// greater than zero. An unknown cost is empty and never 0, and "0.0" or "0.00"
+// is not a cost either, so the check parses the number.
+func requirePositiveCost(t *testing.T, cost string) {
+	t.Helper()
+	require.NotEmpty(t, cost, "the event must hold the cost of a priced model")
+	v, err := strconv.ParseFloat(cost, 64)
+	require.NoError(t, err, "the cost %q must be a number", cost)
+	require.Greater(t, v, 0.0, "the cost of a priced model must be greater than zero, got %q", cost)
+}
+
 // requireCallPoints checks the fields that points 1 and 2 name.
 func requireCallPoints(t *testing.T, c helpers.ObservedLlmCall, wantInOutput string) {
 	t.Helper()
@@ -362,28 +374,52 @@ func aaifOpenResponsesPoints(
 		require.True(t, itemsContain(call, "function_call"), "the event must hold the prior tool call; items: %q", call.Items)
 		require.True(t, itemsContain(call, "function_call_output"), "the event must hold the tool result; items: %q", call.Items)
 		if wantCost {
-			require.NotEmpty(t, call.Cost, "the event must hold the cost of a priced model")
-			require.NotEqual(t, "0", call.Cost, "an unknown cost is empty and never 0")
+			requirePositiveCost(t, call.Cost)
 		}
 	})
 
 	t.Run("a streamed call is observed with all items, tokens and cost", func(t *testing.T) {
+		callsBefore := len(s.observedCalls(t, work.MissionID))
+		mockBefore := aaifMockCount(t)
+
 		text, completed, err := g.StreamResponse(s.ctx, toolRoundTrip())
 		require.NoError(t, err, "the streamed call")
 		require.True(t, completed, "the stream must end with response.completed")
 		require.Equal(t, aaifMockReply, text)
 
-		helpers.Eventually(t, aaifTraceTimeout, "two llm_call.observed events", func() (bool, string) {
-			n := len(s.observedCalls(t, work.MissionID))
-			return n >= 2, fmt.Sprint(n)
+		// The provider must get a streamed request. A gateway that buffers the
+		// call and answers in one piece would pass the checks above, so this
+		// one proves the stream reached the provider.
+		reqs := aaifMockRequests(t)
+		require.Greater(t, aaifMockCount(t), mockBefore, "the mock provider must get the streamed call")
+		last := reqs[len(reqs)-1]
+		require.Equal(t, wantMockPath, last.Path)
+		require.Regexp(t, `"stream"\s*:\s*true`, last.Body, "the provider must get a request with stream true")
+
+		// The streamed call is a new event that did not fail, with its own call
+		// id. A failed call is a record too, so a wait for any new event could
+		// stop on one.
+		var streamed *helpers.ObservedLlmCall
+		helpers.Eventually(t, aaifTraceTimeout, "a new llm_call.observed event for the streamed call that did not fail", func() (bool, string) {
+			calls := s.observedCalls(t, work.MissionID)
+			for i := callsBefore; i < len(calls); i++ {
+				if !calls[i].Failed() {
+					streamed = &calls[i]
+					return true, ""
+				}
+			}
+			return false, fmt.Sprintf("%d events, %d before the stream, none new that ended well", len(calls), callsBefore)
 		})
-		calls := s.observedCalls(t, work.MissionID)
 		seen := map[string]bool{}
-		for _, call := range calls {
+		all := s.observedCalls(t, work.MissionID)
+		for _, call := range all {
 			seen[call.CallID] = true
 		}
-		require.Len(t, seen, len(calls), "each call must have its own call id")
-		requireCallPoints(t, calls[len(calls)-1], aaifMockReply)
+		require.Len(t, seen, len(all), "each call must have its own call id")
+		requireCallPoints(t, *streamed, aaifMockReply)
+		if wantCost {
+			requirePositiveCost(t, streamed.Cost)
+		}
 	})
 }
 
