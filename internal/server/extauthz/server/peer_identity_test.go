@@ -112,7 +112,8 @@ func TestPeer_AModelPathFromTheEdgeIsRefused(t *testing.T) {
 // never reaches an Edge route: each path of the gateway is a model path or an
 // A2A path.
 func TestPeer_EdgeRouteNeedsTheEdgeIdentity(t *testing.T) {
-	t.Parallel()
+	// Not parallel: the test reads the process-wide refusal counter, and a
+	// parallel test that also gets a peer refusal would change it.
 	srv, _, _ := buildPeerServer(t, []string{gatewaySVID})
 	edgeRoute := soleGrantRequest("no-grant")
 
