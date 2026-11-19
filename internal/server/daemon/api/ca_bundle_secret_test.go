@@ -88,7 +88,7 @@ func TestGetOutsideAgentCredential_AddsTheCABundle(t *testing.T) {
 			{Name: "bad-ca", CABundleSecret: "key"},
 		},
 	}}
-	secrets := &fakeCredStore{data: map[string][]byte{"key": []byte("tok"), "cred:ca": bundle}}
+	secrets := &fakeCredStore{data: map[string][]byte{"cred:key": []byte("tok"), "cred:ca": bundle}}
 	srv := outsideOperatorServer(store, secrets)
 	get := func(name string) (*daemonoperatorv1.GetOutsideAgentCredentialResponse, error) {
 		return srv.GetOutsideAgentCredential(peerCtx(t, testTenantOperatorSVID),

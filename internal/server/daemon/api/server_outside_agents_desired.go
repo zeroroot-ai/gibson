@@ -15,13 +15,16 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
+	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -111,8 +114,13 @@ func (s *DaemonServer) GetOutsideAgentCredential(
 	tctx := auth.WithTenant(ctx, tenant)
 	data := map[string][]byte{}
 	if entry.CredentialSecret != "" {
-		value, err := s.modelCredStore.Resolve(tctx, entry.CredentialSecret)
+		// The user saved the secret with SetSecret, so the read uses the same
+		// stored-name rule.
+		stored := secrets.StoredName(secretsv1.SecretCategory_SECRET_CATEGORY_CRED, entry.CredentialSecret)
+		value, err := s.modelCredStore.Resolve(tctx, stored)
 		if err != nil {
+			slog.WarnContext(ctx, "the credential secret of an outside agent cannot be read",
+				"secret", entry.CredentialSecret, "stored_name", stored, "error", err)
 			// The error names the secret and never a value.
 			return nil, status.Errorf(codes.NotFound, "the credential secret %q cannot be read", entry.CredentialSecret)
 		}

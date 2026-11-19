@@ -82,7 +82,7 @@ func TestGetOutsideAgentCredential_ReturnsTheAuthorizationKey(t *testing.T) {
 	store := &tenantOutsideStore{byTenant: map[string][]outsideagentstore.Entry{
 		"acme": {{Name: "scout", CredentialSecret: "scout-key"}},
 	}}
-	secrets := &fakeCredStore{data: map[string][]byte{"scout-key": []byte("tok-1")}}
+	secrets := &fakeCredStore{data: map[string][]byte{"cred:scout-key": []byte("tok-1")}}
 	resp, err := outsideOperatorServer(store, secrets).GetOutsideAgentCredential(
 		peerCtx(t, testTenantOperatorSVID),
 		&daemonoperatorv1.GetOutsideAgentCredentialRequest{TenantId: "acme", Name: "scout"})
@@ -122,7 +122,7 @@ func TestGetOutsideAgentCredential_OtherTenantRecordIsNotFound(t *testing.T) {
 	store := &tenantOutsideStore{byTenant: map[string][]outsideagentstore.Entry{
 		"other": {{Name: "scout", CredentialSecret: "scout-key"}},
 	}}
-	secrets := &fakeCredStore{data: map[string][]byte{"scout-key": []byte("tok")}}
+	secrets := &fakeCredStore{data: map[string][]byte{"cred:scout-key": []byte("tok")}}
 	_, err := outsideOperatorServer(store, secrets).GetOutsideAgentCredential(
 		peerCtx(t, testTenantOperatorSVID),
 		&daemonoperatorv1.GetOutsideAgentCredentialRequest{TenantId: "acme", Name: "scout"})
@@ -135,7 +135,7 @@ func TestOutsideAgentOperatorRPCs_OnlyTheTenantOperator(t *testing.T) {
 	store := &tenantOutsideStore{byTenant: map[string][]outsideagentstore.Entry{
 		"acme": {{Name: "scout", CredentialSecret: "scout-key"}},
 	}}
-	secrets := &fakeCredStore{data: map[string][]byte{"scout-key": []byte("tok")}}
+	secrets := &fakeCredStore{data: map[string][]byte{"cred:scout-key": []byte("tok")}}
 	srv := outsideOperatorServer(store, secrets)
 	callers := map[string]context.Context{
 		"the connector operator": peerCtx(t, testConnectorOperatorSVID),
