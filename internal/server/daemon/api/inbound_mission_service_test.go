@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +27,8 @@ import (
 var errInboundBoom = errors.New("boom")
 
 type memInboundStore struct {
+	lockMu      sync.Mutex
+	locks       map[string]*sync.Mutex
 	afterDelete func()
 	entries     map[string]inboundmissionstore.Entry
 	publishErr  error
@@ -88,8 +91,25 @@ func (m *memInboundStore) Bind(context.Context, string, string, string) error {
 func (m *memInboundStore) Release(context.Context, string, string) error {
 	return errors.New("not used")
 }
-func (m *memInboundStore) Owner(context.Context, string, string) (string, error) {
-	return "", errors.New("not used")
+func (m *memInboundStore) Owner(context.Context, string, string) (owner, agent string, err error) {
+	return "", "", errors.New("not used")
+}
+
+// WithIdentityLock runs fn while it holds a lock of the identity, as the database does.
+func (m *memInboundStore) WithIdentityLock(_ context.Context, _, identity string, fn func() error) error {
+	m.lockMu.Lock()
+	l, ok := m.locks[identity]
+	if !ok {
+		if m.locks == nil {
+			m.locks = map[string]*sync.Mutex{}
+		}
+		l = &sync.Mutex{}
+		m.locks[identity] = l
+	}
+	m.lockMu.Unlock()
+	l.Lock()
+	defer l.Unlock()
+	return fn()
 }
 
 func (m *memInboundStore) Delete(_ context.Context, _, agent string) error {
@@ -145,6 +165,13 @@ type failingInboundFGA struct {
 	checkErr, writeErr, deleteErr, listErr error
 	// afterWrite runs after a write, as a parallel call would.
 	afterWrite func()
+	// readDelay slows each tuple read.
+	readDelay time.Duration
+}
+
+func (f *failingInboundFGA) ReadTuples(ctx context.Context, user, relation, object string) ([]authz.Tuple, error) {
+	time.Sleep(f.readDelay)
+	return f.recordingAuthorizer.ReadTuples(ctx, user, relation, object)
 }
 
 func (f *failingInboundFGA) Check(ctx context.Context, user, relation, object string) (bool, error) {
@@ -159,6 +186,9 @@ func (f *failingInboundFGA) Write(ctx context.Context, t []authz.Tuple) error {
 		return f.writeErr
 	}
 	err := f.recordingAuthorizer.Write(ctx, t)
+	f.mu.Lock()
+	f.stored = append(f.stored, t...)
+	f.mu.Unlock()
 	if f.afterWrite != nil {
 		f.afterWrite()
 	}
@@ -690,4 +720,29 @@ func TestGrantInboundCaller_AfterCreateAgentIdentity(t *testing.T) {
 			assert.Equal(t, tc.want, code(err), "%v", err)
 		})
 	}
+}
+
+// Two grants of one identity at the same time give one grant. The check of the sole
+// grant and the write are one step under a lock of the identity. Without the lock
+// both calls read no grant and both write one.
+func TestGrantInboundCaller_ParallelGrantsOfOneIdentityGiveOneGrant(t *testing.T) {
+	const ref = "agent_principal:a1"
+	f := publishedFixture(t)
+	f.source.defs["def-2"] = InboundDefinition{ID: "def-2", Hash: "h", Agents: []string{"scan"}}
+	_, err := f.svc.PublishInboundMission(f.ctx, pub("scan", "def-2", goodTarget))
+	require.NoError(t, err)
+	f.fga.allow("tenant:acme", "belongs_to", ref)
+	// A slow read gives the other call time to read before the first one writes.
+	f.fga.readDelay = 20 * time.Millisecond
+
+	codesSeen := make(chan codes.Code, 2)
+	for _, agent := range []string{"recon", "scan"} {
+		go func() {
+			_, err := f.svc.GrantInboundCaller(f.ctx, &tenantv1.GrantInboundCallerRequest{Agent: agent, IdentityId: ref})
+			codesSeen <- code(err)
+		}()
+	}
+	got := []codes.Code{<-codesSeen, <-codesSeen}
+
+	assert.ElementsMatch(t, []codes.Code{codes.OK, codes.FailedPrecondition}, got)
 }

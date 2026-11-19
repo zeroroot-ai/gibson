@@ -86,14 +86,17 @@ type InboundRuns interface {
 	// under the agent name, and it returns the Task of the mission. A message that
 	// the policy refuses gets a Task in the state rejected, and no mission starts.
 	Start(ctx context.Context, req InboundStart) (*a2a.Task, error)
-	// Task returns the Task of a mission that the caller started. The Task state
+	// Task returns the Task of a mission that the caller started through the
+	// endpoint of the agent. A Task belongs to the endpoint of the agent that it
+	// started from, so a read through the path of another agent finds nothing. The
+	// Task state
 	// is the mission state. A finished mission has the findings of that mission in
 	// its result. A mission of another caller is not found.
-	Task(ctx context.Context, caller InboundCaller, id a2a.TaskID) (*a2a.Task, error)
+	Task(ctx context.Context, caller InboundCaller, agent string, id a2a.TaskID) (*a2a.Task, error)
 	// Cancel ends a mission that the caller started, and it returns its Task. It
 	// never ends the mission of another caller. A mission in a final state cannot
 	// be canceled (ErrNotCancelable).
-	Cancel(ctx context.Context, caller InboundCaller, id a2a.TaskID) (*a2a.Task, error)
+	Cancel(ctx context.Context, caller InboundCaller, agent string, id a2a.TaskID) (*a2a.Task, error)
 }
 
 // InboundGrants decides the right of a caller to use a published definition. The
@@ -176,14 +179,14 @@ func (h *inboundRPC) SendMessage(ctx context.Context, req *a2a.SendMessageReques
 // grant. The ownership check of the runs decides. A revoked identity does not reach
 // this point, because ext-authz refuses it.
 func (h *inboundRPC) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Task, error) {
-	c, _, err := h.callOf(ctx)
+	c, agent, err := h.callOf(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if req == nil || req.ID == "" {
 		return nil, fmt.Errorf("%w: the request names no task", a2a.ErrInvalidParams)
 	}
-	t, err := h.runs.Task(ctx, c, req.ID)
+	t, err := h.runs.Task(ctx, c, agent, req.ID)
 	if err != nil {
 		return nil, MapError(err)
 	}
@@ -202,7 +205,7 @@ func (h *inboundRPC) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest)
 	if req == nil || req.ID == "" {
 		return nil, fmt.Errorf("%w: the request names no task", a2a.ErrInvalidParams)
 	}
-	t, err := h.runs.Cancel(ctx, c, req.ID)
+	t, err := h.runs.Cancel(ctx, c, agent, req.ID)
 	if err != nil {
 		return nil, MapError(err)
 	}

@@ -301,9 +301,12 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 // started and a mission that does not exist all give ErrNotFound, so the caller
 // learns nothing about them. A mission that the World does not hold yet gives the
 // snapshot of a submitted mission.
-func (r *inboundRuns) ownedMission(ctx context.Context, c a2aserver.InboundCaller, id string) (brain.MissionSnapshot, error) {
-	owner, err := r.published.Owner(ctx, c.Tenant, id)
-	if errors.Is(err, inboundmissionstore.ErrNotFound) || (err == nil && owner != c.Subject) {
+func (r *inboundRuns) ownedMission(ctx context.Context, c a2aserver.InboundCaller, agent, id string) (brain.MissionSnapshot, error) {
+	owner, rowAgent, err := r.published.Owner(ctx, c.Tenant, id)
+	// A Task belongs to the endpoint of the agent that it started from. A read or a
+	// cancel through the path of another agent finds nothing, so a grant on agent B
+	// never reaches a mission of agent A.
+	if errors.Is(err, inboundmissionstore.ErrNotFound) || (err == nil && (owner != c.Subject || rowAgent != agent)) {
 		return brain.MissionSnapshot{}, a2aserver.ErrNotFound
 	}
 	if err != nil {
@@ -327,8 +330,8 @@ const inputRequiredText = "the mission waits for a person in the tenant to decid
 // the mission state, and a paused mission shows as working. A mission in a final
 // state has the findings of that one mission in its result, with all of their
 // evidence. The result has no size limit.
-func (r *inboundRuns) Task(ctx context.Context, c a2aserver.InboundCaller, id a2a.TaskID) (*a2a.Task, error) {
-	m, err := r.ownedMission(ctx, c, string(id))
+func (r *inboundRuns) Task(ctx context.Context, c a2aserver.InboundCaller, agent string, id a2a.TaskID) (*a2a.Task, error) {
+	m, err := r.ownedMission(ctx, c, agent, string(id))
 	if err != nil {
 		return nil, err
 	}
@@ -395,8 +398,8 @@ func withResult(t *a2a.Task, res inboundResult) *a2a.Task {
 // Cancel ends a mission that the caller started. It ends no other mission: a
 // mission of another caller is not found. A mission in a final state cannot be
 // canceled.
-func (r *inboundRuns) Cancel(ctx context.Context, c a2aserver.InboundCaller, id a2a.TaskID) (*a2a.Task, error) {
-	m, err := r.ownedMission(ctx, c, string(id))
+func (r *inboundRuns) Cancel(ctx context.Context, c a2aserver.InboundCaller, agent string, id a2a.TaskID) (*a2a.Task, error) {
+	m, err := r.ownedMission(ctx, c, agent, string(id))
 	if err != nil {
 		return nil, err
 	}

@@ -358,7 +358,7 @@ func TestInboundRuns_TaskStateIsTheMissionState(t *testing.T) {
 	f := newTaskFixture(t)
 	f.startMission(ownerRef)
 
-	task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	task, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateWorking, task.Status.State)
 	assert.Equal(t, a2a.TaskID(f.mission), task.ID)
@@ -369,7 +369,7 @@ func TestInboundRuns_TaskStateIsTheMissionState(t *testing.T) {
 	// A paused mission shows as working.
 	f.eng.Submit(brain.MissionPauseRequested{ID: f.mission, RunID: "run-1"})
 	f.eng.Tick()
-	task, err = f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	task, err = f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateWorking, task.Status.State, "paused shows as working")
 }
@@ -389,7 +389,7 @@ func TestInboundRuns_ATaskInAFinalStateHoldsTheFindingsOfThatMission(t *testing.
 			}}}
 			f.end(outcome)
 
-			task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+			task, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 
 			require.NoError(t, err)
 			assert.Equal(t, want, task.Status.State)
@@ -423,7 +423,7 @@ func TestInboundRuns_TaskNeverShowsTheMissionOfAnotherCaller(t *testing.T) {
 	f.end(brain.MissionCompleted)
 
 	for name, id := range map[string]string{"another caller": f.mission, "a mission that does not exist": types.NewID().String()} {
-		_, err := f.runs.Task(context.Background(), otherCaller, a2a.TaskID(id))
+		_, err := f.runs.Task(context.Background(), otherCaller, "recon", a2a.TaskID(id))
 		require.ErrorIs(t, err, a2aserver.ErrNotFound, name)
 	}
 	assert.Empty(t, f.findings.asked, "the findings of another caller are never read")
@@ -431,7 +431,7 @@ func TestInboundRuns_TaskNeverShowsTheMissionOfAnotherCaller(t *testing.T) {
 	// A mission that a person started has no inbound owner, so no caller reads it.
 	g := newTaskFixture(t)
 	g.startMission(principal.Principal{Kind: principal.User, ID: "u1"})
-	_, err := g.runs.Task(context.Background(), ownerCaller, a2a.TaskID(g.mission))
+	_, err := g.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(g.mission))
 	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
 }
 
@@ -441,24 +441,24 @@ func TestInboundRuns_TheOwnerComesFromTheDatabaseAndNotFromAReplica(t *testing.T
 	f := newTaskFixture(t)
 	f.owners.owners[f.mission] = inboundCallerRef // the World of this replica holds nothing
 
-	task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	task, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
 
 	// A second replica has its own memory and the same database.
 	second := newTaskFixture(t)
 	second.runs.published = f.owners
-	task, err = second.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	task, err = second.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
 
-	_, err = f.runs.Task(context.Background(), otherCaller, a2a.TaskID(f.mission))
+	_, err = f.runs.Task(context.Background(), otherCaller, "recon", a2a.TaskID(f.mission))
 	require.ErrorIs(t, err, a2aserver.ErrNotFound, "another caller reads nothing of it")
 
 	f.owners.ownerErr = errors.New("db down")
-	_, err = f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	_, err = f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 	require.ErrorContains(t, err, "read the owner of mission")
-	_, err = f.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	_, err = f.runs.Cancel(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 	require.ErrorContains(t, err, "read the owner of mission")
 }
 
@@ -468,7 +468,7 @@ func TestInboundRuns_TaskFailures(t *testing.T) {
 	f.end(brain.MissionCompleted)
 
 	f.findings.err = errors.New("postgres is down")
-	_, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	_, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 	require.ErrorContains(t, err, "postgres is down")
 
 	// A result of any size is built whole.
@@ -476,7 +476,7 @@ func TestInboundRuns_TaskFailures(t *testing.T) {
 	f.findings.findings = []finding.EnhancedFinding{{Finding: agent.Finding{
 		ID: types.NewID(), Evidence: []*typespb.Evidence{{Content: strings.Repeat("A", 17<<20)}},
 	}}}
-	task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	task, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 	require.NoError(t, err, "no size limit")
 	require.Len(t, task.Artifacts, 1)
 	assert.Contains(t, string(task.Artifacts[0].Parts[0].Data().(json.RawMessage)), strings.Repeat("A", 17<<20))
@@ -490,7 +490,7 @@ func TestInboundRuns_CancelEndsTheMissionOfTheCaller(t *testing.T) {
 	f := newTaskFixture(t)
 	f.startMission(ownerRef)
 
-	task, err := f.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	task, err := f.runs.Cancel(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateCanceled, task.Status.State)
@@ -505,16 +505,16 @@ func TestInboundRuns_CancelNeverEndsTheMissionOfAnotherCaller(t *testing.T) {
 	f := newTaskFixture(t)
 	f.startMission(ownerRef)
 
-	_, err := f.runs.Cancel(context.Background(), otherCaller, a2a.TaskID(f.mission))
+	_, err := f.runs.Cancel(context.Background(), otherCaller, "recon", a2a.TaskID(f.mission))
 	require.ErrorIs(t, err, a2aserver.ErrNotFound)
-	_, err = f.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(types.NewID().String()))
+	_, err = f.runs.Cancel(context.Background(), ownerCaller, "recon", a2a.TaskID(types.NewID().String()))
 	require.ErrorIs(t, err, a2aserver.ErrNotFound)
 	assert.Empty(t, f.stopped, "no mission ended")
 
 	// A mission that a person started is not the mission of any inbound caller.
 	g := newTaskFixture(t)
 	g.startMission(principal.Principal{Kind: principal.User, ID: "u1"})
-	_, err = g.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(g.mission))
+	_, err = g.runs.Cancel(context.Background(), ownerCaller, "recon", a2a.TaskID(g.mission))
 	require.ErrorIs(t, err, a2aserver.ErrNotFound)
 	assert.Empty(t, g.stopped)
 }
@@ -523,14 +523,14 @@ func TestInboundRuns_CancelRefusals(t *testing.T) {
 	f := newTaskFixture(t)
 	f.startMission(ownerRef)
 	f.end(brain.MissionCompleted)
-	_, err := f.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+	_, err := f.runs.Cancel(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 	require.ErrorIs(t, err, a2aserver.ErrNotCancelable, "a mission in a final state cannot be canceled")
 	assert.Empty(t, f.stopped)
 
 	g := newTaskFixture(t)
 	g.startMission(ownerRef)
 	g.stopErr = errors.New("not running here")
-	_, err = g.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(g.mission))
+	_, err = g.runs.Cancel(context.Background(), ownerCaller, "recon", a2a.TaskID(g.mission))
 	assert.ErrorContains(t, err, "not running here")
 }
 
@@ -746,7 +746,7 @@ func TestInboundRuns_TheResultOfAFinishedMissionIsBuiltOnce(t *testing.T) {
 	f.end(brain.MissionCompleted)
 
 	for range 3 {
-		task, err := f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
+		task, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
 		require.NoError(t, err)
 		require.Len(t, task.Artifacts, 1)
 	}
@@ -757,7 +757,7 @@ func TestInboundRuns_TheResultOfAFinishedMissionIsBuiltOnce(t *testing.T) {
 	h.findings.err = errors.New("postgres is down")
 	h.end(brain.MissionCompleted)
 	for range 2 {
-		_, err := h.runs.Task(context.Background(), ownerCaller, a2a.TaskID(h.mission))
+		_, err := h.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(h.mission))
 		require.Error(t, err)
 	}
 	assert.Len(t, h.findings.asked, 2, "a failure to read is tried again")
@@ -867,4 +867,21 @@ func TestInboundHandler_AfterTheGrantIsGoneACallerKeepsTheReadAndNothingElse(t *
 	start := call(inboundCallerRef, "SendMessage", `{"message":{"messageId":"m","role":"ROLE_USER","parts":[{"text":"x"}]}}`)
 	assert.Contains(t, start, "no grant", "a new start is refused")
 	assert.Empty(t, f.stopped, "no mission was ended")
+}
+
+// A Task belongs to the endpoint of the agent that it started from. A read or a
+// cancel through the path of another agent finds nothing, so the grant of a caller
+// on agent B never reaches a mission of agent A.
+func TestInboundRuns_ATaskIsFoundOnlyThroughThePathOfItsAgent(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef) // the task row names the agent recon
+
+	_, err := f.runs.Cancel(context.Background(), ownerCaller, "scan", a2a.TaskID(f.mission))
+	require.ErrorIs(t, err, a2aserver.ErrNotFound)
+	_, err = f.runs.Task(context.Background(), ownerCaller, "scan", a2a.TaskID(f.mission))
+	require.ErrorIs(t, err, a2aserver.ErrNotFound)
+	assert.Empty(t, f.stopped, "no mission was ended through another agent")
+
+	_, err = f.runs.Cancel(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
+	require.NoError(t, err)
 }

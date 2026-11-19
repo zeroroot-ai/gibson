@@ -82,11 +82,12 @@ func TestTargetsOf_NeverReadsATargetFromTextOrMetadata(t *testing.T) {
 
 // fakeStarts records each inbound call and answers with a fixed Task.
 type fakeStarts struct {
-	got       []InboundStart
-	task      *a2a.Task
-	err       error
-	asked     []InboundCaller
-	askedByID []a2a.TaskID
+	got        []InboundStart
+	task       *a2a.Task
+	err        error
+	asked      []InboundCaller
+	askedByID  []a2a.TaskID
+	askedAgent []string
 }
 
 func (f *fakeStarts) Start(_ context.Context, req InboundStart) (*a2a.Task, error) {
@@ -94,13 +95,13 @@ func (f *fakeStarts) Start(_ context.Context, req InboundStart) (*a2a.Task, erro
 	return f.task, f.err
 }
 
-func (f *fakeStarts) Task(_ context.Context, c InboundCaller, id a2a.TaskID) (*a2a.Task, error) {
-	f.asked, f.askedByID = append(f.asked, c), append(f.askedByID, id)
+func (f *fakeStarts) Task(_ context.Context, c InboundCaller, agent string, id a2a.TaskID) (*a2a.Task, error) {
+	f.asked, f.askedByID, f.askedAgent = append(f.asked, c), append(f.askedByID, id), append(f.askedAgent, agent)
 	return f.task, f.err
 }
 
-func (f *fakeStarts) Cancel(_ context.Context, c InboundCaller, id a2a.TaskID) (*a2a.Task, error) {
-	f.asked, f.askedByID = append(f.asked, c), append(f.askedByID, id)
+func (f *fakeStarts) Cancel(_ context.Context, c InboundCaller, agent string, id a2a.TaskID) (*a2a.Task, error) {
+	f.asked, f.askedByID, f.askedAgent = append(f.asked, c), append(f.askedByID, id), append(f.askedAgent, agent)
 	return f.task, f.err
 }
 
@@ -211,6 +212,7 @@ func TestInboundRPC_GetAndCancelActForTheCallerOfTheHeaders(t *testing.T) {
 			require.Len(t, starts.asked, 1)
 			assert.Equal(t, InboundCaller{Tenant: "acme", Subject: "agent_principal:9"}, starts.asked[0])
 			assert.Equal(t, a2a.TaskID("m-1"), starts.askedByID[0])
+			assert.Equal(t, []string{"recon"}, starts.askedAgent, "the run gets the agent of the path")
 		})
 	}
 }

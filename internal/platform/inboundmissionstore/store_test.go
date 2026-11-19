@@ -455,26 +455,49 @@ func TestBindReleaseOwner(t *testing.T) {
 	ok := &fakeDB{exec: okExec, queryRow: func(string) datapool.Row { return fakeRow{values: []any{"agent_principal:9"}} }}
 	require.NoError(t, newStore(ok).Bind(context.Background(), "acme", "slot", "m-1"))
 	require.NoError(t, newStore(ok).Release(context.Background(), "acme", "slot"))
-	owner, err := newStore(ok).Owner(context.Background(), "acme", "m-1")
+	ok.queryRow = func(string) datapool.Row { return fakeRow{values: []any{"agent_principal:9", "recon"}} }
+	owner, agent, err := newStore(ok).Owner(context.Background(), "acme", "m-1")
 	require.NoError(t, err)
 	assert.Equal(t, "agent_principal:9", owner)
+	assert.Equal(t, "recon", agent)
 
 	none := &fakeDB{exec: func(string) (int64, error) { return 0, nil },
 		queryRow: func(string) datapool.Row { return fakeRow{err: datapool.ErrNoRows} }}
 	require.ErrorIs(t, newStore(none).Bind(context.Background(), "acme", "slot", "m-1"), ErrNotFound)
-	_, err = newStore(none).Owner(context.Background(), "acme", "m-1")
+	_, _, err = newStore(none).Owner(context.Background(), "acme", "m-1")
 	require.ErrorIs(t, err, ErrNotFound)
 
 	bad := &fakeDB{exec: func(string) (int64, error) { return 0, errBoom },
 		queryRow: func(string) datapool.Row { return fakeRow{err: errBoom} }}
 	require.ErrorIs(t, newStore(bad).Bind(context.Background(), "acme", "s", "m"), errBoom)
 	require.ErrorIs(t, newStore(bad).Release(context.Background(), "acme", "s"), errBoom)
-	_, err = newStore(bad).Owner(context.Background(), "acme", "m")
+	_, _, err = newStore(bad).Owner(context.Background(), "acme", "m")
 	require.ErrorIs(t, err, errBoom)
 
 	gone := &fakeDB{forErr: errBoom}
 	require.ErrorIs(t, newStore(gone).Bind(context.Background(), "acme", "s", "m"), errBoom)
 	require.ErrorIs(t, newStore(gone).Release(context.Background(), "acme", "s"), errBoom)
-	_, err = newStore(gone).Owner(context.Background(), "acme", "m")
+	_, _, err = newStore(gone).Owner(context.Background(), "acme", "m")
 	require.ErrorIs(t, err, errBoom)
+}
+
+func TestWithIdentityLock_RunsTheFunctionUnderAnAdvisoryLockOfTheIdentity(t *testing.T) {
+	db := &fakeDB{exec: okExec}
+	ran := false
+
+	err := newStore(db).WithIdentityLock(context.Background(), "acme", "agent_principal:9", func() error { ran = true; return nil })
+
+	require.NoError(t, err)
+	assert.True(t, ran)
+	assert.Contains(t, db.seen[0], "pg_advisory_xact_lock", "the lock comes before the function")
+
+	err = newStore(db).WithIdentityLock(context.Background(), "acme", "x", func() error { return errBoom })
+	require.ErrorIs(t, err, errBoom)
+	fail := &fakeDB{exec: func(string) (int64, error) { return 0, errBoom }}
+	ran = false
+	err = newStore(fail).WithIdentityLock(context.Background(), "acme", "x", func() error { ran = true; return nil })
+	require.ErrorIs(t, err, errBoom)
+	assert.False(t, ran, "the function does not run without the lock")
+	require.ErrorIs(t, newStore(&fakeDB{forErr: errBoom}).WithIdentityLock(context.Background(), "acme", "x",
+		func() error { return nil }), errBoom)
 }

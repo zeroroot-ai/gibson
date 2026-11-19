@@ -54,15 +54,15 @@ func (f *fakePublished) Release(_ context.Context, _, slot string) error {
 	return f.releaseErr
 }
 
-func (f *fakePublished) Owner(_ context.Context, _, missionID string) (string, error) {
+func (f *fakePublished) Owner(_ context.Context, _, missionID string) (owner, agent string, err error) {
 	if f.ownerErr != nil {
-		return "", f.ownerErr
+		return "", "", f.ownerErr
 	}
 	o, ok := f.owners[missionID]
 	if !ok {
-		return "", inboundmissionstore.ErrNotFound
+		return "", "", inboundmissionstore.ErrNotFound
 	}
-	return o, nil
+	return o, "recon", nil
 }
 
 func (f *fakePublished) Get(_ context.Context, tenant, agent string) (*inboundmissionstore.Entry, error) {
