@@ -21,6 +21,28 @@ CREATE TABLE IF NOT EXISTS inbound_missions (
     -- target_hashes is a JSON object, target id to the hash of the target at
     -- publish. A call starts a mission only while each of its targets has its hash.
     target_hashes         TEXT        NOT NULL,
+    -- max_active_missions is the most inbound missions of this publication that
+    -- run or wait at one time. The admin sets it at publish. It has no default.
+    max_active_missions   INT         NOT NULL CHECK (max_active_missions > 0),
     published_by          TEXT        NOT NULL DEFAULT '',
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- inbound_tasks — one row for each inbound mission, from the moment a message
+-- reserves a place for it. The row holds the caller that started the mission, so
+-- every replica finds the Task of a caller from the row. A row with finished_at
+-- NULL counts against max_active_missions. The reservation locks the row of the
+-- publication in inbound_missions, so parallel messages and more than one replica
+-- cannot go over the limit. The row stays after an unpublish, so the caller can
+-- still read and cancel its own missions.
+CREATE TABLE IF NOT EXISTS inbound_tasks (
+    slot        TEXT        PRIMARY KEY,
+    agent       TEXT        NOT NULL,
+    owner       TEXT        NOT NULL,
+    mission_id  TEXT        NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS inbound_tasks_mission_idx ON inbound_tasks (mission_id) WHERE mission_id <> '';
+CREATE INDEX IF NOT EXISTS inbound_tasks_open_idx ON inbound_tasks (agent) WHERE finished_at IS NULL;

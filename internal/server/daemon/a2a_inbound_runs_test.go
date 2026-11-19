@@ -22,6 +22,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"github.com/zeroroot-ai/gibson/internal/server/a2aserver"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
@@ -622,4 +623,85 @@ func TestInboundRuns_AFailedPinReadIsAnError(t *testing.T) {
 	require.ErrorContains(t, err, "check the publication of agent recon")
 	assert.Nil(t, task)
 	assert.Empty(t, starter.started)
+}
+
+// The place is reserved before the mission starts, and the mission is bound to its
+// place after it starts.
+func TestInboundRuns_ReservesAPlaceBeforeTheMissionStartsAndBindsItAfter(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	pubs := r.published.(*fakePublished)
+
+	task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
+
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
+	assert.Equal(t, []string{"reserve:acme/recon/" + inboundCallerRef, "bind:slot-1/m-1"}, pubs.events)
+}
+
+// A message over the limit gets a rejected Task, and no mission record is written.
+func TestInboundRuns_ARefusedPlaceIsRejectedAndNoMissionStarts(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"the publication has its most active missions", inboundmissionstore.ErrLimit, "most active missions"},
+		{"the publication is gone", inboundmissionstore.ErrNotFound, "not published"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			starter := &recordingStarter{}
+			r := newInboundRuns(starter)
+			r.published.(*fakePublished).reserveErr = tt.err
+
+			task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
+
+			require.NoError(t, err)
+			assert.Equal(t, a2a.TaskStateRejected, task.Status.State)
+			assert.Contains(t, a2aserver.TextOf(task.Status.Message), tt.want)
+			assert.Empty(t, starter.started, "no mission started")
+		})
+	}
+	r := newInboundRuns(&recordingStarter{})
+	r.published.(*fakePublished).reserveErr = errors.New("db down")
+	_, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
+	require.ErrorContains(t, err, "reserve a place")
+}
+
+func TestInboundRuns_AFailedStartGivesThePlaceBack(t *testing.T) {
+	starter := &recordingStarter{err: errors.New("boom")}
+	r := newInboundRuns(starter)
+	pubs := r.published.(*fakePublished)
+	pubs.releaseErr = errors.New("release boom")
+
+	_, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
+
+	require.ErrorContains(t, err, "boom")
+	assert.Equal(t, []string{"reserve:acme/recon/" + inboundCallerRef, "release:slot-1"}, pubs.events)
+}
+
+// A mission that no task row names has no owner, so it ends at once.
+func TestInboundRuns_AMissionThatCannotBeBoundEndsAtOnce(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	r.published.(*fakePublished).bindErr = errors.New("bind boom")
+	var stopped []string
+	r.stop = func(_ context.Context, id string) error { stopped = append(stopped, id); return errors.New("stop boom") }
+
+	task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
+
+	require.ErrorContains(t, err, "bind boom")
+	assert.Nil(t, task)
+	assert.Equal(t, []string{"m-1"}, stopped)
+}
+
+func TestInboundRuns_MissionFinishedReadsTheWorld(t *testing.T) {
+	f := newTaskFixture(t)
+	f.startMission(ownerRef)
+	finished := f.runs.missionFinished("acme")
+	assert.False(t, finished(f.mission), "a running mission has not ended")
+	assert.False(t, finished("not-in-the-world"), "a mission that the World does not hold has not ended")
+	f.end(brain.MissionCompleted)
+	assert.True(t, finished(f.mission))
 }

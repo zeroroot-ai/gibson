@@ -337,7 +337,7 @@ func TestA2AInbound(t *testing.T) {
 	f.defID = helpers.CreateAgentMission(ctx, t, clients.Daemon, "a2a-inbound-exit", inboundAgent, nil)
 
 	_, err = f.inbound.PublishInboundMission(ctx, &tenantv1.PublishInboundMissionRequest{
-		Agent: inboundAgent, MissionDefinitionId: f.defID, TargetIds: f.targets[:],
+		Agent: inboundAgent, MissionDefinitionId: f.defID, TargetIds: f.targets[:], MaxActiveMissions: 3,
 	})
 	require.NoError(t, err, "PublishInboundMission")
 	t.Cleanup(func() {

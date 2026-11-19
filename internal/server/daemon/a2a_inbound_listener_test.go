@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"time"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +27,37 @@ type fakePublished struct {
 	entries map[string]inboundmissionstore.Entry
 	err     error
 	asked   []string
+	// The task methods.
+	reserveErr error
+	bindErr    error
+	releaseErr error
+	events     []string
+	owners     map[string]string
+}
+
+func (f *fakePublished) Reserve(
+	_ context.Context, tenant, agent, owner string, _ func(string) bool, _ time.Duration,
+) (string, error) {
+	f.events = append(f.events, "reserve:"+tenant+"/"+agent+"/"+owner)
+	return "slot-1", f.reserveErr
+}
+
+func (f *fakePublished) Bind(_ context.Context, _, slot, missionID string) error {
+	f.events = append(f.events, "bind:"+slot+"/"+missionID)
+	return f.bindErr
+}
+
+func (f *fakePublished) Release(_ context.Context, _, slot string) error {
+	f.events = append(f.events, "release:"+slot)
+	return f.releaseErr
+}
+
+func (f *fakePublished) Owner(_ context.Context, _, missionID string) (string, error) {
+	o, ok := f.owners[missionID]
+	if !ok {
+		return "", inboundmissionstore.ErrNotFound
+	}
+	return o, nil
 }
 
 func (f *fakePublished) Get(_ context.Context, tenant, agent string) (*inboundmissionstore.Entry, error) {

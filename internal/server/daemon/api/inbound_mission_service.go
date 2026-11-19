@@ -186,7 +186,7 @@ func inboundEntryProto(e inboundmissionstore.Entry, staleReason string) *tenantv
 	return &tenantv1.InboundMissionEntry{
 		Agent: e.Agent, MissionDefinitionId: e.DefinitionID, TargetIds: e.TargetIDs,
 		PublishedBy: e.PublishedBy, CreatedAt: timestamppb.New(e.CreatedAt),
-		Stale: staleReason != "", StaleReason: staleReason,
+		Stale: staleReason != "", StaleReason: staleReason, MaxActiveMissions: e.MaxActive,
 	}
 }
 
@@ -203,6 +203,10 @@ func (s *InboundMissionService) PublishInboundMission(
 	object, err := inboundObject(rpc, tenant, req.GetAgent())
 	if err != nil {
 		return nil, err
+	}
+	if req.GetMaxActiveMissions() < 1 {
+		return nil, status_grpc.Errorf(codes.InvalidArgument,
+			"%s: max_active_missions is required. Set the most missions that may run or wait at one time", rpc)
 	}
 	targets := slices.Clone(req.GetTargetIds())
 	if len(targets) == 0 || len(targets) > maxInboundTargets {
@@ -237,7 +241,7 @@ func (s *InboundMissionService) PublishInboundMission(
 		publishedBy = id.Subject
 	}
 	entry, err := s.store.Publish(ctx, tenant, inboundmissionstore.Entry{
-		Agent: req.GetAgent(), DefinitionID: def.ID, DefinitionHash: def.Hash, TargetIDs: targets, TargetHashes: hashes,
+		Agent: req.GetAgent(), DefinitionID: def.ID, DefinitionHash: def.Hash, TargetIDs: targets, TargetHashes: hashes, MaxActive: req.GetMaxActiveMissions(),
 		PublishedBy: publishedBy,
 	})
 	if err != nil {

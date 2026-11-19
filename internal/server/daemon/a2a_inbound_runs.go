@@ -55,6 +55,28 @@ type inboundRuns struct {
 	pending map[string]inboundPending
 }
 
+// inboundReservationGrace is how long a reserved place may wait for its mission. A
+// reservation that never got a mission, for example after a crash, gives its place
+// back after this time.
+const inboundReservationGrace = 2 * time.Minute
+
+// missionFinished returns the function that tells the store whether a mission has
+// ended. A mission that the World does not hold yet has not ended.
+func (r *inboundRuns) missionFinished(tenant string) func(missionID string) bool {
+	return func(missionID string) bool {
+		eng, ok := api.TenantEngine(r.registry, tenant)
+		if !ok {
+			return false
+		}
+		for _, m := range eng.Missions() {
+			if m.ID == missionID {
+				return m.Status.IsTerminal()
+			}
+		}
+		return false
+	}
+}
+
 // inboundPendingTTL is how long a started mission may be missing from the World.
 // The World folds the start of a mission on its next tick, so a mission is
 // missing for a moment only.
@@ -148,6 +170,18 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		Subject: c.Subject, Issuer: auth.IssuerCapabilityGrant, CredentialType: auth.CredentialCapabilityGrant,
 		Tenant: tenant,
 	})
+	// One place of the publication is reserved before the mission record is written.
+	// The store counts in the database under a lock, so parallel messages and more
+	// than one replica cannot go over the limit.
+	slot, err := r.published.Reserve(ctx, c.Tenant, req.Agent, c.Subject, r.missionFinished(c.Tenant), inboundReservationGrace)
+	switch {
+	case errors.Is(err, inboundmissionstore.ErrLimit):
+		return rejectedInboundTask(fmt.Sprintf("the agent already has its most active missions (%d). Wait for one to end", pub.MaxActive)), nil
+	case errors.Is(err, inboundmissionstore.ErrNotFound):
+		return rejectedInboundTask("the agent is not published for inbound calls"), nil
+	case err != nil:
+		return nil, fmt.Errorf("reserve a place for agent %s: %w", req.Agent, err)
+	}
 	missionID, err := r.starter.StartMission(ctx, api.RunMissionData{
 		MissionDefinitionID: pub.DefinitionID,
 		TargetIDs:           targets,
@@ -157,7 +191,17 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		CreatedBy:  inboundPrincipal(c.Subject),
 	})
 	if err != nil {
+		if rerr := r.published.Release(ctx, c.Tenant, slot); rerr != nil {
+			err = errors.Join(err, rerr)
+		}
 		return nil, fmt.Errorf("start the mission of agent %s: %w", req.Agent, err)
+	}
+	if err := r.published.Bind(ctx, c.Tenant, slot, missionID); err != nil {
+		// A mission that no task row names has no owner. It ends here.
+		if serr := r.stop(ctx, missionID); serr != nil {
+			err = errors.Join(err, serr)
+		}
+		return nil, fmt.Errorf("record the mission %s of agent %s: %w", missionID, req.Agent, err)
 	}
 	r.remember(missionID, c)
 	return &a2a.Task{

@@ -19,6 +19,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -26,6 +28,8 @@ import (
 var (
 	// ErrNotFound marks an agent name that the tenant has not published.
 	ErrNotFound = errors.New("inboundmissionstore: not published")
+	// ErrLimit marks a publication that has no free place for a new inbound mission.
+	ErrLimit = errors.New("inboundmissionstore: the publication has its most active missions")
 	// ErrConflict marks an agent name that the tenant already published with
 	// other fields.
 	ErrConflict = errors.New("inboundmissionstore: the agent is published with other fields")
@@ -45,6 +49,9 @@ type Entry struct {
 	TargetIDs []string
 	// TargetHashes holds the hash of each approved target at publish, by target ID.
 	TargetHashes map[string]string
+	// MaxActive is the most inbound missions of this publication that run or wait
+	// at one time. It is at least 1.
+	MaxActive int32
 	// PublishedBy is the subject of the tenant admin who published it.
 	PublishedBy string
 	CreatedAt   time.Time
@@ -62,8 +69,23 @@ type Store interface {
 	ListPage(ctx context.Context, tenant, after string, hasAfter bool, limit int) ([]Entry, error)
 	// Get returns one entry, or ErrNotFound.
 	Get(ctx context.Context, tenant, agent string) (*Entry, error)
-	// Delete removes one entry, or reports ErrNotFound.
+	// Delete removes one entry, or reports ErrNotFound. The tasks of the entry stay.
 	Delete(ctx context.Context, tenant, agent string) error
+	// Reserve takes one place for a new inbound mission of the publication, for the
+	// owner, and returns its slot. It locks the row of the publication, so parallel
+	// calls and more than one replica cannot go over MaxActive. isFinished tells
+	// whether a bound mission has ended, and a task whose mission has ended gives
+	// its place back. A task with no mission after grace gives its place back too.
+	// It returns ErrLimit when no place is free, and ErrNotFound when the agent is
+	// not published.
+	Reserve(ctx context.Context, tenant, agent, owner string, isFinished func(missionID string) bool,
+		grace time.Duration) (slot string, err error)
+	// Bind records the mission of a reserved slot.
+	Bind(ctx context.Context, tenant, slot, missionID string) error
+	// Release gives a reserved place back, for a mission that did not start.
+	Release(ctx context.Context, tenant, slot string) error
+	// Owner returns the caller that started a mission, or ErrNotFound.
+	Owner(ctx context.Context, tenant, missionID string) (string, error)
 }
 
 type conn interface {
@@ -103,7 +125,7 @@ func NewPostgresStore(pool datapool.Pool) Store {
 
 var _ Store = (*postgresStore)(nil)
 
-const columns = `agent, mission_definition_id, definition_hash, target_ids, target_hashes, published_by, created_at`
+const columns = `agent, mission_definition_id, definition_hash, target_ids, target_hashes, max_active_missions, published_by, created_at`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -112,7 +134,7 @@ type scanner interface {
 func scanEntry(row scanner) (*Entry, error) {
 	var e Entry
 	var targets, hashes string
-	if err := row.Scan(&e.Agent, &e.DefinitionID, &e.DefinitionHash, &targets, &hashes, &e.PublishedBy, &e.CreatedAt); err != nil {
+	if err := row.Scan(&e.Agent, &e.DefinitionID, &e.DefinitionHash, &targets, &hashes, &e.MaxActive, &e.PublishedBy, &e.CreatedAt); err != nil {
 		return nil, fmt.Errorf("scan inbound mission row: %w", err)
 	}
 	if err := json.Unmarshal([]byte(targets), &e.TargetIDs); err != nil {
@@ -128,6 +150,9 @@ func scanEntry(row scanner) (*Entry, error) {
 func (s *postgresStore) Publish(ctx context.Context, tenant string, e Entry) (*Entry, error) {
 	if e.Agent == "" || e.DefinitionID == "" || e.DefinitionHash == "" || len(e.TargetIDs) == 0 {
 		return nil, errors.New("inboundmissionstore: publish needs an agent, a definition with its hash and a target")
+	}
+	if e.MaxActive < 1 {
+		return nil, errors.New("inboundmissionstore: publish needs a limit of at least one active mission")
 	}
 	for _, id := range e.TargetIDs {
 		if e.TargetHashes[id] == "" {
@@ -151,10 +176,10 @@ func (s *postgresStore) Publish(ctx context.Context, tenant string, e Entry) (*E
 	var out *Entry
 	err = c.InTx(ctx, func(q datapool.SQL) error {
 		if _, err := q.Exec(ctx,
-			`INSERT INTO inbound_missions (agent, mission_definition_id, definition_hash, target_ids, target_hashes, published_by)
-			 VALUES ($1,$2,$3,$4,$5,$6)
+			`INSERT INTO inbound_missions (agent, mission_definition_id, definition_hash, target_ids, target_hashes, max_active_missions, published_by)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7)
 			 ON CONFLICT (agent) DO NOTHING`,
-			e.Agent, e.DefinitionID, e.DefinitionHash, string(targets), string(hashes), e.PublishedBy); err != nil {
+			e.Agent, e.DefinitionID, e.DefinitionHash, string(targets), string(hashes), e.MaxActive, e.PublishedBy); err != nil {
 			return fmt.Errorf("insert: %w", err)
 		}
 		got, gerr := scanEntry(q.QueryRow(ctx, `SELECT `+columns+` FROM inbound_missions WHERE agent = $1 FOR UPDATE`, e.Agent))
@@ -164,13 +189,14 @@ func (s *postgresStore) Publish(ctx context.Context, tenant string, e Entry) (*E
 		if got.DefinitionID != e.DefinitionID || !slices.Equal(got.TargetIDs, e.TargetIDs) {
 			return fmt.Errorf("%w: %s", ErrConflict, e.Agent)
 		}
-		if got.DefinitionHash != e.DefinitionHash || !maps.Equal(got.TargetHashes, e.TargetHashes) {
+		if got.DefinitionHash != e.DefinitionHash || !maps.Equal(got.TargetHashes, e.TargetHashes) ||
+			got.MaxActive != e.MaxActive {
 			if _, err := q.Exec(ctx,
-				`UPDATE inbound_missions SET definition_hash = $2, target_hashes = $3 WHERE agent = $1`,
-				e.Agent, e.DefinitionHash, string(hashes)); err != nil {
+				`UPDATE inbound_missions SET definition_hash = $2, target_hashes = $3, max_active_missions = $4 WHERE agent = $1`,
+				e.Agent, e.DefinitionHash, string(hashes), e.MaxActive); err != nil {
 				return fmt.Errorf("pin: %w", err)
 			}
-			got.DefinitionHash, got.TargetHashes = e.DefinitionHash, e.TargetHashes
+			got.DefinitionHash, got.TargetHashes, got.MaxActive = e.DefinitionHash, e.TargetHashes, e.MaxActive
 		}
 		out = got
 		return nil
@@ -240,4 +266,119 @@ func (s *postgresStore) Delete(ctx context.Context, tenant, agent string) error 
 		return fmt.Errorf("%w: %s", ErrNotFound, agent)
 	}
 	return nil
+}
+
+func (s *postgresStore) Reserve(
+	ctx context.Context, tenant, agent, owner string, isFinished func(missionID string) bool, grace time.Duration,
+) (string, error) {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return "", fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	slot := uuid.NewString()
+	err = c.InTx(ctx, func(q datapool.SQL) error {
+		// The lock on the row of the publication makes the count and the insert one
+		// step for every replica.
+		var limit int
+		if err := q.QueryRow(ctx,
+			`SELECT max_active_missions FROM inbound_missions WHERE agent = $1 FOR UPDATE`, agent).Scan(&limit); err != nil {
+			if errors.Is(err, datapool.ErrNoRows) {
+				return fmt.Errorf("%w: %s", ErrNotFound, agent)
+			}
+			return fmt.Errorf("lock the publication: %w", err)
+		}
+		if _, err := q.Exec(ctx,
+			`DELETE FROM inbound_tasks WHERE agent = $1 AND mission_id = '' AND finished_at IS NULL
+			 AND created_at < now() - ($2 * interval '1 second')`, agent, int64(grace/time.Second)); err != nil {
+			return fmt.Errorf("drop the lapsed reservations: %w", err)
+		}
+		rows, err := q.Query(ctx,
+			`SELECT slot, mission_id FROM inbound_tasks WHERE agent = $1 AND finished_at IS NULL AND mission_id <> ''`, agent)
+		if err != nil {
+			return fmt.Errorf("read the open tasks: %w", err)
+		}
+		var ended []string
+		for rows.Next() {
+			var sl, mid string
+			if err := rows.Scan(&sl, &mid); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan an open task: %w", err)
+			}
+			if isFinished(mid) {
+				ended = append(ended, sl)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("read the open tasks: %w", err)
+		}
+		for _, sl := range ended {
+			if _, err := q.Exec(ctx, `UPDATE inbound_tasks SET finished_at = now() WHERE slot = $1`, sl); err != nil {
+				return fmt.Errorf("close a task: %w", err)
+			}
+		}
+		var open int
+		if err := q.QueryRow(ctx,
+			`SELECT count(*) FROM inbound_tasks WHERE agent = $1 AND finished_at IS NULL`, agent).Scan(&open); err != nil {
+			return fmt.Errorf("count the open tasks: %w", err)
+		}
+		if open >= limit {
+			return fmt.Errorf("%w: %s allows %d", ErrLimit, agent, limit)
+		}
+		if _, err := q.Exec(ctx,
+			`INSERT INTO inbound_tasks (slot, agent, owner) VALUES ($1,$2,$3)`, slot, agent, owner); err != nil {
+			return fmt.Errorf("insert the reservation: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("inboundmissionstore: reserve for %s: %w", agent, err)
+	}
+	return slot, nil
+}
+
+func (s *postgresStore) Bind(ctx context.Context, tenant, slot, missionID string) error {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	n, err := c.SQL().Exec(ctx, `UPDATE inbound_tasks SET mission_id = $2 WHERE slot = $1 AND mission_id = ''`, slot, missionID)
+	if err != nil {
+		return fmt.Errorf("inboundmissionstore: bind %s: %w", slot, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: slot %s", ErrNotFound, slot)
+	}
+	return nil
+}
+
+func (s *postgresStore) Release(ctx context.Context, tenant, slot string) error {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	if _, err := c.SQL().Exec(ctx, `DELETE FROM inbound_tasks WHERE slot = $1 AND mission_id = ''`, slot); err != nil {
+		return fmt.Errorf("inboundmissionstore: release %s: %w", slot, err)
+	}
+	return nil
+}
+
+func (s *postgresStore) Owner(ctx context.Context, tenant, missionID string) (string, error) {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return "", fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	var owner string
+	err = c.SQL().QueryRow(ctx, `SELECT owner FROM inbound_tasks WHERE mission_id = $1`, missionID).Scan(&owner)
+	if errors.Is(err, datapool.ErrNoRows) {
+		return "", fmt.Errorf("%w: mission %s", ErrNotFound, missionID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("inboundmissionstore: owner of %s: %w", missionID, err)
+	}
+	return owner, nil
 }
