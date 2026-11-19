@@ -65,7 +65,7 @@ func modelProviderTestRig(t *testing.T, mp *gibsonv1alpha1.ModelProvider, extra 
 	r := &ModelProviderReconciler{
 		Client: c, Scheme: scheme,
 		Render: modelprovider.Config{
-			Namespace: "gibson-gateway", GatewayName: "model-gateway",
+			Namespace: "gibson-gateway", GatewayName: "model-gateway", SectionName: "model",
 		},
 		Credentials: &fakeModelCredentials{data: map[string]map[string][]byte{}},
 	}

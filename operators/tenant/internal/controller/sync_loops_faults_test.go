@@ -234,7 +234,7 @@ func TestModelProviderSync_ARecordThatAlreadyExistsIsNotAnError(t *testing.T) {
 }
 
 func TestOutsideAgentSync_LeaderElectionSetupAndLoop(t *testing.T) {
-	valid := outsideagent.Config{Namespace: testGatewayNS, GatewayName: "agent-gateway"}
+	valid := outsideagent.Config{Namespace: testGatewayNS, GatewayName: "agent-gateway", SectionName: "agent"}
 	r := &OutsideAgentSyncRunnable{}
 	if !r.NeedLeaderElection() {
 		t.Error("the loop must run on the leader only")
@@ -407,7 +407,7 @@ func TestOutsideAgentSync_ClientFailuresAreReported(t *testing.T) {
 				WithInterceptorFuncs(tt.funcs).Build()
 			r := &OutsideAgentSyncRunnable{
 				Client: c, Daemon: &fakeOutsideRecords{byTenant: tt.records}, Credentials: tt.creds,
-				Render: outsideagent.Config{Namespace: testGatewayNS, GatewayName: "agent-gateway"},
+				Render: outsideagent.Config{Namespace: testGatewayNS, GatewayName: "agent-gateway", SectionName: "agent"},
 			}
 			err := r.Sync(context.Background())
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {

@@ -24,7 +24,7 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 
 func testConfig() Config {
 	return Config{
-		Namespace: "gibson-gateway", GatewayName: "model-gateway",
+		Namespace: "gibson-gateway", GatewayName: "model-gateway", SectionName: "model",
 	}
 }
 

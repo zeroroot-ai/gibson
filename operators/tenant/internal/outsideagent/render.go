@@ -75,6 +75,11 @@ type Config struct {
 	// GatewayName is the Gateway that the route attaches to. It is the Gateway
 	// with the agent listener.
 	GatewayName string
+	// SectionName is the listener of the Gateway that the route attaches to, the agent
+	// listener. A route with no section name attaches to every listener, and the
+	// policies of the listener of the other kind would not apply to it. The chart names
+	// the listener, and the operator reads the name from its environment.
+	SectionName string
 }
 
 // Validate reports a missing field.
@@ -84,6 +89,8 @@ func (c Config) Validate() error {
 		return errors.New("outsideagent: the gateway namespace is required")
 	case c.GatewayName == "":
 		return errors.New("outsideagent: the gateway name is required")
+	case c.SectionName == "":
+		return errors.New("outsideagent: the gateway listener name is required")
 	}
 	return nil
 }
@@ -237,7 +244,7 @@ func route(a Agent, cfg Config, name, basePath string) *unstructured.Unstructure
 		"kind":       "HTTPRoute",
 		"metadata":   map[string]any{"name": name, "namespace": cfg.Namespace, "labels": labels(a)},
 		"spec": map[string]any{
-			"parentRefs": []any{map[string]any{"name": cfg.GatewayName}},
+			"parentRefs": []any{map[string]any{"name": cfg.GatewayName, "sectionName": cfg.SectionName}},
 			"rules": []any{
 				rule(agentcall.RouteA2A, basePath),
 				rule(agentcall.CardPathFor(a.Name), basePath+agentcall.CardPath),

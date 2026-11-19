@@ -67,6 +67,11 @@ type Config struct {
 	Namespace string
 	// GatewayName is the name of the Gateway that the routes attach to.
 	GatewayName string
+	// SectionName is the listener of the Gateway that the routes attach to, the model
+	// listener. A route with no section name attaches to every listener, and the
+	// policies of the listener of the other kind would not apply to it. The chart names
+	// the listener, and the operator reads the name from its environment.
+	SectionName string
 }
 
 // Validate reports a missing field.
@@ -76,6 +81,8 @@ func (c Config) Validate() error {
 		return errors.New("modelprovider: the gateway namespace is required")
 	case c.GatewayName == "":
 		return errors.New("modelprovider: the gateway name is required")
+	case c.SectionName == "":
+		return errors.New("modelprovider: the gateway listener name is required")
 	}
 	return nil
 }
@@ -372,7 +379,7 @@ func route(
 			"name": name, "namespace": cfg.Namespace, "labels": labels(mp),
 		},
 		"spec": map[string]any{
-			"parentRefs": []any{map[string]any{"name": cfg.GatewayName}},
+			"parentRefs": []any{map[string]any{"name": cfg.GatewayName, "sectionName": cfg.SectionName}},
 			"rules":      rules,
 		},
 	}}

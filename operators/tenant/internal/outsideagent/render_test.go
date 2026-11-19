@@ -20,7 +20,9 @@ import (
 
 var update = flag.Bool("update", false, "rewrite the golden files")
 
-func testConfig() Config { return Config{Namespace: "gibson-gateway", GatewayName: "agent-gateway"} }
+func testConfig() Config {
+	return Config{Namespace: "gibson-gateway", GatewayName: "agent-gateway", SectionName: "agent"}
+}
 
 func renderYAML(t *testing.T, a Agent) []byte {
 	t.Helper()

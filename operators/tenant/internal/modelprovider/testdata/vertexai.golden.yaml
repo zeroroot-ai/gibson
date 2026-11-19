@@ -39,6 +39,7 @@ metadata:
 spec:
   parentRefs:
   - name: model-gateway
+    sectionName: model
   rules:
   - backendRefs:
     - group: agentgateway.dev

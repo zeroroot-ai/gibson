@@ -16,9 +16,10 @@ func TestConfigValidate_NeedsTheNamespaceAndTheGatewayName(t *testing.T) {
 		cfg     Config
 		wantErr string
 	}{
-		{"no namespace", Config{GatewayName: "gw"}, "namespace is required"},
-		{"no gateway name", Config{Namespace: "ns"}, "gateway name is required"},
-		{"complete", Config{Namespace: "ns", GatewayName: "gw"}, ""},
+		{"no namespace", Config{GatewayName: "gw", SectionName: "model"}, "namespace is required"},
+		{"no gateway name", Config{Namespace: "ns", SectionName: "model"}, "gateway name is required"},
+		{"no listener name", Config{Namespace: "ns", GatewayName: "gw"}, "listener name is required"},
+		{"complete", Config{Namespace: "ns", GatewayName: "gw", SectionName: "model"}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
