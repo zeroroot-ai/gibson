@@ -81,7 +81,7 @@ func TestInboundCard_ServesTheCardOfTheAgentInThePath(t *testing.T) {
 		agentcall.HeaderRouteAgent: "other", modelcall.HeaderRouteTenant: "evil", modelcall.HeaderMission: "m-1",
 	}
 
-	rec := inboundGet(h, agentcall.InboundCardPathFor("recon"), headers)
+	rec := inboundGet(h, "/a2a/inbound/recon"+agentcall.CardPath, headers)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
@@ -102,14 +102,14 @@ func TestInboundCard_Refusals(t *testing.T) {
 		want    int
 		asked   int
 	}{
-		{"no caller headers", agentcall.InboundCardPathFor("recon"), nil, &recordingCards{}, http.StatusUnauthorized, 0},
-		{"no subject", agentcall.InboundCardPathFor("recon"), map[string]string{modelcall.HeaderTenant: "acme"},
+		{"no caller headers", "/a2a/inbound/recon"+agentcall.CardPath, nil, &recordingCards{}, http.StatusUnauthorized, 0},
+		{"no subject", "/a2a/inbound/recon"+agentcall.CardPath, map[string]string{modelcall.HeaderTenant: "acme"},
 			&recordingCards{}, http.StatusUnauthorized, 0},
-		{"an agent that is not published", agentcall.InboundCardPathFor("scanner"), inboundHeaders,
+		{"an agent that is not published", "/a2a/inbound/scanner"+agentcall.CardPath, inboundHeaders,
 			&recordingCards{cards: map[string]*a2a.AgentCard{}}, http.StatusNotFound, 1},
 		{"a path with an invalid agent name", agentcall.InboundPrefix + "Re_con" + agentcall.CardPath, inboundHeaders,
 			&recordingCards{}, http.StatusNotFound, 0},
-		{"a card source that fails", agentcall.InboundCardPathFor("recon"), inboundHeaders,
+		{"a card source that fails", "/a2a/inbound/recon"+agentcall.CardPath, inboundHeaders,
 			&recordingCards{err: errors.New("registry down")}, http.StatusInternalServerError, 1},
 		{"a path off the inbound prefix", "/agents/recon/.well-known/agent-card.json", inboundHeaders,
 			&recordingCards{}, http.StatusNotFound, 0},

@@ -115,8 +115,8 @@ var originateCeiling = []string{"mission:originate"}
 func TestInboundA2A_AllowsAGrantedCallerAndSetsTheTrustedHeaders(t *testing.T) {
 	t.Parallel()
 	for name, path := range map[string]string{
-		"the JSON-RPC endpoint": agentcall.InboundPathFor(inboundAgent),
-		"the Agent Card":        agentcall.InboundCardPathFor(inboundAgent),
+		"the JSON-RPC endpoint": "/a2a/inbound/"+inboundAgent,
+		"the Agent Card":        "/a2a/inbound/"+inboundAgent+agentcall.CardPath,
 	} {
 		t.Run(name, func(t *testing.T) {
 			srv, priv, mock := inboundServer(t, inboundCase{capabilities: originateCeiling, allow: grantedInbound()})
@@ -156,7 +156,7 @@ func TestInboundA2A_AllowsAGrantedCallerAndSetsTheTrustedHeaders(t *testing.T) {
 
 func TestInboundA2A_Refusals(t *testing.T) {
 	t.Parallel()
-	path := agentcall.InboundPathFor(inboundAgent)
+	path := "/a2a/inbound/"+inboundAgent
 	tests := []struct {
 		name  string
 		c     inboundCase
@@ -172,10 +172,10 @@ func TestInboundA2A_Refusals(t *testing.T) {
 		},
 		{
 			name: "an agent that is not published", c: inboundCase{capabilities: originateCeiling, allow: grantedInbound()},
-			peer: edgeSVID, path: agentcall.InboundPathFor("unpublished"), want: codes.PermissionDenied,
+			peer: edgeSVID, path: "/a2a/inbound/unpublished", want: codes.PermissionDenied,
 			token: func(t *testing.T, priv ed25519.PrivateKey) string {
 				t.Helper()
-				return mintInboundJWT(t, priv, "agent+jwt", agentcall.InboundPathFor("unpublished"))
+				return mintInboundJWT(t, priv, "agent+jwt", "/a2a/inbound/unpublished")
 			},
 		},
 		{
@@ -232,7 +232,7 @@ func TestInboundA2A_Refusals(t *testing.T) {
 			peer: edgeSVID, path: path, want: codes.Unauthenticated,
 			token: func(t *testing.T, priv ed25519.PrivateKey) string {
 				t.Helper()
-				return mintInboundJWT(t, priv, "agent+jwt", agentcall.InboundPathFor("other"))
+				return mintInboundJWT(t, priv, "agent+jwt", "/a2a/inbound/other")
 			},
 		},
 		{
@@ -271,7 +271,7 @@ func TestInboundA2A_Refusals(t *testing.T) {
 func TestInboundA2A_NoCeilingAsksNoFGAQuestion(t *testing.T) {
 	t.Parallel()
 	srv, priv, mock := inboundServer(t, inboundCase{allow: grantedInbound()})
-	path := agentcall.InboundPathFor(inboundAgent)
+	path := "/a2a/inbound/"+inboundAgent
 
 	resp, err := srv.Check(peerContext(t, edgeSVID), inboundRequest(path, mintInboundJWT(t, priv, "agent+jwt", path), nil))
 	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
@@ -284,7 +284,7 @@ func TestInboundA2A_NoCeilingAsksNoFGAQuestion(t *testing.T) {
 
 func TestInboundA2A_CountsEachRefusalByReason(t *testing.T) {
 	srv, priv, _ := inboundServer(t, inboundCase{capabilities: originateCeiling})
-	path := agentcall.InboundPathFor(inboundAgent)
+	path := "/a2a/inbound/"+inboundAgent
 	before := testutil.ToFloat64(extauthzInboundA2ADeniedTotal.WithLabelValues(inboundDenyNoGrant))
 
 	resp, err := srv.Check(peerContext(t, edgeSVID), inboundRequest(path, mintInboundJWT(t, priv, "agent+jwt", path), nil))
@@ -320,7 +320,7 @@ func TestInboundA2A_ARevokeAppliesAtTheNextCall(t *testing.T) {
 	t.Cleanup(desc.Close)
 	srv := buildComponentServer(t, &modelFGA{allow: grantedInbound()}, desc.URL+"/capabilitygrant/v1/keys")
 	srv.edgeIDs = idSet([]string{edgeSVID})
-	path := agentcall.InboundPathFor(inboundAgent)
+	path := "/a2a/inbound/"+inboundAgent
 	call := func() codes.Code {
 		resp, err := srv.Check(peerContext(t, edgeSVID), inboundRequest(path, mintInboundJWT(t, priv, "agent+jwt", path), nil))
 		return statusOf(t, resp, err)

@@ -127,7 +127,7 @@ func TestInboundRPC_SendMessageStartsARunForTheAgentInThePath(t *testing.T) {
 		agentcall.HeaderRouteAgent: "other", "x-gibson-mission": "m-evil",
 	}
 
-	rec := rpcCall(h, agentcall.InboundPathFor("recon"), sendBody, headers)
+	rec := rpcCall(h, "/a2a/inbound/recon", sendBody, headers)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Len(t, starts.got, 1)
@@ -161,17 +161,17 @@ func TestInboundRPC_Refusals(t *testing.T) {
 		wantBody   string
 		wantStart  int
 	}{
-		{"no caller headers", agentcall.InboundPathFor("recon"), sendBody, nil, &fakeStarts{}, http.StatusUnauthorized, "", 0},
+		{"no caller headers", "/a2a/inbound/recon", sendBody, nil, &fakeStarts{}, http.StatusUnauthorized, "", 0},
 		{"a path with an invalid agent", agentcall.InboundPrefix + "Re_con", sendBody, trusted, &fakeStarts{},
 			http.StatusNotFound, "", 0},
-		{"a message with no parts", agentcall.InboundPathFor("recon"),
+		{"a message with no parts", "/a2a/inbound/recon",
 			`{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m","role":"ROLE_USER","parts":[]}}}`,
 			trusted, &fakeStarts{}, http.StatusOK, "error", 0},
-		{"a start that fails with an internal cause", agentcall.InboundPathFor("recon"), sendBody, trusted,
+		{"a start that fails with an internal cause", "/a2a/inbound/recon", sendBody, trusted,
 			&fakeStarts{err: errors.New("redis is down")}, http.StatusOK, "error", 1},
-		{"a start that policy refuses", agentcall.InboundPathFor("recon"), sendBody, trusted,
+		{"a start that policy refuses", "/a2a/inbound/recon", sendBody, trusted,
 			&fakeStarts{err: ErrRefused}, http.StatusOK, "error", 1},
-		{"a method that is not served", agentcall.InboundPathFor("recon"),
+		{"a method that is not served", "/a2a/inbound/recon",
 			`{"jsonrpc":"2.0","id":1,"method":"ListTasks","params":{}}`, trusted, &fakeStarts{}, http.StatusOK, "error", 0},
 	}
 	for _, tt := range tests {
@@ -204,7 +204,7 @@ func TestInboundRPC_GetAndCancelActForTheCallerOfTheHeaders(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			starts := &fakeStarts{task: &a2a.Task{ID: "m-1", ContextID: "m-1",
 				Status: a2a.TaskStatus{State: a2a.TaskStateWorking}}}
-			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), agentcall.InboundPathFor("recon"), body, trusted)
+			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), "/a2a/inbound/recon", body, trusted)
 
 			require.Equal(t, http.StatusOK, rec.Code)
 			assert.Contains(t, rec.Body.String(), "TASK_STATE_WORKING")
@@ -234,7 +234,7 @@ func TestInboundRPC_GetAndCancelRefusals(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			starts := &fakeStarts{err: tt.err}
-			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), agentcall.InboundPathFor("recon"), tt.body, trusted)
+			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), "/a2a/inbound/recon", tt.body, trusted)
 			assert.Equal(t, http.StatusOK, rec.Code)
 			assert.Contains(t, rec.Body.String(), tt.want)
 			assert.NotContains(t, rec.Body.String(), "redis is down")
@@ -259,7 +259,7 @@ func TestInboundRPC_AMessageToATaskIsRefusedAndStartsNothing(t *testing.T) {
 		`{"messageId":"m","taskId":"m-1","role":"ROLE_USER","parts":[{"text":"yes, approve"}]}}}`
 	trusted := map[string]string{"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"}
 
-	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), agentcall.InboundPathFor("recon"), body, trusted)
+	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), "/a2a/inbound/recon", body, trusted)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "cannot answer an approval")
@@ -281,7 +281,7 @@ func TestInboundRPC_AMalformedTargetListIsAnInvalidParamsError(t *testing.T) {
 			// The fake start runs TargetsOf as the daemon does.
 			body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m","role":"ROLE_USER","parts":` + parts + `}}}`
 			h := NewInboundHandler(startsThatReadTargets{starts}, &recordingCards{})
-			rec := rpcCall(h, agentcall.InboundPathFor("recon"), body, trusted)
+			rec := rpcCall(h, "/a2a/inbound/recon", body, trusted)
 			assert.Contains(t, rec.Body.String(), "invalid params")
 			assert.NotContains(t, rec.Body.String(), "internal error")
 		})
@@ -306,11 +306,11 @@ func TestInboundRPC_ABodyOverTheLimitIsRefused(t *testing.T) {
 	big := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m","role":"ROLE_USER",` +
 		`"parts":[{"text":"` + strings.Repeat("A", MaxInboundRequestBytes) + `"}]}}}`
 
-	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), agentcall.InboundPathFor("recon"), big, trusted)
+	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}), "/a2a/inbound/recon", big, trusted)
 
 	assert.Contains(t, rec.Body.String(), "error")
 	assert.Empty(t, starts.got)
 
-	ok := rpcCall(NewInboundHandler(starts, &recordingCards{}), agentcall.InboundPathFor("recon"), sendBody, trusted)
+	ok := rpcCall(NewInboundHandler(starts, &recordingCards{}), "/a2a/inbound/recon", sendBody, trusted)
 	assert.Contains(t, ok.Body.String(), "result", "a normal message still passes")
 }

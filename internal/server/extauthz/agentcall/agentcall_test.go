@@ -87,14 +87,9 @@ func TestInboundPathAgent(t *testing.T) {
 	}
 }
 
-func TestInboundPathFor_IsReadByInboundPathAgent(t *testing.T) {
-	if got := InboundPathFor("recon"); got != "/a2a/inbound/recon" || !IsInboundPath(got) {
-		t.Fatalf("InboundPathFor = %q", got)
-	}
-	for _, p := range []string{InboundPathFor("recon"), InboundCardPathFor("recon")} {
-		if a, _, ok := InboundPathAgent(p); !ok || a != "recon" {
-			t.Errorf("InboundPathAgent(%q) = %q, %v", p, a, ok)
-		}
+func TestIsInboundPath(t *testing.T) {
+	if !IsInboundPath("/a2a/inbound/recon") {
+		t.Error("the inbound path is not inbound")
 	}
 	if IsInboundPath("/agents/recon") {
 		t.Error("IsInboundPath accepted a path off the prefix")

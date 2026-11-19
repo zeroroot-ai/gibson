@@ -133,13 +133,6 @@ const (
 // a published mission definition.
 var inboundAgentPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 
-// InboundPathFor returns the path of the A2A JSON-RPC endpoint of one published
-// agent.
-func InboundPathFor(agent string) string { return InboundPrefix + agent }
-
-// InboundCardPathFor returns the path of the Agent Card of one published agent.
-func InboundCardPathFor(agent string) string { return InboundPathFor(agent) + CardPath }
-
 // IsInboundPath reports whether a path is on the inbound prefix. It says nothing
 // about the rest of the path.
 func IsInboundPath(path string) bool { return strings.HasPrefix(path, InboundPrefix) }
