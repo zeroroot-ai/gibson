@@ -81,14 +81,16 @@ func TestAgentKeyDescriptor_WithholdsALapsedAgentsKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "lapsed")
 }
 
-// expectOriginateGrant answers the read of the mission:originate bit.
-func expectOriginateGrant(m *mockedService, held bool) {
+// expectCapabilityNames answers the read of every active capability name of the
+// principal.
+func expectCapabilityNames(m *mockedService, names ...string) {
+	rows := sqlmock.NewRows([]string{"capability_name"})
+	for _, n := range names {
+		rows.AddRow(n)
+	}
 	m.mock.ExpectQuery("JOIN capability_grant_agents a ON a.id = g.agent_id").
-		WithArgs("acme", "agent_principal:acct-1", "mission:originate").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(held))
-	m.mock.ExpectQuery("JOIN capability_grant_agents a ON a.id = g.agent_id").
-		WithArgs("acme", "agent_principal:acct-1", "mission:delegate").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+		WithArgs("acme", "agent_principal:acct-1").
+		WillReturnRows(rows)
 }
 
 func TestAgentKeyDescriptor_ServesAnAgentInsideItsLifetime(t *testing.T) {
@@ -96,7 +98,7 @@ func TestAgentKeyDescriptor_ServesAnAgentInsideItsLifetime(t *testing.T) {
 	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
 		WithArgs("agt_1").
 		WillReturnRows(agentRowExpiring("agt_1", "acme", time.Now().Add(time.Hour)))
-	expectOriginateGrant(m, false)
+	expectCapabilityNames(m)
 
 	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
 
@@ -110,7 +112,7 @@ func TestAgentKeyDescriptor_ServesAnAgentWithNoRecordedExpiry(t *testing.T) {
 	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
 		WithArgs("agt_1").
 		WillReturnRows(agentRowExpiring("agt_1", "acme", nil))
-	expectOriginateGrant(m, false)
+	expectCapabilityNames(m)
 
 	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
 
@@ -123,12 +125,27 @@ func TestAgentKeyDescriptor_ListsTheOriginateCeiling(t *testing.T) {
 	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
 		WithArgs("agt_1").
 		WillReturnRows(agentRowExpiring("agt_1", "acme", nil))
-	expectOriginateGrant(m, true)
+	expectCapabilityNames(m, "mission:originate")
 
 	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
 
 	require.NoError(t, err)
 	assert.Contains(t, string(body), `"capabilities":["mission:originate"]`)
+}
+
+// The descriptor lists every active capability name, so ext-authz sees any extra
+// capability at call time and can refuse the caller.
+func TestAgentKeyDescriptor_ListsEveryActiveCapability(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
+		WithArgs("agt_1").
+		WillReturnRows(agentRowExpiring("agt_1", "acme", nil))
+	expectCapabilityNames(m, "mission:originate", "tool:invoke", "mission:delegate")
+
+	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
+
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"capabilities":["mission:originate","tool:invoke","mission:delegate"]`)
 }
 
 func TestAgentKeyDescriptor_RefusesWhenTheGrantReadFails(t *testing.T) {
@@ -141,7 +158,7 @@ func TestAgentKeyDescriptor_RefusesWhenTheGrantReadFails(t *testing.T) {
 
 	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
 
-	require.ErrorContains(t, err, "mission:originate")
+	require.ErrorContains(t, err, "read the capabilities")
 	assert.Nil(t, body)
 }
 

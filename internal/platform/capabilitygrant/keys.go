@@ -7,15 +7,7 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/zeroroot-ai/gibson/internal/platform/capname"
 )
-
-// descriptorCapabilities are the capability bits that the key descriptor lists.
-// ext-authz reads them without a database. An inbound A2A call needs
-// mission:originate (gibson#1410). It refuses a caller that holds another
-// session bit, because a caller identity has the one ceiling mission:originate.
-var descriptorCapabilities = []string{capname.MissionOriginate, capname.MissionDelegate}
 
 // AgentKeyDescriptor returns the per-kid key descriptor for the agent whose id
 // is kid (ADR-0045, gibson#648). The descriptor is a JWKS superset:
@@ -23,8 +15,11 @@ var descriptorCapabilities = []string{capname.MissionOriginate, capname.MissionD
 //	{"keys":[{ed25519 jwk}], "principal":"agent_principal:<acct>",
 //	 "tenant":"<tenant>", "status":"active", "capabilities":["mission:originate"]}
 //
-// capabilities lists each bit of descriptorCapabilities that the agent holds in
-// an active grant. The list is absent when the agent holds none.
+// capabilities lists every capability name that the agent holds in an active grant,
+// in name order. The list is absent when the agent holds none. ext-authz reads it
+// without a database. An inbound A2A call needs mission:originate (gibson#1410), and
+// it refuses a caller that holds any other name, because a caller identity has the
+// one ceiling mission:originate.
 //
 // ext-authz fetches this by kid to verify a component's self-signed agent+jwt
 // (kid = agent row id) and then runs its NORMAL per-method FGA check on the
@@ -56,15 +51,9 @@ func (s *CapabilityGrantService) AgentKeyDescriptor(ctx context.Context, kid str
 	if err != nil {
 		return nil, fmt.Errorf("capabilitygrant: AgentKeyDescriptor: parse %q public key: %w", kid, err)
 	}
-	var held []string
-	for _, name := range descriptorCapabilities {
-		has, err := s.store.HasActiveGrant(ctx, agent.TenantID, agent.PrincipalRef, name)
-		if err != nil {
-			return nil, fmt.Errorf("capabilitygrant: AgentKeyDescriptor: read %s of %q: %w", name, kid, err)
-		}
-		if has {
-			held = append(held, name)
-		}
+	held, err := s.store.ActiveCapabilityNames(ctx, agent.TenantID, agent.PrincipalRef)
+	if err != nil {
+		return nil, fmt.Errorf("capabilitygrant: AgentKeyDescriptor: read the capabilities of %q: %w", kid, err)
 	}
 	return buildKeyDescriptor(pub, kid, agent.PrincipalRef, agent.TenantID, agent.Status, held)
 }
