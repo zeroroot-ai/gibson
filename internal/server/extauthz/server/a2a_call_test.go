@@ -95,10 +95,9 @@ func TestA2ACall_AllowedSetsTheFourHeadersAndKeepsTheRoute(t *testing.T) {
 	mock := &modelFGA{allow: allowExecute()}
 	srv, priv := a2aServer(t, mock)
 	g := mintA2AGrant(t, priv, modelTenant, "mission-1", "task-1", a2aGrantRoutes)
-	// The caller sends forged copies of the trusted headers.
-	req := a2aRequest(agentcall.RouteA2A, g, map[string]string{
-		modelcall.HeaderTenant: "evil", modelcall.HeaderSubject: "user:evil", modelcall.HeaderMission: "m-evil",
-	})
+	// A caller copy of a trusted header is refused
+	// (TestGatewayCall_ACallerCopyOfATrustedHeaderIsRefused).
+	req := a2aRequest(agentcall.RouteA2A, g, nil)
 	resp, err := srv.Check(peerContext(t, gatewaySVID), req)
 	if got := statusOf(t, resp, err); got != codes.OK {
 		t.Fatalf("status = %v, want OK", got)

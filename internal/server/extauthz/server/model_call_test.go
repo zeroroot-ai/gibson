@@ -216,12 +216,7 @@ func TestModelCall_AllowedSetsTheFourHeaders(t *testing.T) {
 	srv, priv := buildModelServer(t, mock)
 	grant := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
 
-	// The caller sends its own copies. The answer must replace each one.
-	forged := map[string]string{
-		modelcall.HeaderTenant: "forged-tenant", modelcall.HeaderSubject: "forged-admin",
-		modelcall.HeaderMission: "forged-mission", modelcall.HeaderTask: "forged-task",
-	}
-	req := modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, grant, forged)
+	req := modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, grant, nil)
 	resp, err := srv.Check(context.Background(), req)
 	if got := statusOf(t, resp, err); got != codes.OK {
 		t.Fatalf("status = %v, want OK", got)
@@ -477,8 +472,7 @@ func TestModelCall_ComponentToken(t *testing.T) {
 		mock := &modelFGA{allow: map[string]bool{tupleKey("agent_principal:9", "can_use", modelObj): true}}
 		srv, tok := build(t, modelTenant, mock)
 		resp, err := srv.Check(context.Background(),
-			modelRequest(componentModelRoute, modelTenant, modelProvider, modelName1, tok,
-				map[string]string{modelcall.HeaderMission: "forged-mission"}))
+			modelRequest(componentModelRoute, modelTenant, modelProvider, modelName1, tok, nil))
 		if got := statusOf(t, resp, err); got != codes.OK {
 			t.Fatalf("status = %v, want OK", got)
 		}
@@ -740,4 +734,33 @@ func TestModelCall_TheHeaderOfAnotherTenantIsRefused(t *testing.T) {
 
 func reqHeaders(r *authv3.CheckRequest) map[string]string {
 	return r.GetAttributes().GetRequest().GetHttp().GetHeaders()
+}
+
+// A gateway call that holds a copy of a trusted header is refused with 403,
+// before FGA. The refusal does not change the request, so the trace of the call
+// must end with a status that the trace receiver drops. A model call and an A2A
+// call are both refused.
+func TestGatewayCall_ACallerCopyOfATrustedHeaderIsRefused(t *testing.T) {
+	t.Parallel()
+	mock := &modelFGA{allow: map[string]bool{tupleKey(members, "can_use", modelObj): true}}
+	srv, priv := buildModelServer(t, mock)
+	grant := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
+
+	for _, h := range []string{
+		modelcall.HeaderTenant, modelcall.HeaderSubject, modelcall.HeaderMission, modelcall.HeaderTask,
+	} {
+		for _, path := range []string{modelcall.RouteResponses, "/"} {
+			req := modelRequest(path, modelTenant, modelProvider, modelName1, grant, map[string]string{h: "tenant-b"})
+			resp := srv.gatewayCallResponse(context.Background(), req)
+			if got := statusOf(t, resp, nil); got != codes.PermissionDenied {
+				t.Errorf("%s on %s: status = %v, want PermissionDenied", h, path, got)
+			}
+			if code := resp.GetDeniedResponse().GetStatus().GetCode(); code != http.StatusForbidden {
+				t.Errorf("%s on %s: HTTP status = %v, want 403", h, path, code)
+			}
+		}
+	}
+	if len(mock.questions()) != 0 {
+		t.Errorf("FGA was asked %d times for a call with a trusted header", len(mock.questions()))
+	}
 }

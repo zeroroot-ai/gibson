@@ -14,6 +14,9 @@
 //   - the trusted values of ext-authz, in the attributes gibson.tenant,
 //     gibson.subject, gibson.mission and gibson.task. They are CEL fields of the
 //     trace policy that read the request headers after ext-authz set them.
+//     ext-authz sets them on an allow only. On a refusal (401 or 403) the
+//     headers are the copies of the caller, and the receiver of the daemon
+//     drops the span.
 //
 // The package is pure. It does no I/O. The receiver that gets the spans from the
 // collector, and the routing by tenant, are not part of it.

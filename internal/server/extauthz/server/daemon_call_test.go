@@ -87,8 +87,7 @@ func TestDaemonCall_ChatAllowedForTheInitiator(t *testing.T) {
 	t.Parallel()
 	srv, priv, mock := dcServer(t)
 	g := signDC(t, priv, modelcall.DaemonCallJWTType, dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1"))
-	forged := map[string]string{modelcall.HeaderMission: "forged", modelcall.HeaderTask: "forged"}
-	req := modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, forged)
+	req := modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil)
 	resp, err := srv.Check(gw(t), req)
 	if got := statusOf(t, resp, err); got != codes.OK {
 		t.Fatalf("status = %v, want OK", got)

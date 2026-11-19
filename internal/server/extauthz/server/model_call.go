@@ -18,6 +18,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/gatewayheaders"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	"github.com/zeroroot-ai/sdk/capabilitygrant"
 )
@@ -39,6 +40,7 @@ const (
 	modelDenyObject         = "object"
 	modelDenyMission        = "mission_not_active"
 	modelDenyDaemonRoute    = "daemon_route_mismatch"
+	modelDenyTrustedHeader  = "trusted_header_from_caller"
 )
 
 var extauthzModelCallDeniedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -74,13 +76,26 @@ func denyModel(reason string, resp *authv3.CheckResponse) *authv3.CheckResponse 
 // gatewayCallResponse decides a call of the gateway peer. A model path is a model
 // call: the claimed tenant and provider come from the two route headers. Any
 // other path is an A2A call (a2a_call.go).
+//
+// A call that already holds a trusted header is refused first. Only ext-authz
+// sets these headers, and only on an allow. A refusal does not change the
+// request headers, so the trace of a refused call would keep the copy of the
+// caller. With this rule, a call with a copy always ends with 403, and the
+// trace receiver of the daemon drops each 401 and 403 span.
 func (s *EnvoyAuthzServer) gatewayCallResponse(ctx context.Context, req *authv3.CheckRequest) *authv3.CheckResponse {
 	path := extractMethod(req)
+	httpHeaders := req.GetAttributes().GetRequest().GetHttp().GetHeaders()
+	for _, h := range gatewayheaders.Trusted() {
+		if _, ok := httpHeaders[h]; ok {
+			s.log.WarnContext(ctx, "ext-authz: a gateway call holds a trusted header", "path", path, "header", h)
+			return denyModel(modelDenyTrustedHeader, denyForbidden())
+		}
+	}
 	if !modelcall.IsModelPath(path) {
 		// On the gateway identity, a path that is not a model path is an A2A call.
 		return s.a2aCallResponse(ctx, req)
 	}
-	tenant, provider, reason := modelcall.ClaimedRoute(req.GetAttributes().GetRequest().GetHttp().GetHeaders())
+	tenant, provider, reason := modelcall.ClaimedRoute(httpHeaders)
 	if reason != "" {
 		s.log.WarnContext(ctx, "ext-authz: the route headers of a model call are not usable", "path", path, "reason", reason)
 		return denyModel(reason, denyForbidden())
@@ -98,7 +113,8 @@ func (s *EnvoyAuthzServer) gatewayCallResponse(ctx context.Context, req *authv3.
 //
 // On allow, ext-authz sets x-gibson-tenant, x-gibson-subject, x-gibson-mission
 // and x-gibson-task. It sets each one on each call and removes the ones that it
-// has no value for, so a copy from the caller never passes.
+// has no value for. gatewayCallResponse refuses a copy from the caller before
+// this point.
 func (s *EnvoyAuthzServer) modelCallResponse(
 	ctx context.Context, req *authv3.CheckRequest, routeTenant, provider string,
 ) *authv3.CheckResponse {

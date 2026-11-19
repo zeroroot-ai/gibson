@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -48,14 +49,16 @@ var (
 		Name: "gibson_gateway_outside_calls_total",
 		Help: "A2A spans of the Agent gateway, by result.",
 	}, []string{"result"})
-	// gatewayLLMRefusedTotal counts the spans of calls that the gateway answered
-	// with an error status and that carry no tenant. ext-authz or the router
-	// refused such a call before it had an identity (no route, a forged tenant,
-	// a wrong audience), so the daemon has no tenant Timeline to store it in. It
-	// is not a drop: the daemon had no record to keep.
+	// gatewayLLMRefusedTotal counts the spans of calls that the gateway refused
+	// before they had a trusted identity: a span with an error status and no
+	// tenant, and each span with the status 401 or 403. ext-authz or the router
+	// refused such a call (no route, a forged tenant, a wrong audience). A
+	// refusal does not change the request headers, so the tenant of such a span
+	// is the value of the caller and is not trusted. It is not a drop: the
+	// daemon had no record to keep.
 	gatewayLLMRefusedTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "gibson_gateway_llm_refused_total",
-		Help: "Model call spans of calls that the gateway refused before they had a tenant.",
+		Help: "Model call spans of calls that the gateway refused before they had a trusted identity.",
 	})
 	gatewayLLMDroppedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gibson_gateway_llm_dropped_total",
@@ -66,6 +69,7 @@ var (
 // Results of an A2A span, the label of gibson_gateway_outside_calls_total.
 const (
 	outsideRecorded   = "recorded"
+	outsideRefused    = "refused"
 	outsideNotOutside = "not_outside"
 	outsideDropParse  = "dropped_parse"
 	outsideDropTenant = "dropped_tenant"
@@ -216,6 +220,12 @@ func (r *TraceReceiver) deliverOutside(ctx context.Context, sp llmtrace.Span) er
 		r.logger.Warn("an A2A span cannot be read", "error", err)
 		return errDropped
 	}
+	if refusedBeforeIdentity(call.HTTPStatus) {
+		// The tenant of the span is the value of the caller. It is not trusted.
+		gatewayOutsideCallsTotal.WithLabelValues(outsideRefused).Inc()
+		r.logger.Debug("a refused A2A span is not recorded", "call_id", call.CallID, "status", call.HTTPStatus)
+		return nil
+	}
 	tenant, err := auth.NewTenantID(call.Tenant)
 	if err != nil {
 		gatewayOutsideCallsTotal.WithLabelValues(outsideDropTenant).Inc()
@@ -250,6 +260,16 @@ func (r *TraceReceiver) deliverOutside(ctx context.Context, sp llmtrace.Span) er
 	return nil
 }
 
+// refusedBeforeIdentity reports whether a gateway status is a refusal of
+// ext-authz. ext-authz refuses with 401 or 403 and does not change the request
+// headers on a refusal. The trusted values of such a span are the values of the
+// caller, so the daemon never writes the span to a tenant Timeline. ext-authz
+// refuses each gateway call that holds a caller copy of a trusted header with
+// 403, so a span with a caller copy always ends here.
+func refusedBeforeIdentity(code int) bool {
+	return code == http.StatusUnauthorized || code == http.StatusForbidden
+}
+
 var errEngineUnavailable = errors.New("the tenant engine is not available")
 
 // errUsageUnavailable marks a span whose usage the budget could not record.
@@ -263,11 +283,13 @@ func (r *TraceReceiver) deliver(ctx context.Context, attrs []*commonpb.KeyValue)
 	if errors.Is(err, llmtrace.ErrNotAModelCall) {
 		return fmt.Errorf("read the span: %w", err)
 	}
-	// A call that the gateway refused before it had a tenant is counted by
-	// itself. It is neither a request that the daemon should store nor a drop.
-	if err == nil && obs.Tenant == "" && obs.Failed() {
+	// A call that the gateway refused before it had a trusted identity is
+	// counted by itself. It is neither a request that the daemon should store
+	// nor a drop. A 401 or 403 span is such a call whatever tenant it holds,
+	// because ext-authz sets the tenant on an allow only.
+	if err == nil && obs.Failed() && (obs.Tenant == "" || refusedBeforeIdentity(obs.HTTPStatus)) {
 		gatewayLLMRefusedTotal.Inc()
-		r.logger.Debug("a refused model call span has no tenant", "call_id", obs.CallID, "status", obs.HTTPStatus)
+		r.logger.Debug("a refused model call span is not recorded", "call_id", obs.CallID, "status", obs.HTTPStatus)
 		return nil
 	}
 	gatewayLLMRequestsTotal.Inc()

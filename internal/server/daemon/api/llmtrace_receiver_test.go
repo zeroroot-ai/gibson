@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -390,4 +391,96 @@ func TestTraceReceiver_AStoreThatCannotAnswerFailsTheCall(t *testing.T) {
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("code = %v, want Unavailable", status.Code(err))
 	}
+}
+
+// A span that ext-authz refused with 401 or 403 holds the tenant and the mission
+// of the caller. ext-authz did not set them. The receiver writes no event to any
+// Timeline and counts the span as refused.
+func TestTraceReceiver_ARefusedSpanWithACallerTenantIsNotRecorded(t *testing.T) {
+	for _, status := range []int64{401, 403} {
+		t.Run(strconv.FormatInt(status, 10), func(t *testing.T) {
+			r, reg := newReceiver(t)
+			ctx := peerCtx(t, collectorSVID)
+			victim := reg.For("victim")
+			victim.Submit(brain.MissionStarted{ID: "m1", RunID: "r1"})
+			span := spanFromFixture(t, "messages_denied", map[string]string{
+				"gibson.tenant": "victim", "gibson.mission": "m1",
+			})
+			setIntAttr(span, "http.response.status_code", status)
+
+			refusedBefore := testutil.ToFloat64(gatewayLLMRefusedTotal)
+			resp, err := r.Export(ctx, exportOf(span))
+			if err != nil {
+				t.Fatalf("Export: %v", err)
+			}
+			if resp.GetPartialSuccess().GetRejectedSpans() != 0 {
+				t.Errorf("rejected spans = %d, want 0", resp.GetPartialSuccess().GetRejectedSpans())
+			}
+			if got := testutil.ToFloat64(gatewayLLMRefusedTotal) - refusedBefore; got != 1 {
+				t.Errorf("refused = %v, want 1", got)
+			}
+			time.Sleep(100 * time.Millisecond)
+			if n := len(victim.LlmCalls()); n != 0 {
+				t.Errorf("tenant victim holds %d calls, want 0", n)
+			}
+		})
+	}
+}
+
+// A failed call that ext-authz allowed keeps its record: the provider answered
+// with an error, and the tenant is the value that ext-authz set.
+func TestTraceReceiver_AFailedCallAfterTheAllowIsRecorded(t *testing.T) {
+	r, reg := newReceiver(t)
+	ctx := peerCtx(t, collectorSVID)
+	engine := reg.For("acme")
+	engine.Submit(brain.MissionStarted{ID: "m1", RunID: "r1"})
+	span := spanFromFixture(t, "messages_denied", map[string]string{"gibson.tenant": "acme", "gibson.mission": "m1"})
+	setIntAttr(span, "http.response.status_code", 503)
+	if _, err := r.Export(ctx, exportOf(span)); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	calls := awaitCalls(t, engine, 1)
+	if calls[0].HTTPStatus != 503 {
+		t.Errorf("status = %d, want 503", calls[0].HTTPStatus)
+	}
+}
+
+// An A2A span that ext-authz refused is not recorded, even when the tenant of
+// the caller registered the target as an outside agent.
+func TestTraceReceiver_ARefusedA2ASpanIsNotRecorded(t *testing.T) {
+	for _, status := range []int64{401, 403} {
+		t.Run(strconv.FormatInt(status, 10), func(t *testing.T) {
+			r, reg := newReceiver(t)
+			store := &oneOutsideStore{tenant: "victim", name: "partner-scout"}
+			r.WithOutsideAgents(func() outsideagentstore.Store { return store })
+			ctx := peerCtx(t, collectorSVID)
+			span := spanFromFixture(t, "a2a_send_message", map[string]string{"gibson.tenant": "victim"})
+			setIntAttr(span, "http.response.status_code", status)
+
+			before := testutil.ToFloat64(gatewayOutsideCallsTotal.WithLabelValues(outsideRefused))
+			if _, err := r.Export(ctx, exportOf(span)); err != nil {
+				t.Fatalf("Export: %v", err)
+			}
+			if got := testutil.ToFloat64(gatewayOutsideCallsTotal.WithLabelValues(outsideRefused)) - before; got != 1 {
+				t.Errorf("refused = %v, want 1", got)
+			}
+			time.Sleep(100 * time.Millisecond)
+			if n := len(reg.For("victim").OutsideAgentCalls()); n != 0 {
+				t.Errorf("tenant victim holds %d calls, want 0", n)
+			}
+		})
+	}
+}
+
+// setIntAttr sets an integer attribute of a span.
+func setIntAttr(sp *tracepb.Span, key string, n int64) {
+	for _, kv := range sp.Attributes {
+		if kv.GetKey() == key {
+			kv.Value = &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: n}}
+			return
+		}
+	}
+	sp.Attributes = append(sp.Attributes, &commonpb.KeyValue{
+		Key: key, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: n}},
+	})
 }
