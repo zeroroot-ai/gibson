@@ -221,7 +221,9 @@ func TestVerifyDaemonCall_ClaimRefusals(t *testing.T) {
 		{"no tenant", func(c jwt.MapClaims) { delete(c, "tenant") }, ErrMalformed},
 		{"wrong subject", func(c jwt.MapClaims) { c["sub"] = "component:daemon:embedding" }, ErrMalformed},
 		{"chat without initiator", func(c jwt.MapClaims) { delete(c, modelcall.InitiatorClaim) }, ErrMalformed},
-		{"chat with a non-user initiator", func(c jwt.MapClaims) { c[modelcall.InitiatorClaim] = "svc:x" }, ErrMalformed},
+		{"chat with a service initiator", func(c jwt.MapClaims) {
+			c[modelcall.InitiatorClaim] = "svc:x"
+		}, ErrMalformed},
 		{"no jti", func(c jwt.MapClaims) { delete(c, "jti") }, ErrMalformed},
 	}
 	for _, tt := range tests {
