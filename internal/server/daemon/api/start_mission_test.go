@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -47,18 +48,34 @@ func TestStartMission_PassesTheWholeRequestToTheDaemon(t *testing.T) {
 	assert.Equal(t, req, got)
 }
 
+// A failure of the daemon after admission keeps its gRPC status.
+func TestStartMission_KeepsTheStatusOfAFailedStart(t *testing.T) {
+	d := &mockDaemon{runMissionFn: func(context.Context, RunMissionData) (string, error) {
+		return "", status.Error(codes.NotFound, "mission definition not found")
+	}}
+	_, err := NewDaemonServer(d, nil, nil).StartMission(context.Background(), RunMissionData{})
+	require.Error(t, err)
+	assert.Equal(t, codes.NotFound, status.Code(err))
+
+	d.runMissionFn = func(context.Context, RunMissionData) (string, error) { return "", errors.New("boom") }
+	_, err = NewDaemonServer(d, nil, nil).StartMission(context.Background(), RunMissionData{})
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err), "an error with no status becomes Internal")
+}
+
 // A refusal of admission comes before the daemon starts anything.
 func TestStartMission_RefusesBeforeTheDaemonStartsAnything(t *testing.T) {
-	boom := errors.New("quota")
+	exhausted := status.Error(codes.ResourceExhausted, "quota used up")
 	tests := []struct {
 		name  string
 		quota MissionQuotaChecker
 		setup func(*DaemonServer, sqlmock.Sqlmock)
-		want  error
 		code  codes.Code
 	}{
-		{name: "the mission quota is used up", quota: scriptedQuota{missionErr: boom}, want: boom},
-		{name: "the agent quota is used up", quota: scriptedQuota{agentErr: boom}, want: boom},
+		{name: "the mission quota is used up", quota: scriptedQuota{missionErr: exhausted}, code: codes.ResourceExhausted},
+		{name: "the agent quota is used up", quota: scriptedQuota{agentErr: exhausted}, code: codes.ResourceExhausted},
+		{name: "a quota check that fails with no status", quota: scriptedQuota{agentErr: errors.New("redis down")},
+			code: codes.Internal},
 		{
 			name: "the tenant is suspended",
 			setup: func(_ *DaemonServer, m sqlmock.Sqlmock) {
@@ -86,11 +103,7 @@ func TestStartMission_RefusesBeforeTheDaemonStartsAnything(t *testing.T) {
 			_, err := srv.StartMission(ctx, RunMissionData{MissionDefinitionID: "def-1", TargetIDs: []string{"t1"}})
 
 			require.Error(t, err)
-			if tt.want != nil {
-				assert.ErrorIs(t, err, tt.want)
-			} else {
-				wantCode(t, tt.name, err, tt.code)
-			}
+			wantCode(t, tt.name, err, tt.code)
 			assert.False(t, started, "the daemon started a mission after the refusal")
 		})
 	}

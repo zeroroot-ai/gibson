@@ -55,10 +55,10 @@ func decode(t *testing.T, raw any) decodedResult {
 	return out
 }
 
-func sampleFindings() (finding.EnhancedFinding, finding.EnhancedFinding) {
+func sampleFindings() (full, bare finding.EnhancedFinding) {
 	target := types.NewID()
 	rawOutput := "PORT 22/tcp open\n\x00 raw bytes, secrets: AKIAEXAMPLE password=hunter2"
-	full := finding.EnhancedFinding{
+	full = finding.EnhancedFinding{
 		Finding: agent.Finding{
 			ID: types.NewID(), Title: "Open SSH", Description: "port 22", Severity: agent.SeverityHigh, TargetID: &target,
 			Evidence: []*typespb.Evidence{
@@ -69,7 +69,7 @@ func sampleFindings() (finding.EnhancedFinding, finding.EnhancedFinding) {
 		},
 		ReproSteps: []finding.ReproStep{{StepNumber: 1, Description: "run nmap", ExpectedResult: "port 22 open", EvidenceRef: "nmap"}},
 	}
-	bare := finding.EnhancedFinding{Finding: agent.Finding{ID: types.NewID(), Title: "Banner", Severity: agent.SeverityLow}}
+	bare = finding.EnhancedFinding{Finding: agent.Finding{ID: types.NewID(), Title: "Banner", Severity: agent.SeverityLow}}
 	return full, bare
 }
 

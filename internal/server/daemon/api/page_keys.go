@@ -41,3 +41,24 @@ func pageTokenStatus(err error) error {
 	}
 	return status.Errorf(codes.Internal, "page token: %v", err)
 }
+
+// keysetPage reads one page of a list that the store pages with a keyset. fetch
+// returns at most limit entries after the key, in key order. keyOf returns the
+// key of an entry. The function asks for one more entry than the page holds, so
+// it knows whether a next page exists, and it returns the token of that page. The
+// token is empty on the last page.
+func keysetPage[E any](
+	page pagetoken.Request, fetch func(after string, hasAfter bool, limit int) ([]E, error), keyOf func(E) string,
+) (entries []E, next string, err error) {
+	after, hasAfter := page.After()
+	limit := page.Limit()
+	entries, err = fetch(after, hasAfter, limit+1)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(entries) > limit {
+		entries = entries[:limit]
+		next = page.Token(keyOf(entries[len(entries)-1]), true)
+	}
+	return entries, next, nil
+}

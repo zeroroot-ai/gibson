@@ -245,7 +245,7 @@ func TestInboundRPC_GetAndCancelRefusals(t *testing.T) {
 func TestInboundRPC_RefusesAGetOrCancelWithNoCaller(t *testing.T) {
 	h := &inboundRPC{runs: &fakeStarts{}}
 	_, err := h.GetTask(context.Background(), &a2a.GetTaskRequest{ID: "m-1"})
-	assert.ErrorIs(t, err, a2a.ErrUnauthenticated)
+	require.ErrorIs(t, err, a2a.ErrUnauthenticated)
 	_, err = h.CancelTask(context.Background(), &a2a.CancelTaskRequest{ID: "m-1"})
 	assert.ErrorIs(t, err, a2a.ErrUnauthenticated)
 }

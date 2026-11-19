@@ -146,7 +146,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		CreatedBy:  inboundPrincipal(c.Subject),
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("start the mission of agent %s: %w", req.Agent, err)
 	}
 	r.remember(missionID, c)
 	return &a2a.Task{
@@ -250,11 +250,11 @@ func (r *inboundRuns) taskOf(ctx context.Context, c a2aserver.InboundCaller, m b
 	}
 	findings, err := r.findings.MissionFindings(ctx, c.Tenant, missionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read the findings of mission %s: %w", m.ID, err)
 	}
 	artifact, err := a2aserver.FindingsArtifact(m.ID, findings, a2aserver.MaxInboundResultBytes)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build the result of mission %s: %w", m.ID, err)
 	}
 	t.Artifacts = []*a2a.Artifact{artifact}
 	return t, nil
@@ -304,7 +304,7 @@ func (e refusedTargets) Error() string { return string(e) }
 func (r *inboundRuns) narrowedTargets(pub *inboundmissionstore.Entry, msg *a2a.Message) ([]string, error) {
 	asked, present, err := a2aserver.TargetsOf(msg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read the target list of the message: %w", err)
 	}
 	if !present {
 		return slices.Clone(pub.TargetIDs), nil

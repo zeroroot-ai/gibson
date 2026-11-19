@@ -192,23 +192,17 @@ func (s *InboundMissionService) ListInboundMissions(
 	if err != nil {
 		return nil, err
 	}
-	after, hasAfter := page.After()
-	// One more row than the page tells whether a next page exists.
-	limit := page.Limit()
-	entries, err := s.store.ListPage(ctx, tenant, after, hasAfter, limit+1)
+	entries, next, err := keysetPage(page, func(after string, hasAfter bool, limit int) ([]inboundmissionstore.Entry, error) {
+		return s.store.ListPage(ctx, tenant, after, hasAfter, limit)
+	}, func(e inboundmissionstore.Entry) string { return e.Agent })
 	if err != nil {
 		return nil, inboundStatus(rpc, err)
 	}
-	more := len(entries) > limit
-	if more {
-		entries = entries[:limit]
+	out := &tenantv1.ListInboundMissionsResponse{
+		Entries: make([]*tenantv1.InboundMissionEntry, 0, len(entries)), NextPageToken: next,
 	}
-	out := &tenantv1.ListInboundMissionsResponse{Entries: make([]*tenantv1.InboundMissionEntry, 0, len(entries))}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, inboundEntryProto(e))
-	}
-	if more {
-		out.NextPageToken = page.Token(entries[len(entries)-1].Agent, true)
 	}
 	return out, nil
 }

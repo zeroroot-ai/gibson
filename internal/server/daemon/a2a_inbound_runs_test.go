@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -42,7 +43,7 @@ func (r *recordingStarter) StartMission(ctx context.Context, req api.RunMissionD
 	}
 	r.started = append(r.started, req)
 	r.ctxs = append(r.ctxs, ctx)
-	return "m-" + string(rune('0'+len(r.started))), nil
+	return fmt.Sprintf("m-%d", len(r.started)), nil
 }
 
 const inboundCallerRef = "agent_principal:9"
@@ -67,9 +68,9 @@ func newInboundRuns(starter *recordingStarter) *inboundRuns {
 	return &inboundRuns{published: pubs, starter: starter}
 }
 
-func startInbound(r *inboundRuns, agent string, msg *a2a.Message) (*a2a.Task, error) {
+func startInbound(r *inboundRuns, agentName string, msg *a2a.Message) (*a2a.Task, error) {
 	return r.Start(context.Background(), a2aserver.InboundStart{
-		Caller: a2aserver.InboundCaller{Tenant: "acme", Subject: inboundCallerRef}, Agent: agent, Message: msg,
+		Caller: a2aserver.InboundCaller{Tenant: "acme", Subject: inboundCallerRef}, Agent: agentName, Message: msg,
 	})
 }
 
@@ -225,7 +226,7 @@ func TestInboundRuns_Failures(t *testing.T) {
 
 			require.ErrorIs(t, err, tt.wantIs)
 			if tt.wantMsg != "" {
-				assert.ErrorContains(t, err, tt.wantMsg)
+				require.ErrorContains(t, err, tt.wantMsg)
 			}
 			assert.Nil(t, task)
 			assert.Empty(t, starter.started)
@@ -375,7 +376,7 @@ func TestInboundRuns_TaskNeverShowsTheMissionOfAnotherCaller(t *testing.T) {
 
 	for name, id := range map[string]string{"another caller": f.mission, "a mission that does not exist": types.NewID().String()} {
 		_, err := f.runs.Task(context.Background(), otherCaller, a2a.TaskID(id))
-		assert.ErrorIs(t, err, a2aserver.ErrNotFound, name)
+		require.ErrorIs(t, err, a2aserver.ErrNotFound, name)
 	}
 	assert.Empty(t, f.findings.asked, "the findings of another caller are never read")
 
@@ -395,12 +396,12 @@ func TestInboundRuns_ARunThatTheWorldHasNotFoldedBelongsToItsCaller(t *testing.T
 	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
 
 	_, err = f.runs.Task(context.Background(), otherCaller, a2a.TaskID(f.mission))
-	assert.ErrorIs(t, err, a2aserver.ErrNotFound, "another caller reads nothing of it")
+	require.ErrorIs(t, err, a2aserver.ErrNotFound, "another caller reads nothing of it")
 
 	// The entry lapses with time, and the World is the record after that.
 	f.runs.pending[f.mission] = inboundPending{tenant: "acme", owner: inboundCallerRef, at: time.Now().Add(-2 * inboundPendingTTL)}
 	_, err = f.runs.Task(context.Background(), ownerCaller, a2a.TaskID(f.mission))
-	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+	require.ErrorIs(t, err, a2aserver.ErrNotFound)
 	f.runs.remember("other-mission", ownerCaller)
 	assert.NotContains(t, f.runs.pending, f.mission, "a lapsed entry is dropped")
 
@@ -456,16 +457,16 @@ func TestInboundRuns_CancelNeverEndsTheMissionOfAnotherCaller(t *testing.T) {
 	f.startMission(ownerRef)
 
 	_, err := f.runs.Cancel(context.Background(), otherCaller, a2a.TaskID(f.mission))
-	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+	require.ErrorIs(t, err, a2aserver.ErrNotFound)
 	_, err = f.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(types.NewID().String()))
-	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+	require.ErrorIs(t, err, a2aserver.ErrNotFound)
 	assert.Empty(t, f.stopped, "no mission ended")
 
 	// A mission that a person started is not the mission of any inbound caller.
 	g := newTaskFixture(t)
 	g.startMission(principal.Principal{Kind: principal.User, ID: "u1"})
 	_, err = g.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(g.mission))
-	assert.ErrorIs(t, err, a2aserver.ErrNotFound)
+	require.ErrorIs(t, err, a2aserver.ErrNotFound)
 	assert.Empty(t, g.stopped)
 }
 
@@ -474,7 +475,7 @@ func TestInboundRuns_CancelRefusals(t *testing.T) {
 	f.startMission(ownerRef)
 	f.end(brain.MissionCompleted)
 	_, err := f.runs.Cancel(context.Background(), ownerCaller, a2a.TaskID(f.mission))
-	assert.ErrorIs(t, err, a2aserver.ErrNotCancelable, "a mission in a final state cannot be canceled")
+	require.ErrorIs(t, err, a2aserver.ErrNotCancelable, "a mission in a final state cannot be canceled")
 	assert.Empty(t, f.stopped)
 
 	g := newTaskFixture(t)
@@ -508,7 +509,7 @@ func (p *pager) FindWithEvidence(_ context.Context, _ string, q pgstore.Query) (
 
 func TestPGMissionFindings_ReadsEveryPageOfTheMission(t *testing.T) {
 	mission := types.NewID()
-	var all []finding.EnhancedFinding
+	all := make([]finding.EnhancedFinding, 0, 5)
 	for range 5 {
 		all = append(all, finding.EnhancedFinding{Finding: agent.Finding{ID: types.NewID()}})
 	}

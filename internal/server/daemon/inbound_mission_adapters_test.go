@@ -81,10 +81,10 @@ func TestInboundMissionSource_DefinitionAgents(t *testing.T) {
 	assert.Len(t, agents, 2)
 
 	_, err = f.source.DefinitionAgents(f.ctx, "missing")
-	assert.ErrorIs(t, err, api.ErrInboundDefinitionNotFound)
+	require.ErrorIs(t, err, api.ErrInboundDefinitionNotFound)
 
 	_, err = f.source.DefinitionAgents(context.Background(), "recon-def")
-	assert.ErrorIs(t, err, errNoTenantInContext)
+	require.ErrorIs(t, err, errNoTenantInContext)
 
 	f.source.pool = &mockPool{err: errors.New("pool down")}
 	_, err = f.source.DefinitionAgents(f.ctx, "recon-def")

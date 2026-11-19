@@ -109,14 +109,17 @@ func (h *handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*
 // it and implements the methods that it serves.
 type UnsupportedMethods struct{}
 
+// ListTasks is not supported.
 func (UnsupportedMethods) ListTasks(context.Context, *a2a.ListTasksRequest) (*a2a.ListTasksResponse, error) {
 	return nil, a2a.ErrUnsupportedOperation
 }
 
+// SubscribeToTask is not supported.
 func (UnsupportedMethods) SubscribeToTask(context.Context, *a2a.SubscribeToTaskRequest) iter.Seq2[a2a.Event, error] {
 	return unsupportedStream()
 }
 
+// SendStreamingMessage is not supported.
 func (UnsupportedMethods) SendStreamingMessage(context.Context, *a2a.SendMessageRequest) iter.Seq2[a2a.Event, error] {
 	return unsupportedStream()
 }
@@ -125,22 +128,27 @@ func unsupportedStream() iter.Seq2[a2a.Event, error] {
 	return func(yield func(a2a.Event, error) bool) { yield(nil, a2a.ErrUnsupportedOperation) }
 }
 
+// GetTaskPushConfig is not supported. The daemon has no push notifications.
 func (UnsupportedMethods) GetTaskPushConfig(context.Context, *a2a.GetTaskPushConfigRequest) (*a2a.PushConfig, error) {
 	return nil, a2a.ErrPushNotificationNotSupported
 }
 
+// ListTaskPushConfigs is not supported.
 func (UnsupportedMethods) ListTaskPushConfigs(context.Context, *a2a.ListTaskPushConfigRequest) (*a2a.ListTaskPushConfigResponse, error) {
 	return nil, a2a.ErrPushNotificationNotSupported
 }
 
+// CreateTaskPushConfig is not supported.
 func (UnsupportedMethods) CreateTaskPushConfig(context.Context, *a2a.PushConfig) (*a2a.PushConfig, error) {
 	return nil, a2a.ErrPushNotificationNotSupported
 }
 
+// DeleteTaskPushConfig is not supported.
 func (UnsupportedMethods) DeleteTaskPushConfig(context.Context, *a2a.DeleteTaskPushConfigRequest) error {
 	return a2a.ErrPushNotificationNotSupported
 }
 
+// GetExtendedAgentCard is not supported. The daemon serves no extended card.
 func (UnsupportedMethods) GetExtendedAgentCard(context.Context, *a2a.GetExtendedAgentCardRequest) (*a2a.AgentCard, error) {
 	return nil, a2a.ErrExtendedCardNotConfigured
 }

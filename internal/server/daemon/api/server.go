@@ -1317,22 +1317,26 @@ func isTerminalMissionEvent(me *MissionEventData) bool {
 func (s *DaemonServer) StartMission(ctx context.Context, req RunMissionData) (string, error) {
 	if err := s.requireActiveTenant(ctx, auth.TenantStringFromContext(ctx)); err != nil {
 		s.logger.Warn("mission submission rejected: tenant suspended", "error", err)
-		return "", err
+		return "", preserveStatus(err, "tenant check failed")
 	}
 	if s.quotaManager != nil {
 		if err := s.quotaManager.CheckMissionQuota(ctx); err != nil {
 			s.logger.Warn("mission submission rejected: mission quota exceeded", "error", err)
-			return "", err
+			return "", preserveStatus(err, "mission quota check failed")
 		}
 		if err := s.quotaManager.CheckAgentQuota(ctx); err != nil {
 			s.logger.Warn("mission submission rejected: agent quota exceeded", "error", err)
-			return "", err
+			return "", preserveStatus(err, "agent quota check failed")
 		}
 		// Memory-quota enforcement was removed by spec
 		// plans-and-quotas-simplification (it was unenforced and the Redis
 		// key family was dead). Future memory checks ship in their own spec.
 	}
-	return s.daemon.RunMission(ctx, req)
+	id, err := s.daemon.RunMission(ctx, req)
+	if err != nil {
+		return "", preserveStatus(err, "failed to start mission")
+	}
+	return id, nil
 }
 
 // RunMission starts a mission by reference and streams execution events.

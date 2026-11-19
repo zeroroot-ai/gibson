@@ -173,6 +173,7 @@ func TestInboundA2A_Refusals(t *testing.T) {
 			name: "an agent that is not published", c: inboundCase{capabilities: originateCeiling, allow: grantedInbound()},
 			peer: edgeSVID, path: agentcall.InboundPathFor("unpublished"), want: codes.PermissionDenied,
 			token: func(t *testing.T, priv ed25519.PrivateKey) string {
+				t.Helper()
 				return mintInboundJWT(t, priv, "agent+jwt", agentcall.InboundPathFor("unpublished"))
 			},
 		},
@@ -214,13 +215,17 @@ func TestInboundA2A_Refusals(t *testing.T) {
 			name: "a daemon task grant instead of a component token",
 			c:    inboundCase{capabilities: originateCeiling, allow: grantedInbound()},
 			peer: edgeSVID, path: path, want: codes.PermissionDenied,
-			token: func(t *testing.T, priv ed25519.PrivateKey) string { return mintInboundJWT(t, priv, "JWT", path) },
+			token: func(t *testing.T, priv ed25519.PrivateKey) string {
+				t.Helper()
+				return mintInboundJWT(t, priv, "JWT", path)
+			},
 		},
 		{
 			name: "a token that is bound to another path",
 			c:    inboundCase{capabilities: originateCeiling, allow: grantedInbound()},
 			peer: edgeSVID, path: path, want: codes.Unauthenticated,
 			token: func(t *testing.T, priv ed25519.PrivateKey) string {
+				t.Helper()
 				return mintInboundJWT(t, priv, "agent+jwt", agentcall.InboundPathFor("other"))
 			},
 		},
