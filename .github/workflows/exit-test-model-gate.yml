@@ -198,6 +198,8 @@ jobs:
       # its SVID on the daemon's listener and set GIBSON_TEST_FIXTURES_ENABLED
       # on the daemon (charts#142). One patch means one Argo sync and one
       # daemon rollout.
+      # allow_private_llm_endpoints: the test saves a provider at the mock
+      # address in the cluster, which the base_url check refuses by default.
       - name: Point the daemon at the test-mode image with authz off + fixtures on
         working-directory: hosted
         run: |
@@ -207,6 +209,7 @@ jobs:
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"model-gate","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.config.security.allow_private_llm_endpoints","value":"true"}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
             ]'
 

@@ -130,6 +130,8 @@ runs:
     # app=mock-provider, and the container port 8443 of the TLS front (not the
     # Service port 443, and not the record port 18080). The chart owns the policy
     # of the proxy, so the fixture has none.
+    # allow_private_llm_endpoints: the tests save a provider at the mock
+    # address in the cluster, which the base_url check refuses by default.
     - name: Point the Argo application at the images of the checkout
       shell: bash
       working-directory: hosted
@@ -145,6 +147,7 @@ runs:
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.digest","value":"","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.config.security.allow_private_llm_endpoints","value":"true"}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.extAuthz.image.repository","value":"ghcr.io/zeroroot-ai/ext-authz","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.extAuthz.image.tag","value":"'"${TAG}"'","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.extAuthz.image.digest","value":"","forceString":true}},
