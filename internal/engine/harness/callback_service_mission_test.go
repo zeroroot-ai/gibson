@@ -153,7 +153,7 @@ func TestGetMissionStatus_MissingMissionID_ReturnsInvalidArgument(t *testing.T) 
 func TestGetMissionStatus_Success(t *testing.T) {
 	mgr := &cbMockMissionOperator{
 		statusInfo: &MissionStatusInfo{
-			Status:   MissionStatusRunning,
+			Status:   MissionStatusWorking,
 			Progress: 0.42,
 			Phase:    "reconnaissance",
 		},
@@ -232,7 +232,7 @@ func TestListMissions_Success(t *testing.T) {
 	id1, _ := types.ParseID(validMissionID)
 	mgr := &cbMockMissionOperator{
 		listRecords: []*MissionRecord{
-			{ID: id1, Status: MissionStatusRunning},
+			{ID: id1, Status: MissionStatusWorking},
 		},
 	}
 	svc := newCBCallbackServiceWithMgr(mgr)
@@ -241,14 +241,14 @@ func TestListMissions_Success(t *testing.T) {
 	assert.Nil(t, resp.Error)
 	require.Len(t, resp.Missions, 1)
 	assert.Equal(t, validMissionID, resp.Missions[0].Id)
-	assert.Equal(t, harnesspb.MissionStatus_MISSION_STATUS_RUNNING, resp.Missions[0].Status)
+	assert.Equal(t, harnesspb.MissionStatus_MISSION_STATUS_WORKING, resp.Missions[0].Status)
 }
 
 // A full page carries a next page token. A token that the harness did not
 // write is a refusal (ADR-0028, rule 3).
 func TestListMissions_PageToken(t *testing.T) {
 	id1, _ := types.ParseID(validMissionID)
-	mgr := &cbMockMissionOperator{listRecords: []*MissionRecord{{ID: id1, Status: MissionStatusRunning}}}
+	mgr := &cbMockMissionOperator{listRecords: []*MissionRecord{{ID: id1, Status: MissionStatusWorking}}}
 	svc := newCBCallbackServiceWithMgr(mgr)
 
 	resp, err := svc.ListMissions(context.Background(), &harnesspb.ListMissionsRequest{PageSize: 1})

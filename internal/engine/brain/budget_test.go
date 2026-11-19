@@ -84,7 +84,7 @@ func TestBudget_ZeroMeansUnlimited(t *testing.T) {
 	e.Submit(MissionProjected{ID: "m1", Goal: "g"}) // Budget zero-value
 	e.Submit(TokenUsed{MissionID: "m1", Tokens: 1_000_000})
 	e.Tick()
-	if got := e.Missions()[0].Status; got != MissionRunning {
+	if got := e.Missions()[0].Status; got != MissionWorking {
 		t.Fatalf("zero budget = unlimited; mission should stay running, got %s", got)
 	}
 }

@@ -27,7 +27,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -651,12 +650,6 @@ var summaryProperties = []string{
 	"domain", "service", "product", "os", "state",
 }
 
-// CountBucket is an internal result type for FindingCounts.
-type CountBucket struct {
-	Label string
-	Count uint64
-}
-
 // GraphStats is an internal result type for GraphStats.
 type GraphStats struct {
 	ByLabel     []NodeCountByLabel
@@ -691,176 +684,6 @@ type GraphContext struct {
 	FocusNode *graphpb.Node
 	Neighbors []*graphpb.NeighborEdge
 	Summary   string
-}
-
-// FindingCounts returns finding counts grouped by severity or category.
-//
-// Ported from:
-//   - zeroroot-ai/dashboard src/lib/gibson-client.ts (getFindingsBySeverity,
-//     getFindingsByCategory) and
-//   - zeroroot-ai/dashboard app/api/findings/counts/route.ts (SEVERITY path
-//     includes both :Finding and :Vulnerability nodes).
-//
-// windowSeconds applies an optional recency filter (skip when 0).
-func (q *DashboardQueries) FindingCounts(
-	ctx context.Context,
-	tenantID auth.TenantID,
-	groupBy graphpb.FindingCountGroupBy,
-	windowSeconds uint64,
-) ([]CountBucket, error) {
-	tenant := tenantID.String()
-
-	// Build the grouping expression.
-	var groupExpr string
-	switch groupBy {
-	case graphpb.FindingCountGroupBy_CATEGORY:
-		groupExpr = "coalesce(f.type, 'unknown')"
-	default: // SEVERITY or unspecified
-		groupExpr = "coalesce(f.severity, 'unknown')"
-	}
-
-	// The /api/findings/counts route queries both :Finding and :Vulnerability.
-	// Match that behaviour for the SEVERITY groupBy path; CATEGORY only has Finding.
-	var nodeFilter string
-	if groupBy == graphpb.FindingCountGroupBy_SEVERITY || groupBy == graphpb.FindingCountGroupBy_FINDING_COUNT_GROUP_BY_UNSPECIFIED {
-		nodeFilter = "(f:Finding OR f:Vulnerability)"
-	} else {
-		nodeFilter = "f:Finding"
-	}
-
-	params := map[string]any{"tenant": tenant}
-	cypher := fmt.Sprintf(`
-MATCH (f)
-WHERE %s`, nodeFilter)
-
-	if windowSeconds > 0 {
-		params["win"] = int64(windowSeconds)
-		cypher += "\n  AND f.created_at > datetime() - duration({seconds: $win})"
-	}
-
-	cypher += fmt.Sprintf(`
-RETURN %s AS label, count(f) AS cnt`, groupExpr)
-
-	raw, err := q.client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, params)
-		if err != nil {
-			return nil, err
-		}
-		records, err := res.Collect(ctx)
-		if err != nil {
-			return nil, err
-		}
-		buckets := make([]CountBucket, 0, len(records))
-		for _, rec := range records {
-			label, _ := rec.Get("label")
-			cnt, _ := rec.Get("cnt")
-			buckets = append(buckets, CountBucket{
-				Label: stringify(label),
-				Count: toUint64(cnt),
-			})
-		}
-		return buckets, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if raw == nil {
-		return nil, nil
-	}
-	return raw.([]CountBucket), nil
-}
-
-// FindingTimeSeries returns daily finding counts over the past `days` days,
-// padded so the response always contains exactly `days` points (zero for
-// days with no findings). days=0 → DefaultTimeSeriesDays; clamped to [1, MaxTimeSeriesDays].
-//
-// Ported from zeroroot-ai/dashboard src/lib/gibson-client.ts
-// (getFindingsTimeSeries) — same Cypher, same day-bucketing logic.
-func (q *DashboardQueries) FindingTimeSeries(
-	ctx context.Context,
-	tenantID auth.TenantID,
-	days uint32,
-) ([]*graphpb.TimeSeriesPoint, error) {
-	if days == 0 {
-		days = DefaultTimeSeriesDays
-	}
-	if days > MaxTimeSeriesDays {
-		days = MaxTimeSeriesDays
-	}
-
-	tenant := tenantID.String()
-	cypher := `
-MATCH (f:Finding)
-WHERE f.created_at > datetime() - duration({days: $days})
-RETURN date(f.created_at) AS d, count(f) AS cnt
-ORDER BY d
-`
-	raw, err := q.client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{
-			"tenant": tenant,
-			"days":   int64(days),
-		})
-		if err != nil {
-			return nil, err
-		}
-		records, err := res.Collect(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		// Build a map of date-string → count from Neo4j results.
-		counts := make(map[string]uint64, len(records))
-		for _, rec := range records {
-			dVal, _ := rec.Get("d")
-			cnt, _ := rec.Get("cnt")
-			dateStr := neoDateString(dVal)
-			if dateStr != "" {
-				counts[dateStr] = toUint64(cnt)
-			}
-		}
-		return counts, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Build the full padded series regardless of what Neo4j returned.
-	countMap := map[string]uint64{}
-	if raw != nil {
-		countMap = raw.(map[string]uint64)
-	}
-
-	now := time.Now().UTC()
-	points := make([]*graphpb.TimeSeriesPoint, 0, days)
-	for i := int(days) - 1; i >= 0; i-- {
-		day := now.AddDate(0, 0, -i)
-		key := day.Format("2006-01-02")
-		cnt := countMap[key]
-		ts := timestamppb.New(time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC))
-		points = append(points, &graphpb.TimeSeriesPoint{
-			Date:  ts,
-			Count: cnt,
-		})
-	}
-	return points, nil
-}
-
-// neoDateString converts a Neo4j date value (dbtype.Date or time.Time or string)
-// to a "YYYY-MM-DD" key string.
-func neoDateString(v any) string {
-	switch val := v.(type) {
-	case dbtype.Date:
-		return val.Time().Format("2006-01-02")
-	case time.Time:
-		return val.Format("2006-01-02")
-	case string:
-		return val
-	default:
-		if v != nil {
-			return fmt.Sprintf("%v", v)
-		}
-		return ""
-	}
 }
 
 // GraphStats returns aggregate graph statistics for a tenant:
@@ -1525,41 +1348,11 @@ func toTimeValue(v any) time.Time {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// FindingsFilters + FindingRecord — Task 4 (dashboard-neo4j-crud-removal)
-// ---------------------------------------------------------------------------
-
-// FindingsFilters controls which findings the Findings method returns.
-// Empty string fields mean "no filter".
-type FindingsFilters struct {
-	Severity  string // exact match on n.severity
-	Category  string // exact match on n.type
-	MissionID string // restrict to findings reachable from the given mission
-	Search    string // case-insensitive substring on title (key for a :Vulnerability) + description
-	Limit     uint32 // default 100 when 0; clamped to 500
-	Offset    uint32 // default 0
-}
-
-// FindingRecord holds the result of a single findings row.
-type FindingRecord struct {
-	ID          string
-	Name        string
-	Description string
-	Type        string // category field (n.type)
-	Severity    string
-	MissionID   string
-	Properties  map[string]string
-	Labels      []string
-	CreatedAt   time.Time
-}
-
 // The :Finding property contract (gibson#210). The graph projector is the sole
 // writer of :Finding nodes (ADR-0107). It merges a Finding on brain_id, the
-// World entity id, the same way every first-class projection is keyed, and it
-// writes the World's Title as title. The reader maps exactly those two
-// properties. A :Vulnerability is the one other label this query returns. The
-// projector merges it on key, the shared weakness id, and writes no title, so
-// the key is both its id and its name.
+// World entity id, and writes the World's Title as title. A :Vulnerability is
+// merged on key, the shared weakness id, and has no title. The graph summary
+// reads these properties.
 const (
 	// FindingIDProperty is the property the projector merges a :Finding on.
 	FindingIDProperty = "brain_id"
@@ -1570,177 +1363,9 @@ const (
 	VulnerabilityKeyProperty = "key"
 )
 
-// FindingRecordFromNode maps one node the Findings query returned onto a
-// FindingRecord. The id and the name come from the property the projector
-// writes for the node's label. A node with neither label, or one without its
-// identity property, maps to an empty id. There is no fallback to the Neo4j
-// internal id: that id is not the id the daemon handed the submitter, and a
-// read by it finds nothing.
-func FindingRecordFromNode(n dbtype.Node) FindingRecord {
-	props := coerceProps(n.Props)
-	fr := FindingRecord{
-		Description: props["description"],
-		Type:        props["type"],
-		Severity:    props["severity"],
-		Properties:  props,
-		Labels:      n.Labels,
-	}
-	if slices.Contains(n.Labels, "Finding") {
-		fr.ID = props[FindingIDProperty]
-		fr.Name = props[FindingTitleProperty]
-	} else if slices.Contains(n.Labels, "Vulnerability") {
-		fr.ID = props[VulnerabilityKeyProperty]
-		fr.Name = props[VulnerabilityKeyProperty]
-	}
-	// Created-at: prefer created_at; fall back to discoveredAt.
-	for _, key := range []string{"created_at", "discoveredAt"} {
-		if v, ok := n.Props[key]; ok {
-			if t := toTimeValue(v); !t.IsZero() {
-				fr.CreatedAt = t
-				break
-			}
-		}
-	}
-	return fr
-}
-
 const (
-	// DefaultFindingsLimit is applied when FindingsFilters.Limit is 0.
+	// DefaultFindingsLimit is the default page size of a findings list.
 	DefaultFindingsLimit uint32 = 100
-	// MaxFindingsLimit is the hard server-side cap enforced by Findings and GetFindings.
+	// MaxFindingsLimit is the hard server-side cap on a findings page.
 	MaxFindingsLimit uint32 = 500
 )
-
-// Findings returns paginated findings (and Vulnerability nodes) for the given
-// tenant, applying optional filters.  It executes two Cypher queries: one for
-// the page and one for the total count (same WHERE clause, no SKIP/LIMIT).
-//
-// Cypher ported byte-for-byte from
-// zeroroot-ai/dashboard app/api/findings/route.ts.
-func (q *DashboardQueries) Findings(
-	ctx context.Context,
-	tenantID auth.TenantID,
-	f FindingsFilters,
-) (records []FindingRecord, total uint64, err error) {
-	// Apply defaults / caps.
-	limit := f.Limit
-	if limit == 0 {
-		limit = DefaultFindingsLimit
-	}
-	if limit > MaxFindingsLimit {
-		limit = MaxFindingsLimit
-	}
-
-	tenant := tenantID.String()
-
-	// Build the common WHERE clause. Tenant isolation is the per-tenant Neo4j
-	// database (pool.For); nodes carry no tenant_id property, so the base filter
-	// is just the node-kind label predicate.
-	params := map[string]any{
-		"tenant": tenant,
-		"offset": int64(f.Offset),
-		"limit":  int64(limit),
-	}
-
-	where := "WHERE (n:Finding OR n:Vulnerability)"
-	if f.Severity != "" {
-		where += "\n  AND n.severity = $severity"
-		params["severity"] = f.Severity
-	}
-	if f.Category != "" {
-		where += "\n  AND n.type = $category"
-		params["category"] = f.Category
-	}
-	if f.MissionID != "" {
-		// Ported from route.ts: OPTIONAL MATCH (m:Mission)-[*1..3]->(n) WHERE m.id = $missionId
-		// Rewritten as an EXISTS sub-query to stay in the same MATCH scope.
-		where += "\n  AND EXISTS { MATCH (m:Mission { id: $mission_id })-[*1..3]->(n) }"
-		params["mission_id"] = f.MissionID
-	}
-	if f.Search != "" {
-		// A :Finding is searched by the title the projector writes, a
-		// :Vulnerability by its key. Both are searched by description.
-		where += fmt.Sprintf("\n  AND (toLower(coalesce(n.%s, \"\")) CONTAINS toLower($search)"+
-			" OR toLower(coalesce(n.%s, \"\")) CONTAINS toLower($search)"+
-			" OR toLower(coalesce(n.description, \"\")) CONTAINS toLower($search))",
-			FindingTitleProperty, VulnerabilityKeyProperty)
-		params["search"] = f.Search
-	}
-
-	// --- page query ---
-	pageCypher := fmt.Sprintf(`
-MATCH (n)
-%s
-RETURN n
-ORDER BY CASE n.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, n.created_at DESC
-SKIP $offset LIMIT $limit
-`, where)
-
-	rawPage, pageErr := q.client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, pageCypher, params)
-		if err != nil {
-			return nil, err
-		}
-		recs, err := res.Collect(ctx)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]FindingRecord, 0, len(recs))
-		for _, rec := range recs {
-			rawNode, ok := rec.Get("n")
-			if !ok {
-				continue
-			}
-			neoNode, ok := rawNode.(dbtype.Node)
-			if !ok {
-				continue
-			}
-			out = append(out, FindingRecordFromNode(neoNode))
-		}
-		return out, nil
-	})
-	if pageErr != nil {
-		return nil, 0, fmt.Errorf("findings page query: %w", pageErr)
-	}
-	if rawPage != nil {
-		records = rawPage.([]FindingRecord)
-	}
-
-	// --- count query (same WHERE, no SKIP/LIMIT) ---
-	countParams := make(map[string]any, len(params))
-	for k, v := range params {
-		countParams[k] = v
-	}
-	delete(countParams, "offset")
-	delete(countParams, "limit")
-
-	countCypher := fmt.Sprintf(`
-MATCH (n)
-%s
-RETURN count(n) AS total
-`, where)
-
-	rawCount, countErr := q.client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, countCypher, countParams)
-		if err != nil {
-			return nil, err
-		}
-		recs, err := res.Collect(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if len(recs) == 0 {
-			return uint64(0), nil
-		}
-		v, _ := recs[0].Get("total")
-		return toUint64(v), nil
-	})
-	if countErr != nil {
-		return nil, 0, fmt.Errorf("findings count query: %w", countErr)
-	}
-	if rawCount != nil {
-		total = rawCount.(uint64)
-	}
-
-	return records, total, nil
-}

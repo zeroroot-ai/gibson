@@ -260,7 +260,7 @@ func (s *ConnBoundMissionStore) Delete(ctx context.Context, id types.ID) error {
 		return err
 	}
 	if !mission.Status.IsTerminal() {
-		return NewInvalidStateError(mission.Status, MissionStatusCancelled)
+		return NewInvalidStateError(mission.Status, MissionStatusCanceled)
 	}
 
 	pipe := s.rdb.Pipeline()
@@ -285,7 +285,7 @@ func (s *ConnBoundMissionStore) GetByTarget(ctx context.Context, targetID types.
 // Its only remaining consumers are non-hot paths; the folded World is the
 // authoritative "what is running" answer for anything latency-sensitive.
 func (s *ConnBoundMissionStore) GetActive(ctx context.Context) ([]*Mission, error) {
-	running := MissionStatusRunning
+	running := MissionStatusWorking
 	paused := MissionStatusPaused
 	missions, err := s.List(ctx, &MissionFilter{Status: &running})
 	if err != nil {

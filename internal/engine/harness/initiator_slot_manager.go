@@ -9,7 +9,6 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
@@ -23,21 +22,32 @@ import (
 // them reaches the model gate through the harness's slot manager, so this is
 // the one place that all of them pass.
 type initiatorSlotManager struct {
-	next   llm.SlotManager
+	next   SlotManager
 	userID string
 }
 
 // withMissionInitiator wraps next when a person created the mission. A
 // mission that a service or a component created has no initiator: the model
 // gate then decides for the calling identity, or for the tenant's members.
-func withMissionInitiator(next llm.SlotManager, createdBy principal.Principal) llm.SlotManager {
+func withMissionInitiator(next SlotManager, createdBy principal.Principal) SlotManager {
 	if next == nil || createdBy.Kind != principal.User || createdBy.ID == "" {
 		return next
 	}
 	return &initiatorSlotManager{next: next, userID: createdBy.ID}
 }
 
-func (m *initiatorSlotManager) ResolveSlot(ctx context.Context, slot agent.SlotDefinition, override *agent.SlotConfig) (llm.LLMProvider, llm.ModelInfo, error) {
+// missionInitiator returns the FGA user of the person who created the mission,
+// or "" when a service or a component created it. The task grants of the mission
+// carry it as the signed claim "ini". ext-authz uses it as the subject of the
+// model access check.
+func missionInitiator(createdBy principal.Principal) string {
+	if createdBy.Kind != principal.User || createdBy.ID == "" {
+		return ""
+	}
+	return "user:" + createdBy.ID
+}
+
+func (m *initiatorSlotManager) ResolveSlot(ctx context.Context, slot agent.SlotDefinition, override *agent.SlotConfig) (SlotModel, error) {
 	//nolint:wrapcheck // a decorator returns the slot manager's own error, which callers match by code
 	return m.next.ResolveSlot(auth.ContextWithInitiatorUser(ctx, m.userID), slot, override)
 }

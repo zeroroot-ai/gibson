@@ -46,6 +46,8 @@ func (s *ComponentServiceServer) CallToolStream(
 
 	// Execute the tool synchronously and send the result as the final event.
 	outputJSON, err := s.toolExecutor.ExecuteTool(ctx, tenant, req.GetToolName(), req.GetInputJson())
+	// The last event carries the id of the recorded call, also when it failed.
+	callReq := &componentpb.CallToolRequest{WorkId: req.GetWorkId(), ToolName: req.GetToolName(), InputJson: req.GetInputJson()}
 	if err != nil {
 		return stream.Send(&componentpb.CallToolStreamResponse{
 			EventType: "error",
@@ -54,6 +56,7 @@ func (s *ComponentServiceServer) CallToolStream(
 				Code:    "TOOL_EXECUTION_FAILED",
 				Message: err.Error(),
 			},
+			ToolCallId: s.recordNativeToolCall(ctx, tenant, callReq, "", err.Error()),
 		})
 	}
 
@@ -61,6 +64,7 @@ func (s *ComponentServiceServer) CallToolStream(
 		EventType:   "result",
 		PayloadJson: outputJSON,
 		Done:        true,
+		ToolCallId:  s.recordNativeToolCall(ctx, tenant, callReq, outputJSON, ""),
 	})
 }
 

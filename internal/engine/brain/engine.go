@@ -124,6 +124,10 @@ func (e *Engine) Err() error {
 	}
 }
 
+// Stopped returns a channel that closes when the engine stops. A component that
+// lives as long as the engine (a tap) ends its own work on it.
+func (e *Engine) Stopped() <-chan struct{} { return e.stopped }
+
 // stop puts the engine in its terminal state. It is safe to call more than once.
 // The first error wins.
 func (e *Engine) stop(err error) {
@@ -207,6 +211,42 @@ func (e *Engine) Submit(ev Event) {
 	case e.intake <- ev:
 	case <-e.stopped:
 		e.logDropped(ev)
+	}
+}
+
+// ackedEvent is an event in the intake queue whose submitter waits for its fold.
+// The tick unwraps it, applies the event and sends the result on done.
+type ackedEvent struct {
+	Event
+	done chan error
+}
+
+// SubmitAndWait enqueues an event and returns after the tick has appended it to
+// the durable log and folded it into the World. A reader of the World that
+// starts after SubmitAndWait returns sees the event. It is for a write that a
+// reader meets right after, for example the record of a tool call that a
+// finding cites.
+//
+// It returns an error when the engine stops before the fold, or when ctx ends.
+// The caller sets the bound of the wait with ctx. An event that was queued stays
+// queued when the wait ends, and the tick applies it later.
+func (e *Engine) SubmitAndWait(ctx context.Context, ev Event) error {
+	ack := &ackedEvent{Event: ev, done: make(chan error, 1)}
+	select {
+	case <-e.stopped:
+		e.logDropped(ev)
+		return fmt.Errorf("brain/engine: the engine is stopped, so %q is not recorded: %w", ev.Kind(), e.Err())
+	case <-ctx.Done():
+		return fmt.Errorf("brain/engine: queue %q: %w", ev.Kind(), ctx.Err())
+	case e.intake <- ack:
+	}
+	select {
+	case err := <-ack.done:
+		return err
+	case <-e.stopped:
+		return fmt.Errorf("brain/engine: the engine stopped before it applied %q: %w", ev.Kind(), e.Err())
+	case <-ctx.Done():
+		return fmt.Errorf("brain/engine: wait for the fold of %q: %w", ev.Kind(), ctx.Err())
 	}
 }
 
@@ -329,7 +369,15 @@ func (e *Engine) drainIntake() int {
 	for {
 		select {
 		case ev := <-e.intake:
-			if !e.apply(ev) {
+			ack, acked := ev.(*ackedEvent)
+			if acked {
+				ev = ack.Event
+			}
+			applied := e.apply(ev)
+			if acked {
+				ack.done <- e.Err()
+			}
+			if !applied {
 				return n
 			}
 			n++
@@ -611,6 +659,22 @@ func (e *Engine) AgentToolCalls() []AgentToolCallSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.World.AgentToolCallSnapshot()
+}
+
+// AgentSkillLoads returns each load of an Agent Skill by a mission agent, in
+// Timeline order (epic gibson#1364).
+func (e *Engine) AgentSkillLoads() []AgentSkillLoad {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.AgentSkillLoads()
+}
+
+// OutsideAgentCalls returns each delegation to an outside A2A agent that the
+// gateway trace recorded, in the order of the Timeline (epic gibson#1366).
+func (e *Engine) OutsideAgentCalls() []OutsideAgentCall {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.OutsideAgentCalls()
 }
 
 // FlightRecorderPolicy returns the tenant's current retention/redaction policy

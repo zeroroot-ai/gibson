@@ -13,7 +13,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -27,7 +26,7 @@ var (
 	ErrAlreadyExists = errors.New("provider config already exists")
 
 	// ErrUnsupportedType is returned when the requested ProviderType is not in
-	// llm.SupportedProviderTypes().
+	// SupportedProviderTypes().
 	ErrUnsupportedType = errors.New("unsupported provider type")
 
 	// ErrInvalidCredentials is returned when a credential field fails its
@@ -46,7 +45,7 @@ type ProviderConfig struct {
 	ID           types.ID
 	TenantID     string
 	Name         string
-	Type         llm.ProviderType
+	Type         ProviderType
 	DefaultModel string
 	// DefaultModelContextWindow is the context window, in tokens, stored with
 	// DefaultModel at save time. 0 means none is stored: unknown.
@@ -110,7 +109,7 @@ type DecryptedConfig struct {
 // (secrets.Service), which encrypts it.
 type ProviderConfigInput struct {
 	Name         string
-	Type         llm.ProviderType
+	Type         ProviderType
 	DefaultModel string
 	// DefaultModelContextWindow is the context window of DefaultModel, filled
 	// by the save handler before the store sees it. 0 stores none.

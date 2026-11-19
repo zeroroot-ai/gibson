@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/findingtest"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 const (
@@ -27,7 +29,7 @@ const (
 func newMarkerRegistry(t *testing.T) *settlement.Registry {
 	t.Helper()
 	r := settlement.NewRegistry()
-	err := r.Register(testTechnique, testPredicateType, func(params json.RawMessage, evidence []finding.EnhancedEvidence) (bool, error) {
+	err := r.Register(testTechnique, testPredicateType, func(params json.RawMessage, evidence []*typespb.Evidence) (bool, error) {
 		var p struct {
 			Marker string `json:"marker"`
 		}
@@ -35,7 +37,7 @@ func newMarkerRegistry(t *testing.T) *settlement.Registry {
 			return false, fmt.Errorf("decode test predicate params: %w", err)
 		}
 		for _, e := range evidence {
-			if s, ok := e.Content.(string); ok && s == p.Marker {
+			if e.GetContent() == p.Marker {
 				return true, nil
 			}
 		}
@@ -47,9 +49,9 @@ func newMarkerRegistry(t *testing.T) *settlement.Registry {
 	return r
 }
 
-func markerEvidence(marker string) []finding.EnhancedEvidence {
-	return []finding.EnhancedEvidence{
-		finding.NewEnhancedEvidence(finding.EvidenceLog, "capture", marker),
+func markerEvidence(marker string) []*typespb.Evidence {
+	return []*typespb.Evidence{
+		findingtest.NewEvidence(sdkfinding.EvidenceLog, "capture", marker),
 	}
 }
 

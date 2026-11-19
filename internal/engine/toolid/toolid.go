@@ -9,6 +9,7 @@
 //
 //	mcp:<connector>:<tool>     // a tool exposed by an MCP connector
 //	native:<tool>              // a native primitive (nmap, httpx, …)
+//	skill:<name>               // an Agent Skill (a method in the Agent Skills format)
 //
 // The canonical form carries structure a native LLM function name cannot
 // (function names are constrained to ^[a-zA-Z0-9_-]{1,64}$). When — and only
@@ -17,6 +18,7 @@
 //
 //	mcp__<connector>__<tool>
 //	native__<tool>
+//	skill__<name>
 //
 // An MCP id names a connector and one of its tools. The daemon, the one MCP
 // client, calls that connector. See ADR-0065.
@@ -36,7 +38,12 @@ const (
 	SourceMCP Source = "mcp"
 	// SourceNative is a native primitive tool (nmap, httpx, …).
 	SourceNative Source = "native"
+	// SourceSkill is an Agent Skill. The id holds the name of the Agent Skill.
+	SourceSkill Source = "skill"
 )
+
+// MaxSkillNameLen is the longest name that the Agent Skills format allows.
+const MaxSkillNameLen = 64
 
 const (
 	canonicalSep = ":"
@@ -46,9 +53,15 @@ const (
 // functionNameRE is the LLM-provider rule for a native function name.
 var functionNameRE = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
+// skillNameRE is the name rule of the Agent Skills format. The name has
+// lowercase letters, digits and single hyphens. It has no hyphen at the start
+// or at the end.
+var skillNameRE = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
 // ID is a parsed, validated tool identifier.
 //
-// Connector is empty for SourceNative.
+// Connector is empty for SourceNative and for SourceSkill. For SourceSkill,
+// Tool holds the name of the Agent Skill.
 type ID struct {
 	Source    Source
 	Connector string
@@ -79,6 +92,22 @@ func ForNative(tool string) (ID, error) {
 	return ID{Source: SourceNative, Tool: tool}, nil
 }
 
+// ValidSkillName reports whether name follows the name rule of the Agent Skills
+// format. The name has 1 to 64 characters. It has lowercase letters, digits and
+// hyphens. It has no hyphen at the start or at the end and no two hyphens
+// together.
+func ValidSkillName(name string) bool {
+	return len(name) <= MaxSkillNameLen && skillNameRE.MatchString(name)
+}
+
+// ForSkill constructs an Agent Skill id from the name of the Agent Skill.
+func ForSkill(name string) (ID, error) {
+	if !ValidSkillName(name) {
+		return ID{}, fmt.Errorf("toolid: %q is not a valid Agent Skill name", name)
+	}
+	return ID{Source: SourceSkill, Tool: name}, nil
+}
+
 // Parse decodes a canonical tool id.
 func Parse(s string) (ID, error) {
 	parts := strings.Split(s, canonicalSep)
@@ -96,6 +125,11 @@ func Parse(s string) (ID, error) {
 			return ID{}, fmt.Errorf("toolid: native id must be native:<tool>, got %q", s)
 		}
 		return ID{Source: SourceNative, Tool: parts[1]}, nil
+	case SourceSkill:
+		if len(parts) != 2 {
+			return ID{}, fmt.Errorf("toolid: Agent Skill id must be skill:<name>, got %q", s)
+		}
+		return ForSkill(parts[1])
 	default:
 		return ID{}, fmt.Errorf("toolid: unknown source %q in %q", parts[0], s)
 	}
@@ -103,8 +137,8 @@ func Parse(s string) (ID, error) {
 
 // Canonical returns the canonical colon-form id.
 func (id ID) Canonical() string {
-	if id.Source == SourceNative {
-		return string(SourceNative) + canonicalSep + id.Tool
+	if id.Source == SourceNative || id.Source == SourceSkill {
+		return string(id.Source) + canonicalSep + id.Tool
 	}
 	return string(id.Source) + canonicalSep + id.Connector + canonicalSep + id.Tool
 }
@@ -147,6 +181,11 @@ func Unflatten(flat string) (ID, error) {
 			return ID{}, fmt.Errorf("toolid: flattened native name must be native__<tool>, got %q", flat)
 		}
 		return ID{Source: SourceNative, Tool: parts[1]}, nil
+	case SourceSkill:
+		if len(parts) != 2 {
+			return ID{}, fmt.Errorf("toolid: flattened Agent Skill name must be skill__<name>, got %q", flat)
+		}
+		return ForSkill(parts[1])
 	default:
 		return ID{}, fmt.Errorf("toolid: unknown source in flattened name %q", flat)
 	}

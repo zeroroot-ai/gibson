@@ -5,21 +5,21 @@ package harness
 
 import (
 	"context"
-
+	"encoding/json"
 	"errors"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/agentwire"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
-	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
-	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
-	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"go.opentelemetry.io/otel/trace/noop"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // queueFake records what was enqueued and answers with a canned result, so a
@@ -76,11 +76,20 @@ func remoteAgentInstances() []component.ComponentInfo {
 	return []component.ComponentInfo{{Kind: "agent", Name: "zerocool", InstanceID: "i1"}}
 }
 
-func executeResponseJSON(t *testing.T, r *agentpb.ExecuteResponse) []byte {
+// taskResultJSON builds the JSON of the A2A Task that a remote agent returns as
+// the result of a work item. A nil env gives a Task with no Gibson extension.
+func taskResultJSON(t *testing.T, state a2a.TaskState, env *sdkagent.ResultEnvelope, text string) []byte {
 	t.Helper()
-	b, err := protojson.Marshal(r)
+	task := &a2a.Task{ID: a2a.NewTaskID(), ContextID: "ctx-1", Status: a2a.TaskStatus{State: state}}
+	if text != "" {
+		task.Status.Message = a2a.NewMessageForTask(a2a.MessageRoleAgent, task, a2a.NewTextPart(text))
+	}
+	if env != nil {
+		task.SetMeta(sdkagent.ExtensionKey, *env)
+	}
+	b, err := json.Marshal(task)
 	if err != nil {
-		t.Fatalf("marshal ExecuteResponse: %v", err)
+		t.Fatalf("marshal the a2a task: %v", err)
 	}
 	return b
 }
@@ -89,9 +98,7 @@ func TestDelegateToAgent_DispatchesToRemoteComponentOverTheWorkQueue(t *testing.
 	// The regression this guards: work was enqueued for tools and plugins only,
 	// so a component registered as kind=agent polled an empty stream forever
 	// (gibson#1197).
-	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-	})}
+	q := &queueFake{result: taskResultJSON(t, a2a.TaskStateCompleted, nil, "")}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 	h.missionCtx.MissionRunID = "run-7"
 	h.missionCtx.AgentRunID = "agent-run-3"
@@ -104,8 +111,8 @@ func TestDelegateToAgent_DispatchesToRemoteComponentOverTheWorkQueue(t *testing.
 		t.Fatalf("DelegateToAgent: %v", err)
 	}
 
-	if q.gotKind != "agent" || q.gotType != component.WorkTypeAgentExecute {
-		t.Errorf("enqueued kind/work_type = %q/%q, want agent/agent_execute", q.gotKind, q.gotType)
+	if q.gotKind != "agent" || q.gotType != agentwire.WorkType {
+		t.Errorf("enqueued kind/work_type = %q/%q, want agent/execute", q.gotKind, q.gotType)
 	}
 	if q.gotTenant != "zerocool-lab" || q.gotName != "zerocool" {
 		t.Errorf("enqueued tenant/name = %q/%q", q.gotTenant, q.gotName)
@@ -117,27 +124,38 @@ func TestDelegateToAgent_DispatchesToRemoteComponentOverTheWorkQueue(t *testing.
 		t.Errorf("result status = %v, want the remote agent's success", res.Status)
 	}
 
-	// The payload must be the same ExecuteRequest an in-cluster gRPC agent gets,
-	// so one implementation serves both transports.
-	req := &agentpb.ExecuteRequest{}
-	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(q.gotItem.Payload, req); err != nil {
-		t.Fatalf("payload is not an ExecuteRequest: %v", err)
+	// The payload is one A2A message with the Gibson run context in the
+	// extension metadata, so one implementation serves each transport.
+	var msg a2a.Message
+	if err := json.Unmarshal(q.gotItem.Payload, &msg); err != nil {
+		t.Fatalf("payload is not an a2a message: %v", err)
 	}
-	if got := req.GetTask().GetGoal(); got != "Fetch https://google.com" {
+	if got := msg.Parts[0].Text(); got != "Fetch https://google.com" {
 		t.Errorf("dispatched goal = %q, want the task's", got)
 	}
-	// The run travels in the request, so the agent sends it on its callbacks.
-	if req.GetMissionRunId() != "run-7" || req.GetAgentRunId() != "agent-run-3" {
-		t.Errorf("request run ids = %q/%q, want run-7/agent-run-3", req.GetMissionRunId(), req.GetAgentRunId())
+	if string(msg.TaskID) != task.ID.String() {
+		t.Errorf("message task id = %q, want %q", msg.TaskID, task.ID)
+	}
+	// The run travels in the message, so the agent sends it on its callbacks.
+	raw, err := json.Marshal(msg.Metadata[sdkagent.ExtensionKey])
+	if err != nil {
+		t.Fatalf("encode the extension: %v", err)
+	}
+	var env sdkagent.Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("decode the extension: %v", err)
+	}
+	if env.MissionRunID != "run-7" || env.AgentRunID != "agent-run-3" {
+		t.Errorf("run ids = %q/%q, want run-7/agent-run-3", env.MissionRunID, env.AgentRunID)
 	}
 }
 
 func TestDelegateToAgent_RemoteErrorFailsTheDelegation(t *testing.T) {
 	// A remote agent reporting failure must fail the node with its own reason;
 	// swallowing it would leave the mission looking successful.
-	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Error: &commonpb.Error{Code: "TOOL_MISSING", Message: "no http tool available"},
-	})}
+	q := &queueFake{result: taskResultJSON(t, a2a.TaskStateFailed, &sdkagent.ResultEnvelope{
+		Error: &sdkagent.ResultError{Code: "TOOL_MISSING", Message: "no http tool available"},
+	}, "no http tool available")}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 
 	ctx := callerCtx(t, "user-remote", "zerocool-lab")
@@ -283,9 +301,7 @@ func TestTrackInFlightAgent_NoCounterIsANoOp(t *testing.T) {
 func TestDelegateToAgent_CountsAgainstTheQuota(t *testing.T) {
 	// End to end: the work-queue path takes and releases a slot.
 	spy := &quotaSpy{}
-	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-	})}
+	q := &queueFake{result: taskResultJSON(t, a2a.TaskStateCompleted, nil, "")}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 	h.quotaCounter = spy
 
@@ -299,7 +315,7 @@ func TestDelegateToAgent_CountsAgainstTheQuota(t *testing.T) {
 }
 
 func TestDelegateToAgent_MalformedResultIsReported(t *testing.T) {
-	// A component answering with something that is not an ExecuteResponse fails
+	// A component answering with something that is not an A2A Task fails
 	// the delegation rather than yielding an empty Result that reads as success.
 	q := &queueFake{result: []byte(`{"result": "not a message"`)}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
@@ -345,9 +361,7 @@ func (r *registrarFake) UnregisterHarness(key string) { r.unregistered = append(
 // it is unregistered when the work item completes.
 func TestDelegateToAgent_QueueDispatchRegistersTheCallbackHarness(t *testing.T) {
 	reg := &registrarFake{}
-	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-	})}
+	q := &queueFake{result: taskResultJSON(t, a2a.TaskStateCompleted, nil, "")}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 	h.callbackManager = reg
 	h.missionCtx.ID = types.NewID()
@@ -375,9 +389,7 @@ func TestDelegateToAgent_QueueDispatchRegistersTheCallbackHarness(t *testing.T) 
 // TestDelegateToAgent_QueueDispatchWithoutRegistrarStillDispatches: no
 // callback manager wired (tests, minimal daemons) is not an error.
 func TestDelegateToAgent_QueueDispatchWithoutRegistrarStillDispatches(t *testing.T) {
-	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-	})}
+	q := &queueFake{result: taskResultJSON(t, a2a.TaskStateCompleted, nil, "")}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 	if _, err := h.DelegateToAgent(callerCtx(t, "user-remote", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal")); err != nil {
 		t.Fatalf("DelegateToAgent: %v", err)
@@ -389,9 +401,7 @@ func TestDelegateToAgent_QueueDispatchWithoutRegistrarStillDispatches(t *testing
 // fails loudly and nothing is enqueued or registered.
 func TestDelegateToAgent_QueueDispatchChildHarnessFailureIsReported(t *testing.T) {
 	reg := &registrarFake{}
-	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-	})}
+	q := &queueFake{result: taskResultJSON(t, a2a.TaskStateCompleted, nil, "")}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 	h.callbackManager = reg
 	h.missionCtx.ID = types.NewID()
@@ -415,9 +425,7 @@ func TestDelegateToAgent_QueueDispatchRefusedRegistrationStopsTheWork(t *testing
 		ListenAddress:  "127.0.0.1:0",
 		ServiceOptions: []CallbackServiceOption{testEventBus()},
 	}, slog.New(slog.DiscardHandler))
-	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-	})}
+	q := &queueFake{result: taskResultJSON(t, a2a.TaskStateCompleted, nil, "")}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 	h.callbackManager = m
 	h.missionCtx.ID = types.NewID() // and no MissionRunID

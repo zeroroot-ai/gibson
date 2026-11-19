@@ -18,6 +18,8 @@ on:
       - 'internal/server/daemon/api/**/*.proto'
       - 'scripts/check-proto-field-consumers.sh'
       - 'scripts/proto-field-consumers-exempt.txt'
+      - 'scripts/proto-field-consumer-roots.sh'
+      - '.proto-consumer-ref'
       - 'tools/protofieldreads/**'
       - '.github/workflows/proto-field-consumers.yml'
   workflow_dispatch: {}
@@ -39,18 +41,6 @@ jobs:
         with:
           path: gibson
 
-      - name: Checkout the six other consumers
-        # Each at its main. The gate fails when a root is missing, so a
-        # checkout that silently skipped would be caught, not ignored.
-        run: |
-          set -euo pipefail
-          for r in sdk adk gibson-executor setec dashboard sdk-ts; do
-            git clone --quiet --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/zeroroot-ai/${r}.git" "consumers/${r}"
-            echo "${r} $(git -C "consumers/${r}" rev-parse --short HEAD)"
-          done
-        env:
-          GH_TOKEN: ${{ github.token }}
-
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v5
         with:
@@ -61,5 +51,11 @@ jobs:
         working-directory: gibson
         run: |
           bash scripts/__tests__/check-proto-field-consumers.test.sh
-          CONSUMER_ROOTS=". ../consumers/sdk ../consumers/adk ../consumers/gibson-executor ../consumers/setec ../consumers/dashboard ../consumers/sdk-ts" \
-            bash scripts/check-proto-field-consumers.sh
+          bash scripts/__tests__/proto-field-consumer-roots.test.sh
+          # Each consumer at its main, or at the one branch that
+          # .proto-consumer-ref names. The script fails when a clone fails.
+          roots="$(PROTO_CONSUMERS_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/zeroroot-ai" \
+            bash scripts/proto-field-consumer-roots.sh "$RUNNER_TEMP/consumers")"
+          CONSUMER_ROOTS="$roots" bash scripts/check-proto-field-consumers.sh
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -5,6 +5,8 @@ package brain
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -113,5 +115,44 @@ func TestEngine_RecordedToolCalls(t *testing.T) {
 	}
 	if len(missing) != 2 || missing[0] != "nope" || missing[1] != "c" {
 		t.Fatalf("missing = %v", missing)
+	}
+}
+
+// SubmitAndWait returns after the fold. A reader that starts right after it sees
+// the record. A plain Submit gives no such promise, so this loop would miss the
+// record of some of the calls with it.
+func TestEngine_SubmitAndWait_TheRecordIsReadableAtOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e := NewRegistry(ctx, memStoreFactory()).For("t")
+	for i := range 100 {
+		id := fmt.Sprintf("call-%d", i)
+		if err := e.SubmitAndWait(ctx, AgentToolCallObserved{ToolCallID: id, MissionID: "m1"}); err != nil {
+			t.Fatalf("SubmitAndWait(%s): %v", id, err)
+		}
+		if _, missing := e.RecordedToolCalls("m1", []string{id}); len(missing) != 0 {
+			t.Fatalf("the record of %s is missing right after SubmitAndWait", id)
+		}
+	}
+}
+
+// A wait that the context ends gives an error and does not hang. A stopped
+// engine gives an error at once.
+func TestEngine_SubmitAndWait_EndsWithAnError(t *testing.T) {
+	store, err := memStoreFactory()(context.Background(), "t")
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	e := NewEngine("t", store)
+	// No Run loop: the tick never applies the event.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err = e.SubmitAndWait(ctx, AgentToolCallObserved{ToolCallID: "a", MissionID: "m1"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want a deadline error", err)
+	}
+	e.stop(errors.New("test stop"))
+	if err := e.SubmitAndWait(context.Background(), AgentToolCallObserved{ToolCallID: "b"}); err == nil {
+		t.Fatal("a stopped engine must refuse the wait")
 	}
 }

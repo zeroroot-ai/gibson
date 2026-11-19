@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,9 +19,8 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/queue"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
@@ -34,10 +32,8 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
-	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"github.com/zeroroot-ai/sdk/protoresolver"
-	"github.com/zeroroot-ai/sdk/schema"
 	"go.opentelemetry.io/otel/attribute"
 	otelcodes "go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -131,11 +127,13 @@ type HarnessCallbackService struct {
 	// returns an empty slice, symmetric to observationSink's no-op default.
 	worldViewSource WorldViewSource
 
-	// llmCallSink receives completed mission/agent LLM calls observed on the
-	// callback completion path (gibson#1083); the daemon wires it to the
-	// per-tenant World's LlmCall capture (gibson#755/#1078) so a mission-scoped
-	// frame surfaces the mission's LLM activity. nil means capture is disabled.
-	llmCallSink LLMCallSink
+	// modelGateway and agentGateway are the public gateways that ResolveModel
+	// and ResolveAgent return.
+	modelGateway GatewayInfo
+	agentGateway GatewayInfo
+	// outsideAgents returns the outside agent store. ResolveAgent resolves a name
+	// that the tenant registered as an outside agent.
+	outsideAgents OutsideAgentStoreSource
 
 	// toolCallSink receives completed tool calls observed on the callback
 	// CallToolProto path (ADR-0120, gibson#271); the daemon wires it to the
@@ -244,6 +242,13 @@ type HarnessCallbackService struct {
 	// missionBlockedTools reads the deny list of a mission from its stored
 	// definition. Nil refuses a connector call.
 	missionBlockedTools MissionBlockedToolsSource
+
+	// skillLoadSink receives each successful load of an Agent Skill. nil means
+	// the load is not recorded on the Timeline.
+	skillLoadSink SkillLoadSink
+
+	// agentSkills returns the Agent Skill store. It is nil when no store is wired.
+	agentSkills AgentSkillStoreSource
 
 	// componentAuthorizer is the FGA-backed authorizer for component authz decisions.
 	// One-code-path slice deploy#195: required for any callback service that
@@ -461,85 +466,11 @@ func WithOntologyDiscovery(engine brain.OntologyDiscoveryEngine) CallbackService
 	}
 }
 
-// LLMCallRecord captures a completed mission/agent LLM call observed on the
-// callback completion path (gibson#1083). It mirrors the daemon's
-// api.LLMCallRecord but lives here so the harness package stays decoupled from
-// the brain/api packages — the daemon supplies a closure that maps it onto the
-// per-tenant World's LlmCall capture sink (gibson#755/#1078).
-type LLMCallRecord struct {
-	// CallID is a fresh per-call identity giving the call a stable World/graph node.
-	CallID string
-	// MissionID attributes the call to its mission's frame (gibson#1075/#1078);
-	// it is the mission_id carried on the callback request context.
-	MissionID string
-	// RunID is the mission run (or agent run) the call ran under, for provenance.
-	RunID string
-	// MissionRunID is the mission run that issued the call, and only that. RunID
-	// falls back to the agent run, so it cannot tell one run of a mission from
-	// the next (gibson#1217). Empty when the context carries no mission run.
-	MissionRunID string
-	// Model is the resolved model that produced the completion.
-	Model            string
-	PromptTokens     int
-	CompletionTokens int
-	// Messages + Completion are the full transcript (ADR-0120 flight recorder,
-	// gibson#271: capture is ALWAYS ON, never optional). The folded frame
-	// metadata uses model + token counts; the transcript backs the dashboard
-	// conversation view and the flight recorder replay.
-	Messages   []LLMCallMessage
-	Completion string
-	// CompletionToolCalls carries the tool calls the model made as part of
-	// THIS completion — distinct from Completion, which is the assistant's
-	// text content and is often empty on a tool-calling turn. Without this a
-	// tool-calling turn's transcript was silently incomplete (gibson#271).
-	CompletionToolCalls []LLMCallToolCall
-	// RecordedAtUnixNano stamps when the daemon observed this call, so a
-	// tenant's retention policy can be swept deterministically later
-	// (gibson#271).
-	RecordedAtUnixNano int64
-}
-
-// LLMCallMessage is one prompt message in an LLMCallRecord transcript. Role +
-// Content cover a plain turn; ToolCalls carries any tool calls an assistant
-// message in the prompt history made, and ToolCallID/Name identify a
-// tool-result message (role "tool") replaying that call's result back to the
-// model — full-fidelity capture of a tool-calling conversation (gibson#271).
-type LLMCallMessage struct {
-	Role       string
-	Content    string
-	Name       string
-	ToolCalls  []LLMCallToolCall
-	ToolCallID string
-}
-
-// LLMCallToolCall is one tool call an LLM made as part of a completion.
-// Mirrors internal/engine/llm.ToolCall.
-type LLMCallToolCall struct {
-	ID        string
-	Type      string
-	Name      string
-	Arguments string
-}
-
-// LLMCallSink consumes a completed LLM call observed on the callback completion
-// path. The daemon wires this to the per-tenant World; tenant is the call's
-// tenant (already validated equal to the mission tenant by getHarness). When
-// unset, callback LLM-call capture is a no-op.
-type LLMCallSink func(ctx context.Context, tenant string, call LLMCallRecord)
-
-// WithLLMCallSink sets the sink the LLM completion RPCs forward completed calls
-// to for World capture (gibson#1083). When unset, capture is disabled.
-func WithLLMCallSink(sink LLMCallSink) CallbackServiceOption {
-	return func(s *HarnessCallbackService) {
-		s.llmCallSink = sink
-	}
-}
-
 // ToolCallRecord captures a completed tool call observed on the callback
 // CallToolProto path — the tool-I/O half of the flight recorder (ADR-0120,
-// gibson#271), alongside LLMCallRecord's transcript half. It mirrors the
+// gibson#271), It mirrors the
 // daemon's brain.AgentToolCallObserved but lives here so the harness package
-// stays decoupled from the brain package, same as LLMCallRecord.
+// stays decoupled from the brain package,
 type ToolCallRecord struct {
 	// ToolCallID is the call's stable World/graph identity — the
 	// ContextInfo.ToolExecutionId the calling agent's SDK already stamps for
@@ -547,7 +478,7 @@ type ToolCallRecord struct {
 	// a tool call and the graph nodes it produced share one key.
 	ToolCallID string
 	// MissionID attributes the call to its mission's frame, mirroring
-	// LLMCallRecord.MissionID.
+	// the mission frame.
 	MissionID string
 	// RunID is the mission run (or agent run) that made this call.
 	RunID string
@@ -646,6 +577,10 @@ func NewHarnessCallbackService(logger *slog.Logger, opts ...CallbackServiceOptio
 		turnGrants:    noBankSurface{},
 		memberEvents:  noBankSurface{},
 		memberControl: NewMemberControl(),
+		// The Agent Skill seams are never nil. A daemon that serves no Agent Skill
+		// offers none, and a load with no sink fails.
+		agentSkills:   noAgentSkillStore,
+		skillLoadSink: noSkillLoadSink,
 	}
 
 	for _, opt := range opts {
@@ -689,6 +624,8 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 		turnGrants:       noBankSurface{},
 		memberEvents:     noBankSurface{},
 		memberControl:    NewMemberControl(),
+		agentSkills:      noAgentSkillStore,
+		skillLoadSink:    noSkillLoadSink,
 	}
 
 	for _, opt := range opts {
@@ -823,72 +760,6 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 // LLM Operations
 // ============================================================================
 
-// captureLLMCall folds a completed callback LLM completion into the per-tenant
-// World via the wired llmCallSink (gibson#1083), stamped with the mission
-// context already carried on the callback request. This is the mission/agent
-// counterpart to the daemon's ExecuteLLM World capture (gibson#1078): mission
-// agents reach the LLM through this callback path (slot → local provider), never
-// through ExecuteLLM, so without this they never become LlmCallObserved events.
-//
-// Best-effort and metadata-first: a fresh CallID gives each call a stable World
-// identity; mission_id attaches it to the mission frame; model + token counts
-// back the LlmCallView. The tenant is read from the request context, which
-// getHarness has already validated equal to the mission's tenant — so there is
-// no cross-tenant or cross-mission bleed. No double-capture: this path and
-// ExecuteLLM are disjoint (mission vs. dashboard chat), and ingestLLMCall is the
-// sole producer of LlmCallObserved.
-func (s *HarnessCallbackService) captureLLMCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, promptMsgs []llm.Message, resp *llm.CompletionResponse) {
-	if s.llmCallSink == nil || resp == nil || contextInfo == nil {
-		return
-	}
-	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" {
-		return
-	}
-	runID := contextInfo.GetMissionRunId()
-	if runID == "" {
-		runID = contextInfo.GetAgentRunId()
-	}
-	msgs := make([]LLMCallMessage, 0, len(promptMsgs))
-	for _, m := range promptMsgs {
-		msgs = append(msgs, LLMCallMessage{
-			Role:       string(m.Role),
-			Content:    m.Content,
-			Name:       m.Name,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  toLLMCallToolCalls(m.ToolCalls),
-		})
-	}
-	s.llmCallSink(ctx, tenant, LLMCallRecord{
-		CallID:              uuid.NewString(),
-		MissionID:           contextInfo.GetMissionId(),
-		MissionRunID:        contextInfo.GetMissionRunId(),
-		RunID:               runID,
-		Model:               resp.Model,
-		PromptTokens:        resp.Usage.PromptTokens,
-		CompletionTokens:    resp.Usage.CompletionTokens,
-		Messages:            msgs,
-		Completion:          resp.Message.Content,
-		CompletionToolCalls: toLLMCallToolCalls(resp.Message.ToolCalls),
-		RecordedAtUnixNano:  time.Now().UnixNano(),
-	})
-}
-
-// toLLMCallToolCalls converts llm.ToolCall values (internal/engine/llm) to the
-// capture-record shape, preserving full fidelity (id, type, name, arguments) —
-// the gibson#271 fix for a tool-calling turn's transcript silently dropping
-// its tool calls.
-func toLLMCallToolCalls(calls []llm.ToolCall) []LLMCallToolCall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]LLMCallToolCall, 0, len(calls))
-	for _, c := range calls {
-		out = append(out, LLMCallToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
-	}
-	return out
-}
-
 // validator is the discovery-compliance validator, built once.
 //
 // Lazily rather than in the constructor: HarnessCallbackService has several
@@ -901,26 +772,36 @@ func (s *HarnessCallbackService) validator() *ToolValidator {
 	return s.toolValidator
 }
 
+// newToolCallID returns the id of one tool call. It is the ToolExecutionId that
+// the SDK of the calling agent stamps for provenance. When the caller left it
+// empty, the id is a fresh one, so the call is still recorded.
+func newToolCallID(contextInfo *harnesspb.ContextInfo) string {
+	if id := contextInfo.GetToolExecutionId(); id != "" {
+		return id
+	}
+	return uuid.NewString()
+}
+
 // captureToolCall folds a completed CallToolProto invocation into the
 // per-tenant World via the wired toolCallSink (ADR-0120, gibson#271) — the
 // tool-I/O half of the flight recorder, alongside captureLLMCall's transcript
 // half. Best-effort: a missing sink, context, or tenant is a silent no-op, the
 // same contract as captureLLMCall, so capture can never break a tool call.
 //
-// ToolCallID is the ContextInfo.ToolExecutionId the calling agent's SDK already
-// stamps for provenance; when the caller left it empty a fresh id is minted so
-// the call is still captured (just not correlated to a PRODUCED-edge chain).
-func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, toolName, argumentsJSON, resultJSON, callErr string) {
+// toolCallID is the id of the call. The caller mints it one time, with
+// newToolCallID, at the start of the call. The record, the reply and the
+// discovery processor all use that one id.
+//
+// It returns the id that the record holds, or an empty string when nothing was
+// recorded. The tool call reply carries this id as tool_call_id, so a finding
+// can cite the call.
+func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, toolCallID, toolName, argumentsJSON, resultJSON, callErr string) string {
 	if s.toolCallSink == nil || contextInfo == nil {
-		return
+		return ""
 	}
 	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
-		return
-	}
-	toolCallID := contextInfo.GetToolExecutionId()
-	if toolCallID == "" {
-		toolCallID = uuid.NewString()
+		return ""
 	}
 	runID := contextInfo.GetMissionRunId()
 	if runID == "" {
@@ -937,349 +818,7 @@ func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInf
 		Err:                callErr,
 		RecordedAtUnixNano: time.Now().UnixNano(),
 	})
-}
-
-// llmErrorCode maps the error of an LLM call to the code that the agent sees.
-// A refusal of the model gate is a policy answer and a retry cannot change it,
-// so it is PERMISSION_DENIED. A gate that could not decide is UNAVAILABLE,
-// because a retry can succeed. Every other error stays INTERNAL (gibson#1221).
-func llmErrorCode(err error) commonpb.ErrorCode {
-	switch {
-	case errors.Is(err, modelgate.ErrUnavailable):
-		return commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE
-	case errors.Is(err, modelgate.ErrDenied):
-		return commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED
-	default:
-		return commonpb.ErrorCode_ERROR_CODE_INTERNAL
-	}
-}
-
-// llmStatusCode is llmErrorCode for an RPC that answers with a gRPC status.
-func llmStatusCode(err error) codes.Code {
-	switch {
-	case errors.Is(err, modelgate.ErrUnavailable):
-		return codes.Unavailable
-	case errors.Is(err, modelgate.ErrDenied):
-		return codes.PermissionDenied
-	default:
-		return codes.Internal
-	}
-}
-
-// LLMComplete implements the LLM completion RPC.
-func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *harnesspb.LLMCompleteRequest) (*harnesspb.LLMCompleteResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Publish llm.request.started event
-	// Include parent_span_id from context so taxonomy engine can create MADE_CALL relationship
-	s.publishEvent(ctx, "llm.request.started", map[string]interface{}{
-		"slot":           req.Slot,
-		"mission_id":     req.Context.MissionId,
-		"agent_name":     req.Context.AgentName,
-		"task_id":        callerTask(ctx, req.Context),
-		"message_count":  len(req.Messages),
-		"parent_span_id": req.Context.SpanId, // Agent's span ID becomes LLM call's parent
-	})
-
-	// Convert proto messages to llm.Message
-	messages := s.protoToMessages(req.Messages)
-
-	// Build completion options
-	var opts []CompletionOption
-	if req.Temperature != nil {
-		opts = append(opts, WithTemperature(*req.Temperature))
-	}
-	if req.MaxTokens != nil {
-		opts = append(opts, WithMaxTokens(int(*req.MaxTokens)))
-	}
-	if req.TopP != nil {
-		opts = append(opts, WithTopP(*req.TopP))
-	}
-	if len(req.Stop) > 0 {
-		opts = append(opts, WithStopSequences(req.Stop...))
-	}
-
-	// Execute completion
-	resp, err := harness.Complete(ctx, req.Slot, messages, opts...)
-	if err != nil {
-		s.logger.Error("LLM completion failed", "error", err, "task_id", req.Context.TaskId)
-
-		// Publish llm.request.failed event
-		s.publishEvent(ctx, "llm.request.failed", map[string]interface{}{
-			"slot":           req.Slot,
-			"mission_id":     req.Context.MissionId,
-			"agent_name":     req.Context.AgentName,
-			"task_id":        callerTask(ctx, req.Context),
-			"error":          err.Error(),
-			"parent_span_id": req.Context.SpanId,
-		})
-
-		return &harnesspb.LLMCompleteResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    llmErrorCode(err),
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Publish llm.request.completed event
-	s.publishEvent(ctx, "llm.request.completed", map[string]interface{}{
-		"slot":              req.Slot,
-		"mission_id":        req.Context.MissionId,
-		"agent_name":        req.Context.AgentName,
-		"task_id":           callerTask(ctx, req.Context),
-		"finish_reason":     string(resp.FinishReason),
-		"prompt_tokens":     resp.Usage.PromptTokens,
-		"completion_tokens": resp.Usage.CompletionTokens,
-		"total_tokens":      resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
-		"parent_span_id":    req.Context.SpanId,
-	})
-
-	// World capture (gibson#1083): fold the call into the mission's frame.
-	s.captureLLMCall(ctx, req.Context, messages, resp)
-
-	// Convert response
-	return &harnesspb.LLMCompleteResponse{
-		Content:      resp.Message.Content,
-		ToolCalls:    s.toolCallsToProto(resp.Message.ToolCalls),
-		FinishReason: string(resp.FinishReason),
-		Usage: &harnesspb.TokenUsage{
-			InputTokens:  int32(resp.Usage.PromptTokens),
-			OutputTokens: int32(resp.Usage.CompletionTokens),
-			TotalTokens:  int32(resp.Usage.PromptTokens + resp.Usage.CompletionTokens),
-		},
-	}, nil
-}
-
-// LLMCompleteWithTools implements the LLM completion with tools RPC.
-func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *harnesspb.LLMCompleteWithToolsRequest) (*harnesspb.LLMCompleteWithToolsResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert proto messages and tools
-	messages := s.protoToMessages(req.Messages)
-	tools := s.protoToToolDefs(req.Tools)
-
-	// Execute completion with tools
-	resp, err := harness.CompleteWithTools(ctx, req.Slot, messages, tools)
-	if err != nil {
-		s.logger.Error("LLM completion with tools failed", "error", err, "task_id", req.Context.TaskId)
-		return &harnesspb.LLMCompleteWithToolsResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    llmErrorCode(err),
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// World capture (gibson#1083): fold the call into the mission's frame.
-	s.captureLLMCall(ctx, req.Context, messages, resp)
-
-	// Convert response
-	return &harnesspb.LLMCompleteWithToolsResponse{
-		Content:      resp.Message.Content,
-		ToolCalls:    s.toolCallsToProto(resp.Message.ToolCalls),
-		FinishReason: string(resp.FinishReason),
-		Usage: &harnesspb.TokenUsage{
-			InputTokens:  int32(resp.Usage.PromptTokens),
-			OutputTokens: int32(resp.Usage.CompletionTokens),
-			TotalTokens:  int32(resp.Usage.PromptTokens + resp.Usage.CompletionTokens),
-		},
-	}, nil
-}
-
-// LLMStream implements the streaming LLM completion RPC.
-func (s *HarnessCallbackService) LLMStream(req *harnesspb.LLMStreamRequest, stream harnesspb.HarnessCallbackService_LLMStreamServer) error {
-	harness, err := s.getHarness(stream.Context(), req.Context)
-	if err != nil {
-		return err
-	}
-
-	// Convert proto messages
-	messages := s.protoToMessages(req.Messages)
-
-	// Build completion options
-	var opts []CompletionOption
-	if req.Temperature != nil {
-		opts = append(opts, WithTemperature(*req.Temperature))
-	}
-	if req.MaxTokens != nil {
-		opts = append(opts, WithMaxTokens(int(*req.MaxTokens)))
-	}
-	if req.TopP != nil {
-		opts = append(opts, WithTopP(*req.TopP))
-	}
-	if len(req.Stop) > 0 {
-		opts = append(opts, WithStopSequences(req.Stop...))
-	}
-
-	// Execute streaming completion
-	chunkChan, err := harness.Stream(stream.Context(), req.Slot, messages, opts...)
-	if err != nil {
-		s.logger.Error("LLM stream failed", "error", err, "task_id", req.Context.TaskId)
-		return status.Errorf(llmStatusCode(err), "stream failed: %v", err)
-	}
-
-	// Forward chunks to client while aggregating the completion for World
-	// capture (gibson#1085): streaming has no single terminal usage event on the
-	// wire, so we accumulate the text deltas and read the aggregated token usage
-	// + model off the terminal chunk emitted by the provider stream.
-	var transcript strings.Builder
-	var streamUsage *llm.CompletionTokenUsage
-	var streamModel string
-	var streamFinish llm.FinishReason
-	for chunk := range chunkChan {
-		// Check for error in chunk. Capture is success-only: a failed/aborted
-		// stream is not folded into the mission frame.
-		if chunk.Error != nil {
-			protoChunk := &harnesspb.LLMStreamResponse{
-				Error: &harnesspb.HarnessError{
-					Code:    llmErrorCode(chunk.Error),
-					Message: chunk.Error.Error(),
-				},
-			}
-			_ = stream.Send(protoChunk)
-			return nil
-		}
-
-		transcript.WriteString(chunk.Delta.Content)
-		if chunk.Usage != nil {
-			streamUsage = chunk.Usage
-		}
-		if chunk.Model != "" {
-			streamModel = chunk.Model
-		}
-		if chunk.FinishReason != "" {
-			streamFinish = chunk.FinishReason
-		}
-
-		protoChunk := &harnesspb.LLMStreamResponse{
-			Delta:        chunk.Delta.Content,
-			FinishReason: string(chunk.FinishReason),
-		}
-		if chunk.Usage != nil {
-			protoChunk.Usage = &harnesspb.TokenUsage{
-				InputTokens:  int32(chunk.Usage.PromptTokens),
-				OutputTokens: int32(chunk.Usage.CompletionTokens),
-				TotalTokens:  int32(chunk.Usage.TotalTokens),
-			}
-		}
-
-		if err := stream.Send(protoChunk); err != nil {
-			s.logger.Error("failed to send stream chunk", "error", err)
-			return status.Errorf(codes.Internal, "stream send failed: %v", err)
-		}
-	}
-
-	// World capture (gibson#1085): the stream completed successfully — fold it
-	// into the mission frame as an LlmCallObserved, stamped with the aggregated
-	// usage. Reuses the same sink as the unary path; the two are disjoint RPCs so
-	// there is no double-capture.
-	resp := &llm.CompletionResponse{
-		Model:        streamModel,
-		Message:      llm.Message{Role: llm.RoleAssistant, Content: transcript.String()},
-		FinishReason: streamFinish,
-	}
-	if streamUsage != nil {
-		resp.Usage = *streamUsage
-	}
-	s.captureLLMCall(stream.Context(), req.Context, messages, resp)
-
-	return nil
-}
-
-// LLMCompleteStructured implements the structured LLM completion RPC.
-// This uses provider-native structured output mechanisms (tool_use for Anthropic,
-// response_format for OpenAI) to guarantee JSON responses matching the schema.
-func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req *harnesspb.LLMCompleteStructuredRequest) (*harnesspb.LLMCompleteStructuredResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert proto messages to llm.Message
-	messages := s.protoToMessages(req.Messages)
-
-	// Parse the schema JSON to reconstruct the schema type
-	var schemaData map[string]any
-	if err := json.Unmarshal([]byte(req.SchemaJson), &schemaData); err != nil {
-		s.logger.Error("failed to parse schema JSON", "error", err, "task_id", req.Context.TaskId)
-		return &harnesspb.LLMCompleteStructuredResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: fmt.Sprintf("invalid schema JSON: %v", err),
-			},
-		}, nil
-	}
-
-	// Execute structured completion. Use the *WithUsage variant so token usage
-	// surfaces back here (gibson#1085): the brain Decider issues its decisions
-	// through this structured path, so capturing it makes the brain's own
-	// decision LLM calls appear in mission frames. For callback mode, we pass the
-	// parsed map which will be used to build the response format.
-	structured, err := harness.CompleteStructuredAnyWithUsage(ctx, req.Slot, messages, schemaData)
-	if err != nil {
-		s.logger.Error("LLM structured completion failed", "error", err, "task_id", req.Context.TaskId)
-		return &harnesspb.LLMCompleteStructuredResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    llmErrorCode(err),
-				Message: err.Error(),
-			},
-		}, nil
-	}
-	result := structured.Result
-
-	// World capture (gibson#1085): fold the structured completion (incl. the
-	// Decider's decisions) into the mission frame as an LlmCallObserved, stamped
-	// with the surfaced usage. Reuses the same sink as the unary path; the RPCs
-	// are disjoint so there is no double-capture. Success-only.
-	s.captureLLMCall(ctx, req.Context, messages, &llm.CompletionResponse{
-		Model:        structured.Model,
-		Message:      llm.Message{Role: llm.RoleAssistant, Content: structured.RawJSON},
-		FinishReason: llm.FinishReasonStop,
-		Usage: llm.CompletionTokenUsage{
-			PromptTokens:     structured.PromptTokens,
-			CompletionTokens: structured.CompletionTokens,
-			TotalTokens:      structured.TotalTokens,
-		},
-	})
-
-	// Serialize result to JSON
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		s.logger.Error("failed to serialize structured result", "error", err, "task_id", req.Context.TaskId)
-		return &harnesspb.LLMCompleteStructuredResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: fmt.Sprintf("failed to serialize result: %v", err),
-			},
-		}, nil
-	}
-
-	// Unmarshal JSON back to any to convert to TypedValue
-	var resultData any
-	if err := json.Unmarshal(resultJSON, &resultData); err != nil {
-		return &harnesspb.LLMCompleteStructuredResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: fmt.Sprintf("failed to unmarshal result: %v", err),
-			},
-		}, nil
-	}
-
-	return &harnesspb.LLMCompleteStructuredResponse{
-		Result: anyToTypedValue(resultData),
-		Usage: &harnesspb.TokenUsage{
-			InputTokens:  int32(structured.PromptTokens),
-			OutputTokens: int32(structured.CompletionTokens),
-			TotalTokens:  int32(structured.TotalTokens),
-		},
-	}, nil
+	return toolCallID
 }
 
 // ============================================================================
@@ -1397,6 +936,10 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		}, nil
 	}
 
+	// The id of this call. The record, the reply and the discovery processor
+	// all use it. Nothing below mints a second id.
+	toolCallID := newToolCallID(req.Context)
+
 	// Execute tool using CallToolProto
 	if err := harness.CallToolProto(ctx, req.Name, requestMsg, responseMsg); err != nil {
 		s.logger.Error("tool execution failed", "error", err, "tool", req.Name)
@@ -1414,44 +957,15 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		// Flight recorder (ADR-0120, gibson#271): capture the failed call too —
 		// the arguments the agent sent and why it failed, not just the ones
 		// that succeeded.
-		s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", err.Error())
+		callID := s.captureToolCall(ctx, req.Context, toolCallID, req.Name, string(req.InputJson), "", err.Error())
 
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
+			ToolCallId: callID,
 		}, nil
-	}
-
-	// Process discovery if present (async, non-blocking)
-	if s.discoveryProcessor != nil {
-		if pbDiscovery := sdkgraphrag.ExtractDiscovery(responseMsg); pbDiscovery != nil {
-			execCtx := callToolDiscoveryScope(ctx, req.Context)
-
-			// Process discovery asynchronously with timeout
-			// This doesn't block the tool response
-			// NOTE: Now passing proto directly (proto-first approach)
-			go func() {
-				processCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-
-				result, err := s.discoveryProcessor.Process(processCtx, execCtx, pbDiscovery)
-				if err != nil {
-					s.logger.ErrorContext(processCtx, "failed to process discovery",
-						"error", err,
-						"tool", req.Name,
-						"mission_run_id", execCtx.MissionRunID,
-					)
-				} else if result != nil {
-					// Log success (result type varies by processor implementation)
-					s.logger.DebugContext(processCtx, "discovery processed successfully",
-						"tool", req.Name,
-						"mission_run_id", execCtx.MissionRunID,
-					)
-				}
-			}()
-		}
 	}
 
 	// Marshal proto response to JSON
@@ -1468,13 +982,14 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		// a real (unmarshalable) result leaves no independent record at all,
 		// which is exactly the unrecorded path the completeness guard exists
 		// to catch.
-		s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", fmt.Sprintf("failed to marshal response: %v", err))
+		callID := s.captureToolCall(ctx, req.Context, toolCallID, req.Name, string(req.InputJson), "", fmt.Sprintf("failed to marshal response: %v", err))
 
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to marshal response: %v", err),
 			},
+			ToolCallId: callID,
 		}, nil
 	}
 
@@ -1505,10 +1020,46 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	// transcript half captureLLMCall already folds in. Before this, tool I/O
 	// only reached the daemon as bare tool.call.* pub/sub metadata (no
 	// arguments/result text) and never became part of the Timeline.
-	s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), string(responseJSON), "")
+	callID := s.captureToolCall(ctx, req.Context, toolCallID, req.Name, string(req.InputJson), string(responseJSON), "")
+
+	// Discovery runs after the call is recorded. The parser evidence of the
+	// discovery cites the recorded call, so the record has to exist before the
+	// goroutine starts.
+	if s.discoveryProcessor != nil {
+		if pbDiscovery := sdkgraphrag.ExtractDiscovery(responseMsg); pbDiscovery != nil {
+			execCtx := callToolDiscoveryScope(ctx, req.Context)
+			// The discovery names the one id of this call, so the processor
+			// finds the record that is written above.
+			execCtx.ToolExecutionID = toolCallID
+
+			// Process discovery asynchronously with timeout
+			// This doesn't block the tool response
+			// NOTE: Now passing proto directly (proto-first approach)
+			go func() {
+				processCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+				defer cancel()
+
+				result, err := s.discoveryProcessor.Process(processCtx, execCtx, pbDiscovery)
+				if err != nil {
+					s.logger.ErrorContext(processCtx, "failed to process discovery",
+						"error", err,
+						"tool", req.Name,
+						"mission_run_id", execCtx.MissionRunID,
+					)
+				} else if result != nil {
+					// Log success (result type varies by processor implementation)
+					s.logger.DebugContext(processCtx, "discovery processed successfully",
+						"tool", req.Name,
+						"mission_run_id", execCtx.MissionRunID,
+					)
+				}
+			}()
+		}
+	}
 
 	return &harnesspb.CallToolProtoResponse{
 		OutputJson: responseJSON,
+		ToolCallId: callID,
 	}, nil
 }
 
@@ -1663,6 +1214,11 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *harness
 				},
 			}, nil
 		}
+
+		// Record the call now. The tool name and the arguments are known at
+		// submit time. The result joins the record when it arrives, under the
+		// same id (ToolResults).
+		s.captureToolCall(ctx, req.Context, queuedToolCallID(jobID, i), req.ToolName, string(inputJSON), "", "")
 	}
 
 	s.logger.Info("queued tool work",
@@ -1675,6 +1231,17 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *harness
 	return &harnesspb.QueueToolWorkResponse{
 		JobId: jobID,
 	}, nil
+}
+
+// queuedToolCallNamespace is the UUID namespace of the ids of queued tool calls.
+var queuedToolCallNamespace = uuid.MustParse("6f1c7d52-3a0e-4b9a-9c1e-5d2b8a4e7f10")
+
+// queuedToolCallID returns the id of the tool call that one input of a queued
+// job stands for. The id depends only on the job and the index. QueueToolWork
+// records the call under it at submit time, and ToolResults returns it with
+// the result, so the two need no shared state.
+func queuedToolCallID(jobID string, index int) string {
+	return uuid.NewSHA1(queuedToolCallNamespace, []byte(fmt.Sprintf("%s/%d", jobID, index))).String()
 }
 
 // ToolResults implements the streaming RPC that delivers results from queued tool work.
@@ -1725,8 +1292,11 @@ func (s *HarnessCallbackService) ToolResults(req *harnesspb.ToolResultsRequest, 
 		resultCount++
 
 		// Convert queue.Result to proto ToolResultResponse
+		// The id is the one that QueueToolWork recorded for this input.
+		toolCallID := queuedToolCallID(jobID, result.Index)
 		protoResult := &harnesspb.ToolResultsResponse{
-			Index: int32(result.Index),
+			Index:      boundedInt32(result.Index),
+			ToolCallId: toolCallID,
 		}
 
 		if result.Error != "" {
@@ -1737,6 +1307,9 @@ func (s *HarnessCallbackService) ToolResults(req *harnesspb.ToolResultsRequest, 
 		} else {
 			protoResult.OutputJson = result.OutputJSON
 		}
+
+		// Add the result to the record of the call.
+		s.captureToolCall(ctx, req.Context, toolCallID, "", "", string(result.OutputJSON), result.Error)
 
 		// Send result to stream
 		if err := stream.Send(protoResult); err != nil {
@@ -1854,127 +1427,6 @@ func (s *HarnessCallbackService) ListPlugins(ctx context.Context, req *harnesspb
 // Agent Operations
 // ============================================================================
 
-// DelegateToAgent implements the agent delegation RPC.
-func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *harnesspb.DelegateToAgentRequest) (*harnesspb.DelegateToAgentResponse, error) {
-	// A delegation aimed at a bank or a job is a turn on a job, not a
-	// sandbox launch (ADR-0119, gibson#1713).
-	if resp, err := s.delegateToTarget(ctx, req); resp != nil || err != nil {
-		return resp, err
-	}
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert proto Task to internal Task
-	task := inheritNodeScope(protoTaskToTask(req.Task), harness.Mission())
-
-	// Capture start time for agent execution
-	agentStartTime := time.Now()
-
-	// Resolve the delegated agent's owning user so ExecutorUser attribution
-	// follows the code that's about to run. Graceful on both lookup absence
-	// (no hook wired) and lookup miss (unknown agent, system-shared agent).
-	// Spec: llm-user-attribution-governance Requirement 1.5.
-	if s.agentOwnerLookup != nil {
-		if ownerID, lookupErr := s.agentOwnerLookup(ctx, req.Name); lookupErr != nil {
-			s.logger.Warn("agent owner lookup failed; skipping executor_user_id attribution",
-				"agent", req.Name,
-				"error", lookupErr,
-			)
-		} else if ownerID != "" {
-			ctx = auth.ContextWithExecutorUser(ctx, ownerID)
-		}
-	}
-
-	// Emit agent.started event
-	s.publishEvent(ctx, "agent.started", map[string]interface{}{
-		"agent_name":       req.Name,
-		"task_id":          task.ID.String(),
-		"task_description": task.Description,
-		"mission_id":       req.Context.MissionId,
-		"parent_agent":     req.Context.AgentName,
-	})
-
-	// Delegate to agent
-	result, err := harness.DelegateToAgent(ctx, req.Name, task)
-
-	// Calculate duration
-	durationMs := time.Since(agentStartTime).Milliseconds()
-	findingsCount := len(result.Findings)
-
-	// Handle different execution outcomes
-	if err != nil {
-		s.logger.Error("agent delegation failed", "error", err, "agent", req.Name)
-
-		// Check if context was cancelled
-		if ctx.Err() == context.Canceled {
-			s.publishEvent(ctx, "agent.cancelled", map[string]interface{}{
-				"agent_name":    req.Name,
-				"task_id":       task.ID.String(),
-				"cancel_reason": "context cancelled",
-				"duration_ms":   durationMs,
-			})
-		} else {
-			// Emit agent.failed event
-			s.publishEvent(ctx, "agent.failed", map[string]interface{}{
-				"agent_name":     req.Name,
-				"task_id":        task.ID.String(),
-				"error":          err.Error(),
-				"duration_ms":    durationMs,
-				"findings_count": findingsCount,
-			})
-		}
-
-		return &harnesspb.DelegateToAgentResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Emit agent.completed event on success
-	s.publishEvent(ctx, "agent.completed", map[string]interface{}{
-		"agent_name":     req.Name,
-		"task_id":        task.ID.String(),
-		"duration_ms":    durationMs,
-		"findings_count": findingsCount,
-		"success":        true,
-	})
-
-	return &harnesspb.DelegateToAgentResponse{
-		Result: resultToProtoResult(result),
-	}, nil
-}
-
-// ListAgents implements the agent listing RPC.
-func (s *HarnessCallbackService) ListAgents(ctx context.Context, req *harnesspb.ListAgentsRequest) (*harnesspb.ListAgentsResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get agent descriptors
-	agents := harness.ListAgents()
-
-	// Convert to proto
-	protoAgents := make([]*harnesspb.HarnessAgentDescriptor, len(agents))
-	for i, agent := range agents {
-		protoAgents[i] = &harnesspb.HarnessAgentDescriptor{
-			Name:        agent.Name,
-			Version:     agent.Version,
-			Description: agent.Description,
-			// Note: Capabilities are []string in the AgentDescriptor
-			// but we need to convert them appropriately
-		}
-	}
-
-	return &harnesspb.ListAgentsResponse{
-		Agents: protoAgents,
-	}, nil
-}
-
 // ============================================================================
 // Finding Operations
 // ============================================================================
@@ -1988,6 +1440,18 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 
 	// Convert proto Finding to internal Finding
 	finding := protoFindingToFinding(req.Finding)
+
+	// Tier 1 evidence comes from the record of each tool call that the agent
+	// names. An ID that names no record of this mission and tenant fails the
+	// whole submit, before the daemon stores anything.
+	recorded, refusal, err := s.recordedFindingEvidence(ctx, harness.Mission().ID.String(), req.GetToolCallIds())
+	if err != nil {
+		return nil, err
+	}
+	if refusal != nil {
+		return &harnesspb.SubmitFindingResponse{Error: refusal}, nil
+	}
+	finding.Evidence = append(recorded, finding.Evidence...)
 
 	// Submit finding
 	if err := harness.SubmitFinding(ctx, finding); err != nil {
@@ -2005,16 +1469,79 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 				},
 			}, nil
 		}
+		// An evidence item over the size limit is the fault of the caller. The
+		// store wrote nothing, and it never truncates.
+		if evidenceRejected(err) {
+			s.logger.Warn("finding rejected for its evidence", "error", err)
+			return &harnesspb.SubmitFindingResponse{
+				Error: &harnesspb.HarnessError{
+					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+					Message: err.Error(),
+				},
+			}, nil
+		}
+		// The cause can name the database. It stays in the log, and the agent
+		// gets a fixed message.
 		s.logger.Error("finding submission failed", "error", err)
+		message := "the finding could not be stored. Try again"
+		var notProvisioned *datapool.NotProvisionedError
+		if errors.As(err, &notProvisioned) {
+			message = "the data plane of the tenant is not ready, so the finding was not stored"
+		}
 		return &harnesspb.SubmitFindingResponse{
 			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: message,
 			},
 		}, nil
 	}
 
 	return &harnesspb.SubmitFindingResponse{}, nil
+}
+
+// recordedFindingEvidence builds the tier 1 evidence of a finding from the
+// tool calls that the agent names. It returns a HarnessError when an ID names
+// no record of the mission of the caller in the tenant of the caller. It
+// returns a gRPC error when the request is malformed or the daemon cannot read
+// its record. An empty list of IDs gives no evidence and no error.
+func (s *HarnessCallbackService) recordedFindingEvidence(
+	ctx context.Context, missionID string, toolCallIDs []string,
+) ([]*typespb.Evidence, *harnesspb.HarnessError, error) {
+	evidence, missing, err := s.recordedEvidence(ctx, missionID, toolCallIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(missing) > 0 {
+		return nil, &harnesspb.HarnessError{
+			Code: commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
+			Message: fmt.Sprintf(
+				"SubmitFinding: the daemon holds no record of tool call %q for this mission", missing[0]),
+		}, nil
+	}
+	return evidence, nil, nil
+}
+
+// recordedEvidence reads the record of tool calls for a proof and for a
+// finding. It calls brain.ReadRecordedEvidence, the one function that the
+// component path also calls, and maps its errors to gRPC status errors.
+func (s *HarnessCallbackService) recordedEvidence(
+	ctx context.Context, missionID string, toolCallIDs []string,
+) (evidence []*typespb.Evidence, missing []string, err error) {
+	if len(toolCallIDs) == 0 {
+		return nil, nil, nil
+	}
+	if s.proofSettlement == nil {
+		return nil, nil, status.Error(codes.Unavailable,
+			"the record of tool calls is not wired on this daemon")
+	}
+	evidence, missing, err = brain.ReadRecordedEvidence(ctx, s.proofSettlement, missionID, toolCallIDs)
+	switch {
+	case errors.Is(err, brain.ErrTooManyToolCalls):
+		return nil, nil, status.Errorf(codes.InvalidArgument, "tool_call_ids: %v", err)
+	case err != nil:
+		return nil, nil, status.Errorf(codes.Internal, "%v", err)
+	}
+	return evidence, missing, nil
 }
 
 // ============================================================================
@@ -2098,64 +1625,6 @@ func (s *HarnessCallbackService) exportSpanData(data *proxySpanData) {
 // ============================================================================
 // Helper Methods for Proto Conversions
 // ============================================================================
-
-func (s *HarnessCallbackService) protoToMessages(protoMessages []*harnesspb.LLMMessage) []llm.Message {
-	messages := make([]llm.Message, len(protoMessages))
-	for i, protoMsg := range protoMessages {
-		msg := llm.Message{
-			Role:    llm.Role(protoMsg.Role),
-			Content: protoMsg.Content,
-			Name:    protoMsg.Name,
-		}
-
-		if len(protoMsg.ToolCalls) > 0 {
-			msg.ToolCalls = make([]llm.ToolCall, len(protoMsg.ToolCalls))
-			for j, protoCall := range protoMsg.ToolCalls {
-				msg.ToolCalls[j] = llm.ToolCall{
-					ID:        protoCall.Id,
-					Name:      protoCall.Name,
-					Arguments: protoCall.Arguments,
-				}
-			}
-		}
-
-		// Note: proto has ToolResults but internal llm.Message doesn't have ToolResults
-		// Tool results are represented differently in the internal API
-
-		messages[i] = msg
-	}
-	return messages
-}
-
-func (s *HarnessCallbackService) toolCallsToProto(calls []llm.ToolCall) []*harnesspb.ToolCall {
-	protoCalls := make([]*harnesspb.ToolCall, len(calls))
-	for i, call := range calls {
-		protoCalls[i] = &harnesspb.ToolCall{
-			Id:        call.ID,
-			Name:      call.Name,
-			Arguments: call.Arguments,
-		}
-	}
-	return protoCalls
-}
-
-func (s *HarnessCallbackService) protoToToolDefs(protoTools []*harnesspb.ToolDef) []llm.ToolDef {
-	tools := make([]llm.ToolDef, len(protoTools))
-	for i, protoTool := range protoTools {
-		// Convert JSONSchemaNode to schema.JSON
-		var params schema.JSON
-		if protoTool.Parameters != nil {
-			params = CallbackProtoToSchema(protoTool.Parameters)
-		}
-
-		tools[i] = llm.ToolDef{
-			Name:        protoTool.Name,
-			Description: protoTool.Description,
-			Parameters:  params,
-		}
-	}
-	return tools
-}
 
 // protoToSpanData converts a proto Span to a proxySpanData container.
 // Since sdktrace.ReadOnlySpan has an unexported method, we can't implement it directly.
@@ -2559,9 +2028,8 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harne
 
 	s.logger.Debug("ValidateFinding called")
 
-	// Convert proto finding to SDK finding
-	finding := protoFindingToSDKFinding(req.Finding)
-	if finding == nil {
+	// Use the one conversion of a proto finding, the one that SubmitFinding uses.
+	if req.Finding == nil {
 		return &harnesspb.ValidateFindingResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
@@ -2569,19 +2037,14 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harne
 			},
 		}, nil
 	}
+	finding := protoFindingToFinding(req.Finding)
 
 	resp := &harnesspb.ValidateFindingResponse{Valid: true}
 
 	// Validate severity
-	validSeverities := []string{"critical", "high", "medium", "low", "informational"}
-	severityValid := false
-	for _, sev := range validSeverities {
-		if string(finding.Severity) == sev {
-			severityValid = true
-			break
-		}
-	}
-	if !severityValid && finding.Severity != "" {
+	switch finding.Severity {
+	case agent.SeverityCritical, agent.SeverityHigh, agent.SeverityMedium, agent.SeverityLow, agent.SeverityInfo:
+	default:
 		resp.Valid = false
 		resp.Errors = append(resp.Errors, &harnesspb.ValidationError{
 			Field:   "severity",
@@ -2756,148 +2219,6 @@ func typedValueMapToMap(m map[string]*commonpb.TypedValue) map[string]any {
 	return result
 }
 
-// protoTaskToTask converts a proto Task to an internal agent.Task.
-func protoTaskToTask(pt *typespb.Task) agent.Task {
-	if pt == nil {
-		return agent.Task{}
-	}
-
-	task := agent.Task{
-		Goal:    pt.Goal,
-		Context: typedValueMapToMap(pt.Context),
-	}
-
-	// Parse ID if present
-	if pt.Id != "" {
-		if id, err := uuid.Parse(pt.Id); err == nil {
-			task.ID = types.ID(id.String())
-		}
-	}
-
-	// Extract metadata fields
-	if pt.Metadata != nil {
-		if nameVal := pt.Metadata["name"]; nameVal != nil {
-			if name, ok := typedValueToAny(nameVal).(string); ok {
-				task.Name = name
-			}
-		}
-		if descVal := pt.Metadata["description"]; descVal != nil {
-			if desc, ok := typedValueToAny(descVal).(string); ok {
-				task.Description = desc
-			}
-		}
-		if timeoutVal := pt.Metadata["timeout_ms"]; timeoutVal != nil {
-			if timeoutMs, ok := typedValueToAny(timeoutVal).(int64); ok {
-				task.Timeout = time.Duration(timeoutMs) * time.Millisecond
-			}
-		}
-		if missionIDVal := pt.Metadata["mission_id"]; missionIDVal != nil {
-			if missionIDStr, ok := typedValueToAny(missionIDVal).(string); ok {
-				if id, err := uuid.Parse(missionIDStr); err == nil {
-					missionID := types.ID(id.String())
-					task.MissionID = &missionID
-				}
-			}
-		}
-		if parentTaskIDVal := pt.Metadata["parent_task_id"]; parentTaskIDVal != nil {
-			if parentTaskIDStr, ok := typedValueToAny(parentTaskIDVal).(string); ok {
-				if id, err := uuid.Parse(parentTaskIDStr); err == nil {
-					parentTaskID := types.ID(id.String())
-					task.ParentTaskID = &parentTaskID
-				}
-			}
-		}
-		if targetIDVal := pt.Metadata["target_id"]; targetIDVal != nil {
-			if targetIDStr, ok := typedValueToAny(targetIDVal).(string); ok {
-				if id, err := uuid.Parse(targetIDStr); err == nil {
-					targetID := types.ID(id.String())
-					task.TargetID = &targetID
-				}
-			}
-		}
-	}
-
-	return task
-}
-
-// resultToProtoResult converts an internal agent.Result to a proto Result.
-func resultToProtoResult(r agent.Result) *typespb.Result {
-	result := &typespb.Result{
-		Status: resultStatusToProtoStatus(r.Status),
-		Output: mapToTypedValue(r.Output),
-	}
-
-	if r.Error != nil {
-		// Convert error code string to ErrorCode enum
-		errCode := commonpb.ErrorCode_ERROR_CODE_INTERNAL
-		if codeVal, ok := commonpb.ErrorCode_value["ERROR_CODE_"+r.Error.Code]; ok {
-			errCode = commonpb.ErrorCode(codeVal)
-		}
-		result.Error = &typespb.ResultError{
-			Message:   r.Error.Message,
-			Code:      errCode,
-			Details:   convertMapStringAnyToMapStringString(r.Error.Details),
-			Retryable: r.Error.Recoverable,
-		}
-	}
-
-	return result
-}
-
-// resultStatusToProtoStatus converts an internal ResultStatus to proto ResultStatus.
-func resultStatusToProtoStatus(status agent.ResultStatus) typespb.ResultStatus {
-	switch status {
-	case agent.ResultStatusPending:
-		return typespb.ResultStatus_RESULT_STATUS_UNSPECIFIED
-	case agent.ResultStatusCompleted:
-		return typespb.ResultStatus_RESULT_STATUS_SUCCESS
-	case agent.ResultStatusFailed:
-		return typespb.ResultStatus_RESULT_STATUS_FAILED
-	case agent.ResultStatusCancelled:
-		return typespb.ResultStatus_RESULT_STATUS_CANCELLED
-	default:
-		return typespb.ResultStatus_RESULT_STATUS_FAILED
-	}
-}
-
-// mapToTypedValue converts a map[string]any to a proto TypedValue containing a TypedMap.
-func mapToTypedValue(m map[string]any) *commonpb.TypedValue {
-	if m == nil {
-		return &commonpb.TypedValue{
-			Kind: &commonpb.TypedValue_MapValue{
-				MapValue: &commonpb.TypedMap{Entries: make(map[string]*commonpb.TypedValue)},
-			},
-		}
-	}
-
-	entries := make(map[string]*commonpb.TypedValue)
-	for k, v := range m {
-		entries[k] = anyToTypedValue(v)
-	}
-
-	return &commonpb.TypedValue{
-		Kind: &commonpb.TypedValue_MapValue{
-			MapValue: &commonpb.TypedMap{Entries: entries},
-		},
-	}
-}
-
-// convertMapStringAnyToMapStringString converts map[string]any to map[string]string for Error.Details.
-func convertMapStringAnyToMapStringString(m map[string]any) map[string]string {
-	if m == nil {
-		return nil
-	}
-	result := make(map[string]string)
-	for k, v := range m {
-		if str, ok := v.(string); ok {
-			result[k] = str
-		} else {
-			result[k] = fmt.Sprintf("%v", v)
-		}
-	}
-	return result
-}
-
 // mapToTypedValueMap converts a map[string]any to a map[string]*commonpb.TypedValue.
 func mapToTypedValueMap(m map[string]any) map[string]*commonpb.TypedValue {
 	if m == nil {
@@ -2909,135 +2230,6 @@ func mapToTypedValueMap(m map[string]any) map[string]*commonpb.TypedValue {
 		result[k] = anyToTypedValue(v)
 	}
 	return result
-}
-
-// protoFindingToSDKFinding converts a proto Finding to an SDK finding.Finding.
-func protoFindingToSDKFinding(pf *typespb.Finding) *sdkfinding.Finding {
-	if pf == nil {
-		return nil
-	}
-
-	finding := &sdkfinding.Finding{
-		ID:          pf.Id,
-		MissionID:   pf.MissionId,
-		AgentName:   pf.AgentName,
-		Title:       pf.Title,
-		Description: pf.Description,
-		Category:    pf.Category, // Category is now a plain string
-		Subcategory: pf.Subcategory,
-		Severity:    protoSeverityToSDKSeverity(pf.Severity),
-		Confidence:  pf.Confidence,
-		TargetID:    pf.TargetId,
-		Technique:   pf.Technique,
-		Tags:        pf.Tags,
-		Remediation: pf.Remediation,
-		References:  pf.References,
-	}
-
-	// Convert Evidence
-	if len(pf.Evidence) > 0 {
-		finding.Evidence = make([]sdkfinding.Evidence, len(pf.Evidence))
-		for i, ev := range pf.Evidence {
-			finding.Evidence[i] = sdkfinding.Evidence{
-				Type:    protoEvidenceTypeToSDK(ev.Type),
-				Title:   ev.Title,
-				Content: ev.Content,
-			}
-			// Convert metadata if present
-			if len(ev.Metadata) > 0 {
-				finding.Evidence[i].Metadata = make(map[string]any)
-				for k, v := range ev.Metadata {
-					finding.Evidence[i].Metadata[k] = v
-				}
-			}
-		}
-	}
-
-	// Convert Reproduction steps
-	if len(pf.Reproduction) > 0 {
-		finding.Reproduction = make([]sdkfinding.ReproStep, len(pf.Reproduction))
-		for i, rs := range pf.Reproduction {
-			finding.Reproduction[i] = sdkfinding.ReproStep{
-				Order:       int(rs.Order),
-				Description: rs.Description,
-				Input:       rs.Input,
-				Output:      rs.Output,
-			}
-		}
-	}
-
-	// Convert CVSS score
-	if pf.CvssScore > 0 {
-		finding.CVSSScore = &pf.CvssScore
-	}
-
-	finding.RiskScore = pf.RiskScore
-
-	// Convert timestamps
-	if pf.CreatedAt > 0 {
-		finding.CreatedAt = time.Unix(0, pf.CreatedAt*int64(time.Millisecond))
-	}
-	if pf.UpdatedAt > 0 {
-		finding.UpdatedAt = time.Unix(0, pf.UpdatedAt*int64(time.Millisecond))
-	}
-
-	return finding
-}
-
-// protoSeverityToSDKSeverity converts a proto FindingSeverity to an SDK Severity.
-func protoSeverityToSDKSeverity(severity typespb.FindingSeverity) sdkfinding.Severity {
-	switch severity {
-	case typespb.FindingSeverity_FINDING_SEVERITY_CRITICAL:
-		return sdkfinding.SeverityCritical
-	case typespb.FindingSeverity_FINDING_SEVERITY_HIGH:
-		return sdkfinding.SeverityHigh
-	case typespb.FindingSeverity_FINDING_SEVERITY_MEDIUM:
-		return sdkfinding.SeverityMedium
-	case typespb.FindingSeverity_FINDING_SEVERITY_LOW:
-		return sdkfinding.SeverityLow
-	case typespb.FindingSeverity_FINDING_SEVERITY_INFO:
-		return sdkfinding.SeverityInfo
-	default:
-		return sdkfinding.SeverityInfo
-	}
-}
-
-// protoEvidenceTypeToSDK converts a proto EvidenceType to an SDK EvidenceType.
-func protoEvidenceTypeToSDK(evidenceType typespb.EvidenceType) sdkfinding.EvidenceType {
-	switch evidenceType {
-	case typespb.EvidenceType_EVIDENCE_TYPE_REQUEST:
-		return sdkfinding.EvidenceHTTPRequest
-	case typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
-		return sdkfinding.EvidenceHTTPResponse
-	case typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
-		return sdkfinding.EvidenceScreenshot
-	case typespb.EvidenceType_EVIDENCE_TYPE_LOG:
-		return sdkfinding.EvidenceLog
-	case typespb.EvidenceType_EVIDENCE_TYPE_CODE:
-		return sdkfinding.EvidencePayload
-	default:
-		return sdkfinding.EvidenceLog
-	}
-}
-
-// protoEvidenceTypeToString converts a proto EvidenceType to a string.
-func protoEvidenceTypeToString(evidenceType typespb.EvidenceType) string {
-	switch evidenceType {
-	case typespb.EvidenceType_EVIDENCE_TYPE_REQUEST:
-		return "request"
-	case typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
-		return "response"
-	case typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
-		return "screenshot"
-	case typespb.EvidenceType_EVIDENCE_TYPE_LOG:
-		return "log"
-	case typespb.EvidenceType_EVIDENCE_TYPE_CODE:
-		return "code"
-	case typespb.EvidenceType_EVIDENCE_TYPE_OTHER:
-		return "other"
-	default:
-		return "other"
-	}
 }
 
 // protoFindingToFinding converts a proto Finding to an internal agent.Finding.
@@ -3074,25 +2266,16 @@ func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 		}
 	}
 
-	// Convert Evidence
+	// Evidence that the agent typed is tier 2. The daemon sets the tier and
+	// the tool call ID itself. A value that the agent sent for either field is
+	// dropped, so an agent cannot claim a tool call that backs an item.
 	if len(pf.Evidence) > 0 {
-		finding.Evidence = make([]agent.Evidence, len(pf.Evidence))
+		finding.Evidence = make([]*typespb.Evidence, len(pf.Evidence))
 		for i, ev := range pf.Evidence {
-			// Convert proto EvidenceType enum to string
-			typeStr := protoEvidenceTypeToString(ev.Type)
-			finding.Evidence[i] = agent.Evidence{
-				Type:        typeStr,
-				Description: ev.Title,
-				Data: map[string]any{
-					"content": ev.Content,
-				},
-			}
-			// Add metadata to Data if present
-			if len(ev.Metadata) > 0 {
-				for k, v := range ev.Metadata {
-					finding.Evidence[i].Data[k] = v
-				}
-			}
+			typed := proto.Clone(ev).(*typespb.Evidence)
+			typed.Tier = typespb.EvidenceTier_EVIDENCE_TIER_TYPED
+			typed.ToolCallId = ""
+			finding.Evidence[i] = typed
 		}
 	}
 
@@ -3463,19 +2646,48 @@ func protoTypedValueToAny(tv *commonpb.TypedValue) any {
 // missionStatusToProto converts internal MissionStatus to proto format
 func missionStatusToProto(status MissionStatus) harnesspb.MissionStatus {
 	switch status {
-	case MissionStatusPending:
-		return harnesspb.MissionStatus_MISSION_STATUS_PENDING
-	case MissionStatusRunning:
-		return harnesspb.MissionStatus_MISSION_STATUS_RUNNING
+	case MissionStatusSubmitted:
+		return harnesspb.MissionStatus_MISSION_STATUS_SUBMITTED
+	case MissionStatusWorking:
+		return harnesspb.MissionStatus_MISSION_STATUS_WORKING
 	case MissionStatusCompleted:
 		return harnesspb.MissionStatus_MISSION_STATUS_COMPLETED
 	case MissionStatusFailed:
 		return harnesspb.MissionStatus_MISSION_STATUS_FAILED
-	case MissionStatusCancelled:
-		return harnesspb.MissionStatus_MISSION_STATUS_CANCELLED
+	case MissionStatusCanceled:
+		return harnesspb.MissionStatus_MISSION_STATUS_CANCELED
+	case MissionStatusPaused:
+		return harnesspb.MissionStatus_MISSION_STATUS_PAUSED
+	case MissionStatusInputRequired:
+		return harnesspb.MissionStatus_MISSION_STATUS_INPUT_REQUIRED
 	default:
 		return harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED
 	}
+}
+
+// missionStatusFromProto converts a proto MissionStatus to the internal status.
+// It is the inverse of missionStatusToProto. The proto enum names PENDING and
+// RUNNING stay in the SDK until the SDK renames them.
+func missionStatusFromProto(state harnesspb.MissionStatus) MissionStatus {
+	switch state {
+	case harnesspb.MissionStatus_MISSION_STATUS_SUBMITTED:
+		return MissionStatusSubmitted
+	case harnesspb.MissionStatus_MISSION_STATUS_WORKING:
+		return MissionStatusWorking
+	case harnesspb.MissionStatus_MISSION_STATUS_COMPLETED:
+		return MissionStatusCompleted
+	case harnesspb.MissionStatus_MISSION_STATUS_FAILED:
+		return MissionStatusFailed
+	case harnesspb.MissionStatus_MISSION_STATUS_CANCELED:
+		return MissionStatusCanceled
+	case harnesspb.MissionStatus_MISSION_STATUS_PAUSED:
+		return MissionStatusPaused
+	case harnesspb.MissionStatus_MISSION_STATUS_INPUT_REQUIRED:
+		return MissionStatusInputRequired
+	case harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED:
+		// An unspecified status has no internal status.
+	}
+	return ""
 }
 
 // RunMission implements the mission execution RPC by delegating to the MissionOperator.
@@ -3630,8 +2842,8 @@ func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *harnessp
 	filter := &MissionFilter{Limit: limit, Offset: offset}
 	if req.Filter != nil {
 		if req.Filter.Status != harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED {
-			// Map proto MissionStatus enum back to internal string representation.
-			st := MissionStatus(strings.ToLower(strings.TrimPrefix(req.Filter.Status.String(), "MISSION_STATUS_")))
+			// Map the proto MissionStatus enum back to the internal status.
+			st := missionStatusFromProto(req.Filter.Status)
 			filter.Status = &st
 		}
 	}
@@ -3756,19 +2968,6 @@ func (s *HarnessCallbackService) GetMissionResults(ctx context.Context, req *har
 			CompletedAt: result.CompletedAt.UnixMilli(),
 		},
 	}, nil
-}
-
-// inheritNodeScope gives a delegated agent the node of its caller. A
-// delegation runs inside the node of the caller, so the sub-agent gets the
-// node id and the network scope of that node (gibson#865, ADR-0169). It is
-// not a mission node of its own: no later node names it, and it starts from
-// no other node, so StartsFrom and Forkable stay empty.
-func inheritNodeScope(task agent.Task, caller MissionContext) agent.Task {
-	task.NodeID = caller.NodeID
-	task.Network = caller.NodeNetwork
-	task.StartsFrom = ""
-	task.Forkable = false
-	return task
 }
 
 // callToolDiscoveryScope is the scope of a discovery that a tool call of an

@@ -4,10 +4,11 @@
 package api
 
 import (
+	"context"
 	"log/slog"
+	"net"
 	"os"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -20,16 +21,22 @@ var testSlogLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOption
 // reembedTrigger is defaulted to the no-op (mirroring NewDaemonServer) so the
 // field is never nil at request time — the provider-config handlers call
 // s.reembedTrigger.Trigger unconditionally ([[0003]]: no request-path nil-guard).
+//
+// modelEndpointResolver resolves each host to a public address, so a save with
+// a base_url does no DNS lookup. A test of the address check sets its own.
 func blankServer() *DaemonServer {
 	return &DaemonServer{
-		logger:         testSlogLogger,
-		reembedTrigger: noopReembedTrigger{},
-		// A unit test must never reach a real provider. The save path asks the
-		// provider for a model list, so the default factory is a stub whose
-		// list is empty. A test that needs a real provider against a fake sets
-		// its own factory.
-		providerFactory: func(llm.ProviderConfig) (llm.LLMProvider, error) { return &stubMockProvider{}, nil },
+		logger:                testSlogLogger,
+		reembedTrigger:        noopReembedTrigger{},
+		modelEndpointResolver: publicResolver{},
 	}
+}
+
+// publicResolver resolves each host to one public address.
+type publicResolver struct{}
+
+func (publicResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
+	return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
 }
 
 func grpcCode(err error) codes.Code {

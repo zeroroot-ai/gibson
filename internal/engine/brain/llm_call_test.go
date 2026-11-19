@@ -4,6 +4,7 @@
 package brain
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -64,26 +65,29 @@ func TestLlmCall_EnrichmentNeverErases(t *testing.T) {
 func TestLlmCall_TranscriptSetOnce(t *testing.T) {
 	w := NewWorld("t1")
 	Reduce(w, LlmCallObserved{
-		CallID:   "c1",
-		Messages: []LlmMessage{{Role: "user", Content: "hello"}},
+		CallID: "c1", RequestItems: 1,
+		Items: []json.RawMessage{json.RawMessage(`{"type":"message","role":"user","content":"hello"}`)},
 	})
 	// A second observation must NOT overwrite an existing transcript.
 	Reduce(w, LlmCallObserved{
-		CallID:     "c1",
-		Completion: "world", // fills the empty completion
-		Messages:   []LlmMessage{{Role: "user", Content: "DIFFERENT"}},
+		CallID: "c1", RequestItems: 2,
+		ErrorText: "world", // fills the empty error text
+		Items: []json.RawMessage{
+			json.RawMessage(`{"type":"message","role":"user","content":"DIFFERENT"}`),
+			json.RawMessage(`{"type":"message","role":"assistant","content":"x"}`),
+		},
 	})
 
 	c := w.LlmCallSnapshot()[0]
-	if len(c.Messages) != 1 || c.Messages[0].Content != "hello" {
-		t.Fatalf("transcript messages overwritten: %+v", c.Messages)
+	if len(c.Items) != 1 || !strings.Contains(string(c.Items[0]), "hello") || c.RequestItems != 1 {
+		t.Fatalf("transcript items overwritten: %s (request items %d)", c.Items, c.RequestItems)
 	}
-	if c.Completion != "world" {
-		t.Fatalf("completion not filled: %q", c.Completion)
+	if c.ErrorText != "world" {
+		t.Fatalf("error text not filled: %q", c.ErrorText)
 	}
 	// Snapshot returns a copy: mutating it must not affect the World.
-	c.Messages[0].Content = "mutated"
-	if w.LlmCallSnapshot()[0].Messages[0].Content != "hello" {
+	c.Items[0] = json.RawMessage(`"mutated"`)
+	if !strings.Contains(string(w.LlmCallSnapshot()[0].Items[0]), "hello") {
 		t.Fatal("snapshot aliases the stored transcript")
 	}
 }
@@ -126,7 +130,7 @@ func TestLlmCall_DeterministicOrderAndReplay(t *testing.T) {
 // progressive-enrichment branch in applyLlmCallObserved: a bare first
 // observation creates the entity with nothing set, so the second observation
 // must go through the merge loop (not the create-entity path) to fill in
-// RunID, Model, ScopeID, tokens, Messages, Completion, CompletionToolCalls,
+// RunID, Model, ScopeID, tokens, Items, ErrorText, HTTPStatus,
 // and RecordedAtUnixNano.
 func TestLlmCall_EnrichesEveryFieldOnSecondObservation(t *testing.T) {
 	w := NewWorld("t1")
@@ -134,10 +138,11 @@ func TestLlmCall_EnrichesEveryFieldOnSecondObservation(t *testing.T) {
 	Reduce(w, LlmCallObserved{
 		CallID: "c1", RunID: "r1", Model: "m", ScopeID: "s1",
 		PromptTokens: 10, CompletionTokens: 5,
-		Messages:            []LlmMessage{{Role: "user", Content: "hi"}},
-		Completion:          "hello",
-		CompletionToolCalls: []LlmToolCall{{ID: "t1", Name: "nmap"}},
-		RecordedAtUnixNano:  42,
+		Items:              []json.RawMessage{json.RawMessage(`{"type":"message","role":"user"}`)},
+		RequestItems:       1,
+		ErrorText:          "hello",
+		HTTPStatus:         503,
+		RecordedAtUnixNano: 42,
 	})
 
 	c := w.LlmCallSnapshot()[0]
@@ -147,53 +152,11 @@ func TestLlmCall_EnrichesEveryFieldOnSecondObservation(t *testing.T) {
 	if c.PromptTokens != 10 || c.CompletionTokens != 5 {
 		t.Fatalf("tokens not enriched: %+v", c)
 	}
-	if len(c.Messages) != 1 || c.Completion != "hello" {
+	if len(c.Items) != 1 || c.RequestItems != 1 || c.ErrorText != "hello" || c.HTTPStatus != 503 {
 		t.Fatalf("transcript not enriched: %+v", c)
-	}
-	if len(c.CompletionToolCalls) != 1 {
-		t.Fatalf("completion tool calls not enriched: %+v", c)
 	}
 	if c.RecordedAtUnixNano != 42 {
 		t.Fatalf("RecordedAtUnixNano not enriched: %+v", c)
-	}
-}
-
-// TestLlmCall_CapturesToolCallsFullFidelity is the gibson#271 flight-recorder
-// unit: a tool-calling turn's ToolCalls must not be silently dropped, on
-// either a historical prompt message or the completion itself. Before this,
-// LlmMessage only carried Role+Content and LlmCall had no
-// CompletionToolCalls, so a tool-calling turn's transcript was incomplete.
-func TestLlmCall_CapturesToolCallsFullFidelity(t *testing.T) {
-	w := NewWorld("t1")
-	Reduce(w, LlmCallObserved{
-		CallID: "c1",
-		Messages: []LlmMessage{
-			{Role: "user", Content: "scan 10.0.0.5"},
-			{Role: "assistant", ToolCalls: []LlmToolCall{
-				{ID: "call_1", Type: "function", Name: "nmap", Arguments: `{"host":"10.0.0.5"}`},
-			}},
-			{Role: "tool", ToolCallID: "call_1", Content: `{"ports":[22,80]}`},
-		},
-		CompletionToolCalls: []LlmToolCall{
-			{ID: "call_2", Type: "function", Name: "nikto", Arguments: `{"host":"10.0.0.5"}`},
-		},
-	})
-
-	c := w.LlmCallSnapshot()[0]
-	if len(c.Messages) != 3 {
-		t.Fatalf("want 3 messages, got %d: %+v", len(c.Messages), c.Messages)
-	}
-	if len(c.Messages[1].ToolCalls) != 1 || c.Messages[1].ToolCalls[0].Name != "nmap" {
-		t.Fatalf("assistant message tool call not captured: %+v", c.Messages[1])
-	}
-	if c.Messages[1].ToolCalls[0].Arguments != `{"host":"10.0.0.5"}` {
-		t.Fatalf("tool call arguments not captured: %+v", c.Messages[1].ToolCalls[0])
-	}
-	if c.Messages[2].ToolCallID != "call_1" {
-		t.Fatalf("tool-result message ToolCallID not captured: %+v", c.Messages[2])
-	}
-	if len(c.CompletionToolCalls) != 1 || c.CompletionToolCalls[0].Name != "nikto" {
-		t.Fatalf("completion tool calls not captured: %+v", c.CompletionToolCalls)
 	}
 }
 
@@ -205,26 +168,25 @@ func TestLlmCall_RedactionAppliedAtFoldTime(t *testing.T) {
 	w := NewWorld("t1")
 	Reduce(w, FlightRecorderPolicySet{Redact: true})
 	Reduce(w, LlmCallObserved{
-		CallID:     "c1",
-		Messages:   []LlmMessage{{Role: "user", Content: "use api_key=abcdefgh12345678 to auth"}},
-		Completion: "Bearer sk-abcdefghijklmnopqrstuvwx",
-		CompletionToolCalls: []LlmToolCall{
-			{ID: "call_1", Name: "curl", Arguments: `{"header":"Authorization: Bearer sk-abcdefghijklmnopqrstuvwx"}`},
+		CallID:       "c1",
+		RequestItems: 1,
+		Items: []json.RawMessage{
+			json.RawMessage(`{"type":"function_call_output","output":"use api_key=abcdefgh12345678 to auth"}`),
+			json.RawMessage(`{"type":"function_call","arguments":"{\"header\":\"Bearer sk-abcdefghijklmnopqrstuvwx\"}"}`),
 		},
+		ErrorText: "Bearer sk-abcdefghijklmnopqrstuvwx",
 	})
 
 	c := w.LlmCallSnapshot()[0]
-	if strings.Contains(c.Messages[0].Content, "abcdefgh12345678") {
-		t.Fatalf("secret survived redaction: %q", c.Messages[0].Content)
+	all := string(c.Items[0]) + string(c.Items[1])
+	if strings.Contains(all, "abcdefgh12345678") || strings.Contains(all, "sk-abcdefghijklmnopqrstuvwx") {
+		t.Fatalf("secret survived redaction in the items: %s", all)
 	}
-	if !strings.Contains(c.Messages[0].Content, redactedPlaceholder) {
-		t.Fatalf("redacted message missing placeholder: %q", c.Messages[0].Content)
+	if !strings.Contains(all, redactedPlaceholder) {
+		t.Fatalf("redacted items miss the placeholder: %s", all)
 	}
-	if strings.Contains(c.Completion, "sk-abcdefghijklmnopqrstuvwx") {
-		t.Fatalf("completion secret survived redaction: %q", c.Completion)
-	}
-	if strings.Contains(c.CompletionToolCalls[0].Arguments, "sk-abcdefghijklmnopqrstuvwx") {
-		t.Fatalf("tool call argument secret survived redaction: %q", c.CompletionToolCalls[0].Arguments)
+	if strings.Contains(c.ErrorText, "sk-abcdefghijklmnopqrstuvwx") {
+		t.Fatalf("error text secret survived redaction: %q", c.ErrorText)
 	}
 }
 
@@ -234,12 +196,12 @@ func TestLlmCall_RedactionAppliedAtFoldTime(t *testing.T) {
 func TestLlmCall_NoRedactionByDefault(t *testing.T) {
 	w := NewWorld("t1")
 	Reduce(w, LlmCallObserved{
-		CallID:     "c1",
-		Completion: "Bearer sk-abcdefghijklmnopqrstuvwx",
+		CallID:    "c1",
+		ErrorText: "Bearer sk-abcdefghijklmnopqrstuvwx",
 	})
 	c := w.LlmCallSnapshot()[0]
-	if c.Completion != "Bearer sk-abcdefghijklmnopqrstuvwx" {
-		t.Fatalf("capture must stay full-fidelity by default, got %q", c.Completion)
+	if c.ErrorText != "Bearer sk-abcdefghijklmnopqrstuvwx" {
+		t.Fatalf("capture must stay full-fidelity by default, got %q", c.ErrorText)
 	}
 }
 
@@ -250,14 +212,16 @@ func TestLlmCall_RetentionSweepPurgesTextKeepsMetadata(t *testing.T) {
 	w := NewWorld("t1")
 	Reduce(w, LlmCallObserved{
 		CallID: "old", Model: "m", PromptTokens: 10, CompletionTokens: 5,
-		Messages:           []LlmMessage{{Role: "user", Content: "old secret content"}},
-		Completion:         "old completion",
+		Items:              []json.RawMessage{json.RawMessage(`{"type":"message","content":"old secret content"}`)},
+		RequestItems:       1,
+		ErrorText:          "old completion",
 		RecordedAtUnixNano: 1000,
 	})
 	Reduce(w, LlmCallObserved{
 		CallID: "new", Model: "m", PromptTokens: 10, CompletionTokens: 5,
-		Messages:           []LlmMessage{{Role: "user", Content: "new content"}},
-		Completion:         "new completion",
+		Items:              []json.RawMessage{json.RawMessage(`{"type":"message","content":"new content"}`)},
+		RequestItems:       1,
+		ErrorText:          "new completion",
 		RecordedAtUnixNano: 5000,
 	})
 
@@ -275,14 +239,17 @@ func TestLlmCall_RetentionSweepPurgesTextKeepsMetadata(t *testing.T) {
 			newCall = c
 		}
 	}
-	if oldCall.Completion != purgedPlaceholder {
-		t.Fatalf("text past cutoff should be purged, got %q", oldCall.Completion)
+	if oldCall.ErrorText != purgedPlaceholder {
+		t.Fatalf("text past cutoff should be purged, got %q", oldCall.ErrorText)
+	}
+	if strings.Contains(string(oldCall.Items[0]), "old secret content") || len(oldCall.Items) != 1 {
+		t.Fatalf("items past cutoff should be purged, got %s", oldCall.Items)
 	}
 	if oldCall.Model != "m" || oldCall.PromptTokens != 10 {
 		t.Fatalf("metadata must survive a retention sweep: %+v", oldCall)
 	}
-	if newCall.Completion != "new completion" {
-		t.Fatalf("text before cutoff must be untouched, got %q", newCall.Completion)
+	if newCall.ErrorText != "new completion" || !strings.Contains(string(newCall.Items[0]), "new content") {
+		t.Fatalf("text before cutoff must be untouched, got %q %s", newCall.ErrorText, newCall.Items)
 	}
 }
 
@@ -307,7 +274,7 @@ func TestFlightRecorderPolicy_DefaultIsCaptureEverything(t *testing.T) {
 func TestFlightRecorderPolicy_ReplayDeterministic(t *testing.T) {
 	events := []Event{
 		FlightRecorderPolicySet{Redact: true, RetentionDays: 30},
-		LlmCallObserved{CallID: "c1", Completion: "api_key=supersecret123456"},
+		LlmCallObserved{CallID: "c1", ErrorText: "api_key=supersecret123456"},
 	}
 	fold := func() LlmCallSnapshot {
 		w := NewWorld("t1")
@@ -320,7 +287,7 @@ func TestFlightRecorderPolicy_ReplayDeterministic(t *testing.T) {
 	if !reflect.DeepEqual(a, b) {
 		t.Fatalf("replay mismatch: %+v vs %+v", a, b)
 	}
-	if strings.Contains(a.Completion, "supersecret123456") {
-		t.Fatalf("secret survived redaction under replay: %q", a.Completion)
+	if strings.Contains(a.ErrorText, "supersecret123456") {
+		t.Fatalf("secret survived redaction under replay: %q", a.ErrorText)
 	}
 }

@@ -26,6 +26,11 @@ type ForkDispatch struct {
 	// TaskID is the id of the task of the fork. Its grant names it.
 	TaskID string `json:"task_id"`
 	Model  string `json:"model"`
+	// Initiator is the FGA user of the person who created the mission. The
+	// daemon sets it from the mission of the dispatch, and the grant of the fork
+	// carries it. A fork has no way to change it. Empty when no person created
+	// the mission.
+	Initiator string `json:"initiator,omitempty"`
 	// TaskB64 is the base64 protojson of the task of the fork.
 	TaskB64 string `json:"task_b64"`
 }

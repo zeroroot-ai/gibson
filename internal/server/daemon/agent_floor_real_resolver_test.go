@@ -9,23 +9,19 @@ package daemon
 // measured against the window stored with the tenant's saved model. The chain
 // here is real from the manifest to the provider: the embedded cve-triage
 // manifest, harness.CatalogAgentResolver, slotModelResolver, DaemonSlotManager,
-// tenantprovider.Resolver and the production provider factory. Only the
-// provider store is a fixture.
+// and the provider records of the tenant. Only the provider store is a
+// fixture.
 
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
-	"github.com/zeroroot-ai/gibson/internal/platform/tenantprovider"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -41,25 +37,29 @@ func (s *floorStore) Resolve(context.Context, string, string) (*providerconfig.D
 	return &providerconfig.DecryptedConfig{ProviderConfig: *s.cfg, Credentials: map[string]string{"api_key": "k"}}, nil
 }
 
+// floorSlotManagers builds the slot manager of a tenant from the provider
+// records of the store, as the daemon does.
+func floorSlotManagers(store *floorStore) func(context.Context, string) (harness.SlotManager, error) {
+	return func(ctx context.Context, tenant string) (harness.SlotManager, error) {
+		recs, err := store.List(ctx, tenant)
+		if err != nil {
+			return nil, fmt.Errorf("list: %w", err)
+		}
+		providers, defaultName := SlotProvidersFromRecords(recs)
+		return NewDaemonSlotManager(providers, slotTestLogger()).WithDefaultProvider(defaultName), nil
+	}
+}
+
 // realFloorChain wires the production objects for one tenant whose saved
 // Anthropic provider has the given model and stored window.
 func realFloorChain(t *testing.T, model string, window int) *harness.CatalogAgentResolver {
 	t.Helper()
 	store := &floorStore{cfg: &providerconfig.ProviderConfig{
-		Name: "anthropic", Type: llm.ProviderAnthropic, Enabled: true, IsDefault: true,
+		Name: "anthropic", Type: providerconfig.ProviderAnthropic, Enabled: true, IsDefault: true,
 		DefaultModel: model, DefaultModelContextWindow: window,
 	}}
-	tp := tenantprovider.NewResolver(store, providers.NewProvider, false, slog.New(slog.DiscardHandler))
-	forTenant := func(ctx context.Context, tenant string) (llm.SlotManager, llm.LLMRegistry, error) {
-		set, err := tp.Resolve(ctx, tenant)
-		if err != nil {
-			return nil, nil, fmt.Errorf("resolve: %w", err)
-		}
-		sm := NewDaemonSlotManager(set.Registry, slog.New(slog.DiscardHandler)).WithDefaultProvider(set.DefaultName)
-		return sm, set.Registry, nil
-	}
 	return harness.NewCatalogAgentResolver("agent", nil).
-		WithTenantModelResolver(&slotModelResolver{forTenant: forTenant})
+		WithTenantModelResolver(&slotModelResolver{forTenant: floorSlotManagers(store)})
 }
 
 func dispatchCVETriage(r *harness.CatalogAgentResolver) (string, error) {
@@ -96,17 +96,12 @@ func TestCVETriageFloor_APinnedModelOtherThanTheSavedOneIsUnproven(t *testing.T)
 	// A stored window belongs to the saved model only. Another model has no
 	// stored window, so it cannot clear a floor.
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
-	model, window, err := (&slotModelResolver{forTenant: func(ctx context.Context, tenant string) (llm.SlotManager, llm.LLMRegistry, error) {
-		tp := tenantprovider.NewResolver(&floorStore{cfg: &providerconfig.ProviderConfig{
-			Name: "anthropic", Type: llm.ProviderAnthropic, Enabled: true, IsDefault: true,
-			DefaultModel: "claude-saved", DefaultModelContextWindow: 200000,
-		}}, providers.NewProvider, false, slog.New(slog.DiscardHandler))
-		set, err := tp.Resolve(ctx, tenant)
-		if err != nil {
-			return nil, nil, fmt.Errorf("resolve: %w", err)
-		}
-		return NewDaemonSlotManager(set.Registry, slog.New(slog.DiscardHandler)).WithDefaultProvider(set.DefaultName), set.Registry, nil
-	}}).ResolveAgentModel(ctx, "acme", "some-other-model", 32000)
+	store := &floorStore{cfg: &providerconfig.ProviderConfig{
+		Name: "anthropic", Type: providerconfig.ProviderAnthropic, Enabled: true, IsDefault: true,
+		DefaultModel: "claude-saved", DefaultModelContextWindow: 200000,
+	}}
+	model, window, err := (&slotModelResolver{forTenant: floorSlotManagers(store)}).
+		ResolveAgentModel(ctx, "acme", "some-other-model", 32000)
 	require.NoError(t, err)
 	assert.Equal(t, "some-other-model", model)
 	assert.Zero(t, window, "the window of a model other than the saved one is unknown")

@@ -38,13 +38,6 @@ func (d *daemonImpl) ensureMissionManager() error {
 			return
 		}
 
-		// Get LLM registry from infrastructure
-		llmReg := d.infrastructure.llmRegistry
-		if llmReg == nil {
-			missionManagerInstance.initErr = fmt.Errorf("LLM registry not initialized in infrastructure")
-			return
-		}
-
 		// Get harness factory from infrastructure
 		harnessFactory := d.infrastructure.harnessFactory
 		if harnessFactory == nil {
@@ -59,7 +52,6 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.logger.Slog(),
 			d.registryAdapter,
 			d.pool,
-			llmReg,
 			d.callback,
 			harnessFactory,
 			d.targetStore,
@@ -75,6 +67,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 		// (ADR-0106, gibson#615). Set here, after the brain registry init built
 		// the per-tenant belief source, rather than threaded through the ctor.
 		missionManagerInstance.mgr.beliefs = d.tenantBeliefs
+		missionManagerInstance.mgr.skillStore = d.agentSkillStore
 
 		d.logger.Info(context.Background(), "mission manager initialized")
 	})

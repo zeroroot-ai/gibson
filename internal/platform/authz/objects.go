@@ -129,6 +129,53 @@ func ProviderObject(tenant, name string) (string, error) {
 	return modelAccessObject("provider", tenant, name)
 }
 
+// ErrInvalidAgentSkillObject marks an Agent Skill name, or a tenant, that cannot
+// form an Agent Skill object.
+var ErrInvalidAgentSkillObject = errors.New("invalid Agent Skill object")
+
+// AgentSkillObject returns the FGA object of one Agent Skill of one tenant:
+// "agent_skill:<tenant>/<name>". The name follows the Agent Skills format, so
+// it never holds a separator. The tenant segment MUST come from the
+// authenticated context or from the mission, never from a request.
+func AgentSkillObject(tenant, name string) (string, error) {
+	if err := validateTeamSegment("tenant", tenant); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidAgentSkillObject, err)
+	}
+	if err := validateTeamSegment("name", name); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidAgentSkillObject, err)
+	}
+	return "agent_skill:" + tenant + TenantQualifiedSep + name, nil
+}
+
+// SharedAgentSkillTenant is the tenant segment of the object of a Shared Agent
+// Skill. A tenant slug has no underscore, so no tenant can have this segment.
+const SharedAgentSkillTenant = "_shared"
+
+// SharedAgentSkillObject returns the FGA object of a Shared Agent Skill that the
+// operator offers: "agent_skill:_shared/<name>". The platform_enabled tuple of
+// the system tenant sits on it.
+func SharedAgentSkillObject(name string) (string, error) {
+	return AgentSkillObject(SharedAgentSkillTenant, name)
+}
+
+// ErrInvalidOutsideAgentObject marks an outside agent name, or a tenant, that
+// cannot form an outside agent object.
+var ErrInvalidOutsideAgentObject = errors.New("invalid outside agent object")
+
+// OutsideAgentObject returns the FGA object of one outside agent of one tenant:
+// "outside_agent:<tenant>/<name>". The tenant segment MUST come from the
+// authenticated context or from the route claim that ext-authz checked, never
+// from a request body.
+func OutsideAgentObject(tenant, name string) (string, error) {
+	if err := validateTeamSegment("tenant", tenant); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidOutsideAgentObject, err)
+	}
+	if err := validateTeamSegment("name", name); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidOutsideAgentObject, err)
+	}
+	return "outside_agent:" + tenant + TenantQualifiedSep + name, nil
+}
+
 // ModelObject is the model counterpart of ProviderObject.
 func ModelObject(tenant, name string) (string, error) {
 	return modelAccessObject("model", tenant, name)
@@ -518,5 +565,39 @@ func CanonicalComponentResource(resource string) (string, error) {
 		}
 		// A 3-segment typed object (e.g. legacy "plugin:<tenant>:<name>") — unchanged.
 		return resource, nil
+	}
+}
+
+// --- mission gate helpers (gibson#1389) -------------------------------------
+
+// ConditionMissionActive is the FGA condition name of the mission `active`
+// relation (defined in model.fga). The writer (the daemon) and the checker
+// (ext-authz) both use this name.
+const ConditionMissionActive = "mission_active"
+
+// ConditionParamActive is the condition parameter that the tuple carries.
+const ConditionParamActive = "active"
+
+// RelationMissionActive is the relation of the model call gate on a mission.
+const RelationMissionActive = "active"
+
+// MissionObject returns the FGA object of a mission: "mission:<id>".
+func MissionObject(missionID string) string {
+	return "mission:" + missionID
+}
+
+// MissionActiveTuple builds the ConditionalTuple that sets the model call gate
+// of a mission. The subject is the tenant of the mission, so a tuple of one
+// tenant never opens a mission of another tenant. active is true while the
+// mission is working or waits for input.
+func MissionActiveTuple(tenant, missionID string, active bool) ConditionalTuple {
+	return ConditionalTuple{
+		User:          "tenant:" + tenant,
+		Relation:      RelationMissionActive,
+		Object:        MissionObject(missionID),
+		ConditionName: ConditionMissionActive,
+		ConditionContext: map[string]any{
+			ConditionParamActive: active,
+		},
 	}
 }

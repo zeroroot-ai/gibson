@@ -6,6 +6,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
@@ -23,6 +24,12 @@ type Checker interface {
 //
 //	mcp:<connector>:<tool> → Check(subject, can_execute, component:connector/<connector>)
 //	native:<tool>          → Check(subject, can_execute, component:<tool>)
+//	skill:<name>           → Check(agent, can_load, agent_skill:<tenant>/<name>)
+//	                         or Check(mission:<id>, can_load, the same object)
+//
+// An Agent Skill has no default grant. The user of the run holds no right to
+// it. A tenant admin grants it to an agent or to a mission, so the check reads
+// Caller.Agent and Caller.Mission and never Caller.Subject.
 //
 // Both sources check can_execute on a component object — connectors are the
 // fourth component kind, and their execute gate is per connector, covering
@@ -55,6 +62,9 @@ var _ Authorizer = (*FGAAuthorizer)(nil)
 
 // CanExecute implements [Authorizer].
 func (a *FGAAuthorizer) CanExecute(ctx context.Context, caller Caller, id toolid.ID) (bool, error) {
+	if id.Source == toolid.SourceSkill {
+		return a.canLoadSkill(ctx, caller, id)
+	}
 	if caller.Subject == "" {
 		return false, fmt.Errorf("catalog: authz check for %q: caller subject is required", id.Canonical())
 	}
@@ -74,4 +84,40 @@ func (a *FGAAuthorizer) CanExecute(ctx context.Context, caller Caller, id toolid
 	default:
 		return false, fmt.Errorf("catalog: authz check for %q: unknown tool source %q", id.Canonical(), id.Source)
 	}
+}
+
+// agentPrincipalPrefix is the FGA type of an agent identity.
+const agentPrincipalPrefix = "agent_principal:"
+
+// canLoadSkill answers "may this caller load this Agent Skill". The caller may
+// load it when its agent has a grant, or when its mission has a grant. The tenant
+// of the object is the tenant of the caller, so a grant in one tenant says
+// nothing about another. It is fail-closed: no tenant, or no agent and no
+// mission, is an error.
+func (a *FGAAuthorizer) canLoadSkill(ctx context.Context, caller Caller, id toolid.ID) (bool, error) {
+	object, err := authz.AgentSkillObject(caller.Tenant, id.Tool)
+	if err != nil {
+		return false, fmt.Errorf("catalog: authz check for %q: %w", id.Canonical(), err)
+	}
+	var subjects []string
+	if strings.HasPrefix(caller.Agent, agentPrincipalPrefix) {
+		subjects = append(subjects, caller.Agent)
+	}
+	if caller.Mission != "" {
+		subjects = append(subjects, "mission:"+caller.Mission)
+	}
+	if len(subjects) == 0 {
+		return false, fmt.Errorf("catalog: authz check for %q: the caller has no agent principal and no mission",
+			id.Canonical())
+	}
+	for _, subject := range subjects {
+		ok, err := a.fga.Check(ctx, subject, "can_load", object)
+		if err != nil {
+			return false, fmt.Errorf("catalog: authz check for %q: %w", id.Canonical(), err)
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }

@@ -4,6 +4,7 @@
 package toolid_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
@@ -30,6 +31,11 @@ func TestParseCanonicalRoundTrip(t *testing.T) {
 			name:      "native primitive",
 			canonical: "native:nmap",
 			want:      toolid.ID{Source: toolid.SourceNative, Connector: "", Tool: "nmap"},
+		},
+		{
+			name:      "agent skill",
+			canonical: "skill:web-recon-2",
+			want:      toolid.ID{Source: toolid.SourceSkill, Tool: "web-recon-2"},
 		},
 	}
 	for _, tc := range cases {
@@ -58,6 +64,14 @@ func TestParseRejectsMalformed(t *testing.T) {
 		"native:",            // empty native tool
 		"native:nmap:extra",  // native takes no connector
 		"mcp:git:lab:create", // too many segments for mcp
+		"skill:",             // empty Agent Skill name
+		"skill:a:b",          // the separator is not allowed in a name
+		"skill:Recon",        // uppercase letter
+		"skill:-recon",       // leading hyphen
+		"skill:recon-",       // trailing hyphen
+		"skill:re--con",      // two hyphens together
+		"skill:re_con",       // underscore
+		"skill:" + strings.Repeat("a", 65),
 	}
 	for _, s := range bad {
 		if _, err := toolid.Parse(s); err == nil {
@@ -123,5 +137,29 @@ func TestForConnectorTool(t *testing.T) {
 	}
 	if _, err := toolid.ForMCP("gitlab:bad", "create"); err == nil {
 		t.Fatalf("ForMCP with ':' in connector = nil error, want error")
+	}
+}
+
+func TestSkillNameLimits(t *testing.T) {
+	if !toolid.ValidSkillName(strings.Repeat("a", 64)) {
+		t.Error("a name of 64 characters must be valid")
+	}
+	if toolid.ValidSkillName("") {
+		t.Error("an empty name must be invalid")
+	}
+	if _, err := toolid.ForSkill("a:b"); err == nil {
+		t.Error("ForSkill with the separator must fail")
+	}
+	id, err := toolid.ForSkill("web-recon")
+	if err != nil {
+		t.Fatalf("ForSkill: %v", err)
+	}
+	flat, err := id.Flatten()
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	back, err := toolid.Unflatten(flat)
+	if err != nil || back != id {
+		t.Fatalf("Unflatten(%q) = %+v, %v, want %+v", flat, back, err, id)
 	}
 }

@@ -75,8 +75,8 @@ func TestBootstrap_WritesTheMissionNodeThroughTheSoleWriter(t *testing.T) {
 		t.Errorf("YAMLSource = %q, want the stored definition", p.YAMLSource)
 	}
 	// The bootstrap runs because the mission is starting.
-	if p.Status != "running" {
-		t.Errorf("Status = %q, want running", p.Status)
+	if p.Status != "working" {
+		t.Errorf("Status = %q, want working", p.Status)
 	}
 	if p.StartedAt == nil {
 		t.Error("StartedAt is nil; the bootstrap knows the run is starting")

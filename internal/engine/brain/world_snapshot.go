@@ -13,6 +13,11 @@ import (
 // It captures all entity stores as stable snapshot slices plus the
 // monotonic ID counters needed to reproduce replay-deterministic IDs.
 type worldSnapshotData struct {
+	// CountedTokenCalls holds, for each mission that still runs, the IDs of the
+	// calls that the budget counted. Without it, a call delivered again after a
+	// restore would count a second time.
+	CountedTokenCalls map[string][]string `json:"counted_token_calls,omitempty"`
+
 	Hosts        []HostSnapshot        `json:"hosts"`
 	Missions     []MissionSnapshot     `json:"missions"`
 	Work         []WorkSnapshot        `json:"work"`
@@ -79,6 +84,14 @@ type worldSnapshotData struct {
 	// vanish across a snapshot and trim cycle.
 	ProofReviews []ProofReviewSnapshot `json:"proof_reviews"`
 
+	// AgentSkillLoads is each load of an Agent Skill (skill_load.go). Without it
+	// the loads would vanish across a snapshot and trim cycle.
+	AgentSkillLoads []AgentSkillLoad `json:"agent_skill_loads,omitempty"`
+
+	// OutsideAgentCalls is each delegation to an outside agent (outside_call.go).
+	// Without it the calls would vanish across a snapshot and trim cycle.
+	OutsideAgentCalls []OutsideAgentCall `json:"outside_agent_calls,omitempty"`
+
 	// MissionRewinds is the parent of each mission that a rewind started
 	// (ADR-0170). Without it the link from a rewound mission to its earlier
 	// run would vanish across a snapshot and trim cycle.
@@ -100,6 +113,7 @@ type worldSnapshotData struct {
 // atSeq is the Timeline sequence ID of the last event folded into the snapshot.
 func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 	data := worldSnapshotData{
+		CountedTokenCalls:  w.countedTokenCallsSnapshot(),
 		Hosts:              w.Snapshot(),
 		Missions:           w.MissionSnapshot(),
 		Work:               w.WorkSnapshot(),
@@ -127,6 +141,8 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		MissionLineage:       w.MissionLineageSnapshot(),
 		ProofReviews:         w.ProofReviewSnapshot(),
 		MissionRewinds:       w.MissionRewindSnapshot(),
+		AgentSkillLoads:      w.AgentSkillLoadSnapshot(),
+		OutsideAgentCalls:    w.OutsideAgentCallSnapshot(),
 
 		NextHostID:        w.nextHostID,
 		NextDomainID:      w.nextDomainID,
@@ -183,7 +199,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// Replay missions — carry display metadata (ADR-0163/gibson#1118) so the
 	// restored World is the single source of truth for status + identity.
 	for _, m := range data.Missions {
-		if m.Status == MissionPending {
+		if m.Status == MissionSubmitted {
 			Reduce(w, MissionCreated{ID: m.ID, Name: m.Name, Description: m.Description, TargetID: m.TargetID, TenantID: m.TenantID, CreatedBy: m.CreatedBy})
 			continue
 		}
@@ -199,6 +215,11 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			CreatedBy:   m.CreatedBy,
 		}
 		Reduce(w, startEv)
+		// The spend of the run is part of the folded state. A replay of the
+		// token events is not available here, so restore the total.
+		if m.TokensUsed > 0 {
+			Reduce(w, TokenUsed{MissionID: m.ID, Tokens: m.TokensUsed})
+		}
 		switch m.Status {
 		case MissionPaused:
 			Reduce(w, MissionPauseRequested{ID: m.ID})
@@ -206,27 +227,40 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Reduce(w, MissionDone{ID: m.ID, Reason: m.Reason, Outcome: MissionCompleted})
 		case MissionFailed:
 			Reduce(w, MissionDone{ID: m.ID, Reason: m.Reason, Outcome: MissionFailed})
+		case MissionCanceled:
+			Reduce(w, MissionDone{ID: m.ID, Reason: m.Reason, Outcome: MissionCanceled})
 		}
+	}
+
+	// Restore the counted call IDs. Each set is dropped when its mission ends.
+	for id, calls := range data.CountedTokenCalls {
+		set := make(map[string]struct{}, len(calls))
+		for _, c := range calls {
+			set[c] = struct{}{}
+		}
+		w.countedTokenCalls[id] = set
 	}
 
 	// Replay work items. WorkDispatched creates them as running with Attempts=1.
 	for _, wi := range data.Work {
 		dsp := WorkDispatched{
-			ID:           wi.ID,
-			MissionID:    wi.MissionID,
-			RunID:        wi.RunID,
-			ItemKind:     wi.Kind,
-			Target:       wi.Target,
-			Input:        wi.Input,
-			Timeout:      wi.Timeout,
-			Group:        wi.Group,
-			Limit:        wi.Limit,
-			Network:      wi.Network,
-			SlotPins:     wi.SlotPins,
-			StartsFrom:   wi.StartsFrom,
-			Forkable:     wi.Forkable,
-			Checkpoint:   wi.Checkpoint,
-			FromSnapshot: wi.FromSnapshot,
+			ID:               wi.ID,
+			MissionID:        wi.MissionID,
+			RunID:            wi.RunID,
+			ItemKind:         wi.Kind,
+			Target:           wi.Target,
+			Input:            wi.Input,
+			ParentID:         wi.ParentID,
+			Timeout:          wi.Timeout,
+			Group:            wi.Group,
+			Limit:            wi.Limit,
+			Network:          wi.Network,
+			SlotPins:         wi.SlotPins,
+			MaxTokensPerCall: wi.MaxTokensPerCall,
+			StartsFrom:       wi.StartsFrom,
+			Forkable:         wi.Forkable,
+			Checkpoint:       wi.Checkpoint,
+			FromSnapshot:     wi.FromSnapshot,
 		}
 		Reduce(w, dsp)
 		switch wi.State {
@@ -234,6 +268,10 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Reduce(w, WorkCompleted{ID: wi.ID, Result: wi.Result, Snapshot: wi.Snapshot})
 		case WorkFailed:
 			Reduce(w, WorkCompleted{ID: wi.ID, Err: wi.Err})
+		case WorkCanceled:
+			Reduce(w, WorkCompleted{ID: wi.ID, State: WorkCanceled, Err: wi.Err})
+		case WorkInputRequired:
+			Reduce(w, WorkCompleted{ID: wi.ID, State: WorkInputRequired, Err: wi.Err})
 		case WorkPending:
 			// WorkRetried re-arms a failed WorkItem to pending. Use
 			// WorkCompleted(err) first so the retry path applies.
@@ -441,6 +479,14 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		Reduce(w, MissionRewound(r))
 	}
 
+	// Replay the loads of Agent Skills, in Timeline order.
+	for _, c := range data.OutsideAgentCalls {
+		Reduce(w, OutsideAgentCalled(c))
+	}
+	for _, l := range data.AgentSkillLoads {
+		Reduce(w, AgentSkillLoaded(l))
+	}
+
 	// Replay the lineage of each originated mission (gibson#734). Identity is
 	// the mission id, so the order does not matter.
 	for _, l := range data.MissionLineage {
@@ -467,16 +513,21 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// Replay LLM calls.
 	for _, c := range data.LlmCalls {
 		Reduce(w, LlmCallObserved{
-			CallID:              c.CallID,
-			RunID:               c.RunID,
-			Model:               c.Model,
-			ScopeID:             c.ScopeID,
-			PromptTokens:        c.PromptTokens,
-			CompletionTokens:    c.CompletionTokens,
-			Messages:            append([]LlmMessage(nil), c.Messages...),
-			Completion:          c.Completion,
-			CompletionToolCalls: append([]LlmToolCall(nil), c.CompletionToolCalls...),
-			RecordedAtUnixNano:  c.RecordedAtUnixNano,
+			CallID:             c.CallID,
+			RunID:              c.RunID,
+			Model:              c.Model,
+			ScopeID:            c.ScopeID,
+			PromptTokens:       c.PromptTokens,
+			CompletionTokens:   c.CompletionTokens,
+			ErrorText:          c.ErrorText,
+			RecordedAtUnixNano: c.RecordedAtUnixNano,
+			Items:              append([]json.RawMessage(nil), c.Items...),
+			RequestItems:       c.RequestItems,
+			Provider:           c.Provider,
+			CacheReadTokens:    c.CacheReadTokens,
+			CacheWriteTokens:   c.CacheWriteTokens,
+			Cost:               c.Cost,
+			HTTPStatus:         c.HTTPStatus,
 		})
 	}
 

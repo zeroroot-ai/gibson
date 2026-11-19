@@ -6,18 +6,20 @@ package harness
 import (
 	"context"
 	"fmt"
-	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
-	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zeroroot-ai/sdk/protoresolver"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -503,18 +505,6 @@ func (m *CallbackManager) SetWorldViewSource(source WorldViewSource) {
 	}
 }
 
-// SetLLMCallSink sets the LLM-call sink on the callback service, wiring the LLM
-// completion RPCs to the per-tenant World's LlmCall capture (gibson#1083). Call
-// after NewCallbackManager, before Start(). Thread-safe.
-func (m *CallbackManager) SetLLMCallSink(sink LLMCallSink) {
-	if m.server != nil && m.server.service != nil {
-		m.server.service.mu.Lock()
-		defer m.server.service.mu.Unlock()
-		m.server.service.llmCallSink = sink
-		m.logger.Debug("set llm-call sink on callback service")
-	}
-}
-
 // SetToolCallSink sets the tool-call sink on the callback service, wiring
 // CallToolProto to the per-tenant World's AgentToolCall capture — the flight
 // recorder's tool-I/O half (ADR-0120, gibson#271). Call after
@@ -525,6 +515,18 @@ func (m *CallbackManager) SetToolCallSink(sink ToolCallSink) {
 		defer m.server.service.mu.Unlock()
 		WithToolCallSink(sink)(m.server.service)
 		m.logger.Debug("set tool-call sink on callback service")
+	}
+}
+
+// SetSkillLoadSink sets the sink that records each load of an Agent Skill on
+// the Timeline (epic gibson#1364). Call after NewCallbackManager, before
+// Start(). Thread-safe.
+func (m *CallbackManager) SetSkillLoadSink(sink SkillLoadSink) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithSkillLoadSink(sink)(m.server.service)
+		m.logger.Debug("set Agent Skill load sink on callback service")
 	}
 }
 
@@ -685,8 +687,13 @@ func (m *CallbackManager) MissionPolicyForRun(ctx context.Context, tenant, runID
 
 // RecordToolCall writes the flight recorder record of a tool call that has no
 // harness callback context.
-func (m *CallbackManager) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) {
-	m.server.Service().RecordToolCall(ctx, rec, resultJSON, errText)
+func (m *CallbackManager) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
+	return m.server.Service().RecordToolCall(ctx, rec, resultJSON, errText)
+}
+
+// CallMetaTool serves search_tools and invoke_tool for an agent in pull mode.
+func (m *CallbackManager) CallMetaTool(ctx context.Context, tenant, missionID, runID, name string, input []byte) (*harnesspb.CallToolProtoResponse, error) {
+	return m.server.Service().CallMetaTool(ctx, tenant, missionID, runID, name, input)
 }
 
 // SetMissionBlockedTools sets the source of the mission deny list on the

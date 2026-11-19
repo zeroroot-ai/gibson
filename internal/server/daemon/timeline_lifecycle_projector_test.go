@@ -40,7 +40,7 @@ func TestProjectBrainEvent(t *testing.T) {
 			ev:            brain.MissionResumed{ID: "m-resume"},
 			wantEventType: "mission.resumed",
 			wantMissionID: "m-resume",
-			wantStatus:    "running",
+			wantStatus:    "working",
 		},
 
 		// ---- WorkDispatched → node.started --------------------------------
@@ -100,11 +100,11 @@ func TestProjectBrainEvent(t *testing.T) {
 
 		// ---- MissionStarted → status:running ------------------------------
 		{
-			name:          "MissionStarted maps to status running",
+			name:          "MissionStarted maps to status working",
 			ev:            brain.MissionStarted{ID: "mission-2"},
 			wantEventType: "status",
 			wantMissionID: "mission-2",
-			wantStatus:    "running",
+			wantStatus:    "working",
 		},
 
 		// ---- MissionDone(completed) → status:completed -------------------
@@ -120,6 +120,19 @@ func TestProjectBrainEvent(t *testing.T) {
 			wantStatus:    "completed",
 		},
 
+		// ---- MissionDone(canceled) → status:canceled ---------------------
+		{
+			name: "MissionDone canceled maps to status canceled",
+			ev: brain.MissionDone{
+				ID:      "mission-4",
+				Outcome: brain.MissionCanceled,
+				Reason:  "stopped by user",
+			},
+			wantEventType: "status",
+			wantMissionID: "mission-4",
+			wantStatus:    "canceled",
+		},
+
 		// ---- MissionDone(failed) → status:failed -------------------------
 		{
 			name: "MissionDone failed maps to status failed",
@@ -132,6 +145,25 @@ func TestProjectBrainEvent(t *testing.T) {
 			wantMissionID: "mission-3",
 			wantStatus:    "failed",
 			wantError:     "work item failed",
+		},
+
+		// ---- MissionDone with a state that is not final → nil ------------
+		{
+			name:    "MissionDone with the outcome working returns nil",
+			ev:      brain.MissionDone{ID: "mission-5", Outcome: brain.MissionWorking},
+			wantNil: true,
+		},
+		{
+			name:    "MissionDone with the outcome paused returns nil",
+			ev:      brain.MissionDone{ID: "mission-5", Outcome: brain.MissionPaused},
+			wantNil: true,
+		},
+		{
+			name:          "MissionDone with no outcome maps to status completed",
+			ev:            brain.MissionDone{ID: "mission-6"},
+			wantEventType: "status",
+			wantMissionID: "mission-6",
+			wantStatus:    "completed",
 		},
 
 		// ---- non-lifecycle events return nil -----------------------------

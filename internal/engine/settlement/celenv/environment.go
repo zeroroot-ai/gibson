@@ -10,14 +10,13 @@ import (
 )
 
 // EvidenceVariable is the one CEL variable a settlement predicate sees: the
-// recorded []finding.EnhancedEvidence for a bet's demonstration, in capture
+// recorded []*typespb.Evidence for a bet's demonstration, in capture
 // order.
 const EvidenceVariable = "evidence"
 
 // EvidenceMapType is the CEL type of one evidence item: a string-keyed map
-// whose values are dyn, carrying exactly finding.EnhancedEvidence's own
-// shape — "type", "title", "content", "timestamp" (see evidenceItemMap in
-// evidence.go). Field access is plain CEL map dot-access (e.type, e.title),
+// whose values are dyn, carrying "type", "title" and "content" of a
+// types.v1.Evidence (see evidenceItemMap in evidence.go). Field access is plain CEL map dot-access (e.type, e.title),
 // the same pattern internal/engine/brain/condition.go already uses for its
 // "nodes" and "mission" bags — never a generated message type. "content" is
 // carried as-is (JSON-normalized) for a predicate that wants to reach in

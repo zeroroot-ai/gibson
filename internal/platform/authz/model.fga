@@ -344,9 +344,18 @@ type team
 # gibson.daemon.v1.DaemonService/CreateMission, which writes the one tuple
 # this type holds: mission:<id>#belongs_to@tenant:<id>.
 #
-# No decision reads a mission relation. A rewind is authorized like a run:
-# whoever may run the mission may rewind it, through the writer check on the
-# tenant (D51). The mission-level admin and can_rewind relations are deleted.
+# One decision reads a mission relation: `active`. It gates a model call of the
+# mission at the gateway (gibson#1389). The daemon writes the tuple
+#
+#   tenant:<id> | active | mission:<id>   with condition mission_active{active: bool}
+#
+# and changes its context when the mission becomes active (working or input
+# required) or stops being active (paused, completed, failed, canceled).
+# ext-authz checks it on each model call that carries a mission. An absent tuple
+# denies the call. The pattern is the one of tenant.active_session (gibson#627).
+# A rewind is authorized like a run: whoever may run the mission may rewind it,
+# through the writer check on the tenant (D51). The mission-level admin and
+# can_rewind relations are deleted.
 #
 # Every mission, run, target, finding and mission-definition RPC is
 # authorized on the TENANT (`member` or `writer` on tenant:<id>, see
@@ -358,13 +367,14 @@ type team
 type mission
   relations
     define belongs_to: [tenant]
+    define active: [tenant with mission_active]
 
 # ----------------------------------------------------------------------
 # LLM provider / model access gating — spec `llm-user-attribution-governance`
 # ----------------------------------------------------------------------
 #
 # provider and model types gate slot resolution per user, per team and per
-# tenant (internal/engine/llm/modelgate, hosted#358).
+# tenant (internal/platform/modelgate, hosted#358).
 #
 # Both objects are tenant-qualified: provider:<tenant>/<name> and
 # model:<tenant>/<name> (authz.ProviderObject, authz.ModelObject). A grant in
@@ -538,6 +548,62 @@ type job
     # can_read — read the job and follow its events.
     define can_read: opened_by or scorer or can_read from parent
 
+# agent_skill — an Agent Skill, a folder in the Agent Skills format that a
+# mission agent can load (epic gibson#1364, decision 10).
+#
+# An Agent Skill is content. It has no identity and no grant of its own, so it
+# is not a component. Its object is tenant-qualified: "agent_skill:<tenant>/<name>"
+# (authz.AgentSkillObject). A Shared Agent Skill that the operator offers also
+# has one object for each entitled tenant.
+#
+# NO DEFAULT GRANT. The type admits no tenant#member and no user on a load
+# relation. A tenant member does not load an Agent Skill because the tenant owns
+# it. A tenant admin grants it to one agent or to one mission:
+#
+#   tenant:acme                    | owner           | agent_skill:acme/web-recon
+#   agent_principal:agent-abc-123  | granted_agent   | agent_skill:acme/web-recon
+#   mission:m-42                   | granted_mission | agent_skill:acme/web-recon
+#
+# can_load is true for an agent with a granted_agent tuple. A check on a mission
+# subject is true for a mission with a granted_mission tuple. can_manage is the
+# right to publish a version and to write or delete a grant. It needs a tenant
+# admin.
+type agent_skill
+  relations
+    define owner: [tenant]
+    # platform_enabled — the operator offers this Shared Agent Skill. The object
+    # is agent_skill:_shared/<name> (authz.SharedAgentSkillObject). It gives a
+    # tenant admin the right to enable the copy. It grants no load.
+    define platform_enabled: [system_tenant]
+    define granted_agent: [agent_principal]
+    define granted_mission: [mission]
+    define can_load: granted_agent or granted_mission
+    define can_manage: admin from owner
+
+# outside_agent — an A2A agent that runs outside Gibson (epic gibson#1366,
+# gibson#1403). A tenant admin registers it, and the tenant operator renders
+# one route for it on the Agent gateway.
+#
+# The object is tenant-qualified: "outside_agent:<tenant>/<name>"
+# (authz.OutsideAgentObject). It is not a component object, because a component
+# object has no tenant segment, and the name of an outside agent belongs to one
+# tenant.
+#
+# NO DEFAULT GRANT. The type admits no tenant#member and no user on a call
+# relation. A tenant admin grants an outside agent to ONE mission:
+#
+#   tenant:acme  | owner           | outside_agent:acme/partner-scout
+#   mission:m-42 | granted_mission | outside_agent:acme/partner-scout
+#
+# ext-authz reads the owner tuple to learn that a route target is an outside
+# agent. It then checks can_call for the mission of the task grant.
+type outside_agent
+  relations
+    define owner: [tenant]
+    define granted_mission: [mission]
+    define can_call: granted_mission
+    define can_manage: admin from owner
+
 # ----------------------------------------------------------------------
 # Conditions — OpenFGA CEL predicates for contextual tuple evaluation.
 # Added for instant-session-revocation (gibson#627).
@@ -563,4 +629,14 @@ type job
 # Spec: instant-session-revocation (gibson#627 Slice 1).
 condition token_not_revoked(token_issued_at: timestamp, revoked_at: timestamp) {
   token_issued_at > revoked_at
+}
+
+# mission_active — the model call gate of a mission (gibson#1389).
+#
+# The daemon sets `active` in the tuple context. It is true while the mission
+# is working or waits for input (brain.MissionStatus.IsActive), and false once
+# the mission is paused or ended. The request carries no context, so the tuple
+# alone decides.
+condition mission_active(active: bool) {
+  active
 }

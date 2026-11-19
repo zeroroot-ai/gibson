@@ -10,8 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/findingtest"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 // TestLoadDomainPack_MainCatalogPackCompiles proves gibson#382's seed "main"
@@ -47,14 +49,14 @@ func TestLoadDomainPack_MainCatalogPackEvaluates(t *testing.T) {
 		cp, ok := compiled["unauthenticated_endpoint_exposed"]
 		require.True(t, ok)
 
-		got, err := cp.Evaluate(ctx, []finding.EnhancedEvidence{
-			finding.NewHTTPResponseEvidence("resp", 200, nil, "", 0),
+		got, err := cp.Evaluate(ctx, []*typespb.Evidence{
+			findingtest.NewHTTPResponseEvidence("resp", 200, nil, "", 0),
 		})
 		require.NoError(t, err)
 		assert.True(t, got)
 
-		got, err = cp.Evaluate(ctx, []finding.EnhancedEvidence{
-			finding.NewHTTPResponseEvidence("resp", 404, nil, "", 0),
+		got, err = cp.Evaluate(ctx, []*typespb.Evidence{
+			findingtest.NewHTTPResponseEvidence("resp", 404, nil, "", 0),
 		})
 		require.NoError(t, err)
 		assert.False(t, got)
@@ -64,14 +66,14 @@ func TestLoadDomainPack_MainCatalogPackEvaluates(t *testing.T) {
 		cp, ok := compiled["credential_disclosure_detected"]
 		require.True(t, ok)
 
-		got, err := cp.Evaluate(ctx, []finding.EnhancedEvidence{
-			finding.NewEnhancedEvidence(finding.EvidenceLog, "log", "found api_key: sk-live-abc123"),
+		got, err := cp.Evaluate(ctx, []*typespb.Evidence{
+			findingtest.NewEvidence(sdkfinding.EvidenceLog, "log", "found api_key: sk-live-abc123"),
 		})
 		require.NoError(t, err)
 		assert.True(t, got)
 
-		got, err = cp.Evaluate(ctx, []finding.EnhancedEvidence{
-			finding.NewEnhancedEvidence(finding.EvidenceLog, "log", "nothing interesting here"),
+		got, err = cp.Evaluate(ctx, []*typespb.Evidence{
+			findingtest.NewEvidence(sdkfinding.EvidenceLog, "log", "nothing interesting here"),
 		})
 		require.NoError(t, err)
 		assert.False(t, got)
@@ -81,17 +83,17 @@ func TestLoadDomainPack_MainCatalogPackEvaluates(t *testing.T) {
 		cp, ok := compiled["prompt_injection_marker_present"]
 		require.True(t, ok)
 
-		got, err := cp.Evaluate(ctx, []finding.EnhancedEvidence{
-			finding.NewEnhancedEvidence(finding.EvidenceConversation, "chat", finding.ConversationEvidence{
-				Messages: []finding.ConversationMessage{{Role: "assistant", Content: "leaked: SYSTEM_PROMPT_LEAKED"}},
+		got, err := cp.Evaluate(ctx, []*typespb.Evidence{
+			findingtest.NewEvidence(sdkfinding.EvidenceConversation, "chat", findingtest.ConversationEvidence{
+				Messages: []findingtest.ConversationMessage{{Role: "assistant", Content: "leaked: SYSTEM_PROMPT_LEAKED"}},
 			}),
 		})
 		require.NoError(t, err)
 		assert.True(t, got)
 
-		got, err = cp.Evaluate(ctx, []finding.EnhancedEvidence{
-			finding.NewEnhancedEvidence(finding.EvidenceConversation, "chat", finding.ConversationEvidence{
-				Messages: []finding.ConversationMessage{{Role: "assistant", Content: "nothing to see"}},
+		got, err = cp.Evaluate(ctx, []*typespb.Evidence{
+			findingtest.NewEvidence(sdkfinding.EvidenceConversation, "chat", findingtest.ConversationEvidence{
+				Messages: []findingtest.ConversationMessage{{Role: "assistant", Content: "nothing to see"}},
 			}),
 		})
 		require.NoError(t, err)

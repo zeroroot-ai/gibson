@@ -72,6 +72,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -80,6 +81,7 @@ import (
 	"golang.org/x/crypto/hkdf"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
@@ -271,6 +273,16 @@ const CallingAgentClaim = "cag"
 // callback names its run, and the SDKs read it from this claim (gibson#1235).
 const MissionRunClaim = sdkcg.MissionRunClaim
 
+// InitiatorClaim is the name of the signed claim that carries the person who
+// created the mission, as an FGA user. ext-authz uses it as the subject of the
+// model access check (gibson#1388).
+const InitiatorClaim = modelcall.InitiatorClaim
+
+// InitiatorOf reads the initiator claim of a token whose signature was
+// verified. It is empty for a grant of a mission that no person created, and for
+// a grant minted before the claim existed.
+func InitiatorOf(token string) string { return modelcall.ClaimString(token, InitiatorClaim) }
+
 // MintRequest carries the per-task scope.
 type MintRequest struct {
 	// Subject is the agent's Zitadel service-account ID. Required.
@@ -305,6 +317,12 @@ type MintRequest struct {
 	// another agent is refused. Empty for the grant of an agent, whose subject
 	// names the agent.
 	CallingAgent string
+
+	// Initiator is the person who created the mission, as an FGA user
+	// ("user:<id>"). It travels as the signed claim "ini". A fork and a renewal
+	// copy it from the grant that they come from, and no caller can change it.
+	// Empty when no person created the mission.
+	Initiator string
 
 	// RecipientClass is the recipient workload's class as recorded on
 	// its Zitadel service-account. Acceptable values are "agent",
@@ -416,6 +434,9 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 	}
 	if req.MissionRunID != "" {
 		claims[MissionRunClaim] = req.MissionRunID
+	}
+	if req.Initiator != "" {
+		claims[InitiatorClaim] = req.Initiator
 	}
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
@@ -556,3 +577,55 @@ func buildKeyDescriptor(pub ed25519.PublicKey, kid, principal, tenant, status st
 // Compile-time assert: rand is referenced so the import is valid even
 // if a future refactor stops using it directly. Cheap.
 var _ = rand.Reader
+
+// DaemonCallRequest is the scope of a daemon call grant (gibson#1392).
+type DaemonCallRequest struct {
+	// Tenant is the tenant of the call. Required.
+	Tenant string
+	// Purpose is one of the purposes of modelcall. It decides the one route.
+	Purpose string
+	// Initiator is the person for whom the daemon makes the call, as an FGA user
+	// ("user:<id>"). Required for the purpose chat. It is the FGA subject of the
+	// model access check.
+	Initiator string
+}
+
+// MintDaemonCall signs a daemon call grant. It is valid for 60 seconds, names
+// one route, and holds no mission and no task. It uses the same key and the same
+// kid as a task grant. Its `typ` header is modelcall.DaemonCallJWTType.
+func (m *Minter) MintDaemonCall(req DaemonCallRequest) (string, error) {
+	route, ok := modelcall.PurposeRoute(req.Purpose)
+	if !ok {
+		return "", fmt.Errorf("capabilitygrant: %q is not a purpose of a daemon call grant", req.Purpose)
+	}
+	if req.Tenant == "" {
+		return "", errors.New("capabilitygrant: Tenant required for a daemon call grant")
+	}
+	if req.Purpose == modelcall.PurposeChat && !strings.HasPrefix(req.Initiator, "user:") {
+		return "", errors.New("capabilitygrant: a chat grant needs the initiator, as user:<id>")
+	}
+	now := time.Now().UTC()
+	claims := jwt.MapClaims{
+		"iss":                  m.issuer,
+		"aud":                  m.audience,
+		"sub":                  modelcall.DaemonSubject(req.Purpose),
+		"tenant":               req.Tenant,
+		modelcall.ClaimPurpose: req.Purpose,
+		modelcall.ClaimRoute:   route,
+		"iat":                  now.Unix(),
+		"exp":                  now.Add(modelcall.DaemonCallMaxLifetime).Unix(),
+		"jti":                  uuid.NewString(),
+	}
+	if req.Initiator != "" {
+		claims[InitiatorClaim] = req.Initiator
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	signer := m.keySet().Current
+	tok.Header["kid"] = signer.keyID
+	tok.Header["typ"] = modelcall.DaemonCallJWTType
+	signed, err := tok.SignedString(signer.priv)
+	if err != nil {
+		return "", fmt.Errorf("capabilitygrant: sign the daemon call grant: %w", err)
+	}
+	return signed, nil
+}

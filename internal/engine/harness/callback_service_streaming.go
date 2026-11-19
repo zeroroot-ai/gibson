@@ -50,6 +50,8 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 			},
 		}
 	}
+	// The terminal event carries the id of the recorded call, also when it failed.
+	event.ToolCallId = resp.GetToolCallId()
 	event.TraceId = req.GetContext().GetTraceId()
 	event.SpanId = req.GetContext().GetSpanId()
 	event.Sequence = 1

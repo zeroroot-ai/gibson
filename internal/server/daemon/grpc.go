@@ -9,7 +9,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/zeroroot-ai/gibson/internal/platform/trainerid"
 	"io"
 	"log/slog"
 	"net"
@@ -19,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/trainerid"
+
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
@@ -27,7 +28,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/reembed"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/infra/idempotency"
@@ -40,6 +40,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/identity"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
+	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
@@ -79,6 +80,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
@@ -746,21 +748,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if err := startTimelineArchive(ctx, d.platformDB, func() timelinePoolForer { return d.pool }, d.logger.Slog()); err != nil {
 		return nil, err
 	}
-	// SSRF egress policy for every LLM provider this server constructs from a
-	// tenant-supplied base_url. Off by default (guard on); operators running an
-	// in-cluster or air-gapped model server opt in via
-	// security.allow_private_llm_endpoints — the same knob the embedder
-	// resolver honours below.
-	daemonSvc.WithAllowPrivateLLMEndpoints(d.config.Security.AllowPrivateLLMEndpoints)
+	// ExecuteLLM sends its chat call to the model gateway (gibson#1392).
+	if d.modelClient != nil {
+		daemonSvc.WithModelClient(d.modelClient)
+		daemonSvc.WithModelLister(d.modelClient)
+	}
 	if d.authorizer != nil {
 		daemonSvc.WithAuthorizer(d.authorizer)
 		d.logger.Info(ctx, "FGA authorizer wired into DaemonServer for admin RPCs")
-	}
-	// Capture completed ExecuteLLM calls into the per-tenant brain World as
-	// LlmCall entities (gibson#755) — the World replacement for Langfuse.
-	if d.brainRegistry != nil {
-		daemonSvc.SetLLMCallSink(ingestLLMCall(d.brainRegistry))
-		d.logger.Info(ctx, "wired ExecuteLLM World-capture sink to the ECS brain")
 	}
 	// Wire the CG Minter so CreateAgentIdentity can issue a first-registration
 	// bootstrap token (gibson#648 / ADR-0045). d.cgMinter is constructed during
@@ -814,6 +809,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if d.pool != nil && d.secretsService != nil {
 		providerStore := providerconfig.NewBrokerBackedStore(d.pool, d.secretsService)
 		daemonSvc.WithProviderConfigStore(providerStore)
+		// A provider save refuses a base_url whose host has a private address,
+		// unless security.allow_private_llm_endpoints is set.
+		daemonSvc.WithPrivateModelEndpoints(d.config.Security.AllowPrivateLLMEndpoints)
 		d.logger.Info(ctx, "provider-config store wired (broker-backed: metadata in Postgres, credentials in secrets broker)")
 
 		// Per-tenant embedder resolution (E11 BYO-embedder, ADR-0059,
@@ -821,10 +819,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// classification resolve their embedder from the tenant's configured
 		// embedding provider via embedder.NewFromProvider, sized to that model's
 		// vector dimension. A tenant with no embedding provider hits the
-		// onboarding gate. allowPrivate honours security.allow_private_llm_endpoints:
-		// off by default (the secure SSRF default); operators running an
-		// in-cluster/air-gapped embedder endpoint opt in via that knob.
-		embedderResolver := tenantembedder.NewResolver(providerStore, d.config.Security.AllowPrivateLLMEndpoints)
+		// onboarding gate. The embedder calls go through the model gateway. The
+		// address of an embedder endpoint is checked when the provider is saved
+		// (checkProviderBaseURL), with security.allow_private_llm_endpoints.
+		embedderResolver := tenantembedder.NewResolver(providerStore, d.modelClient)
 		daemonSvc.WithEmbedderResolver(embedderResolver)
 		d.embedderResolver = embedderResolver
 		d.logger.Info(ctx, "per-tenant embedder resolver wired (BYO-embedder; vector features gated until an embedding provider is configured)")
@@ -925,51 +923,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// auditWriter and is skipped without one.
 	// Spec: llm-user-attribution-governance (Requirement 4).
 	filter := modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0)
-	// ExecuteLLM asks the same filter before it calls a provider. Expose the
-	// filter's cache-invalidation hook so grant/revoke take effect within
-	// milliseconds rather than the filter's 30s TTL.
-	daemonSvc.WithModelFilter(filter)
+	// Expose the cache-invalidation hook of the filter so grant/revoke take
+	// effect within milliseconds rather than the filter's 30s TTL.
 	daemonSvc.WithModelGateInvalidator(filter)
-	if d.infrastructure != nil {
-		if dsm, ok := d.infrastructure.slotManager.(*DaemonSlotManager); ok {
-			dsm.WithModelFilter(filter)
-			d.logger.Info(ctx, "modelgate filter wired into slot resolver (spec: llm-user-attribution-governance)")
-			// Emit a model_resolved event for every resolution, allowed or
-			// denied.
-			if d.auditWriter != nil {
-				emitter := d.auditWriter
-				logger := d.logger.Slog()
-				dsm.WithResolveCallback(func(ctx context.Context, picked modelgate.Candidate, allowed bool) {
-					tenantID := auth.TenantStringFromContext(ctx)
-					userID := ""
-					if uid, ok := auth.ActingUserFromContext(ctx); ok {
-						userID = uid
-					} else if uid, ok := auth.InitiatorUserFromContext(ctx); ok {
-						userID = uid
-					}
-					audit.EmitModelResolved(ctx, emitter, logger, audit.ModelResolutionEvent{
-						TenantID:       tenantID,
-						UserID:         userID,
-						ChosenProvider: picked.Provider,
-						ChosenModel:    picked.Model,
-						Considered: []audit.CandidateOutcome{{
-							Provider: picked.Provider,
-							Model:    picked.Model,
-							Allowed:  allowed,
-							Reason: func() string {
-								if allowed {
-									return "allowed"
-								}
-								return "fga_denied"
-							}(),
-						}},
-					})
-				})
-				d.logger.Info(ctx, "model_resolved audit emitter wired into slot resolver")
-			}
-		}
-	}
-
 	// Agent-owner lookup on the callback service so DelegateToAgent
 	// populates ExecutorUser on sub-agent dispatch. Uses Discover to
 	// read the registered-component instance's Metadata map — the
@@ -1109,6 +1065,16 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			"daemon: conversation store was not wired; Redis state client is required " +
 				"(stateClient nil or non-standalone mode) — " +
 				"dashboard#549: conversation store must always be present at startup",
+		)
+	}
+
+	// The audit writer must be wired by this point. The model_resolved audit
+	// event of each slot resolution needs it, and the resolver has no guard for
+	// a missing one. A daemon with no audit writer fails here, at start.
+	if d.auditWriter == nil {
+		return nil, errors.New(
+			"daemon: the audit writer was not wired; the Redis state client and the FGA authorizer " +
+				"are required because each slot resolution emits a model_resolved audit event",
 		)
 	}
 
@@ -1352,7 +1318,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	tenantAuditWriter.Start(ctx)
 	daemonSvc.WithTenantAdminAuditWriter(tenantAuditWriter)
 	d.logger.Info(ctx, "audit writer wired into TenantService")
-	// Wire pool getter for ExportFindings (Neo4j DashboardQueries path).
+	// Wire pool getter for ExportFindings and GetFinding.
 	// Spec: dashboard-neo4j-crud-removal.
 	daemonSvc.WithPoolGetter(func() datapool.Pool { return d.pool })
 	tenantv1.RegisterTenantServiceServer(srv, daemonSvc)
@@ -1548,6 +1514,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// handler serves the direct-dial connector operator SVID only.
 	if d.secretsService != nil {
 		daemonSvc.WithConnectorCredentialSource(d.secretsService, connectorOperatorSVID(d.spiffeTrustDomain()))
+		// The tenant operator reads the credential of a model provider the
+		// same way and writes it in the namespace of the model gateway
+		// (gibson#1387).
+		daemonSvc.WithModelProviderCredentialSource(d.secretsService, tenantOperatorSVID(d.spiffeTrustDomain()))
 	}
 
 	// Register ConnectorService — the connector lifecycle (catalog, enable,
@@ -1738,6 +1708,15 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		return nil, err
 	}
 	d.registerCatalogPlugin(ctx, srv)
+	if err := d.registerAgentSkill(ctx, srv, pageKeys); err != nil {
+		return nil, err
+	}
+	if err := d.registerOutsideAgent(ctx, srv, pageKeys); err != nil {
+		return nil, err
+	}
+	// The tenant operator pulls the outside agent records and their credential
+	// through the two operator RPCs (gibson#1403).
+	daemonSvc.WithOutsideAgentOperatorSource(d.outsideAgents)
 
 	// Register gibson.tenant.v1.OntologyExtensionService — the tenant
 	// owner's review of agent-proposed Taxonomy extensions (ADR-0124,
@@ -1802,8 +1781,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// The registry uses a 30-second TTL: components that stop heartbeating within
 	// that window are automatically deregistered by Redis key expiry.
 	//
-	// Harness proxy dependencies (llmCompleter, memStore) are wired as nil until
-	// task 5.4 connects those subsystems. findingSubmitter is wired here using
+	// findingSubmitter is wired here using
 	// GraphRAGFindingSubmitter when infrastructure is available.
 	if d.stateClient != nil {
 		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
@@ -1820,7 +1798,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			if d.brainRegistry != nil {
 				graphRAGSubmitter := component.NewGraphRAGFindingSubmitter(
 					ingestComponentFinding(d.brainRegistry), // findings → World → projector (ADR-0107)
-					d.pool,                                  // per-tenant Pool: nil when security.key_provider not configured
+					// The one home of each finding. With no data pool the store
+					// refuses each write, so a finding is never only in the World.
+					pgstore.New(func() datapool.Pool { return d.pool }),
 					d.stateClient,
 					d.logger.WithComponent("finding-submitter").Slog(),
 				)
@@ -1834,60 +1814,33 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				} else {
 					d.logger.Warn(ctx, "CapabilityGrantService unavailable; findings carry the submitting principal but no registered agent name")
 				}
+				// A finding that names tool calls gets tier 1 evidence from the
+				// same record that a proof reads.
+				graphRAGSubmitter.WithToolCallRecord(newTenantRoutedProofSettlement(d.brainRegistry))
 				findingSubmitter = graphRAGSubmitter
 				d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings → per-tenant store + World projection")
 			} else {
 				d.logger.Warn(ctx, "brain registry not ready; finding submitter not wired (findings will be logged only)")
 			}
 
-			// Build LLM adapter when the infrastructure (registry + slot manager) is ready.
-			// The adapter bridges the narrow LLMCompleter/LLMToolCompleter interfaces to
-			// the full provider resolution chain.
-			var llmAdapter *component.LLMRegistryAdapter
-			if d.infrastructure != nil &&
-				d.infrastructure.llmRegistry != nil &&
-				d.infrastructure.slotManager != nil {
-				llmAdapter = component.NewLLMRegistryAdapter(
-					d.infrastructure.llmRegistry,
-					d.infrastructure.slotManager,
-					d.logger.WithComponent("llm-adapter").Slog(),
-				// Install the per-tenant resolver — the SAME one the mission
-				// path uses (harness_init) — or every component completion
-				// fails closed with "per-tenant LLM provider resolution is not
-				// configured". Without this the adapter was wired but inert:
-				// an enrolled agent's completion never reached a provider.
-				).WithTenantResolver(d.newSlotManagerForTenant())
-				d.logger.Info(ctx, "LLM adapter wired into ComponentService with per-tenant resolver")
-			} else {
-				d.logger.Warn(ctx, "LLM adapter not wired: infrastructure or LLM registry not ready; LLM completion RPCs will return Unimplemented")
-			}
-
-			var llmCompleterIface component.LLMCompleter
-			var llmToolCompleterIface component.LLMToolCompleter
-			if llmAdapter != nil {
-				llmCompleterIface = llmAdapter
-				llmToolCompleterIface = llmAdapter
-			}
-
 			compSvc := component.NewComponentServiceServer(
 				compRegistry,
 				compQueue,
 				d.logger.Slog(),
-				llmCompleterIface,      // LLMRegistryAdapter or nil
-				findingSubmitter,       // GraphRAGFindingSubmitter or nil
-				d.componentAccessStore, // nil when no KeyProvider configured
-				auditLogger,
-			)
 
-			// Wire LLMToolCompleter for tool-calling and structured output support.
+				findingSubmitter,
+				d.componentAccessStore,
+				auditLogger)
+
 			// A bank member heartbeats with its status (ADR-0119, gibson#1716).
 			compSvc.WithMemberStatusSink(&memberEvents{daemon: d})
+			compSvc.WithSlotModelResolver(&componentSlotModels{forTenant: d.newSlotManagerForTenant()})
+			compSvc.WithGateways(
+				component.GatewayInfo{URL: d.publicGateways.model.URL, CAPEM: d.publicGateways.model.CAPEM},
+				component.GatewayInfo{URL: d.publicGateways.agent.URL, CAPEM: d.publicGateways.agent.CAPEM})
+			compSvc.WithOutsideAgents(d.outsideAgents)
 			compSvc.WithEventHub(componentEventHub)
 			d.logger.Info(ctx, "WatchComponentEvents wired into ComponentService (gibson#154)")
-			if llmToolCompleterIface != nil {
-				compSvc.WithLLMToolCompleter(llmToolCompleterIface)
-				d.logger.Info(ctx, "LLMToolCompleter wired into ComponentService")
-			}
 
 			// Wire the DiscoveryResult ingest path so a component's SubmitResult
 			// carrying proto field 100 folds the discovered entities into the
@@ -2016,6 +1969,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				// policy of its run, the same policy as invoke_tool.
 				compSvc.WithMissionPolicy(d.callback.MissionPolicyForRun)
 				compSvc.WithToolCallRecorder(d.callback.RecordToolCall)
+				compSvc.WithMetaTools(metaToolAdapter{svc: d.callback})
 			}
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 
@@ -3123,7 +3077,7 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		TenantID:            tenantForMission.String(),
 		Name:                req.Name,
 		Description:         req.Description,
-		Status:              mission.MissionStatusPending,
+		Status:              mission.MissionStatusSubmitted,
 		TargetID:            targetID,
 		MissionDefinitionID: missionDefinitionID,
 		CreatedBy:           req.CreatedBy,

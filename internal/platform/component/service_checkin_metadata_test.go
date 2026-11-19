@@ -31,7 +31,7 @@ func (r *capturingRegistry) Register(_ context.Context, _, _, _ string, info Com
 // is not changed.
 func TestRegisterComponent_DropsDaemonOwnedMetadata(t *testing.T) {
 	reg := &capturingRegistry{}
-	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil)
+	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil)
 
 	req := minimalRegisterReq("tool", "my-tool")
 	req.Metadata = map[string]string{

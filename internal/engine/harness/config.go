@@ -5,14 +5,14 @@ package harness
 
 import (
 	"context"
-	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"log/slog"
 	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/events"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
@@ -35,10 +35,9 @@ type TargetFactsLookup interface {
 // production deployments.
 //
 // Required fields:
-//   - SlotManager: Required for LLM slot resolution and provider selection
+//   - SlotManagerForTenant: Required for LLM slot resolution and provider selection
 //
 // Optional fields (will use defaults if nil):
-//   - LLMRegistry: Uses empty registry if nil (no providers available)
 //   - MemoryManager: Uses in-memory implementation if nil
 //   - Tracer: Uses no-op tracer if nil
 //   - Logger: Uses default slog logger if nil
@@ -46,22 +45,11 @@ type TargetFactsLookup interface {
 //   - Metrics: Uses NoOpMetricsRecorder if nil
 //   - GraphRAGBridge: Uses NoopGraphRAGBridge if nil (no knowledge graph storage)
 type HarnessConfig struct {
-	// LLMRegistry provides access to registered LLM providers.
-	// Used for LLM completion operations (Complete, CompleteWithTools, Stream).
-	// Optional: defaults to empty registry (no providers available).
-	LLMRegistry llm.LLMRegistry
-
-	// SlotManager resolves slot names to provider configurations.
-	// Required for translating agent slot definitions into concrete provider/model pairs.
-	// This is the only required field - harness creation will fail if nil.
-	SlotManager llm.SlotManager
-
-	// SlotManagerForTenant, when set, produces a tenant-scoped SlotManager +
-	// LLMRegistry for a mission's tenant. The factory calls it on Create with
-	// missionCtx.TenantID so slot resolution sees only that tenant's configured
-	// providers (per-tenant LLM provider scoping). When nil, the global
-	// SlotManager/LLMRegistry above are used (legacy single-tenant path).
-	SlotManagerForTenant func(ctx context.Context, tenantID string) (llm.SlotManager, llm.LLMRegistry, error)
+	// SlotManagerForTenant produces a tenant-scoped SlotManager for the tenant
+	// of a mission. The factory calls it on Create with missionCtx.TenantID, so
+	// slot resolution sees only the provider records of that tenant. It is the
+	// only slot manager path. Harness creation fails if it is nil.
+	SlotManagerForTenant func(ctx context.Context, tenantID string) (SlotManager, error)
 
 	// ProtoResolver provides dynamic proto type resolution for tool execution.
 	// Used to convert structpb.Struct inputs to typed proto messages using FileDescriptorSets.
@@ -143,6 +131,10 @@ type HarnessConfig struct {
 	// graph projector materializes :AgentRun + DELEGATED_TO (ADR-0107). Optional;
 	// when nil, delegation provenance is not recorded.
 	DelegationSink DelegationSink
+
+	// FindingSink folds a submitted finding into the World, so the graph holds a
+	// finding node with the same ID as the finding row in Postgres. Optional.
+	FindingSink FindingSink
 
 	// Middleware is the middleware chain to apply to harness operations.
 	// When set, operations are routed through the configured middleware chain
@@ -303,21 +295,21 @@ type QuotaCounter interface {
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.
-// Only SlotManager is strictly required - all other fields have reasonable defaults.
+// Only SlotManagerForTenant and TargetFacts are required - all other fields have reasonable defaults.
 //
 // Validation rules:
-//   - SlotManager must not be nil (required for LLM operations)
+//   - SlotManagerForTenant must not be nil (required for LLM operations)
 //   - All other fields are optional and can be nil
 //
 // Returns:
 //   - nil if validation passes
-//   - ErrHarnessInvalidConfig if SlotManager is nil
+//   - ErrHarnessInvalidConfig if SlotManagerForTenant is nil
 func (c *HarnessConfig) Validate() error {
-	// SlotManager is required for LLM slot resolution
-	if c.SlotManager == nil {
+	// SlotManagerForTenant is required for LLM slot resolution
+	if c.SlotManagerForTenant == nil {
 		return types.NewError(
 			ErrHarnessInvalidConfig,
-			"SlotManager is required (cannot be nil)",
+			"SlotManagerForTenant is required (cannot be nil)",
 		)
 	}
 
@@ -338,7 +330,6 @@ func (c *HarnessConfig) Validate() error {
 // This method is idempotent and safe to call multiple times.
 //
 // Default implementations:
-//   - LLMRegistry: NewLLMRegistry() (empty registry)
 //   - ProtoResolver: NewDefaultProtoResolver() (default resolver with standard config)
 //   - Tracer: trace.NewNoopTracerProvider().Tracer("gibson.harness")
 //   - Logger: slog.Default()
@@ -346,13 +337,9 @@ func (c *HarnessConfig) Validate() error {
 //   - Metrics: NewNoOpMetricsRecorder()
 //
 // Note: MemoryManager is not defaulted as it requires mission-specific configuration.
-// Note: SlotManager is not defaulted as it is a required field.
+// Note: SlotManagerForTenant is not defaulted as it is a required field.
 // Note: RegistryAdapter is not defaulted as it requires external configuration (if nil, agent delegation will not be available).
 func (c *HarnessConfig) ApplyDefaults() {
-	if c.LLMRegistry == nil {
-		c.LLMRegistry = llm.NewLLMRegistry()
-	}
-
 	if c.ProtoResolver == nil {
 		c.ProtoResolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
 	}

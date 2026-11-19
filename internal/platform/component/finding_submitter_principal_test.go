@@ -62,7 +62,7 @@ func recordingSink(seen *finding.EnhancedFinding) WorldFindingSink {
 func TestFindingSubmitter_StampsTheVerifiedSubmitter(t *testing.T) {
 	var seen finding.EnhancedFinding
 	registry := &stubEnrolledAgents{tenant: victimTenant, principal: "agent_principal:sa-1", name: "zerocool-demo", enrolledBy: "user-9"}
-	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), nil, nil, testLogger()).
+	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), &memFindingStore{}, nil, testLogger()).
 		WithEnrolledAgentLookup(registry)
 
 	// The payload claims another submitter. None of it is attribution.
@@ -83,7 +83,7 @@ func TestFindingSubmitter_StampsTheVerifiedSubmitter(t *testing.T) {
 
 func TestFindingSubmitter_RefusesACallerWithoutIdentity(t *testing.T) {
 	var seen finding.EnhancedFinding
-	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), nil, nil, testLogger())
+	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), &memFindingStore{}, nil, testLogger())
 
 	_, err := submitter.Submit(auth.ContextWithTenantString(context.Background(), victimTenant),
 		victimTenant, "", `{"title":"orphan"}`, "", "")
@@ -95,7 +95,7 @@ func TestFindingSubmitter_RefusesACallerWithoutIdentity(t *testing.T) {
 func TestFindingSubmitter_UnenrolledPrincipalCarriesThePrincipalOnly(t *testing.T) {
 	var seen finding.EnhancedFinding
 	registry := &stubEnrolledAgents{tenant: victimTenant, principal: "agent_principal:someone-else", name: "other"}
-	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), nil, nil, testLogger()).
+	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), &memFindingStore{}, nil, testLogger()).
 		WithEnrolledAgentLookup(registry)
 
 	_, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-2"), victimTenant, "", `{"title":"x"}`, "", "")
@@ -108,7 +108,7 @@ func TestFindingSubmitter_UnenrolledPrincipalCarriesThePrincipalOnly(t *testing.
 
 func TestFindingSubmitter_HumanSubjectIsStampedAsAUser(t *testing.T) {
 	var seen finding.EnhancedFinding
-	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), nil, nil, testLogger()).
+	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), &memFindingStore{}, nil, testLogger()).
 		WithEnrolledAgentLookup(&stubEnrolledAgents{})
 
 	ctx := auth.ContextWithTenantString(
@@ -123,7 +123,7 @@ func TestFindingSubmitter_HumanSubjectIsStampedAsAUser(t *testing.T) {
 
 func TestFindingSubmitter_RegistryFailureIsAnError(t *testing.T) {
 	var seen finding.EnhancedFinding
-	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), nil, nil, testLogger()).
+	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), &memFindingStore{}, nil, testLogger()).
 		WithEnrolledAgentLookup(&stubEnrolledAgents{err: errors.New("db down")})
 
 	_, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"), victimTenant, "", `{"title":"x"}`, "", "")

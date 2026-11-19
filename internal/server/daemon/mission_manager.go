@@ -15,13 +15,13 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
@@ -146,7 +146,6 @@ type missionManager struct {
 	logger          *slog.Logger
 	registry        component.ComponentDiscovery
 	pool            datapool.Pool // per-tenant data-plane pool (replaces missionStore, missionRunStore, findingStore)
-	llmRegistry     llm.LLMRegistry
 	callbackManager *harness.CallbackManager
 	harnessFactory  harness.HarnessFactoryInterface
 	targetStore     targetStoreLookup
@@ -166,6 +165,10 @@ type missionManager struct {
 	// start (ADR-0106, gibson#615). The mission records the version, and the
 	// tenant keeps it active until the mission ends.
 	beliefs beliefPinner
+	// skillStore reads the Agent Skill store of the daemon. The store starts
+	// after the manager, so the manager reads it at mission start. A mission
+	// pins the digest of each Agent Skill that it lists (gibson#1375).
+	skillStore func() agentskillstore.Store
 
 	// authzStore records the owning user per run so that HarnessCallbackService.Authorize
 	// can resolve run_id → (user_id, tenant_id) during component callbacks.
@@ -216,6 +219,14 @@ type activeMission struct {
 	tenantID     auth.TenantID // tenant this mission belongs to (C9 isolation key)
 }
 
+// noAgentSkills is the Agent Skill store source before the daemon sets the real
+// one. It has no store.
+func noAgentSkills() agentskillstore.Store { return nil }
+
+// agentSkills returns the Agent Skill store, or nil when the daemon has built
+// none yet.
+func (m *missionManager) agentSkills() agentskillstore.Store { return m.skillStore() }
+
 // newMissionManager creates a new mission manager instance.
 // The pool parameter provides per-tenant data-plane connections; it replaces the
 // former missionStore, missionRunStore, and findingStore parameters. When pool is nil
@@ -225,7 +236,6 @@ func newMissionManager(
 	logger *slog.Logger,
 	reg component.ComponentDiscovery,
 	pool datapool.Pool,
-	llmRegistry llm.LLMRegistry,
 	callbackMgr *harness.CallbackManager,
 	harnessFactory harness.HarnessFactoryInterface,
 	targetStore targetStoreLookup,
@@ -242,7 +252,6 @@ func newMissionManager(
 		logger:          logger.With("component", "mission-manager"),
 		registry:        reg,
 		pool:            pool,
-		llmRegistry:     llmRegistry,
 		callbackManager: callbackMgr,
 		harnessFactory:  harnessFactory,
 		targetStore:     targetStore,
@@ -253,6 +262,7 @@ func newMissionManager(
 		brainRegistry:   brainRegistry,
 		brainExecutor:   brainExecutor,
 		graphWriter:     graphWriter,
+		skillStore:      noAgentSkills,
 		activeMissions:  make(map[auth.TenantID]map[string]*activeMission),
 	}
 }
@@ -377,7 +387,7 @@ func (m *missionManager) runEnded(tenant auth.TenantID, am *activeMission) bool 
 	runID := runIDOf(am)
 	for _, ms := range eng.Missions() {
 		if ms.ID == am.mission.ID.String() && ms.RunID == runID {
-			return ms.Status == brain.MissionCompleted || ms.Status == brain.MissionFailed
+			return ms.Status.IsTerminal()
 		}
 	}
 	return false
@@ -536,7 +546,7 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 		TenantID:              callingTenant.String(), // required: ListMissions filters by tenant
 		Name:                  def.GetName(),
 		Description:           def.GetDescription(),
-		Status:                mission.MissionStatusPending,
+		Status:                mission.MissionStatusSubmitted,
 		MissionDefinitionID:   types.ID(def.GetId()),
 		MissionDefinitionJSON: string(definitionJSON),
 		TargetID:              resolvedTargetID,
@@ -1272,7 +1282,13 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		return
 	}
 
-	missionCtx := newRunMissionContext(active.mission, missionRun, def, bootstrapResult.MissionRunID)
+	pinnedSkills, skillErr := pinMissionSkills(ctx, m.agentSkills(), active.tenantID.String(), missionID, def)
+	if skillErr != nil {
+		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), skillErr.Error())
+		return
+	}
+	missionCtx := newRunMissionContext(active.mission, missionRun, def, bootstrapResult.MissionRunID).
+		WithPinnedSkills(pinnedSkills)
 
 	// Load target entity to get connection details
 	targetInfo, targetInfoErr := m.resolveRunTargetInfo(ctx, active.mission.TargetID)
@@ -1320,6 +1336,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		harness:    agentHarness,
 		slot:       deciderSlot,
 		deciderPin: deciderSlotFrom(def.GetDeciderSlot()),
+		initiator:  missionInitiatorOf(missionCtx.CreatedBy),
 	}
 	m.brainExecutor.register(missionID, binding)
 	defer m.brainExecutor.unregister(missionID, binding)
@@ -1479,18 +1496,18 @@ func (m *missionManager) Stop(ctx context.Context, missionID string, force bool)
 	m.brainRegistry.For(active.tenantID.String()).Submit(brain.MissionDone{
 		ID:      missionID,
 		RunID:   runIDOf(active),
-		Outcome: brain.MissionFailed,
+		Outcome: brain.MissionCanceled,
 		Reason:  "stopped by user",
 	})
 	active.cancel()
 
-	// The MissionDone(fail, "stopped by user") submitted above reaches the
-	// bus as status:failed via the lifecycle projector. The separate
+	// The MissionDone(canceled, "stopped by user") submitted above reaches the
+	// bus as status:canceled via the lifecycle projector. The separate
 	// "mission.stopped" wire event had no consumer outside the retired
 	// per-run channel (gibson#1112 PR 3).
 
 	// Status is World-derived (ADR-0163/gibson#1118): MissionDone above set
-	// status=failed in the World via Reduce. No store write.
+	// status=canceled in the World via Reduce. No store write.
 	active.mission.CompletedAt = mission.NewUnixTimePtrNow()
 
 	m.logger.Info("mission stopped", "mission_id", missionID)
@@ -1519,7 +1536,7 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 		if ms.TenantID != "" && ms.TenantID != tenant.String() {
 			continue
 		}
-		if activeOnly && ms.Status != brain.MissionRunning && ms.Status != brain.MissionPaused {
+		if activeOnly && !ms.Status.IsActive() && ms.Status != brain.MissionPaused {
 			continue
 		}
 		result = append(result, missionSnapshotToData(eng, ms))
@@ -1650,7 +1667,7 @@ func (m *missionManager) awaitBrainMission(
 	for {
 		select {
 		case <-ctx.Done():
-			return mission.MissionStatusCancelled, "mission cancelled"
+			return mission.MissionStatusCanceled, "mission canceled"
 		case <-ticker.C:
 			for _, ms := range eng.Missions() {
 				if ms.ID != missionID || ms.RunID != runID {
@@ -1665,6 +1682,8 @@ func (m *missionManager) awaitBrainMission(
 						reason = "mission failed"
 					}
 					return mission.MissionStatusFailed, reason
+				case brain.MissionCanceled:
+					return mission.MissionStatusCanceled, "mission canceled"
 				}
 			}
 		}

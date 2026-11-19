@@ -64,7 +64,7 @@ func newWorkIDEnv(t *testing.T) *workIDEnv {
 	t.Cleanup(func() { _ = sc.Close() })
 
 	queue := NewRedisWorkQueue(client)
-	svc := NewComponentServiceServer(&noopRegistry{}, queue, testLogger(), nil, nil, nil, nil).
+	svc := NewComponentServiceServer(&noopRegistry{}, queue, testLogger(), nil, nil, nil).
 		WithWorkContextStore(sc, testLogger())
 
 	return &workIDEnv{svc: svc, queue: queue, state: sc, mr: mr}
@@ -203,7 +203,7 @@ func TestSubmitResult_AcceptsSharedComponentIdentity(t *testing.T) {
 // default: with no work-context registry there is no way to tell whose work an
 // id names, and an unanswerable question must not resolve to "allowed".
 func TestSubmitResult_RefusedWhenOwnershipCannotBeEstablished(t *testing.T) {
-	svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil)
+	svc := NewComponentServiceServer(&noopRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), attackerTenant)
 	_, err := svc.SubmitResult(ctx, &componentpb.SubmitResultRequest{
@@ -303,7 +303,7 @@ func newRecordingFindingSubmitter(t *testing.T, sc *state.StateClient) (submitte
 	sink := func(_ context.Context, _ string, f finding.EnhancedFinding, _ string) {
 		seenMission = f.MissionID.String()
 	}
-	return NewGraphRAGFindingSubmitter(sink, nil, sc, testLogger()), &seenMission
+	return NewGraphRAGFindingSubmitter(sink, &memFindingStore{}, sc, testLogger()), &seenMission
 }
 
 // TestFindingSubmitter_IgnoresWorkContextOfAnotherTenant checks the second half
@@ -347,7 +347,7 @@ func TestFindingSubmitter_CarriesTheMissionRunOfTheWorkItem(t *testing.T) {
 	env := newWorkIDEnv(t)
 	var seenRun string
 	sink := func(_ context.Context, _ string, _ finding.EnhancedFinding, run string) { seenRun = run }
-	submitter := NewGraphRAGFindingSubmitter(sink, nil, env.state, testLogger())
+	submitter := NewGraphRAGFindingSubmitter(sink, &memFindingStore{}, env.state, testLogger())
 
 	writeWorkContext(t, env.mr, "work-run-1", "mission-of-victim", victimTenant)
 	require.NoError(t, env.mr.Set(workRunKey("work-run-1"), "run-7"))
@@ -628,6 +628,46 @@ func TestPollWork_RecordsTheCallersTenantForItsOwnStream(t *testing.T) {
 	require.Equal(t, "work-poll-2", resp.WorkId)
 
 	assert.Equal(t, victimTenant, env.mr.HGet(workContextKey("work-poll-2"), workContextTenantField))
+}
+
+// TestPollWork_CarriesTheTaskGrantInTheTypedField proves that the task grant of
+// a work item reaches the agent in PollWorkResponse.task_grant, and that the
+// work context holds no second copy of the secret.
+func TestPollWork_CarriesTheTaskGrantInTheTypedField(t *testing.T) {
+	env := newWorkIDEnv(t)
+	env.svc.registry = &pollRegistry{info: ComponentInfo{
+		Kind: "agent", Name: "scout", InstanceID: "inst-agent",
+	}}
+	_, err := env.queue.Enqueue(context.Background(), victimTenant, "agent", "scout", WorkItem{
+		WorkID:   "work-grant-1",
+		WorkType: "execute",
+		Context:  map[string]string{"mission_id": "mission-3", "capability_grant": "grant.jwt.value"},
+	})
+	require.NoError(t, err)
+
+	ctx := auth.ContextWithTenantString(context.Background(), victimTenant)
+	resp, err := env.svc.PollWork(ctx, &componentpb.PollWorkRequest{InstanceId: "inst-agent", TimeoutMs: 100})
+	require.NoError(t, err)
+	assert.Equal(t, "grant.jwt.value", resp.GetTaskGrant())
+	assert.NotContains(t, resp.GetContext(), "capability_grant")
+}
+
+// TestPollWork_AWorkItemWithNoGrantHasNoTaskGrant keeps the empty value: the
+// SDK then fails each gateway call with a clear error.
+func TestPollWork_AWorkItemWithNoGrantHasNoTaskGrant(t *testing.T) {
+	env := newWorkIDEnv(t)
+	env.svc.registry = &pollRegistry{info: ComponentInfo{
+		Kind: "agent", Name: "scout", InstanceID: "inst-agent",
+	}}
+	_, err := env.queue.Enqueue(context.Background(), victimTenant, "agent", "scout", WorkItem{
+		WorkID: "work-grant-2", WorkType: "execute", Context: map[string]string{"mission_id": "mission-4"},
+	})
+	require.NoError(t, err)
+
+	ctx := auth.ContextWithTenantString(context.Background(), victimTenant)
+	resp, err := env.svc.PollWork(ctx, &componentpb.PollWorkRequest{InstanceId: "inst-agent", TimeoutMs: 100})
+	require.NoError(t, err)
+	assert.Empty(t, resp.GetTaskGrant())
 }
 
 // ---------------------------------------------------------------------------

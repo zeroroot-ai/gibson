@@ -620,12 +620,12 @@ func TestRecordedToolCall_SettlesTheMainPackHTTPPredicate(t *testing.T) {
 	}
 
 	got, err := predicate.Evaluate(context.Background(),
-		recordedToolCallEvidence(record(`{"status_code":200,"body":"admin panel"}`)))
+		brain.RecordedEvidence(record(`{"status_code":200,"body":"admin panel"}`)))
 	require.NoError(t, err)
 	assert.True(t, got, "a recorded 200 must settle the predicate")
 
 	got, err = predicate.Evaluate(context.Background(),
-		recordedToolCallEvidence(record(`{"status_code":403,"body":"forbidden"}`)))
+		brain.RecordedEvidence(record(`{"status_code":403,"body":"forbidden"}`)))
 	require.NoError(t, err)
 	assert.False(t, got, "a recorded 403 must not settle the predicate")
 }

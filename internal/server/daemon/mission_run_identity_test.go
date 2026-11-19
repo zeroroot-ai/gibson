@@ -93,7 +93,7 @@ func TestClaimActive_OneRunOfARecordAtATime(t *testing.T) {
 		t.Fatalf("first claim: %v", err)
 	}
 	eng.Submit(brain.MissionProjected{ID: id, RunID: runIDOf(run1)})
-	waitWorldStatus(t, eng, id, string(brain.MissionRunning))
+	waitWorldStatus(t, eng, id, string(brain.MissionWorking))
 
 	run2 := activeRunOfRecord(rec, tenant)
 	if err := mm.claimActive(tenant, id, run2); err == nil {

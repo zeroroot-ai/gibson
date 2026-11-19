@@ -31,14 +31,21 @@ const DefaultLimit = 20
 type Caller struct {
 	Subject string
 	Tenant  string
+	// Agent is the typed FGA principal of the calling agent, for example
+	// "agent_principal:<id>". It is empty when the caller is not an agent
+	// principal. An Agent Skill grant to an agent reads it.
+	Agent string
+	// Mission is the id of the mission of the call. An Agent Skill grant to a
+	// mission reads it.
+	Mission string
 }
 
 // ToolEntry is a raw tool as enumerated from a backing store, before id
 // assignment and authorization.
 type ToolEntry struct {
 	Source      toolid.Source
-	Connector   string // connector/plugin name; empty for native primitives
-	Tool        string // tool / method name
+	Connector   string // connector/plugin name; empty for native primitives and Agent Skills
+	Tool        string // tool / method name, or the name of an Agent Skill
 	Description string
 	InputSchema []byte
 }
@@ -47,6 +54,26 @@ type ToolEntry struct {
 // component registry plus the harness tool expansion; tests fake it.
 type ToolLister interface {
 	ListTools(ctx context.Context, tenant string) ([]ToolEntry, error)
+}
+
+// CombineListers returns a ToolLister that lists the entries of each lister in
+// order. The first error stops the listing.
+func CombineListers(listers ...ToolLister) ToolLister {
+	return combinedLister(listers)
+}
+
+type combinedLister []ToolLister
+
+func (c combinedLister) ListTools(ctx context.Context, tenant string) ([]ToolEntry, error) {
+	var out []ToolEntry
+	for _, l := range c {
+		entries, err := l.ListTools(ctx, tenant)
+		if err != nil {
+			return nil, fmt.Errorf("catalog: list tools: %w", err)
+		}
+		out = append(out, entries...)
+	}
+	return out, nil
 }
 
 // Authorizer reports whether a caller may execute a tool. In production it is
@@ -77,6 +104,9 @@ type Query struct {
 	Connector string
 	// Limit caps the candidate count. Zero uses DefaultLimit.
 	Limit int
+	// Hide removes an entry before the authorization check and before the limit.
+	// The mission deny list of Agent Skills uses it. Nil hides nothing.
+	Hide func(id toolid.ID) bool
 }
 
 // Engine answers SearchTools queries over a ToolLister, authz-filtered.
@@ -122,6 +152,9 @@ func (e *Engine) Search(ctx context.Context, caller Caller, q Query) ([]Candidat
 		if err != nil {
 			continue // skip malformed entries rather than fail the whole search
 		}
+		if q.Hide != nil && q.Hide(id) {
+			continue
+		}
 		ok, err := e.authz.CanExecute(ctx, caller, id)
 		if err != nil {
 			return nil, fmt.Errorf("catalog: authz check %s: %w", id.Canonical(), err)
@@ -151,6 +184,12 @@ func idFor(en ToolEntry) (toolid.ID, error) {
 		return toolid.ForMCP(en.Connector, en.Tool)
 	case toolid.SourceNative:
 		return toolid.ForNative(en.Tool)
+	case toolid.SourceSkill:
+		id, err := toolid.ForSkill(en.Tool)
+		if err != nil {
+			return toolid.ID{}, fmt.Errorf("catalog: skill id: %w", err)
+		}
+		return id, nil
 	default:
 		return toolid.ID{}, fmt.Errorf("catalog: unknown source %q", en.Source)
 	}

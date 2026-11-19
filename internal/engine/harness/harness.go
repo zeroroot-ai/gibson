@@ -11,7 +11,6 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
@@ -72,28 +71,6 @@ type FindingEventData struct {
 	TargetAsset string `json:"target_asset,omitempty"`
 }
 
-// StructuredCompletionResult contains the result of a structured completion
-// along with token usage information for observability and cost tracking.
-type StructuredCompletionResult struct {
-	// Result is the parsed structured output (pointer to the schema type)
-	Result any
-
-	// Model is the name of the model that was used
-	Model string
-
-	// RawJSON is the raw JSON response from the LLM
-	RawJSON string
-
-	// PromptTokens is the number of tokens in the prompt
-	PromptTokens int
-
-	// CompletionTokens is the number of tokens in the completion
-	CompletionTokens int
-
-	// TotalTokens is the total token usage (prompt + completion)
-	TotalTokens int
-}
-
 // ── AgentHarness capability groups ──────────────────────────────────────────
 //
 // The daemon-side harness is composed of these, using the SAME group names as
@@ -115,144 +92,26 @@ type StructuredCompletionResult struct {
 // A group with no members on this side is simply absent: there is no WorldReader
 // (no WorldView), no Planner and no MissionManager here.
 
-// LLMCaller is the model-facing surface.
-type LLMCaller interface {
-	// ────────────────────────────────────────────────────────────────────────────
-	// LLM Access
-	// ────────────────────────────────────────────────────────────────────────────
+// SlotModel is a slot that is resolved to one provider and one exact model name.
+type SlotModel struct {
+	Provider string
+	Model    string
+	// ContextWindow is the context window of the model in tokens, or zero when
+	// the provider does not report one.
+	ContextWindow int
+	// MaxOutputTokens is the limit of output tokens of one call, or zero when
+	// it is unknown. The harness sets it to the smaller of the limit of the
+	// model and the cap of the node (see agent.MinLimit).
+	MaxOutputTokens int32
+}
 
-	// Complete performs a synchronous LLM completion using the specified slot.
-	// The slot determines which provider and model to use based on configuration.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation, timeout, and distributed tracing
-	//   - slot: Name of the LLM slot (e.g., "primary", "reasoning", "fast")
-	//   - messages: Conversation history with system, user, and assistant messages
-	//   - opts: Optional configuration (temperature, max tokens, etc.)
-	//
-	// Returns:
-	//   - *llm.CompletionResponse: The LLM's response with generated message and token usage
-	//   - error: Non-nil if completion fails (invalid slot, API error, budget exceeded)
-	//
-	// The harness automatically:
-	//   - Validates messages before sending to the provider
-	//   - Tracks token usage and enforces budget limits
-	//   - Records metrics (latency, token count, cost)
-	//   - Creates distributed trace spans
-	//   - Handles provider-specific error translation
-	//
-	// Example:
-	//   messages := []llm.Message{
-	//       llm.NewSystemMessage("You are a security analyst"),
-	//       llm.NewUserMessage("Analyze this code for vulnerabilities"),
-	//   }
-	//   resp, err := harness.Complete(ctx, "primary", messages, WithTemperature(0.2))
-	Complete(ctx context.Context, slot string, messages []llm.Message, opts ...CompletionOption) (*llm.CompletionResponse, error)
-
-	// CompleteWithTools performs a completion with tool-calling capabilities.
-	// The LLM can request tool executions by returning tool calls in the response.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and tracing
-	//   - slot: Name of the LLM slot to use
-	//   - messages: Conversation history
-	//   - tools: Available tools the LLM can choose to call
-	//   - opts: Optional configuration
-	//
-	// Returns:
-	//   - *llm.CompletionResponse: Response that may contain tool calls or final text
-	//   - error: Non-nil if completion fails
-	//
-	// The agent is responsible for:
-	//   1. Checking response.Message.ToolCalls to see if the LLM requested tool execution
-	//   2. Executing the requested tools using CallToolProto()
-	//   3. Appending tool results to messages and calling Complete() again
-	//
-	// Example:
-	//   resp, err := harness.CompleteWithTools(ctx, "primary", messages, tools)
-	//   for _, toolCall := range resp.Message.ToolCalls {
-	//       req := &toolpb.Request{} // Populate from toolCall
-	//       resp := &toolpb.Response{}
-	//       harness.CallToolProto(ctx, toolCall.Name, req, resp)
-	//       messages = append(messages, llm.NewToolResultMessage(toolCall.ID, resp))
-	//   }
-	CompleteWithTools(ctx context.Context, slot string, messages []llm.Message, tools []llm.ToolDef, opts ...CompletionOption) (*llm.CompletionResponse, error)
-
-	// Stream performs a streaming LLM completion, returning chunks as they arrive.
-	// This enables real-time processing and display of LLM output.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and tracing
-	//   - slot: Name of the LLM slot to use
-	//   - messages: Conversation history
-	//   - opts: Optional configuration
-	//
-	// Returns:
-	//   - <-chan llm.StreamChunk: Read-only channel of response chunks
-	//   - error: Non-nil if stream setup fails (does not include streaming errors)
-	//
-	// The returned channel:
-	//   - Sends incremental chunks (StreamChunk) as the LLM generates output
-	//   - Sends a chunk with FinishReason when generation completes
-	//   - Sends a chunk with Error field set if streaming fails
-	//   - Is closed when the stream ends (success or failure)
-	//
-	// The caller must consume the channel until it closes. Context cancellation
-	// will close the channel and stop streaming.
-	//
-	// Example:
-	//   chunks, err := harness.Stream(ctx, "primary", messages)
-	//   for chunk := range chunks {
-	//       if chunk.Error != nil {
-	//           return chunk.Error
-	//       }
-	//       fmt.Print(chunk.Delta.Content)
-	//   }
-	Stream(ctx context.Context, slot string, messages []llm.Message, opts ...CompletionOption) (<-chan llm.StreamChunk, error)
-
-	// CompleteStructuredAny performs a completion with provider-native structured output.
-	// The response is guaranteed to match the provided schema using provider-specific
-	// mechanisms (tool_use for Anthropic, response_format for OpenAI).
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and tracing
-	//   - slot: Name of the LLM slot to use
-	//   - messages: Conversation history (should be natural language, no JSON instructions)
-	//   - schemaType: An instance of the struct type to populate (e.g., MyStruct{})
-	//   - opts: Optional configuration
-	//
-	// Returns:
-	//   - any: A pointer to the populated struct instance (e.g., *MyStruct)
-	//   - error: Non-nil if completion fails or response doesn't match schema
-	//
-	// The prompt should be natural language - the harness handles schema enforcement.
-	// For Anthropic: uses tool_use pattern with forced tool choice
-	// For OpenAI: uses response_format with json_schema
-	//
-	// Example:
-	//   type Analysis struct {
-	//       RiskLevel   string   `json:"risk_level"`
-	//       Findings    []string `json:"findings"`
-	//   }
-	//   result, err := harness.CompleteStructuredAny(ctx, "primary", messages, Analysis{})
-	//   analysis := result.(*Analysis)
-	CompleteStructuredAny(ctx context.Context, slot string, messages []llm.Message, schemaType any, opts ...CompletionOption) (any, error)
-
-	// CompleteStructuredAnyWithUsage performs structured output completion and returns
-	// token usage information along with the result. This is useful for cost tracking
-	// and observability in orchestration systems.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and tracing
-	//   - slot: Name of the LLM slot to use
-	//   - messages: Conversation history
-	//   - schemaType: An instance of the struct type to populate
-	//   - opts: Optional configuration
-	//
-	// Returns:
-	//   - *StructuredCompletionResult: Contains the parsed result, model, and token usage
-	//   - error: Non-nil if completion fails or response doesn't match schema
-	CompleteStructuredAnyWithUsage(ctx context.Context, slot string, messages []llm.Message, schemaType any, opts ...CompletionOption) (*StructuredCompletionResult, error)
+// SlotModelResolver resolves a slot to the provider and the one exact model name
+// that the slot uses, with no model call. A caller that sends its own call to
+// the model gateway uses it (gibson#1392). The gateway never sees a slot. The
+// resolution honors the node pin and the model access gate, as a call through
+// the harness does. The default harness and its middleware wrapper implement it.
+type SlotModelResolver interface {
+	ResolveSlotModel(ctx context.Context, slot string) (SlotModel, error)
 }
 
 // ToolCaller is dispatching tools and inspecting what is available.
@@ -667,7 +526,6 @@ type WorkspaceAccess interface {
 //	}
 type AgentHarness interface {
 	// Capability groups — defined above.
-	LLMCaller
 	ToolCaller
 	PluginCaller
 	Delegator
@@ -833,5 +691,4 @@ type AgentHarness interface {
 	//   if cost > 0.50 {
 	//       // Use cheaper model or reduce max tokens
 	//   }
-	TokenUsage() *llm.TokenTracker
 }

@@ -53,7 +53,7 @@ func missionCheckpoints(eng *brain.Engine, missionID string) []api.MissionCheckp
 		if w.MissionID != missionID || !strings.HasPrefix(w.ID, prefix) {
 			continue
 		}
-		if w.State == brain.WorkDone || w.State == brain.WorkFailed {
+		if w.State == brain.WorkDone || w.State == brain.WorkFailed || w.State == brain.WorkCanceled {
 			ended = append(ended, w)
 		}
 	}
@@ -323,7 +323,7 @@ func rewoundMission(parent *mission.Mission, id types.ID, def *missionpb.Mission
 		TenantID:              parent.TenantID,
 		Name:                  parent.Name,
 		Description:           parent.Description,
-		Status:                mission.MissionStatusPending,
+		Status:                mission.MissionStatusSubmitted,
 		TargetID:              parent.TargetID,
 		AdditionalTargetIDs:   append([]types.ID(nil), parent.AdditionalTargetIDs...),
 		MissionDefinitionID:   parent.MissionDefinitionID,

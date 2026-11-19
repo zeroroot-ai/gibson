@@ -8,17 +8,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
 
 func TestValidateType(t *testing.T) {
 	tests := []struct {
 		name    string
-		typ     llm.ProviderType
+		typ     ProviderType
 		wantErr bool
 	}{
-		{name: "supported type", typ: llm.ProviderAnthropic},
+		{name: "supported type", typ: ProviderAnthropic},
 		{name: "empty type", typ: "", wantErr: true},
 		{name: "unknown type", typ: "no-such-provider", wantErr: true},
 	}
@@ -31,12 +29,12 @@ func TestValidateType(t *testing.T) {
 			}
 			require.ErrorIs(t, err, ErrUnsupportedType)
 			// The message lists the supported types, never the fixture type.
-			assert.Contains(t, err.Error(), string(llm.ProviderAnthropic))
+			assert.Contains(t, err.Error(), string(ProviderAnthropic))
 		})
 	}
 }
 
 func TestJoinTypes(t *testing.T) {
 	assert.Empty(t, joinTypes(nil))
-	assert.Equal(t, "a, b", joinTypes([]llm.ProviderType{"a", "b"}))
+	assert.Equal(t, "a, b", joinTypes([]ProviderType{"a", "b"}))
 }

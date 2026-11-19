@@ -15,13 +15,14 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -415,10 +416,10 @@ func chatConfig(c *providerconfig.ProviderConfig) bool {
 }
 
 // checkGrantTarget refuses a grant target that matches no chat provider or chat
-// model of the tenant. A provider target must be the type of an enabled,
-// chat-capable provider config of the tenant. That type is the provider name
-// that the gate uses. A model target must be the default model of such a config,
-// or a chat model that the live list of such a provider names.
+// model of the tenant. A provider target must be the name of an enabled,
+// chat-capable provider config of the tenant. The gate of a model call uses
+// that name, not the provider type. A model target must be the default model
+// of such a config, or a chat model that the live list of such a provider names.
 func (s *DaemonServer) checkGrantTarget(ctx context.Context, tenantID string, kind tenantv1.GrantTargetKind, id string) error {
 	if s.providerConfig == nil {
 		return status_grpc.Error(codes.FailedPrecondition, "provider store is not configured")
@@ -436,7 +437,7 @@ func (s *DaemonServer) checkGrantTarget(ctx context.Context, tenantID string, ki
 	switch kind {
 	case tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER:
 		for _, c := range configs {
-			if string(c.Type) == id {
+			if c.Name == id {
 				return nil
 			}
 		}
@@ -486,25 +487,21 @@ func (s *DaemonServer) anyProviderListsModel(
 // the model as a chat model. A model with the embedding feature and no chat
 // feature is not a chat model.
 func (s *DaemonServer) providerListsModel(ctx context.Context, tenantID string, c *providerconfig.ProviderConfig, model string) bool {
-	dec, err := s.providerConfig.Resolve(ctx, tenantID, c.Name)
+	// The list of the gateway is a passthrough and holds the model names. It
+	// holds no feature list, so a listed model counts as a chat model.
+	initiator, err := callerInitiator(ctx)
 	if err != nil {
 		return false
 	}
-	factory := s.providerFactory
-	if factory == nil {
-		factory = providers.NewProvider
-	}
-	prov, err := factory(s.withEgressPolicy(decryptedConfigToLLMConfig(dec, "")))
-	if err != nil {
-		return false
-	}
-	models, err := prov.Models(ctx)
+	models, err := s.modelLister.Models(ctx,
+		modelclient.Caller{Tenant: tenantID, Purpose: modelcall.PurposeModelList, Initiator: initiator},
+		modelclient.Target{Tenant: tenantID, Provider: c.Name})
 	if err != nil {
 		return false
 	}
 	for _, m := range models {
-		if m.Name == model {
-			return !slices.Contains(m.Features, "embedding") || slices.Contains(m.Features, "chat")
+		if m.ID == model {
+			return true
 		}
 	}
 	return false

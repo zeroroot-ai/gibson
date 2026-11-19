@@ -14,7 +14,7 @@ import (
 	"github.com/google/cel-go/common/types/traits"
 	"github.com/tidwall/gjson"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 // Function names in the curated helper catalog (ADR-0131). A
@@ -116,8 +116,8 @@ func httpStatusImpl(v ref.Val) ref.Val {
 	}
 	typ, _ := item["type"].(string)
 	// Two evidence types carry a status. Each other type is not applicable.
-	evidence := finding.EvidenceType(typ)
-	if evidence == finding.EvidenceHTTPResponse {
+	evidence := sdkfinding.EvidenceType(typ)
+	if evidence == sdkfinding.EvidenceHTTPResponse {
 		content, ok := item["content"].(map[string]any)
 		if !ok {
 			return notApplicable
@@ -129,7 +129,7 @@ func httpStatusImpl(v ref.Val) ref.Val {
 		}
 		return types.Int(int64(code))
 	}
-	if evidence == finding.EvidenceLog {
+	if evidence == sdkfinding.EvidenceLog {
 		// The daemon's record of a tool call (gibson#810): content is the
 		// JSON the tool returned, with proto field names. An HTTP tool
 		// reports the response status in its top-level status_code field.
@@ -244,17 +244,17 @@ func markerPresentImpl(listVal, markerVal ref.Val) ref.Val {
 
 // evidenceItemText is evidenceText's implementation, working from the plain
 // map[string]any an evidence item converts to (see evidenceItemFromVal)
-// rather than a finding.EnhancedEvidence directly: one case for each
+// rather than a types.v1.Evidence directly: one case for each
 // evidence type, on the JSON-normalized shape [normalizeContent] guarantees.
 func evidenceItemText(item map[string]any) (string, bool) {
 	typ, _ := item["type"].(string)
 	content := item["content"]
 
-	switch finding.EvidenceType(typ) {
-	case finding.EvidenceHTTPRequest, finding.EvidenceHTTPResponse:
+	switch sdkfinding.EvidenceType(typ) {
+	case sdkfinding.EvidenceHTTPRequest, sdkfinding.EvidenceHTTPResponse:
 		return stringField(content, "body")
 
-	case finding.EvidenceConversation:
+	case sdkfinding.EvidenceConversation:
 		cm, ok := content.(map[string]any)
 		if !ok {
 			return "", false
@@ -273,7 +273,7 @@ func evidenceItemText(item map[string]any) (string, bool) {
 		}
 		return b.String(), true
 
-	case finding.EvidenceLog, finding.EvidencePayload, finding.EvidenceCodeSnippet, finding.EvidenceNetworkTrace:
+	case sdkfinding.EvidenceLog, sdkfinding.EvidencePayload, sdkfinding.EvidenceCodeSnippet, sdkfinding.EvidenceNetworkTrace:
 		if s, ok := content.(string); ok {
 			return s, true
 		}
@@ -283,8 +283,9 @@ func evidenceItemText(item map[string]any) (string, bool) {
 		}
 		return string(data), true
 
-	case finding.EvidenceScreenshot:
-		// A screenshot has no text representation.
+	case sdkfinding.EvidenceScreenshot, sdkfinding.EvidenceOther:
+		// A screenshot and an evidence of the other type have no text
+		// representation.
 		return "", false
 
 	default:

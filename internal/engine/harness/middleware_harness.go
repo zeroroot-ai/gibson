@@ -6,13 +6,13 @@ package harness
 import (
 	"context"
 	"fmt"
+	"log/slog"
+
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
-	"log/slog"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
@@ -37,99 +37,6 @@ func (h *MiddlewareHarness) wrapOperation(op middleware.Operation) middleware.Op
 		return op
 	}
 	return h.middleware(op)
-}
-
-func (h *MiddlewareHarness) Complete(ctx context.Context, slot string, messages []llm.Message, opts ...CompletionOption) (*llm.CompletionResponse, error) {
-	ctx = middleware.WithOperationType(ctx, middleware.OpComplete)
-	ctx = middleware.WithSlotName(ctx, slot)
-	ctx = middleware.WithMissionContext(ctx, h.inner.Mission().ID.String(), h.inner.Mission().CurrentAgent)
-	ctx = middleware.WithMessages(ctx, toMiddlewareMessages(messages))
-
-	innerOp := func(ctx context.Context, req any) (any, error) {
-		return h.inner.Complete(ctx, slot, messages, opts...)
-	}
-
-	result, err := h.wrapOperation(innerOp)(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	if result == nil {
-		return nil, nil
-	}
-	return result.(*llm.CompletionResponse), nil
-}
-
-func (h *MiddlewareHarness) CompleteWithTools(ctx context.Context, slot string, messages []llm.Message, tools []llm.ToolDef, opts ...CompletionOption) (*llm.CompletionResponse, error) {
-	ctx = middleware.WithOperationType(ctx, middleware.OpCompleteWithTools)
-	ctx = middleware.WithSlotName(ctx, slot)
-	ctx = middleware.WithMissionContext(ctx, h.inner.Mission().ID.String(), h.inner.Mission().CurrentAgent)
-	ctx = middleware.WithMessages(ctx, toMiddlewareMessages(messages))
-
-	innerOp := func(ctx context.Context, req any) (any, error) {
-		return h.inner.CompleteWithTools(ctx, slot, messages, tools, opts...)
-	}
-
-	result, err := h.wrapOperation(innerOp)(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	if result == nil {
-		return nil, nil
-	}
-	return result.(*llm.CompletionResponse), nil
-}
-
-func (h *MiddlewareHarness) Stream(ctx context.Context, slot string, messages []llm.Message, opts ...CompletionOption) (<-chan llm.StreamChunk, error) {
-	ctx = middleware.WithOperationType(ctx, middleware.OpStream)
-	ctx = middleware.WithSlotName(ctx, slot)
-	ctx = middleware.WithMissionContext(ctx, h.inner.Mission().ID.String(), h.inner.Mission().CurrentAgent)
-	ctx = middleware.WithMessages(ctx, toMiddlewareMessages(messages))
-
-	innerOp := func(ctx context.Context, req any) (any, error) {
-		return h.inner.Stream(ctx, slot, messages, opts...)
-	}
-
-	result, err := h.wrapOperation(innerOp)(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	if result == nil {
-		return nil, nil
-	}
-	return result.(<-chan llm.StreamChunk), nil
-}
-
-func (h *MiddlewareHarness) CompleteStructuredAny(ctx context.Context, slot string, messages []llm.Message, schemaType any, opts ...CompletionOption) (any, error) {
-	ctx = middleware.WithOperationType(ctx, middleware.OpCompleteWithTools) // Reuse tools op type since structured uses tool_use
-	ctx = middleware.WithSlotName(ctx, slot)
-	ctx = middleware.WithMissionContext(ctx, h.inner.Mission().ID.String(), h.inner.Mission().CurrentAgent)
-	ctx = middleware.WithMessages(ctx, toMiddlewareMessages(messages))
-
-	innerOp := func(ctx context.Context, req any) (any, error) {
-		return h.inner.CompleteStructuredAny(ctx, slot, messages, schemaType, opts...)
-	}
-
-	return h.wrapOperation(innerOp)(ctx, nil)
-}
-
-func (h *MiddlewareHarness) CompleteStructuredAnyWithUsage(ctx context.Context, slot string, messages []llm.Message, schemaType any, opts ...CompletionOption) (*StructuredCompletionResult, error) {
-	ctx = middleware.WithOperationType(ctx, middleware.OpCompleteWithTools) // Reuse tools op type since structured uses tool_use
-	ctx = middleware.WithSlotName(ctx, slot)
-	ctx = middleware.WithMissionContext(ctx, h.inner.Mission().ID.String(), h.inner.Mission().CurrentAgent)
-	ctx = middleware.WithMessages(ctx, toMiddlewareMessages(messages))
-
-	innerOp := func(ctx context.Context, req any) (any, error) {
-		return h.inner.CompleteStructuredAnyWithUsage(ctx, slot, messages, schemaType, opts...)
-	}
-
-	result, err := h.wrapOperation(innerOp)(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	if result == nil {
-		return nil, nil
-	}
-	return result.(*StructuredCompletionResult), nil
 }
 
 // CallToolProto delegates to the inner harness's CallToolProto.
@@ -227,7 +134,6 @@ func (h *MiddlewareHarness) ListAgents() []AgentDescriptor   { return h.inner.Li
 func (h *MiddlewareHarness) Tracer() trace.Tracer            { return h.inner.Tracer() }
 func (h *MiddlewareHarness) Logger() *slog.Logger            { return h.inner.Logger() }
 func (h *MiddlewareHarness) Metrics() MetricsRecorder        { return h.inner.Metrics() }
-func (h *MiddlewareHarness) TokenUsage() *llm.TokenTracker   { return h.inner.TokenUsage() }
 func (h *MiddlewareHarness) MissionExecutionContext() MissionExecutionContextSDK {
 	return h.inner.MissionExecutionContext()
 }
@@ -363,15 +269,18 @@ func (h *MiddlewareHarness) Workspaces() map[string]workspace.Workspace {
 	return make(map[string]workspace.Workspace)
 }
 
-// toMiddlewareMessages converts llm.Message slice to middleware.Message slice
-// for passing through context to tracing middleware.
-func toMiddlewareMessages(messages []llm.Message) []middleware.Message {
-	result := make([]middleware.Message, len(messages))
-	for i, m := range messages {
-		result[i] = middleware.Message{
-			Role:    string(m.Role),
-			Content: m.Content,
-		}
+// ResolveSlotModel resolves a slot with no call, so no middleware wraps it. An
+// inner harness that cannot resolve a slot gives an error.
+func (h *MiddlewareHarness) ResolveSlotModel(ctx context.Context, slot string) (SlotModel, error) {
+	r, ok := h.inner.(SlotModelResolver)
+	if !ok {
+		return SlotModel{}, fmt.Errorf("the harness %T cannot resolve a slot to a model", h.inner)
 	}
-	return result
+	//nolint:wrapcheck // a decorator returns the inner error, which callers match by code
+	return r.ResolveSlotModel(ctx, slot)
 }
+
+var (
+	_ SlotModelResolver = (*MiddlewareHarness)(nil)
+	_ SlotModelResolver = (*DefaultAgentHarness)(nil)
+)

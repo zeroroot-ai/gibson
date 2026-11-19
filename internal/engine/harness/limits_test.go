@@ -149,7 +149,7 @@ func TestCheckSpawnLimits_ChildLimit(t *testing.T) {
 					ID:              parentID,
 					ParentMissionID: nil,
 					Depth:           0,
-					Status:          MissionStatusRunning,
+					Status:          MissionStatusWorking,
 				},
 			}
 
@@ -159,7 +159,7 @@ func TestCheckSpawnLimits_ChildLimit(t *testing.T) {
 					ID:              newID("child-" + string(rune(i))),
 					ParentMissionID: &parentID,
 					Depth:           1,
-					Status:          MissionStatusRunning,
+					Status:          MissionStatusWorking,
 				})
 			}
 
@@ -265,7 +265,7 @@ func TestCheckSpawnLimits_DepthLimit(t *testing.T) {
 					ID:              missionID,
 					ParentMissionID: nil,
 					Depth:           tt.currentDepth,
-					Status:          MissionStatusRunning,
+					Status:          MissionStatusWorking,
 				},
 			}
 
@@ -362,7 +362,7 @@ func TestCheckSpawnLimits_ConcurrentLimit(t *testing.T) {
 					ID:              parentID,
 					ParentMissionID: nil,
 					Depth:           0,
-					Status:          MissionStatusRunning,
+					Status:          MissionStatusWorking,
 				},
 			}
 
@@ -372,7 +372,7 @@ func TestCheckSpawnLimits_ConcurrentLimit(t *testing.T) {
 					ID:              newID("running-" + string(rune(i))),
 					ParentMissionID: nil,
 					Depth:           0,
-					Status:          MissionStatusRunning,
+					Status:          MissionStatusWorking,
 				})
 			}
 
@@ -513,7 +513,7 @@ func TestCheckSpawnLimits_CombinedLimits(t *testing.T) {
 					ID:              parentID,
 					ParentMissionID: nil,
 					Depth:           tt.parentDepth,
-					Status:          MissionStatusRunning,
+					Status:          MissionStatusWorking,
 				},
 			}
 
@@ -523,7 +523,7 @@ func TestCheckSpawnLimits_CombinedLimits(t *testing.T) {
 					ID:              newID("child-" + string(rune(i))),
 					ParentMissionID: &parentID,
 					Depth:           tt.parentDepth + 1,
-					Status:          MissionStatusRunning,
+					Status:          MissionStatusWorking,
 				})
 			}
 
@@ -533,7 +533,7 @@ func TestCheckSpawnLimits_CombinedLimits(t *testing.T) {
 					ID:              newID("running-" + string(rune(i))),
 					ParentMissionID: nil,
 					Depth:           0,
-					Status:          MissionStatusRunning,
+					Status:          MissionStatusWorking,
 				})
 			}
 
@@ -596,7 +596,7 @@ func TestCheckSpawnLimits_ListErrors(t *testing.T) {
 						ID:              parentID,
 						ParentMissionID: nil,
 						Depth:           0,
-						Status:          MissionStatusRunning,
+						Status:          MissionStatusWorking,
 					},
 				},
 				listErr: tt.listErr,

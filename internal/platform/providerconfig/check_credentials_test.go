@@ -8,22 +8,20 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
 
 func TestCheckCredentials_StoresOnlyACheckedWorkspaceHeader(t *testing.T) {
-	in := &ProviderConfigInput{Type: llm.ProviderAnthropic, Credentials: map[string]string{
-		"api_key": "k", llm.CustomHeadersKey: " ANTHROPIC-WORKSPACE-ID:wrkspc_1 \n",
+	in := &ProviderConfigInput{Type: ProviderAnthropic, Credentials: map[string]string{
+		"api_key": "k", CustomHeadersKey: " ANTHROPIC-WORKSPACE-ID:wrkspc_1 \n",
 	}}
 	out, err := checkCredentials(in)
 	if err != nil {
 		t.Fatalf("checkCredentials: %v", err)
 	}
-	if got := out.Credentials[llm.CustomHeadersKey]; got != "anthropic-workspace-id: wrkspc_1" {
+	if got := out.Credentials[CustomHeadersKey]; got != "anthropic-workspace-id: wrkspc_1" {
 		t.Errorf("stored value = %q, want the canonical form", got)
 	}
-	if in.Credentials[llm.CustomHeadersKey] == out.Credentials[llm.CustomHeadersKey] {
+	if in.Credentials[CustomHeadersKey] == out.Credentials[CustomHeadersKey] {
 		t.Error("the caller map must not change")
 	}
 	if out.Credentials["api_key"] != "k" {
@@ -33,15 +31,15 @@ func TestCheckCredentials_StoresOnlyACheckedWorkspaceHeader(t *testing.T) {
 
 func TestCheckCredentials_RefusesWhatTheAllowlistRefuses(t *testing.T) {
 	for name, in := range map[string]*ProviderConfigInput{
-		"another header": {Type: llm.ProviderAnthropic, Credentials: map[string]string{llm.CustomHeadersKey: "X-Other: v"}},
-		"a bad value":    {Type: llm.ProviderAnthropic, Credentials: map[string]string{llm.CustomHeadersKey: "anthropic-workspace-id: x y"}},
-		"another type":   {Type: llm.ProviderOpenAI, Credentials: map[string]string{llm.CustomHeadersKey: "anthropic-workspace-id: wrkspc_1"}},
+		"another header": {Type: ProviderAnthropic, Credentials: map[string]string{CustomHeadersKey: "X-Other: v"}},
+		"a bad value":    {Type: ProviderAnthropic, Credentials: map[string]string{CustomHeadersKey: "anthropic-workspace-id: x y"}},
+		"another type":   {Type: ProviderOpenAI, Credentials: map[string]string{CustomHeadersKey: "anthropic-workspace-id: wrkspc_1"}},
 	} {
 		if _, err := checkCredentials(in); !errors.Is(err, ErrInvalidCredentials) {
 			t.Errorf("%s: err = %v, want ErrInvalidCredentials", name, err)
 		}
 	}
-	plain := &ProviderConfigInput{Type: llm.ProviderOpenAI, Credentials: map[string]string{"api_key": "k"}}
+	plain := &ProviderConfigInput{Type: ProviderOpenAI, Credentials: map[string]string{"api_key": "k"}}
 	if out, err := checkCredentials(plain); err != nil || out != plain {
 		t.Errorf("an input with no header field must pass unchanged: %v", err)
 	}
@@ -56,8 +54,8 @@ func TestBrokerStore_CreateAndUpdateRunTheCredentialCheck(t *testing.T) {
 	ctx := context.Background()
 	input := func(headers string) *ProviderConfigInput {
 		return &ProviderConfigInput{
-			Name: "exit-anthropic", Type: llm.ProviderAnthropic,
-			Credentials: map[string]string{"api_key": "k", llm.CustomHeadersKey: headers},
+			Name: "exit-anthropic", Type: ProviderAnthropic,
+			Credentials: map[string]string{"api_key": "k", CustomHeadersKey: headers},
 		}
 	}
 	for op, run := range map[string]func(*ProviderConfigInput) error{

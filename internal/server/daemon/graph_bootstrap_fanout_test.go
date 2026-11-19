@@ -26,7 +26,7 @@ func bootstrapFixture(t *testing.T) (*mission.Mission, *mission.MissionRun) {
 		Name:     "fanout",
 		TenantID: "tenant-a",
 		TargetID: types.NewID(),
-		Status:   mission.MissionStatusRunning,
+		Status:   mission.MissionStatusWorking,
 	}, &mission.MissionRun{
 		ID:        types.NewID(),
 		MissionID: missionID,

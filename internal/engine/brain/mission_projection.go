@@ -68,6 +68,10 @@ type WorkNode struct {
 	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
 	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
 	SlotPins map[string]agent.SlotConfig
+	// MaxTokensPerCall is the effective token cap of one model call of the node
+	// (the node value, else the mission value). Zero means no cap. It travels
+	// with SlotPins to the dispatch.
+	MaxTokensPerCall int32
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -117,7 +121,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 	if ent, ok := findMission(w, e.ID); ok {
 		m := w.missions.Get(ent)
 		switch {
-		case m.Status == MissionPending:
+		case m.Status == MissionSubmitted:
 			// A mission that a person created and that has not run yet. Keep
 			// the entity, which holds the creator, and start its first run.
 			startRun(m, e)
@@ -137,7 +141,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 		ID:             e.ID,
 		RunID:          e.RunID,
 		Goal:           e.Goal,
-		Status:         MissionRunning,
+		Status:         MissionWorking,
 		Budget:         e.Budget,
 		DecisionCursor: -1,
 		DeciderSlot:    e.DeciderSlot,
@@ -183,6 +187,7 @@ func projectWork(w *World, e MissionProjected) {
 			Limit:                  n.Limit,
 			Network:                n.Network,
 			SlotPins:               n.SlotPins,
+			MaxTokensPerCall:       n.MaxTokensPerCall,
 			StartsFrom:             n.StartsFrom,
 			Forkable:               n.Forkable,
 			Checkpoint:             n.Checkpoint,
@@ -223,12 +228,12 @@ func nodeName(workID string) string {
 	return workID
 }
 
-// startRun turns a pending mission into a running one, with the first run of
+// startRun turns a submitted mission into a working one, with the first run of
 // the projection. The entity keeps what creation recorded, such as the creator.
 func startRun(m *Mission, e MissionProjected) {
 	m.RunID = e.RunID
 	m.Goal = e.Goal
-	m.Status = MissionRunning
+	m.Status = MissionWorking
 	m.Budget = e.Budget
 	m.DecisionCursor = -1
 	m.DeciderSlot = e.DeciderSlot
@@ -348,6 +353,11 @@ func checkRun(w *World, ev Event) runCheck {
 		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
 	case AgentToolCallObserved:
 		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case AgentSkillLoaded:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case OutsideAgentCalled:
+		// The span holds no run of the mission, so the call is not run-scoped.
+		return runCheck{}
 	}
 	return runCheck{}
 }
@@ -407,6 +417,12 @@ func detachEvidence(ev Event) Event {
 		e.MissionID = ""
 		return e
 	case AgentToolCallObserved:
+		e.MissionID = ""
+		return e
+	case AgentSkillLoaded:
+		e.MissionID = ""
+		return e
+	case OutsideAgentCalled:
 		e.MissionID = ""
 		return e
 	}

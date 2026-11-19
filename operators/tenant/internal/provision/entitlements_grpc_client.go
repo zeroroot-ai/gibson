@@ -493,3 +493,145 @@ func (c *EntitlementsGRPCClient) ReportCatalogPluginStatus(ctx context.Context, 
 	}
 	return nil
 }
+
+// ModelProviderCredential reads the content of the credential Secret of a model
+// provider via DaemonOperatorService.GetModelProviderCredential (gibson#1387).
+// A tenant secret that does not exist gives clients.ErrNotFound. The error text
+// never holds a value.
+func (c *EntitlementsGRPCClient) ModelProviderCredential(
+	ctx context.Context, tenantID, credentialSecret, providerType, caBundleSecret string,
+) (map[string][]byte, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.GetModelProviderCredential(authedCtx, &operatorv1.GetModelProviderCredentialRequest{
+		TenantId: tenantID, CredentialSecret: credentialSecret, ProviderType: providerType,
+		CaBundleSecret: caBundleSecret,
+	})
+	if grpcstatus.Code(err) == codes.NotFound {
+		metrics.ObserveDaemonCallError("get-model-provider-credential", err)
+		return nil, fmt.Errorf("entitlements: get-model-provider-credential: %w", clients.ErrNotFound)
+	}
+	if err := translateGRPCError("get-model-provider-credential", err); err != nil {
+		return nil, err
+	}
+	return resp.GetSecret().GetData(), nil
+}
+
+// DesiredModelProvider is one provider record of a tenant, as the daemon returns
+// it. The credential secret is a name and never a value.
+type DesiredModelProvider struct {
+	Name             string
+	Type             string
+	BaseURL          string
+	Region           string
+	ProjectID        string
+	CredentialSecret string
+	CABundleSecret   string
+}
+
+// TenantModelProviders reads the provider records of one tenant via
+// DaemonOperatorService.GetTenantModelProviders (gibson#1387). It satisfies
+// the ModelProviderRecords interface of the controller package. The sync
+// removes each ModelProvider that is not in the result, so it walks every page.
+// A read of the first page only would delete the providers of the later pages.
+func (c *EntitlementsGRPCClient) TenantModelProviders(
+	ctx context.Context, tenantID string,
+) ([]DesiredModelProvider, []string, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	var skipped []string
+	out, err := pagetoken.Collect(authedCtx, 0,
+		func(ctx context.Context, token string) ([]DesiredModelProvider, string, error) {
+			resp, err := c.client.GetTenantModelProviders(ctx, &operatorv1.GetTenantModelProvidersRequest{
+				TenantId: tenantID, PageSize: pagetoken.MaxSize, PageToken: token,
+			})
+			if err := translateGRPCError("get-tenant-model-providers", err); err != nil {
+				return nil, "", err
+			}
+			skipped = append(skipped, resp.GetSkipped()...)
+			page := make([]DesiredModelProvider, 0, len(resp.GetProviders()))
+			for _, p := range resp.GetProviders() {
+				page = append(page, DesiredModelProvider{
+					Name: p.GetName(), Type: p.GetType(), BaseURL: p.GetBaseUrl(), Region: p.GetRegion(),
+					ProjectID: p.GetProjectId(), CredentialSecret: p.GetCredentialSecret(),
+					CABundleSecret: p.GetCaBundleSecret(),
+				})
+			}
+			return page, resp.GetNextPageToken(), nil
+		})
+	if err != nil {
+		return nil, nil, fmt.Errorf("get-tenant-model-providers: %w", err)
+	}
+	return out, skipped, nil
+}
+
+// DesiredOutsideAgent is one outside agent record of a tenant, as the daemon
+// returns it. The credential secret is a name and never a value.
+type DesiredOutsideAgent struct {
+	Name             string
+	A2AURL           string
+	CredentialSecret string
+	CABundleSecret   string
+}
+
+// TenantOutsideAgents reads the outside agent records of one tenant via
+// DaemonOperatorService.GetTenantOutsideAgents (gibson#1403). It satisfies the
+// OutsideAgentRecords interface of the controller package. The sync removes each
+// route that is not in the result, so it walks every page.
+func (c *EntitlementsGRPCClient) TenantOutsideAgents(
+	ctx context.Context, tenantID string,
+) ([]DesiredOutsideAgent, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := pagetoken.Collect(authedCtx, 0,
+		func(ctx context.Context, token string) ([]DesiredOutsideAgent, string, error) {
+			resp, err := c.client.GetTenantOutsideAgents(ctx, &operatorv1.GetTenantOutsideAgentsRequest{
+				TenantId: tenantID, PageSize: pagetoken.MaxSize, PageToken: token,
+			})
+			if err := translateGRPCError("get-tenant-outside-agents", err); err != nil {
+				return nil, "", err
+			}
+			page := make([]DesiredOutsideAgent, 0, len(resp.GetAgents()))
+			for _, a := range resp.GetAgents() {
+				page = append(page, DesiredOutsideAgent{
+					Name: a.GetName(), A2AURL: a.GetA2AUrl(), CredentialSecret: a.GetCredentialSecret(),
+					CABundleSecret: a.GetCaBundleSecret(),
+				})
+			}
+			return page, resp.GetNextPageToken(), nil
+		})
+	if err != nil {
+		return nil, fmt.Errorf("get-tenant-outside-agents: %w", err)
+	}
+	return out, nil
+}
+
+// OutsideAgentCredential reads the content of the credential Secret of an
+// outside agent via DaemonOperatorService.GetOutsideAgentCredential
+// (gibson#1403). A record or a tenant secret that does not exist gives
+// clients.ErrNotFound. The error text never holds a value.
+func (c *EntitlementsGRPCClient) OutsideAgentCredential(
+	ctx context.Context, tenantID, name string,
+) (map[string][]byte, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.GetOutsideAgentCredential(authedCtx, &operatorv1.GetOutsideAgentCredentialRequest{
+		TenantId: tenantID, Name: name,
+	})
+	if grpcstatus.Code(err) == codes.NotFound {
+		metrics.ObserveDaemonCallError("get-outside-agent-credential", err)
+		return nil, fmt.Errorf("entitlements: get-outside-agent-credential: %w", clients.ErrNotFound)
+	}
+	if err := translateGRPCError("get-outside-agent-credential", err); err != nil {
+		return nil, err
+	}
+	return resp.GetSecret().GetData(), nil
+}

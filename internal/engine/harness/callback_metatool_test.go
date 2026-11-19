@@ -7,13 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"math"
+	"testing"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
-	"log/slog"
-	"math"
-	"testing"
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -53,7 +54,10 @@ func noBlockedTools(context.Context, string, string) ([]string, error) { return 
 
 func newSvc(t *testing.T) *HarnessCallbackService {
 	t.Helper()
-	return &HarnessCallbackService{logger: slog.Default(), connectorAudit: newConnectorAudit(t, &audittest.Recorder{})}
+	return &HarnessCallbackService{
+		logger: slog.Default(), connectorAudit: newConnectorAudit(t, &audittest.Recorder{}),
+		agentSkills: noAgentSkillStore, skillLoadSink: noSkillLoadSink,
+	}
 }
 
 // newConnectorAudit builds an audit logger over a miniredis tail and the given
@@ -81,7 +85,7 @@ func TestMetaSearch_MapsCandidatesAndEmbedsRawSchema(t *testing.T) {
 			Description: "open an issue", InputSchema: []byte(`{"type":"object","properties":{"title":{"type":"string"}}}`)},
 	}}, mtAuthz{}, nil)
 
-	resp, err := newSvc(t).metaSearch(context.Background(), h, catalog.Caller{Tenant: "acme"}, []byte(`{"query":"issue","limit":3}`))
+	resp, err := newSvc(t).metaSearch(context.Background(), h, catalog.Caller{Tenant: "acme"}, nil, []byte(`{"query":"issue","limit":3}`))
 	if err != nil {
 		t.Fatalf("metaSearch: %v", err)
 	}
@@ -142,6 +146,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnSuccess(t *testing.T) {
 
 	var captured []capturedTool
 	svc := &HarnessCallbackService{
+		agentSkills: noAgentSkillStore, skillLoadSink: noSkillLoadSink,
 		logger: slog.Default(), connectorAudit: newConnectorAudit(t, &audittest.Recorder{}),
 		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
@@ -194,6 +199,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
 
 	var captured []capturedTool
 	svc := &HarnessCallbackService{
+		agentSkills: noAgentSkillStore, skillLoadSink: noSkillLoadSink,
 		logger: slog.Default(), connectorAudit: newConnectorAudit(t, &audittest.Recorder{}),
 		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
@@ -237,6 +243,7 @@ func TestMetaInvoke_RecordsSuccessEvenWhenResultIsNotJSONMarshalable(t *testing.
 
 	var captured []capturedTool
 	svc := &HarnessCallbackService{
+		agentSkills: noAgentSkillStore, skillLoadSink: noSkillLoadSink,
 		logger: slog.Default(), connectorAudit: newConnectorAudit(t, &audittest.Recorder{}),
 		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
@@ -624,6 +631,7 @@ func TestMetaInvoke_AnAuditWriteFailureRefusesTheCall(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
 	var captured []capturedTool
 	svc := &HarnessCallbackService{
+		agentSkills: noAgentSkillStore, skillLoadSink: noSkillLoadSink,
 		logger:         slog.Default(),
 		connectorAudit: newConnectorAudit(t, &refusingDurable{}),
 		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {

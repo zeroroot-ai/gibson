@@ -11,29 +11,54 @@ import (
 	"github.com/mlange-42/ark/ecs"
 )
 
-// MissionStatus is the lifecycle state of a mission.
+// MissionStatus is the lifecycle state of a mission. The names follow the A2A
+// Task states (ADR-0175). "Paused" is the one state that A2A does not have.
 type MissionStatus string
 
 const (
-	// MissionPending is a mission a person created that has not run yet. It
+	// MissionSubmitted is a mission a person created that has not run yet. It
 	// is listed, attributed to its creator, and inert: no System acts on it
-	// until MissionStarted moves it to running (hosted#205).
-	MissionPending   MissionStatus = "pending"
-	MissionRunning   MissionStatus = "running"
+	// until MissionStarted moves it to working (hosted#205).
+	MissionSubmitted MissionStatus = "submitted"
+	// MissionWorking is a mission that runs. The executor Systems dispatch and
+	// decide for it.
+	MissionWorking MissionStatus = "working"
+	// MissionInputRequired is a mission that waits for a person while an
+	// approval request is open. The mission keeps its work going, as ADR-0132
+	// requires: the fleet runs on while the decision is pending. The state
+	// returns to MissionWorking when the last open request is decided.
+	MissionInputRequired MissionStatus = "input_required"
+	// MissionCompleted is a mission that finished its work.
 	MissionCompleted MissionStatus = "completed"
-	MissionFailed    MissionStatus = "failed"
-	// MissionPaused: a running mission halted by an operator (gibson#851,
-	// brain-native pause). The executor Systems stop dispatching/deciding for it
-	// until it is resumed; its World state is untouched, so resume continues
-	// exactly where it left off (the Timeline is the durable record — no separate
-	// checkpoint store, ADR-0101).
+	// MissionFailed is a mission that ended with an error. It is terminal.
+	MissionFailed MissionStatus = "failed"
+	// MissionCanceled is a mission that a person stopped. It is terminal and
+	// it is not a failure.
+	MissionCanceled MissionStatus = "canceled"
+	// MissionPaused is a working mission that an operator halted (gibson#851,
+	// brain-native pause). The executor Systems stop dispatching and deciding
+	// for it until it resumes. Its World state is untouched, so a resume
+	// continues where the pause stopped. The Timeline is the durable record,
+	// with no separate checkpoint store (ADR-0101).
 	MissionPaused MissionStatus = "paused"
 )
 
+// IsTerminal reports whether the state ends a mission.
+func (s MissionStatus) IsTerminal() bool {
+	return s == MissionCompleted || s == MissionFailed || s == MissionCanceled
+}
+
+// IsActive reports whether the executor Systems act for a mission in this
+// state. A working mission and a mission that waits for input are both active.
+func (s MissionStatus) IsActive() bool {
+	return s == MissionWorking || s == MissionInputRequired
+}
+
 // Budget is the per-mission resource ceiling carried from CUE MissionConstraints
-// (ADR-0104). It is recorded here at projection; the budget/limit System that
-// enforces it (forcing MissionDone{budget_exceeded}) is gibson#849. Zero in any
-// field means "unlimited" for that dimension.
+// (ADR-0104). It is recorded here at projection. BudgetSystem (budget.go)
+// enforces it: it ends a mission over its budget with a MissionDone event whose
+// Outcome is MissionFailed and whose Reason starts with "budget exceeded". Zero
+// in any field means "unlimited" for that dimension.
 type Budget struct {
 	MaxExecutions int   // cap on dispatched WorkItems (the runaway guard)
 	MaxTokens     int64 // cumulative LLM token budget
@@ -122,7 +147,7 @@ func (MissionStarted) Kind() string { return "mission.started" }
 
 // MissionCreated records a mission a person created before it runs, so the
 // World, and ListMissions with it, know the mission and its creator from
-// creation. MissionStarted later moves the same entity to running; a
+// creation. MissionStarted later moves the same entity to working; a
 // MissionStarted for an unknown id still creates it, as before.
 type MissionCreated struct {
 	ID          string
@@ -142,7 +167,7 @@ func applyMissionCreated(w *World, e MissionCreated) {
 	}
 	w.missions.NewEntity(&Mission{
 		ID:             e.ID,
-		Status:         MissionPending,
+		Status:         MissionSubmitted,
 		DecisionCursor: -1,
 		Name:           e.Name,
 		Description:    e.Description,
@@ -169,6 +194,16 @@ type MissionDone struct {
 
 func (MissionDone) Kind() string { return "mission.done" }
 
+// FinalOutcome returns the terminal state that the event sets. An empty
+// outcome is MissionCompleted. It returns false for an outcome that is not
+// terminal, because a mission cannot end in a state that still runs.
+func (e MissionDone) FinalOutcome() (MissionStatus, bool) {
+	if e.Outcome == "" {
+		return MissionCompleted, true
+	}
+	return e.Outcome, e.Outcome.IsTerminal()
+}
+
 func findMission(w *World, id string) (ecs.Entity, bool) {
 	q := ecs.NewFilter1[Mission](w.ecs).Query()
 	for q.Next() {
@@ -186,10 +221,10 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		// A pending mission starts: it keeps what creation recorded and
 		// takes what the start adds. Any other status is a replay.
 		m := w.missions.Get(ent)
-		if m.Status != MissionPending {
+		if m.Status != MissionSubmitted {
 			return
 		}
-		m.Status = MissionRunning
+		m.Status = MissionWorking
 		m.Goal = e.Goal
 		m.BeliefModel = e.BeliefModel
 		if e.Name != "" {
@@ -213,7 +248,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		ID:             e.ID,
 		RunID:          e.RunID,
 		Goal:           e.Goal,
-		Status:         MissionRunning,
+		Status:         MissionWorking,
 		DecisionCursor: -1,
 		BeliefModel:    e.BeliefModel,
 		Name:           e.Name,
@@ -224,7 +259,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 	})
 }
 
-// MissionPauseRequested halts a running mission (operator pause). The executor
+// MissionPauseRequested halts a working mission (operator pause). The executor
 // Systems skip a paused mission until MissionResumed.
 type MissionPauseRequested struct {
 	ID    string
@@ -233,7 +268,7 @@ type MissionPauseRequested struct {
 
 func (MissionPauseRequested) Kind() string { return "mission.pause" }
 
-// MissionResumed returns a paused mission to running.
+// MissionResumed returns a paused mission to working.
 type MissionResumed struct {
 	ID    string
 	RunID string // the run to resume; see MissionDone.RunID
@@ -243,7 +278,7 @@ func (MissionResumed) Kind() string { return "mission.resume" }
 
 func applyMissionPauseRequested(w *World, e MissionPauseRequested) {
 	if ent, ok := findMission(w, e.ID); ok {
-		if m := w.missions.Get(ent); m.Status == MissionRunning {
+		if m := w.missions.Get(ent); m.Status.IsActive() {
 			m.Status = MissionPaused
 		}
 	}
@@ -252,23 +287,27 @@ func applyMissionPauseRequested(w *World, e MissionPauseRequested) {
 func applyMissionResumed(w *World, e MissionResumed) {
 	if ent, ok := findMission(w, e.ID); ok {
 		if m := w.missions.Get(ent); m.Status == MissionPaused {
-			m.Status = MissionRunning
+			m.Status = MissionWorking
+			reconcileInputRequired(w, e.ID)
 		}
 	}
 }
 
 func applyMissionDone(w *World, e MissionDone) {
+	outcome, ok := e.FinalOutcome()
+	if !ok {
+		return // an outcome that is not terminal ends nothing
+	}
 	if ent, ok := findMission(w, e.ID); ok {
 		m := w.missions.Get(ent)
-		if m.Status == MissionCompleted || m.Status == MissionFailed {
-			return // already terminal — idempotent (paused/running can still finish)
-		}
-		outcome := e.Outcome
-		if outcome == "" {
-			outcome = MissionCompleted
+		if m.Status.IsTerminal() {
+			return // already terminal — idempotent (paused or working can still finish)
 		}
 		m.Status = outcome
 		m.Reason = e.Reason
+		// A call that arrives after the end of the mission is not counted
+		// against a budget that no longer runs, so the set is not kept.
+		delete(w.countedTokenCalls, e.ID)
 	}
 	// A Decider decision that ends the mission carries the completion reason as its
 	// rationale (gibson#1062). The worker emits MissionDone before DecisionCompleted,
@@ -276,10 +315,6 @@ func applyMissionDone(w *World, e MissionDone) {
 	// no decision in flight is a no-op.
 	if ent, ok := findOpenDecision(w, e.ID); ok {
 		dec := w.decisions.Get(ent)
-		outcome := e.Outcome
-		if outcome == "" {
-			outcome = MissionCompleted
-		}
 		dec.Outcome = string(outcome)
 		dec.Rationale = e.Reason
 	}

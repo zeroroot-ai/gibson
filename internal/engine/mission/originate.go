@@ -310,7 +310,7 @@ func (o *Originator) buildChild(
 		TenantID:              req.Parent.TenantID,
 		Name:                  def.GetName(),
 		Description:           def.GetDescription(),
-		Status:                MissionStatusPending,
+		Status:                MissionStatusSubmitted,
 		MissionDefinitionID:   types.ID(def.GetId()),
 		MissionDefinitionJSON: string(defJSON),
 		Constraints:           grantedConstraints(def.GetConstraints(), granted),

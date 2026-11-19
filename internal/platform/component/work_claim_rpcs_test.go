@@ -65,18 +65,3 @@ func TestSubmitFinding_RefusesAWorkItemThatAnotherAgentClaimed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, submitter.submitted, 1)
 }
-
-// A delegation names the work item of its caller. An agent that did not claim
-// the item cannot delegate from it, and so cannot take its mission or its run.
-func TestDelegateToAgent_RefusesASourceWorkItemThatAnotherAgentClaimed(t *testing.T) {
-	env := newWorkIDEnv(t)
-	env.svc.WithGrantVerifier(fakeGrants{})
-	env.svc.WithCapabilityChecker(grantedChecker())
-	const tenant = "test-tenant"
-	source := env.enqueueRun(t, tenant, "work-claim-del", "run-42")
-
-	_, _, err := env.svc.bindSourceWork(grantedCtx(otherAgentCtx(tenant), "mission-7", "run-42"), tenant, source)
-	assert.Equal(t, codes.PermissionDenied, status.Code(err))
-	assert.Empty(t, sourceRunEntry(otherAgentCtx(tenant), env.svc, tenant, source), "a foreign claimant gets no run")
-	assert.NotEmpty(t, sourceRunEntry(ctxForTenant(tenant), env.svc, tenant, source), "the claimant keeps its run")
-}

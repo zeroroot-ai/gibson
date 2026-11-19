@@ -148,11 +148,8 @@ const reasonMemberJobSurface = "bank member callback: the member acts as itself 
 // Keys are the fully-qualified gRPC method names generated alongside the service
 // — exactly what the interceptors match against info.FullMethod.
 var callbackMethodPolicy = map[string]callbackMethodDecision{
-	// --- LLM operations ---
-	harnesspb.HarnessCallbackService_LLMComplete_FullMethodName:           {agentSurface: true, reason: reasonAgentCallbackSurface},
-	harnesspb.HarnessCallbackService_LLMCompleteWithTools_FullMethodName:  {agentSurface: true, reason: reasonAgentCallbackSurface},
-	harnesspb.HarnessCallbackService_LLMCompleteStructured_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
-	harnesspb.HarnessCallbackService_LLMStream_FullMethodName:             {agentSurface: true, reason: reasonAgentCallbackSurface},
+	// --- Model resolution ---
+	harnesspb.HarnessCallbackService_ResolveModel_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 
 	// --- Tool operations ---
 	harnesspb.HarnessCallbackService_CallToolProto_FullMethodName:       {agentSurface: true, reason: reasonAgentCallbackSurface},
@@ -167,11 +164,10 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 			"agent's meta-tool path rather than a generated harness method",
 	},
 
-	// --- Plugin / agent discovery and delegation ---
-	harnesspb.HarnessCallbackService_QueryPlugin_FullMethodName:     {agentSurface: true, reason: reasonAgentCallbackSurface},
-	harnesspb.HarnessCallbackService_ListPlugins_FullMethodName:     {agentSurface: true, reason: reasonAgentCallbackSurface},
-	harnesspb.HarnessCallbackService_DelegateToAgent_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
-	harnesspb.HarnessCallbackService_ListAgents_FullMethodName:      {agentSurface: true, reason: reasonAgentCallbackSurface},
+	// --- Plugin discovery and agent resolution ---
+	harnesspb.HarnessCallbackService_QueryPlugin_FullMethodName:  {agentSurface: true, reason: reasonAgentCallbackSurface},
+	harnesspb.HarnessCallbackService_ListPlugins_FullMethodName:  {agentSurface: true, reason: reasonAgentCallbackSurface},
+	harnesspb.HarnessCallbackService_ResolveAgent_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 
 	// --- Findings and observations ---
 	harnesspb.HarnessCallbackService_SubmitFinding_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},

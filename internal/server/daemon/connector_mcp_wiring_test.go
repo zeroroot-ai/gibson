@@ -6,6 +6,8 @@ package daemon
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"os"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -38,7 +40,9 @@ func TestRecordConnectorTools_StoresTheCount(t *testing.T) {
 // The daemon builds one MCP client, and with no SPIFFE JWT source a request
 // carries no token.
 func TestConnectorMCPClient_OneClientAndNoTokenWithNoSource(t *testing.T) {
-	d := testDaemonForRegistry(t)
+	d := &daemonImpl{logger: observability.NewLogger(observability.Config{
+		Component: "test", Level: slog.LevelError, Output: os.Stderr,
+	})}
 	first, second := d.connectorMCPClient(), d.connectorMCPClient()
 	if first == nil || first != second {
 		t.Fatal("the daemon must build exactly one MCP client")

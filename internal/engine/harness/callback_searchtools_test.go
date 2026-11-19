@@ -59,6 +59,7 @@ func TestSearchTools_FiltersByCanInvokeAndMaps(t *testing.T) {
 		"component:connector/github": false, // denied
 	}}
 	svc := &HarnessCallbackService{
+		agentSkills: noAgentSkillStore, skillLoadSink: noSkillLoadSink,
 		logger:     slog.Default(),
 		authzStore: fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "acme", Status: "active"}},
 		componentRegistry: fakeSearchReg{comps: []component.ComponentInfo{
@@ -105,6 +106,7 @@ func TestSearchTools_UnavailableWhenNotWired(t *testing.T) {
 
 func TestSearchTools_RequiresRunID(t *testing.T) {
 	svc := &HarnessCallbackService{
+		agentSkills: noAgentSkillStore, skillLoadSink: noSkillLoadSink,
 		logger:              slog.Default(),
 		authzStore:          fakeSearchAuthzStore{state: &RunAuthzState{Status: "active"}},
 		componentRegistry:   fakeSearchReg{},

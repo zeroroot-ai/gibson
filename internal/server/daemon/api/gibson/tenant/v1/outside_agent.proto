@@ -1,0 +1,193 @@
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
+
+// OutsideAgentService manages the outside agents of one tenant (epic
+// gibson#1366, gibson#1403).
+//
+// An outside agent is an A2A agent that runs outside Gibson. A tenant admin
+// registers its name, the HTTPS URL of its A2A endpoint and the name of a tenant
+// secret for its credential. The tenant operator turns each record into one
+// route on the Agent gateway. A mission agent calls the outside agent through
+// that route, and the gateway asks ext-authz first.
+//
+// No default grant exists. A tenant admin grants an outside agent to one mission
+// with GrantOutsideAgent. A mission with no grant gets a refusal at the gateway.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "buf/validate/validate.proto";
+import "gibson/auth/v1/options.proto";
+import "google/protobuf/timestamp.proto";
+
+service OutsideAgentService {
+  // RegisterOutsideAgent saves one outside agent. The URL must be HTTPS, and it
+  // must resolve to a public address. A second call with the same name and the
+  // same fields changes nothing. A second call with the same name and other
+  // fields is refused with ALREADY_EXISTS: delete the record first.
+  rpc RegisterOutsideAgent(RegisterOutsideAgentRequest) returns (RegisterOutsideAgentResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListOutsideAgents returns each outside agent of the tenant.
+  rpc ListOutsideAgents(ListOutsideAgentsRequest) returns (ListOutsideAgentsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetOutsideAgent returns one outside agent.
+  rpc GetOutsideAgent(GetOutsideAgentRequest) returns (GetOutsideAgentResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // DeleteOutsideAgent removes the record and each grant of it.
+  rpc DeleteOutsideAgent(DeleteOutsideAgentRequest) returns (DeleteOutsideAgentResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GrantOutsideAgent lets one mission call an outside agent. It is idempotent.
+  rpc GrantOutsideAgent(GrantOutsideAgentRequest) returns (GrantOutsideAgentResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // RevokeOutsideAgent removes the grant of GrantOutsideAgent. It is idempotent.
+  rpc RevokeOutsideAgent(RevokeOutsideAgentRequest) returns (RevokeOutsideAgentResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListOutsideAgentGrants returns the missions that may call one outside agent.
+  rpc ListOutsideAgentGrants(ListOutsideAgentGrantsRequest) returns (ListOutsideAgentGrantsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// OutsideAgentEntry is one outside agent of the tenant.
+message OutsideAgentEntry {
+  string name = 1;
+  // a2a_url is the HTTPS URL of the A2A endpoint.
+  string a2a_url = 2;
+  // credential_secret is the name of the tenant secret that holds the
+  // credential of the agent. Empty means the agent needs none. The record holds
+  // the name and never the value.
+  string credential_secret = 3;
+  string description = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // ca_bundle_secret is the name of the tenant secret that holds the PEM CA
+  // bundle that signs the certificate of the agent. Empty means the gateway
+  // uses its public roots. The record holds the name and never the value.
+  string ca_bundle_secret = 6;
+}
+
+message RegisterOutsideAgentRequest {
+  // name is the name of the agent in the tenant. It is a DNS label.
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+  string a2a_url = 2 [(buf.validate.field).string = { min_len: 1, max_len: 2048 }];
+  string credential_secret = 3 [(buf.validate.field).string = { max_len: 255 }];
+  string description = 4 [(buf.validate.field).string = { max_len: 1024 }];
+  // ca_bundle_secret is the name of the tenant secret with the PEM CA bundle of
+  // the agent. Optional. The daemon checks at save time that the secret holds
+  // certificates.
+  string ca_bundle_secret = 5 [(buf.validate.field).string = { max_len: 255 }];
+}
+
+message RegisterOutsideAgentResponse {
+  OutsideAgentEntry entry = 1;
+}
+
+message ListOutsideAgentsRequest {
+  // page_size is the largest number of entries on one page. Zero means the
+  // server default. The server also caps it.
+  int32 page_size = 1;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+
+message ListOutsideAgentsResponse {
+  repeated OutsideAgentEntry entries = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+}
+
+message GetOutsideAgentRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+}
+
+message GetOutsideAgentResponse {
+  OutsideAgentEntry entry = 1;
+}
+
+message DeleteOutsideAgentRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+}
+
+message DeleteOutsideAgentResponse {}
+
+message GrantOutsideAgentRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+  // mission_id is the id of a mission of the tenant, with no type prefix.
+  string mission_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 255 }];
+}
+
+message GrantOutsideAgentResponse {}
+
+message RevokeOutsideAgentRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+  string mission_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 255 }];
+}
+
+message RevokeOutsideAgentResponse {}
+
+message ListOutsideAgentGrantsRequest {
+  string name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+  // page_size is the largest number of mission ids on one page. Zero means the
+  // server default. The server also caps it.
+  int32 page_size = 2;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 3 [(buf.validate.field).string = { max_len: 1024 }];
+}
+
+message ListOutsideAgentGrantsResponse {
+  repeated string mission_ids = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+}

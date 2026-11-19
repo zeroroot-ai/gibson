@@ -646,6 +646,7 @@ func main() {
 	var tenantStatusReporter controller.TenantStatusReporter
 	var orgMappingSeeder controller.TenantOrgSeeder
 	var agentLimits flows.AgentLimitsReporter
+	var modelCredentials controller.ModelCredentialSource
 	// The audit record of each saga step and of the last backup goes to the
 	// daemon before the change (gibson#583). Required: no emitter, no start.
 	var sagaAudit *audit.SagaEmitter
@@ -661,6 +662,33 @@ func main() {
 		tenantStatusReporter = grpcClient
 		orgMappingSeeder = grpcClient
 		agentLimits = grpcClient
+		modelCredentials = grpcClient
+		// Pull the provider records of each tenant and reconcile one ModelProvider
+		// for each record (gibson#1387). The daemon never touches Kubernetes.
+		if err := (&controller.ModelProviderSyncRunnable{
+			Client: mgr.GetClient(),
+			Daemon: grpcClient,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to register the model provider sync runnable")
+			os.Exit(1)
+		}
+		// Pull the outside agent records of each tenant and render the backend, the
+		// route and the credential Secret of each into the gateway namespace
+		// (gibson#1403). The agent gateway is a required component.
+		agentGatewayConfig, aerr := agentGatewayConfigFromEnv(os.Getenv)
+		if aerr != nil {
+			setupLog.Error(aerr, "Invalid agent gateway configuration")
+			os.Exit(1)
+		}
+		if err := (&controller.OutsideAgentSyncRunnable{
+			Client:      mgr.GetClient(),
+			Daemon:      grpcClient,
+			Credentials: grpcClient,
+			Render:      agentGatewayConfig,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to register the outside agent sync runnable")
+			os.Exit(1)
+		}
 		if sagaAudit, gerr = audit.NewSagaEmitter(grpcClient); gerr != nil {
 			setupLog.Error(gerr, "saga audit emitter init failed")
 			os.Exit(1)
@@ -853,6 +881,24 @@ func main() {
 		Audit:       sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantSecretsBackend")
+		os.Exit(1)
+	}
+
+	// ModelProvider — one model provider of a tenant. The controller renders it
+	// into the backend and the route of the model gateway (gibson#1387). The
+	// model gateway is a required component.
+	modelGatewayConfig, err := modelGatewayConfigFromEnv(os.Getenv)
+	if err != nil {
+		setupLog.Error(err, "Invalid model gateway configuration")
+		os.Exit(1)
+	}
+	if err := (&controller.ModelProviderReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Render:      modelGatewayConfig,
+		Credentials: modelCredentials,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "ModelProvider")
 		os.Exit(1)
 	}
 

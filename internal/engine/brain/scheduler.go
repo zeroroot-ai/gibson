@@ -19,7 +19,7 @@ package brain
 func pausedMissions(w *World) map[string]bool {
 	notRunning := map[string]bool{}
 	for _, m := range w.MissionSnapshot() {
-		if m.Status != MissionRunning {
+		if !m.Status.IsActive() {
 			notRunning[m.ID] = true
 		}
 	}
@@ -57,21 +57,22 @@ func SchedulerSystem(w *World) []Event {
 			running[key]++
 		}
 		out = append(out, WorkDispatched{
-			ID:           wi.ID,
-			MissionID:    wi.MissionID,
-			RunID:        wi.RunID,
-			ItemKind:     wi.Kind,
-			Target:       wi.Target,
-			Input:        wi.Input,
-			Timeout:      wi.Timeout,
-			Group:        wi.Group,
-			Limit:        wi.Limit,
-			Network:      wi.Network,
-			SlotPins:     wi.SlotPins,
-			StartsFrom:   wi.StartsFrom,
-			Forkable:     wi.Forkable,
-			Checkpoint:   wi.Checkpoint,
-			FromSnapshot: wi.FromSnapshot,
+			ID:               wi.ID,
+			MissionID:        wi.MissionID,
+			RunID:            wi.RunID,
+			ItemKind:         wi.Kind,
+			Target:           wi.Target,
+			Input:            wi.Input,
+			Timeout:          wi.Timeout,
+			Group:            wi.Group,
+			Limit:            wi.Limit,
+			Network:          wi.Network,
+			SlotPins:         wi.SlotPins,
+			MaxTokensPerCall: wi.MaxTokensPerCall,
+			StartsFrom:       wi.StartsFrom,
+			Forkable:         wi.Forkable,
+			Checkpoint:       wi.Checkpoint,
+			FromSnapshot:     wi.FromSnapshot,
 		})
 	}
 	return out
@@ -119,15 +120,17 @@ func MissionCompletionSystem(w *World) []Event {
 
 	var out []Event
 	for _, m := range w.MissionSnapshot() {
-		if m.Status != MissionRunning || m.Goal != "" {
+		if !m.Status.IsActive() || m.Goal != "" {
 			continue // only running no-goal missions complete mechanically
 		}
 		running, ready, anyFailed := false, false, false
 		for _, wi := range byMission[m.ID] {
 			switch wi.State {
-			case WorkRunning:
+			case WorkRunning, WorkInputRequired:
+				// An item that waits for input can still finish, so the
+				// mission is not complete yet.
 				running = true
-			case WorkFailed:
+			case WorkFailed, WorkCanceled:
 				anyFailed = true
 			case WorkPending:
 				if depsSatisfied(wi.DependsOn, idx) {

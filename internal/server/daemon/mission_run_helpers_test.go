@@ -83,7 +83,7 @@ func (f *fakeTargetStore) Get(ctx context.Context, id types.ID) (*types.Target, 
 }
 
 func helperMM() *missionManager {
-	return &missionManager{logger: slog.New(slog.DiscardHandler)}
+	return &missionManager{logger: slog.New(slog.DiscardHandler), skillStore: noAgentSkills}
 }
 
 // ---- runTargetRef ---------------------------------------------------------
@@ -581,7 +581,7 @@ func TestResume_Paused(t *testing.T) {
 	eng := mm.brainRegistry.For(tenant.String())
 	active, _ := mm.getActive(tenant, "m-run")
 	eng.Submit(brain.MissionStarted{ID: "m-run", RunID: runIDOf(active), Name: "recon"})
-	waitWorldStatus(t, eng, "m-run", string(brain.MissionRunning))
+	waitWorldStatus(t, eng, "m-run", string(brain.MissionWorking))
 
 	tctx := auth.WithTenant(context.Background(), tenant)
 	if err := mm.Pause(tctx, "m-run", false); err != nil {

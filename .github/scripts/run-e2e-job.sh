@@ -85,10 +85,16 @@ spec:
         app.kubernetes.io/instance: ${RELEASE}
         app.kubernetes.io/component: ${COMPONENT}
         # The Cilium policy of the chart (D76, charts#394) admits a pod by its
-        # network labels. The runner dials the daemon (net-role platform) and
-        # Redis (client-redis), nothing else.
+        # network labels. The runner dials the daemon (net-role platform), the
+        # Edge (each pod with net-role reaches the Edge listener, and the model
+        # and agent gateways are reached through the Edge routes) and Redis
+        # (client-redis). The egress-namespaces label lets it dial a pod in
+        # another namespace: the mock provider of the exit tests answers the
+        # request record on port 80 (tests/fixtures/mockprovider). The runner
+        # never dials the gateway proxy, because the proxy admits the Edge only.
         gibson.zeroroot.ai/net-role: platform
         gibson.zeroroot.ai/client-redis: "true"
+        gibson.zeroroot.ai/egress-namespaces: "true"
     spec:
       restartPolicy: Never
       serviceAccountName: ${RELEASE}-${COMPONENT}

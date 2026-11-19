@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
+// Package agent defines the Agent interface and the harness that an agent runs
+// on. It also defines the slots that bind an agent to a model.
 package agent
 
 import (

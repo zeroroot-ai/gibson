@@ -13,19 +13,20 @@ import (
 // MissionRunStatus represents the execution status of a mission run
 type MissionRunStatus string
 
+// The values of MissionRunStatus.
 const (
-	MissionRunStatusPending   MissionRunStatus = "pending"
-	MissionRunStatusRunning   MissionRunStatus = "running"
+	MissionRunStatusSubmitted MissionRunStatus = "submitted"
+	MissionRunStatusWorking   MissionRunStatus = "working"
 	MissionRunStatusCompleted MissionRunStatus = "completed"
 	MissionRunStatusFailed    MissionRunStatus = "failed"
-	MissionRunStatusCancelled MissionRunStatus = "cancelled"
+	MissionRunStatusCanceled  MissionRunStatus = "canceled"
 	MissionRunStatusPaused    MissionRunStatus = "paused"
 )
 
 // IsTerminal returns true if the status is a terminal state (no further transitions)
 func (s MissionRunStatus) IsTerminal() bool {
 	switch s {
-	case MissionRunStatusCompleted, MissionRunStatusFailed, MissionRunStatusCancelled:
+	case MissionRunStatusCompleted, MissionRunStatusFailed, MissionRunStatusCanceled:
 		return true
 	default:
 		return false
@@ -86,7 +87,7 @@ func NewMissionRun(missionID types.ID, runNumber int) *MissionRun {
 		ID:        types.NewID(),
 		MissionID: missionID,
 		RunNumber: runNumber,
-		Status:    MissionRunStatusPending,
+		Status:    MissionRunStatusSubmitted,
 		Progress:  0.0,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -113,7 +114,7 @@ func (r *MissionRun) Validate() error {
 // MarkStarted sets status to running and records the start time.
 func (r *MissionRun) MarkStarted() {
 	now := time.Now()
-	r.Status = MissionRunStatusRunning
+	r.Status = MissionRunStatusWorking
 	r.StartedAt = &now
 	r.UpdatedAt = now
 }
@@ -138,7 +139,7 @@ func (r *MissionRun) MarkFailed(errMsg string) {
 // MarkCancelled sets status to cancelled.
 func (r *MissionRun) MarkCancelled() {
 	now := time.Now()
-	r.Status = MissionRunStatusCancelled
+	r.Status = MissionRunStatusCanceled
 	r.CompletedAt = &now
 	r.UpdatedAt = now
 }

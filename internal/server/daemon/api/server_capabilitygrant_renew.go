@@ -244,7 +244,8 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 		Tenant:         claims.Tenant.String(),
 		MissionID:      claims.MissionID,
 		TaskID:         claims.TaskID,
-		MissionRunID:   claims.MissionRunID, // the renewal keeps the run of the grant
+		MissionRunID:   claims.MissionRunID,                  // the renewal keeps the run of the grant
+		Initiator:      capabilitygrant.InitiatorOf(cgToken), // and the initiator of the grant
 		AllowedRPCs:    claims.AllowedRPCs,
 		RecipientClass: recipientClassFromSubject(claims.Subject),
 	})

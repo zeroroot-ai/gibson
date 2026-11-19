@@ -574,7 +574,7 @@ func TestStoredName_ColonFlatRoot(t *testing.T) {
 		{secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, "raw", "raw"},                                                           // unspecified — no prefix added
 	}
 	for _, tc := range tests {
-		got := storedName(tc.cat, tc.name)
+		got := secrets.StoredName(tc.cat, tc.name)
 		if got != tc.want {
 			t.Errorf("storedName(%v, %q) = %q, want %q", tc.cat, tc.name, got, tc.want)
 		}

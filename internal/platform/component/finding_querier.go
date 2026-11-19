@@ -10,26 +10,34 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// PoolFindingQuerier reads a tenant's findings back out of its own graph
-// (gibson#1186 slice B).
+// PoolFindingQuerier reads a tenant's findings back out of the findings table of
+// its own Postgres database (gibson#1186 slice B, gibson#1383).
 //
 // It is the read counterpart of GraphRAGFindingSubmitter, which already writes
 // findings through the same per-tenant pool. Tenant isolation is the pool: each
-// tenant has its own Neo4j database, so the records carry no tenant_id predicate
-// and there is no cross-tenant query to get wrong (see the note in
-// DashboardQueries.Findings).
+// tenant has its own Postgres database, so the query carries no tenant_id
+// predicate and there is no cross-tenant query to get wrong. The graph holds a
+// finding node for relations only.
 //
 // The wire format is JSON on both sides — `filter_json` decodes to the same
 // shape the SDK's finding.Filter marshals, and `findings_json` encodes the SDK
 // finding.Finding shape the daemon already accepts on SubmitFinding.
 type PoolFindingQuerier struct {
-	pool   datapool.Pool
+	lister findingLister
 	logger *slog.Logger
+}
+
+// findingLister reads a page of the findings of a tenant. pgstore.Store is the
+// implementation.
+type findingLister interface {
+	Find(ctx context.Context, tenantID string, q pgstore.Query) ([]finding.EnhancedFinding, int, error)
 }
 
 // NewPoolFindingQuerier constructs a PoolFindingQuerier over the per-tenant pool.
@@ -37,7 +45,10 @@ func NewPoolFindingQuerier(pool datapool.Pool, logger *slog.Logger) *PoolFinding
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &PoolFindingQuerier{pool: pool, logger: logger}
+	return &PoolFindingQuerier{
+		lister: pgstore.New(func() datapool.Pool { return pool }),
+		logger: logger,
+	}
 }
 
 // Compile-time assertion that the querier satisfies the service seam.
@@ -96,33 +107,37 @@ func (q *PoolFindingQuerier) query(
 	tenant string,
 	filter findingFilter,
 ) ([]byte, error) {
-	tenantID, err := auth.NewTenantID(tenant)
-	if err != nil {
+	if _, err := auth.NewTenantID(tenant); err != nil {
 		return nil, fmt.Errorf("finding querier: invalid tenant %q: %w", tenant, err)
 	}
 
-	conn, err := q.pool.For(ctx, tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("finding querier: acquire tenant data plane: %w", err)
+	query := pgstore.Query{
+		Category: filter.Category,
+		Search:   filter.Search,
+		Limit:    int(filter.Limit),
+		Offset:   int(filter.Offset),
 	}
-	defer conn.Release()
+	if filter.Severity != "" {
+		query.Severities = []string{filter.Severity}
+	}
+	if filter.MissionID != "" {
+		missionID, isUUID := parseMissionFilter(filter.MissionID)
+		if !isUUID {
+			// No finding has a mission ID that is not a UUID. The answer is none.
+			return []byte("[]"), nil
+		}
+		query.MissionID = missionID
+	}
 
-	queries := graph.NewDashboardQueries(graph.NewSessionGraphClient(conn.Neo4j))
-	records, _, err := queries.Findings(ctx, tenantID, graph.FindingsFilters{
-		Severity:  filter.Severity,
-		Category:  filter.Category,
-		MissionID: filter.MissionID,
-		Search:    filter.Search,
-		Limit:     filter.Limit,
-		Offset:    filter.Offset,
-	})
+	// A list holds no evidence. The finding comes from Postgres by the query.
+	records, _, err := q.lister.Find(ctx, tenant, query)
 	if err != nil {
 		return nil, fmt.Errorf("finding querier: query findings: %w", err)
 	}
 
 	out := make([]map[string]any, 0, len(records))
 	for _, r := range records {
-		out = append(out, findingRecordToSDKShape(r))
+		out = append(out, findingToSDKShape(r))
 	}
 
 	encoded, err := json.Marshal(out)
@@ -134,40 +149,37 @@ func (q *PoolFindingQuerier) query(
 	return encoded, nil
 }
 
-// findingRecordToSDKShape maps a graph record onto the SDK finding.Finding JSON
+// findingToSDKShape maps a stored finding onto the SDK finding.Finding JSON
 // shape, so a caller decodes findings it reads with the same type it uses to
-// submit them.
-//
-// The graph is lossy relative to a submitted finding — it stores the fields the
-// loader projects (title, severity, description, category) plus arbitrary
-// properties. Anything the graph does not carry is omitted rather than invented.
-func findingRecordToSDKShape(r graph.FindingRecord) map[string]any {
+// submit them. It holds no evidence, because this answer is a list.
+func findingToSDKShape(f finding.EnhancedFinding) map[string]any {
 	out := map[string]any{
-		"id":          r.ID,
-		"title":       r.Name,
-		"description": r.Description,
-		"category":    r.Type,
-		"severity":    r.Severity,
-		"mission_id":  r.MissionID,
+		"id":          f.ID.String(),
+		"title":       f.Title,
+		"description": f.Description,
+		"category":    f.Category,
+		"severity":    string(f.Severity),
+		"mission_id":  f.MissionID.String(),
 		// The registered name of the agent that submitted the finding
-		// (gibson#208), the SDK's agent_name. The principal and the enroller
-		// travel under metadata with the other graph properties.
-		"agent_name": r.Properties["agent_name"],
+		// (gibson#208), the SDK's agent_name.
+		"agent_name": f.AgentName,
 	}
-	if !r.CreatedAt.IsZero() {
-		out["created_at"] = r.CreatedAt.UTC().Format(time.RFC3339)
+	if !f.CreatedAt.IsZero() {
+		out["created_at"] = f.CreatedAt.UTC().Format(time.RFC3339)
 	}
-	if len(r.Properties) > 0 {
-		// Graph properties are the finding's extensible tail; surfacing them under
-		// `metadata` keeps them addressable without colliding with typed fields.
-		metadata := make(map[string]any, len(r.Properties))
-		for k, v := range r.Properties {
-			metadata[k] = v
-		}
+	metadata := make(map[string]any, len(f.Metadata)+2)
+	for k, v := range f.Metadata {
+		metadata[k] = v
+	}
+	// The verified submitter and the enroller travel under metadata.
+	if f.SubmittedBy != "" {
+		metadata["submitted_by"] = f.SubmittedBy
+	}
+	if f.EnrolledBy != "" {
+		metadata["enrolled_by"] = f.EnrolledBy
+	}
+	if len(metadata) > 0 {
 		out["metadata"] = metadata
-	}
-	if len(r.Labels) > 0 {
-		out["tags"] = r.Labels
 	}
 	return out
 }
@@ -183,4 +195,11 @@ func decodeFindingFilter(filterJSON []byte) (findingFilter, error) {
 		return filter, fmt.Errorf("finding querier: decode filter: %w", err)
 	}
 	return filter, nil
+}
+
+// parseMissionFilter reads the mission ID of a filter. It reports false when
+// the text is not a UUID.
+func parseMissionFilter(raw string) (types.ID, bool) {
+	id, err := types.ParseID(raw)
+	return id, err == nil
 }

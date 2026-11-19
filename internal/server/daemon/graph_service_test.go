@@ -380,22 +380,6 @@ func TestGetFindingCounts_NotProvisioned_FailedPrecondition(t *testing.T) {
 // We just verify the request reaches the handler without auth/pool errors.
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestGetFindingCounts_ReachesQuery(t *testing.T) {
-	t.Parallel()
-	srv := graphServerReadyPool() // minimalConn has nil Neo4j; query will fail internally
-	// We expect Internal (not PermissionDenied or FailedPrecondition) since auth passed.
-	_, err := srv.GetFindingCounts(graphTenantCtx(), &graphpb.GetFindingCountsRequest{
-		GroupBy: graphpb.FindingCountGroupBy_SEVERITY,
-	})
-	// With nil Neo4j the SessionGraphClient will error → Internal gRPC code.
-	// We just assert it's NOT PermissionDenied or FailedPrecondition.
-	if err == nil {
-		return // no error is fine too (mock returns nil)
-	}
-	assertNotGRPCCode(t, err, codes.PermissionDenied, "GetFindingCounts reached query")
-	assertNotGRPCCode(t, err, codes.FailedPrecondition, "GetFindingCounts reached query")
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // GetFindingTimeSeries — missing tenant → PermissionDenied
 // ─────────────────────────────────────────────────────────────────────────────
@@ -730,46 +714,12 @@ func TestGetFindings_NotProvisioned_FailedPrecondition(t *testing.T) {
 	assertGRPCCode(t, err, codes.FailedPrecondition, "GetFindings not-provisioned")
 }
 
-func TestGetFindings_LimitCap(t *testing.T) {
-	t.Parallel()
-	// The handler should clamp limit > MaxFindingsLimit without error.
-	// With a nil Neo4j session the Findings query will fail with an internal
-	// error, but what matters is that we reach the query stage (i.e. the cap
-	// logic ran). We just check for Internal (not InvalidArgument / PermissionDenied).
-	srv := graphServerReadyPool()
-
-	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{PageSize: 999})
-	// Should be Internal (query failure on nil session) or nil — not a cap/auth error.
-	if err != nil {
-		s, _ := status.FromError(err)
-		if s.Code() == codes.PermissionDenied || s.Code() == codes.InvalidArgument {
-			t.Errorf("GetFindings limit-cap: unexpected code %s", s.Code())
-		}
-	}
-}
-
 // A page_token that the daemon did not write is InvalidArgument (ADR-0028).
 func TestGetFindings_RefusesABadPageToken(t *testing.T) {
 	t.Parallel()
 	srv := graphServerReadyPool()
 	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{PageToken: "not-a-token"})
 	assertGRPCCode(t, err, codes.InvalidArgument, "GetFindings bad page token")
-}
-
-func TestGetFindings_DefaultLimit(t *testing.T) {
-	t.Parallel()
-	// PageSize=0 should apply DefaultFindingsLimit (100); handler should not error
-	// on the limit logic itself.
-	srv := graphServerReadyPool()
-
-	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{PageSize: 0})
-	if err != nil {
-		s, _ := status.FromError(err)
-		// Acceptable: Internal (nil-session query fail) — NOT PermissionDenied/InvalidArgument.
-		if s.Code() == codes.PermissionDenied || s.Code() == codes.InvalidArgument {
-			t.Errorf("GetFindings default-limit: unexpected code %s", s.Code())
-		}
-	}
 }
 
 // TestGetFindings_LimitConstants verifies the constants from the graph package

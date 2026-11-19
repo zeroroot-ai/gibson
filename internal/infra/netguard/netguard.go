@@ -25,6 +25,7 @@
 package netguard
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -40,10 +41,21 @@ type BlockedAddressError struct {
 	Addr string
 	// Class names the blocked address class, for operator diagnostics.
 	Class string
+	// Hint tells the reader what to change. It is the text in the brackets
+	// of the message. A caller that has its own setting passes its own hint.
+	Hint string
 }
 
+// LLMEndpointHint is the hint of a refusal for a model or embedder endpoint.
+// It is the hint that Dialer, Transport and HTTPClient use.
+const LLMEndpointHint = "set security.allow_private_llm_endpoints=true to permit private endpoints"
+
 func (e *BlockedAddressError) Error() string {
-	return fmt.Sprintf("netguard: refusing to connect to %s: %s address (set security.allow_private_llm_endpoints=true to permit private endpoints)", e.Addr, e.Class)
+	msg := fmt.Sprintf("netguard: refusing to connect to %s: %s address", e.Addr, e.Class)
+	if e.Hint == "" {
+		return msg
+	}
+	return msg + " (" + e.Hint + ")"
 }
 
 // nat64Prefix is the well-known NAT64 prefix (RFC 6052). An address inside it
@@ -128,24 +140,27 @@ func BlockedClass(ip net.IP) string {
 	return ""
 }
 
-// Control is the net.Dialer Control hook. address is the post-resolution
-// "ip:port" the kernel is about to connect to.
-func Control(_, address string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		// Fail closed: an address we cannot parse is an address we cannot vet.
-		return &BlockedAddressError{Addr: address, Class: "unparseable"}
+// ControlWithHint returns the net.Dialer Control hook. address is the
+// post-resolution "ip:port" the kernel is about to connect to. Its refusals carry hint. An empty
+// hint gives a refusal with no hint.
+func ControlWithHint(hint string) func(network, address string, c syscall.RawConn) error {
+	return func(_, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			// Fail closed: an address we cannot parse is an address we cannot vet.
+			return &BlockedAddressError{Addr: address, Class: "unparseable", Hint: hint}
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			// Control always receives a literal IP; a name here means something
+			// resolved outside our view. Fail closed.
+			return &BlockedAddressError{Addr: address, Class: "unresolved", Hint: hint}
+		}
+		if class := BlockedClass(ip); class != "" {
+			return &BlockedAddressError{Addr: address, Class: class, Hint: hint}
+		}
+		return nil
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		// Control always receives a literal IP; a name here means something
-		// resolved outside our view. Fail closed.
-		return &BlockedAddressError{Addr: address, Class: "unresolved"}
-	}
-	if class := BlockedClass(ip); class != "" {
-		return &BlockedAddressError{Addr: address, Class: class}
-	}
-	return nil
 }
 
 // Dialer returns a net.Dialer with the egress guard installed. When
@@ -153,12 +168,17 @@ func Control(_, address string, _ syscall.RawConn) error {
 // security.allow_private_llm_endpoints for operators running an in-cluster or
 // air-gapped model server.
 func Dialer(allowPrivate bool) *net.Dialer {
+	return DialerWithHint(allowPrivate, LLMEndpointHint)
+}
+
+// DialerWithHint is Dialer with the hint of the refusals set by the caller.
+func DialerWithHint(allowPrivate bool, hint string) *net.Dialer {
 	d := &net.Dialer{
 		Timeout:   10 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
 	if !allowPrivate {
-		d.Control = Control
+		d.Control = ControlWithHint(hint)
 	}
 	return d
 }
@@ -166,8 +186,13 @@ func Dialer(allowPrivate bool) *net.Dialer {
 // Transport returns an *http.Transport whose dialer enforces the egress guard.
 // Callers must not replace DialContext afterwards.
 func Transport(allowPrivate bool) *http.Transport {
+	return TransportWithHint(allowPrivate, LLMEndpointHint)
+}
+
+// TransportWithHint is Transport with the hint of the refusals set by the caller.
+func TransportWithHint(allowPrivate bool, hint string) *http.Transport {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.DialContext = Dialer(allowPrivate).DialContext
+	tr.DialContext = DialerWithHint(allowPrivate, hint).DialContext
 	// The guard runs per-connection, so a pooled connection to an address that
 	// was legal when opened stays legal — addresses do not change under a live
 	// TCP connection. Keep the stock pool sizing.
@@ -181,4 +206,36 @@ func HTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 		Timeout:   timeout,
 		Transport: Transport(allowPrivate),
 	}
+}
+
+// Resolver looks up the addresses of a host name. *net.Resolver satisfies it.
+type Resolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+// CheckHost resolves host and refuses it when ANY address is in a blocked
+// class. It is a check at one point in time, for example at registration. It is
+// NOT a connect-time control: the name can resolve to another address later, so
+// the code that makes the connection must use ControlWithHint or a guard of its own.
+// An IP literal is checked without a lookup. A refusal carries hint.
+func CheckHost(ctx context.Context, r Resolver, host, hint string) error {
+	if ip := net.ParseIP(host); ip != nil {
+		if class := BlockedClass(ip); class != "" {
+			return &BlockedAddressError{Addr: ip.String(), Class: class, Hint: hint}
+		}
+		return nil
+	}
+	addrs, err := r.LookupIPAddr(ctx, host)
+	if err != nil {
+		return fmt.Errorf("netguard: resolve %s: %w", host, err)
+	}
+	if len(addrs) == 0 {
+		return fmt.Errorf("netguard: resolve %s: no address", host)
+	}
+	for _, a := range addrs {
+		if class := BlockedClass(a.IP); class != "" {
+			return &BlockedAddressError{Addr: a.IP.String(), Class: class, Hint: hint}
+		}
+	}
+	return nil
 }

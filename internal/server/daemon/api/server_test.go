@@ -345,7 +345,7 @@ func TestCreateMissionDefinition_RejectsMissingName(t *testing.T) {
 }
 
 // Keep a compile-time reference so stray unused imports don't break the test.
-var _ = mission.MissionStatusPending
+var _ = mission.MissionStatusSubmitted
 
 // TestRunMission_ClientDisconnectIsNotAnError verifies that losing the client
 // ends the stream cleanly. The run itself lives on a detached context, so a

@@ -5,6 +5,7 @@ package netguard_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -80,7 +81,7 @@ func TestControl_RejectsBlockedAddresses(t *testing.T) {
 		"0.0.0.0:80",
 	} {
 		t.Run(addr, func(t *testing.T) {
-			err := netguard.Control("tcp", addr, nil)
+			err := control("tcp", addr, nil)
 			require.Error(t, err)
 			var blocked *netguard.BlockedAddressError
 			require.ErrorAs(t, err, &blocked, "want *BlockedAddressError, got %T", err)
@@ -90,14 +91,14 @@ func TestControl_RejectsBlockedAddresses(t *testing.T) {
 }
 
 func TestControl_AllowsPublicAddresses(t *testing.T) {
-	assert.NoError(t, netguard.Control("tcp", "8.8.8.8:443", nil))
-	assert.NoError(t, netguard.Control("tcp", "[2606:4700::1]:443", nil))
+	assert.NoError(t, control("tcp", "8.8.8.8:443", nil))
+	assert.NoError(t, control("tcp", "[2606:4700::1]:443", nil))
 }
 
 func TestControl_FailsClosedOnUnparseableAddress(t *testing.T) {
-	require.Error(t, netguard.Control("tcp", "not-an-address", nil))
+	require.Error(t, control("tcp", "not-an-address", nil))
 	// A hostname reaching Control means resolution happened outside our view.
-	assert.Error(t, netguard.Control("tcp", "evil.example.com:80", nil))
+	assert.Error(t, control("tcp", "evil.example.com:80", nil))
 }
 
 // TestHTTPClient_RefusesBlockedAddressAtDialTime is the core regression test:
@@ -184,4 +185,60 @@ func TestHTTPClient_RefusesRedirectToBlockedAddress(t *testing.T) {
 func TestDialer_GuardIsInstalledUnlessAllowPrivate(t *testing.T) {
 	assert.NotNil(t, netguard.Dialer(false).Control, "guard must be on by default")
 	assert.Nil(t, netguard.Dialer(true).Control, "allowPrivate must remove the guard")
+}
+
+// control is the hook with the hint of the model endpoint setting.
+var control = netguard.ControlWithHint(netguard.LLMEndpointHint)
+
+func TestBlockedAddressError_Hint(t *testing.T) {
+	// The default hint is the one of the model endpoint setting.
+	err := control("tcp", "10.0.0.1:443", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "allow_private_llm_endpoints")
+
+	// A caller hint replaces it.
+	err = netguard.ControlWithHint("use a public host")("tcp", "10.0.0.1:443", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "(use a public host)")
+	assert.NotContains(t, err.Error(), "allow_private_llm_endpoints")
+
+	// An empty hint gives no brackets.
+	err = netguard.ControlWithHint("")("tcp", "10.0.0.1:443", nil)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "(")
+}
+
+type fakeResolver map[string][]net.IP
+
+func (f fakeResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	ips, ok := f[host]
+	if !ok {
+		return nil, errors.New("no such host")
+	}
+	out := make([]net.IPAddr, 0, len(ips))
+	for _, ip := range ips {
+		out = append(out, net.IPAddr{IP: ip})
+	}
+	return out, nil
+}
+
+func TestCheckHost(t *testing.T) {
+	r := fakeResolver{
+		"public.example":   {net.ParseIP("8.8.8.8")},
+		"internal.example": {net.ParseIP("10.0.0.7")},
+		"mixed.example":    {net.ParseIP("8.8.8.8"), net.ParseIP("169.254.169.254")},
+		"empty.example":    {},
+	}
+	ctx := context.Background()
+	require.NoError(t, netguard.CheckHost(ctx, r, "public.example", "h"))
+	require.NoError(t, netguard.CheckHost(ctx, r, "8.8.8.8", "h"))
+
+	for _, host := range []string{"internal.example", "mixed.example", "10.1.2.3", "127.0.0.1", "::1"} {
+		err := netguard.CheckHost(ctx, r, host, "use a public host")
+		var blocked *netguard.BlockedAddressError
+		require.ErrorAs(t, err, &blocked, host)
+		assert.Equal(t, "use a public host", blocked.Hint)
+	}
+	require.Error(t, netguard.CheckHost(ctx, r, "unknown.example", "h"), "a failed lookup refuses")
+	assert.Error(t, netguard.CheckHost(ctx, r, "empty.example", "h"), "no address refuses")
 }

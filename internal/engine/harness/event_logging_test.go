@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -42,10 +40,10 @@ func TestEventLogging_FindingSubmission(t *testing.T) {
 
 	// Create harness with event logger
 	cfg := HarnessConfig{
-		SlotManager:  llmtest.NewSlotManager(llm.NewLLMRegistry()),
-		TargetFacts:  testTargetFacts,
-		FindingStore: NewInMemoryFindingStore(),
-		EventLogger:  mockLogger,
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		FindingStore:         NewInMemoryFindingStore(),
+		EventLogger:          mockLogger,
 	}
 
 	factory, err := NewHarnessFactory(cfg)
@@ -93,10 +91,10 @@ func TestEventLogging_FindingSubmission(t *testing.T) {
 func TestEventLogging_NoEventLogger(t *testing.T) {
 	// Create harness without event logger
 	cfg := HarnessConfig{
-		SlotManager:  llmtest.NewSlotManager(llm.NewLLMRegistry()),
-		TargetFacts:  testTargetFacts,
-		FindingStore: NewInMemoryFindingStore(),
-		EventLogger:  nil, // No event logger
+		SlotManagerForTenant: fixedSlotManager(newStubSlotManager()),
+		TargetFacts:          testTargetFacts,
+		FindingStore:         NewInMemoryFindingStore(),
+		EventLogger:          nil, // No event logger
 	}
 
 	factory, err := NewHarnessFactory(cfg)

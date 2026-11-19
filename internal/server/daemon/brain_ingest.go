@@ -10,18 +10,24 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
-	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // ingestComponentFinding returns the component finding submitter's World sink
@@ -88,7 +94,44 @@ func (d *daemonImpl) newDiscoveryProcessor() ingest.DiscoveryProcessor {
 	return ingest.NewDiscoveryProcessor(
 		ingestDiscovery(d.brainRegistry),
 		d.logger.WithComponent("discovery-ingest").Slog(),
+		ingest.WithFindingWriter(d.discoveredFindingWriter()),
+		ingest.WithToolCallRecord(newTenantRoutedProofSettlement(d.brainRegistry)),
 	)
+}
+
+// findings returns the finding store of the daemon. It builds the Postgres
+// store on the data pool the first time. The pool starts after the callers, so
+// the store reads it on first use.
+func (d *daemonImpl) findings() finding.FindingStore {
+	if d.findingStore == nil {
+		d.findingStore = pgstore.New(func() datapool.Pool { return d.pool })
+	}
+	return d.findingStore
+}
+
+// discoveredFindingWriter returns the writer that puts a finding from a
+// DiscoveryResult in the findings table of the tenant. The finding has the ID
+// of its graph node. The evidence goes in the same transaction as the finding
+// row. The processor builds it: one tier 1 item of the tool call, and the tier 2
+// items of the parsers. The pool starts after the processor, so the writer reads
+// it on first use.
+func (d *daemonImpl) discoveredFindingWriter() ingest.FindingWriter {
+	store := d.findings()
+	return func(ctx context.Context, tenant string, f brain.FindingRaised, evidence []*typespb.Evidence) error {
+		base := agent.NewFinding(f.Title, f.Description, agent.FindingSeverity(f.Severity))
+		base.ID = types.ID(f.ID)
+		base.TenantID = tenant
+		var missionID types.ID
+		if parsed, err := types.ParseID(f.MissionID); err == nil {
+			missionID = parsed
+		}
+		enhanced := finding.NewEnhancedFinding(base, missionID, f.AgentName)
+		enhanced.Evidence = evidence
+		if err := store.Store(ctx, tenant, enhanced); err != nil {
+			return fmt.Errorf("store discovered finding: %w", err)
+		}
+		return nil
+	}
 }
 
 // discoveryProcessorAdapter widens ingest.DiscoveryProcessor's typed
@@ -121,6 +164,28 @@ var (
 	_ sandboxed.DiscoveryProcessor       = (*discoveryProcessorAdapter)(nil)
 	_ component.ResultDiscoveryProcessor = (*discoveryProcessorAdapter)(nil)
 )
+
+// ingestHarnessFinding returns the harness FindingSink: a finding that an agent
+// submits over the callback path is folded into the tenant World as a Finding
+// with the ID of its row in the findings table. The graph projector writes the
+// node, and the graph keeps it for relations only.
+func ingestHarnessFinding(reg *brain.Registry) harness.FindingSink {
+	return func(_ context.Context, f harness.FindingRaised) {
+		if reg == nil || f.Tenant == "" {
+			return
+		}
+		reg.For(f.Tenant).Submit(brain.FindingRaised{
+			ID:           f.ID,
+			Title:        f.Title,
+			Description:  f.Description,
+			Severity:     f.Severity,
+			ScopeID:      f.ScopeID,
+			MissionID:    f.MissionID,
+			MissionRunID: f.MissionRunID,
+			AgentName:    f.AgentName,
+		})
+	}
+}
 
 // ingestDelegation returns the harness DelegationSink (ADR-0107): an agent
 // delegation is folded into the tenant World as AgentRunObserved events for both
@@ -319,102 +384,27 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 	}
 }
 
-// ingestLLMCall returns the DaemonServer's LLM-call capture sink (gibson#755):
-// it folds a completed ExecuteLLM call into the calling tenant's brain World as
-// an LlmCall entity — the World replacement for the Langfuse trace/cost views.
-// Unlike ingestObservation (single dev tenant), this routes by the tenant the
-// call ran under, so it is multi-tenant correct.
-func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
-	return func(_ context.Context, tenant string, call api.LLMCallRecord) {
-		if reg == nil || call.CallID == "" {
-			return
+// ingestSkillLoad returns the sink of the loads of Agent Skills (epic
+// gibson#1364): it folds each successful load into the Timeline of the tenant
+// of the call as one AgentSkillLoaded event, with the agent, the mission and
+// the digest.
+func ingestSkillLoad(reg *brain.Registry) harness.SkillLoadSink {
+	return func(_ context.Context, tenant string, l harness.SkillLoadRecord) error {
+		if reg == nil || l.Digest == "" {
+			return errors.New("daemon: the load of an Agent Skill has no Timeline or no digest")
 		}
-		msgs := make([]brain.LlmMessage, 0, len(call.Messages))
-		for _, m := range call.Messages {
-			msgs = append(msgs, brain.LlmMessage{
-				Role:       m.Role,
-				Content:    m.Content,
-				Name:       m.Name,
-				ToolCallID: m.ToolCallID,
-				ToolCalls:  toBrainToolCalls(m.ToolCalls),
-			})
-		}
-		reg.For(tenant).Submit(brain.LlmCallObserved{
-			CallID:  call.CallID,
-			RunID:   call.RunID,
-			Model:   call.Model,
-			ScopeID: call.ScopeID,
-			// Mission-evidence edge (gibson#1078): a mission-aware ExecuteLLM caller
-			// stamps mission_id on the request; the handler carries it onto the record
-			// so the call attaches to its mission's frame. Empty = tenant-ambient (e.g.
-			// dashboard chat), which never attaches to a mission frame.
-			MissionID:           call.MissionID,
-			MissionRunID:        call.MissionRunID,
-			PromptTokens:        call.PromptTokens,
-			CompletionTokens:    call.CompletionTokens,
-			Messages:            msgs,
-			Completion:          call.Completion,
-			CompletionToolCalls: toBrainToolCalls(call.CompletionToolCalls),
-			RecordedAtUnixNano:  call.RecordedAtUnixNano,
+		reg.For(tenant).Submit(brain.AgentSkillLoaded{
+			MissionID:          l.MissionID,
+			MissionRunID:       l.MissionRunID,
+			RunID:              l.RunID,
+			Agent:              l.Agent,
+			Name:               l.Name,
+			Digest:             l.Digest,
+			File:               l.File,
+			RecordedAtUnixNano: l.RecordedAtUnixNano,
 		})
-	}
-}
-
-// harnessLLMCallToAPI maps a harness.LLMCallRecord (the callback-path capture
-// shape) onto the daemon's api.LLMCallRecord (ADR-0120, gibson#271) — the
-// bridge daemon.go's callback→api LLM-call wiring uses. Extracted as a pure
-// function so the mapping is unit-testable without a live daemon/gRPC server.
-func harnessLLMCallToAPI(call harness.LLMCallRecord) api.LLMCallRecord {
-	msgs := make([]api.LLMMessage, 0, len(call.Messages))
-	for _, m := range call.Messages {
-		msgs = append(msgs, api.LLMMessage{
-			Role:       m.Role,
-			Content:    m.Content,
-			Name:       m.Name,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  toAPIToolCalls(m.ToolCalls),
-		})
-	}
-	return api.LLMCallRecord{
-		CallID:              call.CallID,
-		MissionID:           call.MissionID,
-		MissionRunID:        call.MissionRunID,
-		RunID:               call.RunID,
-		Model:               call.Model,
-		PromptTokens:        call.PromptTokens,
-		CompletionTokens:    call.CompletionTokens,
-		Messages:            msgs,
-		Completion:          call.Completion,
-		CompletionToolCalls: toAPIToolCalls(call.CompletionToolCalls),
-		RecordedAtUnixNano:  call.RecordedAtUnixNano,
-	}
-}
-
-// toAPIToolCalls converts harness.LLMCallToolCall values to the daemon api
-// package's LLMToolCall shape (ADR-0120, gibson#271) — the bridge daemon.go's
-// callback→api LLM-call mapping uses.
-func toAPIToolCalls(calls []harness.LLMCallToolCall) []api.LLMToolCall {
-	if len(calls) == 0 {
 		return nil
 	}
-	out := make([]api.LLMToolCall, 0, len(calls))
-	for _, c := range calls {
-		out = append(out, api.LLMToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
-	}
-	return out
-}
-
-// toBrainToolCalls converts api.LLMToolCall values to the brain package's
-// LlmToolCall shape (ADR-0120, gibson#271).
-func toBrainToolCalls(calls []api.LLMToolCall) []brain.LlmToolCall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]brain.LlmToolCall, 0, len(calls))
-	for _, c := range calls {
-		out = append(out, brain.LlmToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
-	}
-	return out
 }
 
 // ingestToolCall returns the daemon's tool-call capture sink (ADR-0120,
@@ -422,12 +412,21 @@ func toBrainToolCalls(calls []api.LLMToolCall) []brain.LlmToolCall {
 // tenant's brain World as an AgentToolCall entity — the flight recorder's
 // tool-I/O half, alongside ingestLLMCall's transcript half. Routes by the
 // call's own tenant, same as ingestLLMCall.
+//
+// The sink returns after the engine has folded the record. A tool call reply
+// carries the id of the record, and the agent can cite the id in a finding at
+// once. The reader of the finding must find the record, so the reply waits for
+// the fold. The wait has a bound. When it ends, the sink logs the error and the
+// tool call still succeeds, because the record is a side effect of the call.
 func ingestToolCall(reg *brain.Registry) harness.ToolCallSink {
-	return func(_ context.Context, tenant string, call harness.ToolCallRecord) {
+	return func(ctx context.Context, tenant string, call harness.ToolCallRecord) {
 		if reg == nil || call.ToolCallID == "" {
 			return
 		}
-		reg.For(tenant).Submit(brain.AgentToolCallObserved{
+		// A client that left must not cancel the record of a call that ran.
+		waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), toolCallFoldWait)
+		defer cancel()
+		err := reg.For(tenant).SubmitAndWait(waitCtx, brain.AgentToolCallObserved{
 			ToolCallID:         call.ToolCallID,
 			MissionID:          call.MissionID,
 			MissionRunID:       call.MissionRunID,
@@ -438,5 +437,14 @@ func ingestToolCall(reg *brain.Registry) harness.ToolCallSink {
 			Err:                call.Err,
 			RecordedAtUnixNano: call.RecordedAtUnixNano,
 		})
+		if err != nil {
+			slog.ErrorContext(ctx, "the record of a tool call is not in the World, so a finding cannot cite it yet",
+				"tenant", tenant, "tool_call_id", call.ToolCallID, "error", err)
+		}
 	}
 }
+
+// toolCallFoldWait bounds the wait of the tool call sink for the fold of the
+// record. A tick is 50 ms, so the wait ends far sooner unless the engine is
+// stuck.
+const toolCallFoldWait = 10 * time.Second

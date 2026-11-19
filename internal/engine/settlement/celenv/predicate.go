@@ -12,7 +12,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // EvaluationCostLimit caps a single predicate evaluation's CEL cost
@@ -96,7 +96,7 @@ func CompileWithEnv(env *cel.Env, expr string) (*CompiledPredicate, error) {
 // handler) decides how to log and report a genuine evaluation failure — a
 // cost-limit trip, or a canceled context — rather than settling a bet TRUE
 // or FALSE on a silently-produced false.
-func (c *CompiledPredicate) Evaluate(ctx context.Context, evidence []finding.EnhancedEvidence) (bool, error) {
+func (c *CompiledPredicate) Evaluate(ctx context.Context, evidence []*typespb.Evidence) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, fmt.Errorf("celenv: evaluate predicate %q: %w", c.expr, err)
 	}

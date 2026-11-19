@@ -204,7 +204,7 @@ func TestCaptureToolCall_NoTenantInContext_NoOp(t *testing.T) {
 	svc := &HarnessCallbackService{
 		toolCallSink: func(context.Context, string, ToolCallRecord) { called = true },
 	}
-	svc.captureToolCall(context.Background(), &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1"}, "nmap", "{}", "{}", "")
+	svc.captureToolCall(context.Background(), &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1"}, "tc-1", "nmap", "{}", "{}", "")
 	if called {
 		t.Fatal("captureToolCall must no-op when the context carries no tenant")
 	}

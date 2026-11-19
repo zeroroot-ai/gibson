@@ -48,7 +48,7 @@ func TestRegisterComponent_RecordsPlacementFromTheEnrollmentRecord(t *testing.T)
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 	for _, want := range []bool{true, false} {
 		reg := &attestedRegistry{}
-		svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil).
+		svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil).
 			WithEnrollmentReader(enrollmentAnswer{attested: want})
 		if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "my-tool")); err != nil {
 			t.Fatalf("attested=%v: %v", want, err)
@@ -59,7 +59,7 @@ func TestRegisterComponent_RecordsPlacementFromTheEnrollmentRecord(t *testing.T)
 	}
 
 	reg := &attestedRegistry{}
-	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil).
+	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil).
 		WithEnrollmentReader(enrollmentAnswer{err: errors.New("db down")})
 	_, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "my-tool"))
 	if status.Code(err) != codes.Unavailable {
@@ -77,7 +77,7 @@ func TestRegisterComponent_CatalogPluginNameNeedsAnAttestedIdentity(t *testing.T
 	ctx := credCallerCtx(t, "plugin_principal:310000000000000001", "primary")
 	newSvc := func(r EnrollmentReader) (*ComponentServiceServer, *attestedRegistry) {
 		reg := &attestedRegistry{}
-		svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil)
+		svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil)
 		if r != nil {
 			svc.WithEnrollmentReader(r)
 		}

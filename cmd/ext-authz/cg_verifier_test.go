@@ -16,7 +16,7 @@ func TestBuildCGVerifier_RequiresIssuer(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "https://daemon:8086/capabilitygrant/v1/keys")
 	t.Setenv("EXT_AUTHZ_CGJWT_ISSUER", "")
 
-	v, err := buildCGVerifier(&http.Client{})
+	v, err := buildCGVerifier(&http.Client{}, nil)
 	if err == nil {
 		t.Fatalf("buildCGVerifier = %v, nil — it must refuse to start with an unpinned issuer", v)
 	}
@@ -32,7 +32,7 @@ func TestBuildCGVerifier_WiresConfig(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "https://daemon:8086/capabilitygrant/v1/keys")
 	t.Setenv("EXT_AUTHZ_CGJWT_ISSUER", "gibson-daemon")
 
-	v, err := buildCGVerifier(&http.Client{})
+	v, err := buildCGVerifier(&http.Client{}, nil)
 	if err != nil {
 		t.Fatalf("buildCGVerifier: %v", err)
 	}

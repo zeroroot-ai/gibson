@@ -11,7 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/findingtest"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 // nativeVal adapts a plain Go value (typically a map[string]any built by
@@ -36,7 +37,7 @@ func TestEvidenceTextImpl(t *testing.T) {
 	})
 
 	t.Run("an evidence item with no text representation degrades to empty", func(t *testing.T) {
-		item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidenceScreenshot, "shot", "binary"))
+		item := evidenceItemMap(findingtest.NewEvidence(sdkfinding.EvidenceScreenshot, "shot", "binary"))
 		got := evidenceTextImpl(nativeVal(item))
 		assert.Equal(t, types.String(""), got)
 	})
@@ -55,20 +56,20 @@ func TestHTTPStatusImpl(t *testing.T) {
 	})
 
 	t.Run("an item of a type with no status is not applicable", func(t *testing.T) {
-		item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidencePayload, "payload", "text"))
+		item := evidenceItemMap(findingtest.NewEvidence(sdkfinding.EvidencePayload, "payload", "text"))
 		got := httpStatusImpl(nativeVal(item))
 		assert.Equal(t, types.Int(-1), got)
 	})
 
 	t.Run("http_response content that is not a map is not applicable", func(t *testing.T) {
-		item := map[string]any{"type": string(finding.EvidenceHTTPResponse), "content": "not a map"}
+		item := map[string]any{"type": string(sdkfinding.EvidenceHTTPResponse), "content": "not a map"}
 		got := httpStatusImpl(nativeVal(item))
 		assert.Equal(t, types.Int(-1), got)
 	})
 
 	t.Run("http_response content with no status_code is not applicable", func(t *testing.T) {
 		item := map[string]any{
-			"type":    string(finding.EvidenceHTTPResponse),
+			"type":    string(sdkfinding.EvidenceHTTPResponse),
 			"content": map[string]any{"body": "no status here"},
 		}
 		got := httpStatusImpl(nativeVal(item))
@@ -81,13 +82,13 @@ func TestHTTPStatusImpl(t *testing.T) {
 		assert.Equal(t, types.Int(204), got)
 	})
 	t.Run("a recorded tool result with a status_code returns it", func(t *testing.T) {
-		item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidenceLog, "tool call", `{"status_code":200,"body":"ok"}`))
+		item := evidenceItemMap(findingtest.NewEvidence(sdkfinding.EvidenceLog, "tool call", `{"status_code":200,"body":"ok"}`))
 		got := httpStatusImpl(nativeVal(item))
 		assert.Equal(t, types.Int(200), got)
 	})
 
 	t.Run("a recorded tool result that is an object returns its status_code", func(t *testing.T) {
-		item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidenceLog, "tool call", map[string]any{"status_code": 403}))
+		item := evidenceItemMap(findingtest.NewEvidence(sdkfinding.EvidenceLog, "tool call", map[string]any{"status_code": 403}))
 		got := httpStatusImpl(nativeVal(item))
 		assert.Equal(t, types.Int(403), got)
 	})
@@ -102,7 +103,7 @@ func TestHTTPStatusImpl(t *testing.T) {
 		"plain text":                 `status_code 200`,
 	} {
 		t.Run("a recorded tool result with "+name+" is not applicable", func(t *testing.T) {
-			item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidenceLog, "tool call", content))
+			item := evidenceItemMap(findingtest.NewEvidence(sdkfinding.EvidenceLog, "tool call", content))
 			got := httpStatusImpl(nativeVal(item))
 			assert.Equal(t, types.Int(-1), got)
 		})
@@ -186,13 +187,13 @@ func TestMarkerPresentImpl(t *testing.T) {
 	})
 
 	t.Run("a non-map item in the list is skipped, not fatal", func(t *testing.T) {
-		matching := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidenceLog, "log", "has the marker-xyz in it"))
+		matching := evidenceItemMap(findingtest.NewEvidence(sdkfinding.EvidenceLog, "log", "has the marker-xyz in it"))
 		got := markerPresentImpl(evidenceList("not a map item", matching), types.String("marker-xyz"))
 		assert.Equal(t, types.True, got)
 	})
 
 	t.Run("no item matches", func(t *testing.T) {
-		item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidenceLog, "log", "nothing here"))
+		item := evidenceItemMap(findingtest.NewEvidence(sdkfinding.EvidenceLog, "log", "nothing here"))
 		got := markerPresentImpl(evidenceList(item), types.String("marker-xyz"))
 		assert.Equal(t, types.False, got)
 	})
@@ -201,7 +202,7 @@ func TestMarkerPresentImpl(t *testing.T) {
 func TestEvidenceItemText(t *testing.T) {
 	t.Run("conversation content that is not a map has no text", func(t *testing.T) {
 		text, ok := evidenceItemText(map[string]any{
-			"type":    string(finding.EvidenceConversation),
+			"type":    string(sdkfinding.EvidenceConversation),
 			"content": "not a map",
 		})
 		assert.False(t, ok)
@@ -210,7 +211,7 @@ func TestEvidenceItemText(t *testing.T) {
 
 	t.Run("a non-map message in a conversation is skipped, not fatal", func(t *testing.T) {
 		text, ok := evidenceItemText(map[string]any{
-			"type": string(finding.EvidenceConversation),
+			"type": string(sdkfinding.EvidenceConversation),
 			"content": map[string]any{
 				"messages": []any{
 					"garbage",
@@ -224,7 +225,7 @@ func TestEvidenceItemText(t *testing.T) {
 
 	t.Run("log content that is not a string JSON-marshals", func(t *testing.T) {
 		text, ok := evidenceItemText(map[string]any{
-			"type":    string(finding.EvidenceLog),
+			"type":    string(sdkfinding.EvidenceLog),
 			"content": map[string]any{"a": float64(1)},
 		})
 		require.True(t, ok)
@@ -233,7 +234,7 @@ func TestEvidenceItemText(t *testing.T) {
 
 	t.Run("log content that will not JSON-marshal has no text", func(t *testing.T) {
 		text, ok := evidenceItemText(map[string]any{
-			"type":    string(finding.EvidenceLog),
+			"type":    string(sdkfinding.EvidenceLog),
 			"content": make(chan int),
 		})
 		assert.False(t, ok)
@@ -242,7 +243,7 @@ func TestEvidenceItemText(t *testing.T) {
 
 	t.Run("http response content that is not a map has no text", func(t *testing.T) {
 		text, ok := evidenceItemText(map[string]any{
-			"type":    string(finding.EvidenceHTTPResponse),
+			"type":    string(sdkfinding.EvidenceHTTPResponse),
 			"content": "not a map",
 		})
 		assert.False(t, ok)

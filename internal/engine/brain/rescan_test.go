@@ -12,7 +12,7 @@ func scanWorld(t *testing.T, missionID, target string, status MissionStatus) *Wo
 	t.Helper()
 	w := NewWorld("t1")
 	Reduce(w, MissionStarted{ID: missionID, RunID: "run-" + missionID, Name: ScanMissionName, TargetID: target})
-	if status != MissionRunning {
+	if status != MissionWorking {
 		Reduce(w, MissionDone{ID: missionID, Outcome: status})
 	}
 	return w
@@ -49,7 +49,7 @@ func applyAll(w *World, evs []Event) {
 // TestRescan_FixedAndUnseen_BecomesVerified is the transition the whole issue
 // exists for: a fix held, and nothing observed it holding.
 func TestRescan_FixedAndUnseen_BecomesVerified(t *testing.T) {
-	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
+	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
 	// A second scan of the same target runs and does NOT re-raise f1.
@@ -66,7 +66,7 @@ func TestRescan_FixedAndUnseen_BecomesVerified(t *testing.T) {
 // TestRescan_FixedAndSeenAgain_ReturnsToOpen — the fix did not hold. This is the
 // case that makes verified mean something: absence has to be able to be absent.
 func TestRescan_FixedAndSeenAgain_ReturnsToOpen(t *testing.T) {
-	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
+	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
 	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
@@ -84,7 +84,7 @@ func TestRescan_FixedAndSeenAgain_ReturnsToOpen(t *testing.T) {
 // claimed to fix is not evidence, and silently closing it would lose a real
 // weakness.
 func TestRescan_OpenAndUnseen_DoesNotMove(t *testing.T) {
-	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
+	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "open-one", "scan-1", FindingStatusOpen)
 	raiseInto(w, "fixing-one", "scan-1", FindingStatusFixing)
 
@@ -105,7 +105,7 @@ func TestRescan_OpenAndUnseen_DoesNotMove(t *testing.T) {
 // same report as a scan that found everything clean: an empty one. Only one of
 // those is evidence.
 func TestRescan_FailedScan_VerifiesNothing(t *testing.T) {
-	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
+	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
 	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
@@ -128,7 +128,7 @@ func TestRescan_FailedScan_VerifiesNothing(t *testing.T) {
 // Finding no scan ever raised — a pentest finding, a hand-filed one — has an
 // empty ScanScope and must survive every scan completion in the tenant.
 func TestRescan_OutOfScopeFinding_IsNeverTouched(t *testing.T) {
-	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
+	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	// Raised with no mission at all: the component path carries no mission context.
 	raiseInto(w, "hand-filed", "", FindingStatusFixed)
 	// Raised by a mission that is not a scan.
@@ -152,7 +152,7 @@ func TestRescan_OutOfScopeFinding_IsNeverTouched(t *testing.T) {
 // TestRescan_AnotherTargetsScan_DoesNotReconcile. Two Applications scan
 // independently; one finishing says nothing about the other's Findings.
 func TestRescan_AnotherTargetsScan_DoesNotReconcile(t *testing.T) {
-	w := scanWorld(t, "scan-a", "target-a", MissionRunning)
+	w := scanWorld(t, "scan-a", "target-a", MissionWorking)
 	raiseInto(w, "f-a", "scan-a", FindingStatusFixed)
 
 	Reduce(w, MissionStarted{ID: "scan-b", RunID: "run-scan-b", Name: ScanMissionName, TargetID: "target-b"})
@@ -170,7 +170,7 @@ func TestRescan_AnotherTargetsScan_DoesNotReconcile(t *testing.T) {
 // the scan finished must wait for the NEXT scan, not be verified on the next
 // tick by one that never saw the fix.
 func TestRescan_RunsOncePerScan(t *testing.T) {
-	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
+	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "f1", "scan-1", FindingStatusOpen)
 	Reduce(w, MissionDone{ID: "scan-1", Outcome: MissionCompleted})
 
@@ -190,7 +190,7 @@ func TestRescan_RunsOncePerScan(t *testing.T) {
 // TestRescan_IsQuiescent — a second pass over an already-reconciled World emits
 // nothing, so the System can run on every tick.
 func TestRescan_IsQuiescent(t *testing.T) {
-	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
+	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 	Reduce(w, MissionDone{ID: "scan-1", Outcome: MissionCompleted})
 
@@ -211,7 +211,7 @@ func TestRescan_IsQuiescent(t *testing.T) {
 // raised — each branch is blind to the other two, which is why the mission
 // joins at `report` and why this System keys on the mission, never on work.
 func TestRescan_BranchCompletionCannotVerify(t *testing.T) {
-	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
+	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "from-image", "scan-1", FindingStatusFixed)
 
 	// The runtime branch finishes. The mission has not.
@@ -231,7 +231,7 @@ func TestRescan_BranchCompletionCannotVerify(t *testing.T) {
 // the rescan provenance moves. Without that, the second scan of an unchanged
 // Application is indistinguishable from no scan at all.
 func TestRescan_ReRaiseKeepsStatusAndMovesLastScan(t *testing.T) {
-	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
+	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-1", Title: "original", Severity: "high"})
 	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
 

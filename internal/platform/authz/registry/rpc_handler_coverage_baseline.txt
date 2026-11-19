@@ -5,7 +5,6 @@
 # Each line is a registered RPC that does NOT yet have a handler test.
 # epic rather than becoming standing debt.
 # Generated tech-debt baseline for the per-RPC handler-test walker (gibson#793).
-/gibson.agent.v1.AgentService/GetDescriptor
 /gibson.component.v1.ComponentService/CallToolStream
 /gibson.component.v1.ComponentService/DisablePlugin
 /gibson.component.v1.ComponentService/EnablePlugin
@@ -49,7 +48,6 @@
 /gibson.harness.v1.HarnessCallbackService/RecordSpans
 /gibson.harness.v1.HarnessCallbackService/ReportStepHints
 /gibson.harness.v1.HarnessCallbackService/ToolResults
-/gibson.harness.v1.HarnessCallbackService/ValidateFinding
 /gibson.harness.v1.HarnessCallbackService/ValidateGraphNode
 /gibson.harness.v1.HarnessCallbackService/ValidateRelationship
 /gibson.harness.v1.HarnessCallbackService/WorkspaceCommit
@@ -66,7 +64,6 @@
 /gibson.tenant.v1.MembershipService/GetReservedNames
 /gibson.tenant.v1.MembershipService/RemoveTeamMember
 /gibson.tenant.v1.MembershipService/SetTeamAdmin
-/gibson.tenant.v1.ProviderService/ListProviderModels
 /gibson.tenant.v1.TenantService/DeleteMissionDraft
 /gibson.tenant.v1.TenantService/GetMissionDraft
 /gibson.tenant.v1.TenantService/GetOnboardingState
@@ -100,8 +97,6 @@
 # RPCs that had a test of the same name on another service. The walker keys by
 # service and method now, so each line is a handler with no test of its own.
 # Write a Test<Method> test in the package of the service, then delete the line.
-/gibson.agent.v1.AgentService/Execute
-/gibson.agent.v1.AgentService/Health
 /gibson.component.v1.ComponentService/CancelMission
 /gibson.component.v1.ComponentService/FindSimilarAttacks
 /gibson.component.v1.ComponentService/FindSimilarFindings
@@ -128,7 +123,6 @@
 /gibson.daemon.v1.DaemonService/StopMission
 /gibson.daemon.v1.DaemonService/Subscribe
 /gibson.harness.v1.HarnessCallbackService/ApplicationFindings
-/gibson.harness.v1.HarnessCallbackService/ListAgents
 /gibson.harness.v1.HarnessCallbackService/ListTools
 /gibson.tenant.v1.BudgetService/GetBudget
 /gibson.tenant.v1.BudgetService/SetBudget

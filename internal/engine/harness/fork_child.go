@@ -155,6 +155,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSeat(
 		NodeID:       task.NodeID,
 		TaskID:       task.ID.String(),
 		Model:        spec.Model,
+		Initiator:    missionInitiator(h.missionCtx.CreatedBy),
 		TaskB64:      dispatch.TaskB64,
 	}}, forkRecordTTL)
 	if err != nil {

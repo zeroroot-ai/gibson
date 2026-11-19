@@ -119,7 +119,7 @@ func (s *DefaultMissionService) CreateByReference(ctx context.Context, req Creat
 		ID:                  types.NewID(),
 		Name:                req.Name,
 		Description:         req.Description,
-		Status:              MissionStatusPending,
+		Status:              MissionStatusSubmitted,
 		TargetID:            req.TargetID,
 		MissionDefinitionID: req.MissionDefinitionID,
 		Constraints:         req.Constraints,

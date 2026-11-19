@@ -65,7 +65,7 @@ func TestAwaitBrainMission_ReturnsCompleted(t *testing.T) {
 	}
 }
 
-func TestAwaitBrainMission_CtxCancelledReturnsCancelled(t *testing.T) {
+func TestAwaitBrainMission_CtxCancelledReturnsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	eng := brain.NewEngine("t1", braintest.NewMemTimelineStore()) // no systems → mission never completes
 	eng.Submit(brain.MissionProjected{ID: "m1", Goal: "x"})
@@ -73,8 +73,8 @@ func TestAwaitBrainMission_CtxCancelledReturnsCancelled(t *testing.T) {
 	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
 	var mm missionManager
 	status, _ := mm.awaitBrainMission(ctx, eng, "m1", "")
-	if status != mission.MissionStatusCancelled {
-		t.Fatalf("want cancelled, got %s", status)
+	if status != mission.MissionStatusCanceled {
+		t.Fatalf("want canceled, got %s", status)
 	}
 }
 

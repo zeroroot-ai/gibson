@@ -16,6 +16,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -180,20 +181,7 @@ func (s *worldServer) GetLlmCall(ctx context.Context, req *worldpb.GetLlmCallReq
 		if c.CallID != req.GetCallId() {
 			continue
 		}
-		msgs := make([]*worldpb.LlmMessage, 0, len(c.Messages))
-		for _, m := range c.Messages {
-			msgs = append(msgs, &worldpb.LlmMessage{Role: m.Role, Content: m.Content})
-		}
-		return &worldpb.GetLlmCallResponse{Call: &worldpb.LlmCallDetail{
-			CallId:           c.CallID,
-			RunId:            c.RunID,
-			Model:            c.Model,
-			ScopeId:          c.ScopeID,
-			PromptTokens:     int32(c.PromptTokens),
-			CompletionTokens: int32(c.CompletionTokens),
-			Messages:         msgs,
-			Completion:       c.Completion,
-		}}, nil
+		return &worldpb.GetLlmCallResponse{Call: llmCallDetail(c)}, nil
 	}
 	return nil, status.Errorf(codes.NotFound, "llm call %q not found", req.GetCallId())
 }
@@ -515,4 +503,39 @@ func int32Count(n int) int32 {
 		return math.MaxInt32
 	}
 	return int32(n)
+}
+
+// llmCallDetail maps the stored record of a model call to the API message. The
+// items split at RequestItems: the first ones are the request, the rest are the
+// reply. A record with no split (an event of the older shape) has request items
+// only. Each item stays the JSON text that the Timeline stores.
+func llmCallDetail(c brain.LlmCallSnapshot) *worldpb.LlmCallDetail {
+	split := c.RequestItems
+	if split <= 0 || split > len(c.Items) {
+		split = len(c.Items)
+	}
+	return &worldpb.LlmCallDetail{
+		CallId:           c.CallID,
+		RunId:            c.RunID,
+		Model:            c.Model,
+		ScopeId:          c.ScopeID,
+		PromptTokens:     int32Count(c.PromptTokens),
+		CompletionTokens: int32Count(c.CompletionTokens),
+		RequestItems:     itemTexts(c.Items[:split]),
+		OutputItems:      itemTexts(c.Items[split:]),
+		Provider:         c.Provider,
+		HttpStatus:       int32Count(c.HTTPStatus),
+		CacheReadTokens:  int32Count(c.CacheReadTokens),
+		CacheWriteTokens: int32Count(c.CacheWriteTokens),
+		Cost:             c.Cost,
+		ErrorText:        c.ErrorText,
+	}
+}
+
+func itemTexts(items []json.RawMessage) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, string(it))
+	}
+	return out
 }

@@ -61,10 +61,11 @@ var Manifest = []CriticalPath{
 		Tests: []CoveringTest{
 			{Dir: "tests/integration", Func: "TestPerTenantMissionIsolation_TwoTenants"},
 			{Dir: "tests/integration", Func: "TestPerTenantMissionIsolation_CrossTenantGetReturnsNotFound"},
-			// In the finding package, not behind the integration tag: it needs
-			// a Redis Stack, and the coverage job is the lane that guarantees
-			// one (GIBSON_TEST_REQUIRE_REDIS). There a missing Redis fails it.
-			{Dir: "internal/engine/finding", Func: "TestPerTenantFindingIDOR_CrossTenantGetReturnsNotFound"},
+			// The finding store keeps each finding in the Postgres database of its
+			// tenant (gibson#1365). The test needs no server: it gives each tenant
+			// its own database and checks that the store reads the database of the
+			// tenant of the call.
+			{Dir: "internal/engine/finding/pgstore", Func: "TestPerTenantFindingIDOR_CrossTenantGetReturnsNotFound"},
 		},
 	},
 	{

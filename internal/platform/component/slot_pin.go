@@ -83,22 +83,40 @@ func (r *RedisWorkContextRegistry) WorkSlotPin(ctx context.Context, workID, slot
 	return lookupWorkSlotPin(ctx, r.stateClient.Client(), workID, slot)
 }
 
-// slotPinKey is the context key of the slot pin that the completion RPCs hand
-// to the LLM adapter.
-type slotPinKey struct{}
+// workMaxTokensKeyPrefix is the Redis key prefix for the work-item → token cap
+// binding.
+//
+//	gibson:work:maxtokens:{work_id}
+const workMaxTokensKeyPrefix = "gibson:work:maxtokens:"
 
-// withSlotPin returns ctx carrying pin. A nil pin returns ctx unchanged.
-func withSlotPin(ctx context.Context, pin *agent.SlotConfig) context.Context {
-	if pin == nil {
-		return ctx
+func workMaxTokensKey(workID string) string { return workMaxTokensKeyPrefix + workID }
+
+// bindWorkMaxTokens records the token cap of one model call of the work item.
+// A work item with no cap writes nothing.
+func bindWorkMaxTokens(ctx context.Context, client redis.UniversalClient, item WorkItem) error {
+	if item.MaxTokensPerCall <= 0 {
+		return nil
 	}
-	return context.WithValue(ctx, slotPinKey{}, pin)
+	if err := client.Set(ctx, workMaxTokensKey(item.WorkID), item.MaxTokensPerCall, workOwnerTTL).Err(); err != nil {
+		return fmt.Errorf("work-context registry: bind the token cap of work %q: %w", item.WorkID, err)
+	}
+	return nil
 }
 
-// slotPinFrom returns the slot pin in ctx, or nil.
-func slotPinFrom(ctx context.Context) *agent.SlotConfig {
-	pin, _ := ctx.Value(slotPinKey{}).(*agent.SlotConfig)
-	return pin
+// WorkMaxTokensPerCall reads the token cap (see
+// WorkContextRegistry.WorkMaxTokensPerCall).
+func (r *RedisWorkContextRegistry) WorkMaxTokensPerCall(ctx context.Context, workID string) (int32, error) {
+	if workID == "" {
+		return 0, nil
+	}
+	n, err := r.stateClient.Client().Get(ctx, workMaxTokensKey(workID)).Int()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("work-context registry: look up the token cap of work %q: %w", workID, err)
+	}
+	return int32(n), nil //nolint:gosec // bound from an int32 at enqueue
 }
 
 // nodeSlotPin returns the pin of slot for the work item workID.

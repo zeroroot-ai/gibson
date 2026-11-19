@@ -24,23 +24,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"log/slog"
 	"strings"
 	"sync"
-	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 
 	"github.com/google/uuid"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/agentwire"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
+	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -68,6 +70,16 @@ type missionBinding struct {
 	// the same value on the harness, so one value decides both the slot and
 	// how Decide treats a resolution failure (gibson#1210).
 	deciderPin brain.DeciderSlot
+	// initiator is the person who created the mission, as an FGA user
+	// ("user:<id>"), or empty. It is the subject of the model access check of
+	// each Decider call.
+	initiator string
+}
+
+// deciderModels is the part of the model client that the Decider uses.
+type deciderModels interface {
+	Respond(ctx context.Context, caller modelclient.Caller, target modelclient.Target,
+		req modelclient.Request) (*modelclient.Response, error)
 }
 
 // brainExecutor implements brain.Dispatcher and brain.DeciderLLM by routing to
@@ -75,6 +87,16 @@ type missionBinding struct {
 type brainExecutor struct {
 	registry component.ComponentDiscovery
 	logger   *slog.Logger
+	// gate returns the mission gate of a tenant. A tenant with no gate gets
+	// noMissionGate.
+	// Dispatch waits on it before it starts a work item, so the gate tuple that
+	// ext-authz reads is confirmed before the work item gets a task grant.
+	gate func(tenant string) MissionGateAwaiter
+	// cancels holds the cancel function of each running A2A work item, by work
+	// id. CancelWork calls it. A mission node has no entry, because only an A2A
+	// CancelTask cancels a single item.
+	cancelMu sync.Mutex
+	cancels  map[string]context.CancelFunc
 	// jobs is where a job node's jobs live (ADR-0119, gibson#1713). Read per
 	// dispatch because the data-plane pool is built after the executor.
 	jobs func() (job.Store, error)
@@ -85,6 +107,10 @@ type brainExecutor struct {
 	// the run's target (gibson#497). A mission definition cannot name finding
 	// ids, because the run is what produces them.
 	jobFindings jobnode.FindingsResolver
+	// models sends the model call of the Decider to the model gateway
+	// (gibson#1392). The gateway trace is the one source of the llm_call.observed
+	// and token.used events of that call, so the executor emits neither.
+	models deciderModels
 
 	mu       sync.RWMutex
 	bindings map[string]*missionBinding
@@ -95,6 +121,7 @@ func newBrainExecutor(registry component.ComponentDiscovery, logger *slog.Logger
 		registry: registry,
 		logger:   logger,
 		bindings: map[string]*missionBinding{},
+		gate:     func(string) MissionGateAwaiter { return noMissionGate{} },
 	}
 }
 
@@ -134,6 +161,22 @@ func (b *brainExecutor) get(missionID string) (*missionBinding, bool) {
 	return bind, ok
 }
 
+// awaitMissionGate waits until the gate tuple of the mission is confirmed. A work
+// item of a mission gets a task grant when it starts, and its agent then calls a
+// gateway at once. ext-authz refuses the call of a mission whose gate is not
+// open, so the gate comes first. The error says why the work item cannot start.
+func (b *brainExecutor) awaitMissionGate(ctx context.Context, eng *brain.Engine, req brain.DispatchRequest) error {
+	if req.MissionID == "" {
+		return nil
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, missionGateAwaitTimeout)
+	defer cancel()
+	if err := b.gate(eng.World.Tenant).AwaitOpen(waitCtx, req.MissionID); err != nil {
+		return fmt.Errorf("wait for the mission gate: %w", err)
+	}
+	return nil
+}
+
 // Dispatch (brain.Dispatcher) launches the work off the tick and reports back via
 // WorkCompleted. Agent nodes go through the mission harness's delegation path;
 // tool nodes go through its tool path, which reaches remote components over the
@@ -152,6 +195,12 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 		return
 	}
 	go func() {
+		if err := b.awaitMissionGate(bind.ctx, bind.eng, req); err != nil {
+			b.logger.Error("work item not started: the mission gate is not open",
+				"mission_id", req.MissionID, "work_id", req.WorkID, "error", err)
+			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
+			return
+		}
 		switch req.Kind {
 		case "agent":
 			// The node's declared timeout is the agent's bound. Zero stays zero:
@@ -160,12 +209,17 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 			// node needs (gibson#1602).
 			// The network scope of the node decides the egress of the agent
 			// sandbox (owner decision S6, gibson#865).
-			res, err := bind.harness.DelegateToAgent(bind.ctx, req.Target, agent.Task{
+			agentCtx, release := b.trackWork(bind.ctx, req)
+			defer release()
+			res, err := bind.harness.DelegateToAgent(agentCtx, req.Target, agent.Task{
+				ID:      a2aTaskID(req),
 				Goal:    req.Input,
 				Timeout: req.Timeout,
 				Network: req.Network,
 				// The LLM slot pins of the node (gibson#539, gibson#1203).
 				SlotOverrides: taskSlotOverrides(req.SlotPins),
+				// The token cap of one model call of the node.
+				MaxTokensPerCall: req.MaxTokensPerCall,
 				// The fork fields of the node (ADR-0169, gibson#802).
 				NodeID:     nodeIDOf(req.WorkID, req.MissionID),
 				StartsFrom: req.StartsFrom,
@@ -175,7 +229,7 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 				FromSnapshot: req.FromSnapshot,
 			})
 			if err != nil {
-				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
+				bind.eng.Submit(agentWorkFailure(req.WorkID, req.RunID, err))
 				return
 			}
 			// The snapshot id of the node end is part of the Timeline event,
@@ -197,6 +251,19 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 			// implementation, which is how an off-cluster component serves a
 			// mission node.
 			out, err := b.dispatchTool(bind, req)
+			if err != nil {
+				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
+				return
+			}
+			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Result: out})
+
+		case workKindBank, workKindJobTurn:
+			// An A2A message aimed at a bank, or at a job of a bank. The
+			// daemon opens the job, or sends the next turn, and waits for the
+			// turn (gibson#1400).
+			jobCtx, release := b.trackWork(bind.ctx, req)
+			defer release()
+			out, err := b.dispatchBankTurn(jobCtx, bind, req)
 			if err != nil {
 				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
 				return
@@ -326,14 +393,10 @@ func (b *brainExecutor) dispatchTool(bind *missionBinding, req brain.DispatchReq
 // Decide (brain.DeciderLLM) asks the mission's slot LLM for the next action over
 // the serialized own-mission World slice + capability catalog.
 //
-// The Decider's own reasoning turn is captured onto the mission's Timeline as
-// an LlmCallObserved (ADR-0120 flight recorder, gibson#271): before this fix,
-// the Decider called the harness in-process (CompleteStructuredAny), bypassing
-// the callback-RPC path captureLLMCall instruments, so the brain's own
-// decision-loop prompt + raw response never became part of the recorded
-// transcript — every OTHER fleet-agent LLM call did, but the Decider's did
-// not. bind.eng is the mission's own Engine, so capture Submits directly; no
-// sink indirection is needed here the way the callback RPCs need one.
+// The Decider sends its call to the model gateway (gibson#1392). The gateway
+// trace is the one source of the llm_call.observed and token.used events of the
+// call, so Decide emits neither. The transcript of the Decider still reaches the
+// mission Timeline (ADR-0120, gibson#271), through the receiver of the trace.
 func (b *brainExecutor) Decide(ctx context.Context, mc brain.MissionContext) (brain.DeciderOutput, error) {
 	bind, ok := b.get(mc.MissionID)
 	if !ok {
@@ -344,41 +407,92 @@ func (b *brainExecutor) Decide(ctx context.Context, mc brain.MissionContext) (br
 		slot = deciderSlot
 	}
 	messages := buildDeciderPrompt(mc)
-	structured, err := bind.harness.CompleteStructuredAnyWithUsage(ctx, slot, messages, deciderDecision{})
+	if b.models == nil {
+		return brain.DeciderOutput{}, errors.New("brain decide: no model gateway client is configured")
+	}
+	resolver, ok := bind.harness.(gibsonharness.SlotModelResolver)
+	if !ok {
+		return brain.DeciderOutput{}, fmt.Errorf("brain decide: the harness %T cannot resolve a slot to a model", bind.harness)
+	}
+	// One slot resolves to one exact model name before the call. The gateway
+	// never sees a slot.
+	picked, err := resolver.ResolveSlotModel(ctx, slot)
 	if err != nil {
-		if pinnedDeciderUnservable(bind.deciderPin, err) {
-			// The brain retries a failed decision on the next evidence change,
-			// and the budget System bounds a persistent failure. A pin that
-			// cannot be served spends no tokens, and a retry cannot serve it.
-			// So the mission fails with the reason (gibson#1210).
-			return brain.DeciderOutput{Complete: &brain.DeciderComplete{
-				Outcome: "failed",
-				Reason:  fmt.Sprintf("the decider_slot of the mission cannot be served: %v", err),
-			}}, nil
+		return b.deciderFailure(bind, err)
+	}
+	schemaName, schema, err := gibsonharness.StructuredSchema(deciderDecision{})
+	if err != nil {
+		return brain.DeciderOutput{}, fmt.Errorf("brain decide: schema: %w", err)
+	}
+	resp, err := b.models.Respond(ctx,
+		modelclient.Caller{
+			Tenant: bind.tenant, Mission: mc.MissionID, Task: "decide-" + uuid.NewString(),
+			Initiator: bind.initiator, Purpose: "brain-decider",
+		},
+		modelclient.Target{Tenant: bind.tenant, Provider: picked.Provider, Model: picked.Model},
+		modelclient.Request{Input: deciderInput(messages), Text: modelclient.JSONSchemaFormat(schemaName, schema)},
+	)
+	if err != nil {
+		var refused *modelclient.APIError
+		if errors.As(err, &refused) && refused.Refused() {
+			// ext-authz refused the call: the model is not allowed, or the mission
+			// is not running. A pin that is refused cannot be served.
+			return b.deciderFailure(bind, types.WrapError(gibsonharness.ErrNoMatchingProvider,
+				fmt.Sprintf("model_access_denied: the gateway refused the model %q on provider %q", picked.Model, picked.Provider), err))
 		}
 		return brain.DeciderOutput{}, fmt.Errorf("brain decide: llm: %w", err)
 	}
-
-	if bind.eng != nil {
-		msgs := make([]brain.LlmMessage, 0, len(messages))
-		for _, m := range messages {
-			msgs = append(msgs, brain.LlmMessage{Role: string(m.Role), Content: m.Content})
-		}
-		bind.eng.Submit(brain.LlmCallObserved{
-			CallID:    uuid.NewString(),
-			MissionID: mc.MissionID,
-			// RunID is empty: the Decider is a mission-level call with no
-			// owning AgentRun (llm_call.go's documented convention).
-			Model:              structured.Model,
-			PromptTokens:       structured.PromptTokens,
-			CompletionTokens:   structured.CompletionTokens,
-			Messages:           msgs,
-			Completion:         structured.RawJSON,
-			RecordedAtUnixNano: time.Now().UnixNano(),
-		})
+	var decision deciderDecision
+	if err := json.Unmarshal([]byte(resp.OutputText()), &decision); err != nil {
+		return brain.DeciderOutput{}, fmt.Errorf("brain decide: the model did not return the decision schema: %w", err)
 	}
+	return parseDecision(&decision), nil
+}
 
-	return parseDecision(structured.Result), nil
+// deciderFailure turns a slot or gateway failure into the answer of Decide. A
+// pin that cannot be served ends the mission with the reason (gibson#1210).
+// Other failures go back to the brain, which retries on the next evidence
+// change.
+func (b *brainExecutor) deciderFailure(bind *missionBinding, err error) (brain.DeciderOutput, error) {
+	if pinnedDeciderUnservable(bind.deciderPin, err) {
+		// The brain retries a failed decision on the next evidence change,
+		// and the budget System bounds a persistent failure. A pin that
+		// cannot be served spends no tokens, and a retry cannot serve it.
+		return brain.DeciderOutput{Complete: &brain.DeciderComplete{
+			Outcome: "failed",
+			Reason:  fmt.Sprintf("the decider_slot of the mission cannot be served: %v", err),
+		}}, nil
+	}
+	return brain.DeciderOutput{}, fmt.Errorf("brain decide: llm: %w", err)
+}
+
+// deciderMessage is one message of the prompt of the Decider.
+type deciderMessage struct {
+	Role    string
+	Content string
+}
+
+// The roles of a Decider prompt message.
+const (
+	deciderRoleSystem    = "system"
+	deciderRoleAssistant = "assistant"
+	deciderRoleUser      = "user"
+)
+
+// deciderInput maps the prompt messages to Open Responses items.
+func deciderInput(messages []deciderMessage) []modelclient.Item {
+	out := make([]modelclient.Item, 0, len(messages))
+	for _, m := range messages {
+		switch m.Role {
+		case deciderRoleSystem:
+			out = append(out, modelclient.SystemMessage(m.Content))
+		case deciderRoleAssistant:
+			out = append(out, modelclient.AssistantMessage(m.Content))
+		default:
+			out = append(out, modelclient.UserMessage(m.Content))
+		}
+	}
+	return out
 }
 
 // pinnedDeciderUnservable reports whether err is a slot resolution failure of a
@@ -393,7 +507,10 @@ func pinnedDeciderUnservable(pin brain.DeciderSlot, err error) bool {
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	return errors.Is(err, types.NewError(llm.ErrNoMatchingProvider, ""))
+	// A pin that names a provider that the tenant does not have cannot be
+	// served either. The wait for a later call does not help.
+	return errors.Is(err, types.NewError(gibsonharness.ErrNoMatchingProvider, "")) ||
+		errors.Is(err, types.NewError(gibsonharness.ErrProviderNotFound, ""))
 }
 
 // catalog lists the mission tenant's enrolled components as brain capabilities.
@@ -546,7 +663,7 @@ func parseDecision(raw any) brain.DeciderOutput {
 // buildDeciderPrompt renders the own-mission slice + catalog into the Decider's
 // messages. The Decider reasons over structured World state, not a transcript
 // (CONTEXT.md / ADR-0101).
-func buildDeciderPrompt(mc brain.MissionContext) []llm.Message {
+func buildDeciderPrompt(mc brain.MissionContext) []deciderMessage {
 	system := "You are the orchestration Decider for an autonomous offensive-security mission. " +
 		"Reason over the current world state and choose the single next action that best advances the goal. " +
 		"You re-invoke existing capabilities with new inputs; you never author the knowledge graph. " +
@@ -594,9 +711,9 @@ func buildDeciderPrompt(mc brain.MissionContext) []llm.Message {
 		}
 	}
 
-	return []llm.Message{
-		{Role: llm.RoleSystem, Content: system},
-		{Role: llm.RoleUser, Content: b.String()},
+	return []deciderMessage{
+		{Role: deciderRoleSystem, Content: system},
+		{Role: deciderRoleUser, Content: b.String()},
 	}
 }
 
@@ -625,4 +742,31 @@ func taskSlotOverrides(pins map[string]agent.SlotConfig) map[string]*agent.SlotC
 		out[slot] = &cfg
 	}
 	return out
+}
+
+// missionInitiatorOf names the person who created a mission as an FGA user. A
+// mission that no person created has none. It is the subject of the model
+// access check of ext-authz.
+func missionInitiatorOf(createdBy principal.Principal) string {
+	if createdBy.Kind != principal.User || createdBy.ID == "" {
+		return ""
+	}
+	return "user:" + createdBy.ID
+}
+
+// agentWorkFailure builds the WorkCompleted of an agent node that did not
+// finish. A run that ended in the A2A state canceled, input-required or
+// auth-required keeps that state on the work item. Any other error fails the
+// item.
+func agentWorkFailure(workID, runID string, err error) brain.WorkCompleted {
+	var se *agentwire.StateError
+	if errors.As(err, &se) {
+		switch state := brain.WorkStateFromTask(se.State); state {
+		case brain.WorkCanceled, brain.WorkInputRequired:
+			return brain.WorkCompleted{ID: workID, RunID: runID, State: state, Err: se.Message}
+		case brain.WorkPending, brain.WorkRunning, brain.WorkDone, brain.WorkFailed, brain.WorkSkipped:
+			// These states fail the item below.
+		}
+	}
+	return brain.WorkCompleted{ID: workID, RunID: runID, Err: err.Error()}
 }

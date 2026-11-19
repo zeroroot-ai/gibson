@@ -35,7 +35,7 @@ func (r *recordingMemberStatus) ReportMemberStatus(_ context.Context, tenant, me
 // sink's refusal is the caller's answer.
 func TestHeartbeat_AMemberStatusGoesToTheSink(t *testing.T) {
 	sink := &recordingMemberStatus{}
-	svc := NewComponentServiceServer(&listRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil).
+	svc := NewComponentServiceServer(&listRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil).
 		WithMemberStatusSink(sink)
 	st := &bankpb.MemberStatus{State: bankpb.MemberState_MEMBER_STATE_BUSY, JobsInFlight: 1, Cap: 1}
 
@@ -56,7 +56,7 @@ func TestHeartbeat_AMemberStatusGoesToTheSink(t *testing.T) {
 // TestHeartbeat_AMemberStatusOnADaemonWithNoBanksIsRefused asserts the
 // heartbeat is refused, not dropped, when nothing records member status.
 func TestHeartbeat_AMemberStatusOnADaemonWithNoBanksIsRefused(t *testing.T) {
-	svc := NewComponentServiceServer(&listRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil)
+	svc := NewComponentServiceServer(&listRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil)
 	_, err := svc.Heartbeat(componentCtx("component:agent:claude"), &componentpb.HeartbeatRequest{
 		InstanceId: "m-1", Member: &bankpb.MemberStatus{State: bankpb.MemberState_MEMBER_STATE_IDLE},
 	})

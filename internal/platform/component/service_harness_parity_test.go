@@ -87,8 +87,8 @@ func newParityServer() *ComponentServiceServer {
 		&noopRegistry{},
 		&noopWorkQueue{},
 		testLogger(),
-		nil, nil, nil, nil,
-	)
+		nil, nil, nil)
+
 }
 
 // tenantCtx returns a background context stamped with "test-tenant".

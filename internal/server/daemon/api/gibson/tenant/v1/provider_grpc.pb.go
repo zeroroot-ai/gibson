@@ -42,7 +42,6 @@ const (
 	ProviderService_DeleteProvider_FullMethodName        = "/gibson.tenant.v1.ProviderService/DeleteProvider"
 	ProviderService_TestProvider_FullMethodName          = "/gibson.tenant.v1.ProviderService/TestProvider"
 	ProviderService_GetSupportedProviders_FullMethodName = "/gibson.tenant.v1.ProviderService/GetSupportedProviders"
-	ProviderService_ProbeProvider_FullMethodName         = "/gibson.tenant.v1.ProviderService/ProbeProvider"
 	ProviderService_ListProviderModels_FullMethodName    = "/gibson.tenant.v1.ProviderService/ListProviderModels"
 	ProviderService_GetProviderHealth_FullMethodName     = "/gibson.tenant.v1.ProviderService/GetProviderHealth"
 	ProviderService_GetDefaultProvider_FullMethodName    = "/gibson.tenant.v1.ProviderService/GetDefaultProvider"
@@ -66,27 +65,16 @@ type ProviderServiceClient interface {
 	UpdateProvider(ctx context.Context, in *UpdateProviderRequest, opts ...grpc.CallOption) (*UpdateProviderResponse, error)
 	// DeleteProvider removes a provider config from the store.
 	DeleteProvider(ctx context.Context, in *DeleteProviderRequest, opts ...grpc.CallOption) (*DeleteProviderResponse, error)
-	// TestProvider validates a proposed provider config by making a minimal live
-	// request.
+	// TestProvider tests a SAVED provider by name. It sends one GET of the model
+	// list through the route of the provider on the model gateway. It never tests
+	// a credential that is not saved (gibson#1394).
 	TestProvider(ctx context.Context, in *TestProviderRequest, opts ...grpc.CallOption) (*TestProviderResponse, error)
 	// GetSupportedProviders returns the daemon's static catalog of LLM provider
 	// types with their per-provider credential field schemas.
 	GetSupportedProviders(ctx context.Context, in *GetSupportedProvidersRequest, opts ...grpc.CallOption) (*GetSupportedProvidersResponse, error)
-	// ProbeProvider validates candidate provider credentials WITHOUT persisting
-	// them, and returns the live model catalog the provider's API exposes for
-	// those credentials. Used by the wizard's "Test connection" step.
-	//
-	// SECURITY: credentials transit memory only — they are passed to the
-	// transient provider client, the call is made, and the values are dropped
-	// when the request returns. They are never logged, never persisted, and
-	// never returned to the caller.
-	//
-	// Source: previously ProbeProvider in gibson.admin.v1.TenantAdminService
-	// (platform-sdk); moved here as it is customer-callable.
-	ProbeProvider(ctx context.Context, in *ProbeProviderRequest, opts ...grpc.CallOption) (*ProbeProviderResponse, error)
-	// ListProviderModels fetches the live model catalog for an already-
-	// configured provider, looked up by name. Credentials are read from the
-	// encrypted store; the caller does not pass them.
+	// ListProviderModels fetches the live model catalog for a saved provider, by
+	// name. It sends one GET of the model list through the route of the provider
+	// on the model gateway. The caller passes no credential.
 	ListProviderModels(ctx context.Context, in *ListProviderModelsRequest, opts ...grpc.CallOption) (*ListProviderModelsResponse, error)
 	// GetProviderHealth returns the last-known health status of a stored provider.
 	GetProviderHealth(ctx context.Context, in *GetProviderHealthRequest, opts ...grpc.CallOption) (*GetProviderHealthResponse, error)
@@ -176,16 +164,6 @@ func (c *providerServiceClient) GetSupportedProviders(ctx context.Context, in *G
 	return out, nil
 }
 
-func (c *providerServiceClient) ProbeProvider(ctx context.Context, in *ProbeProviderRequest, opts ...grpc.CallOption) (*ProbeProviderResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ProbeProviderResponse)
-	err := c.cc.Invoke(ctx, ProviderService_ProbeProvider_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *providerServiceClient) ListProviderModels(ctx context.Context, in *ListProviderModelsRequest, opts ...grpc.CallOption) (*ListProviderModelsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListProviderModelsResponse)
@@ -252,27 +230,16 @@ type ProviderServiceServer interface {
 	UpdateProvider(context.Context, *UpdateProviderRequest) (*UpdateProviderResponse, error)
 	// DeleteProvider removes a provider config from the store.
 	DeleteProvider(context.Context, *DeleteProviderRequest) (*DeleteProviderResponse, error)
-	// TestProvider validates a proposed provider config by making a minimal live
-	// request.
+	// TestProvider tests a SAVED provider by name. It sends one GET of the model
+	// list through the route of the provider on the model gateway. It never tests
+	// a credential that is not saved (gibson#1394).
 	TestProvider(context.Context, *TestProviderRequest) (*TestProviderResponse, error)
 	// GetSupportedProviders returns the daemon's static catalog of LLM provider
 	// types with their per-provider credential field schemas.
 	GetSupportedProviders(context.Context, *GetSupportedProvidersRequest) (*GetSupportedProvidersResponse, error)
-	// ProbeProvider validates candidate provider credentials WITHOUT persisting
-	// them, and returns the live model catalog the provider's API exposes for
-	// those credentials. Used by the wizard's "Test connection" step.
-	//
-	// SECURITY: credentials transit memory only — they are passed to the
-	// transient provider client, the call is made, and the values are dropped
-	// when the request returns. They are never logged, never persisted, and
-	// never returned to the caller.
-	//
-	// Source: previously ProbeProvider in gibson.admin.v1.TenantAdminService
-	// (platform-sdk); moved here as it is customer-callable.
-	ProbeProvider(context.Context, *ProbeProviderRequest) (*ProbeProviderResponse, error)
-	// ListProviderModels fetches the live model catalog for an already-
-	// configured provider, looked up by name. Credentials are read from the
-	// encrypted store; the caller does not pass them.
+	// ListProviderModels fetches the live model catalog for a saved provider, by
+	// name. It sends one GET of the model list through the route of the provider
+	// on the model gateway. The caller passes no credential.
 	ListProviderModels(context.Context, *ListProviderModelsRequest) (*ListProviderModelsResponse, error)
 	// GetProviderHealth returns the last-known health status of a stored provider.
 	GetProviderHealth(context.Context, *GetProviderHealthRequest) (*GetProviderHealthResponse, error)
@@ -312,9 +279,6 @@ func (UnimplementedProviderServiceServer) TestProvider(context.Context, *TestPro
 }
 func (UnimplementedProviderServiceServer) GetSupportedProviders(context.Context, *GetSupportedProvidersRequest) (*GetSupportedProvidersResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSupportedProviders not implemented")
-}
-func (UnimplementedProviderServiceServer) ProbeProvider(context.Context, *ProbeProviderRequest) (*ProbeProviderResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ProbeProvider not implemented")
 }
 func (UnimplementedProviderServiceServer) ListProviderModels(context.Context, *ListProviderModelsRequest) (*ListProviderModelsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListProviderModels not implemented")
@@ -478,24 +442,6 @@ func _ProviderService_GetSupportedProviders_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ProviderService_ProbeProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ProbeProviderRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ProviderServiceServer).ProbeProvider(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ProviderService_ProbeProvider_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ProviderServiceServer).ProbeProvider(ctx, req.(*ProbeProviderRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _ProviderService_ListProviderModels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListProviderModelsRequest)
 	if err := dec(in); err != nil {
@@ -620,10 +566,6 @@ var ProviderService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSupportedProviders",
 			Handler:    _ProviderService_GetSupportedProviders_Handler,
-		},
-		{
-			MethodName: "ProbeProvider",
-			Handler:    _ProviderService_ProbeProvider_Handler,
 		},
 		{
 			MethodName: "ListProviderModels",

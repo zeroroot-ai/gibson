@@ -81,6 +81,19 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 			// Can't attribute without a missionID — skip.
 			return nil
 		}
+		switch e.State {
+		case brain.WorkInputRequired:
+			// The node waits for input. It has neither completed nor failed.
+			return nil
+		case brain.WorkCanceled:
+			msg := e.Err
+			if msg == "" {
+				msg = "canceled"
+			}
+			return missionEventData(now, "node.failed", missionID, e.ID, "", msg)
+		case brain.WorkPending, brain.WorkRunning, brain.WorkDone, brain.WorkFailed, brain.WorkSkipped:
+			// The error of the event decides the result, below.
+		}
 		if e.Err != "" {
 			return missionEventData(now, "node.failed", missionID, e.ID, "", e.Err)
 		}
@@ -89,7 +102,7 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 	// ---- mission lifecycle -------------------------------------------
 
 	case brain.MissionStarted:
-		return missionEventData(now, "status", e.ID, "", "running", "")
+		return missionEventData(now, "status", e.ID, "", string(brain.MissionWorking), "")
 
 	case brain.MissionPauseRequested:
 		// Operator pause (gibson#851). The old path emitted this from
@@ -100,16 +113,18 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 		return missionEventData(now, "mission.paused", e.ID, "", "paused", "")
 
 	case brain.MissionResumed:
-		return missionEventData(now, "mission.resumed", e.ID, "", "running", "")
+		return missionEventData(now, "mission.resumed", e.ID, "", string(brain.MissionWorking), "")
 
 	case brain.MissionDone:
-		status := "completed"
+		outcome, ok := e.FinalOutcome()
+		if !ok {
+			return nil // the reducer drops this event, so no status changed
+		}
 		errMsg := ""
-		if e.Outcome == brain.MissionFailed {
-			status = "failed"
+		if outcome == brain.MissionFailed {
 			errMsg = e.Reason
 		}
-		return missionEventData(now, "status", e.ID, "", status, errMsg)
+		return missionEventData(now, "status", e.ID, "", string(outcome), errMsg)
 	}
 
 	return nil

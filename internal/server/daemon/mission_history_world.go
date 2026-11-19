@@ -15,7 +15,7 @@ const StatusRunUnknown = "unknown"
 // isEndedRunStatus reports whether a stored run status is an end state.
 func isEndedRunStatus(status string) bool {
 	switch status {
-	case "completed", "failed", "cancelled", StatusRunUnknown:
+	case "completed", "failed", string(brain.MissionCanceled), StatusRunUnknown:
 		return true
 	}
 	return false
@@ -23,8 +23,8 @@ func isEndedRunStatus(status string) bool {
 
 // overlayRunsFromWorld sets the live fields of each run from the World, the one
 // source of mission state (ADR-0163, gibson#1118). The run store holds a run
-// once, at its start, with the status "running". Nothing writes it again, so the
-// history of a finished run read "running" for ever while ListMissions showed it
+// once, at its start, with the status "working". Nothing writes it again, so the
+// history of a finished run read "working" for ever while ListMissions showed it
 // completed or failed (gibson#1340). A snapshot is matched on the run id. A run
 // that the World does not hold keeps what the store has.
 //
@@ -35,7 +35,7 @@ func isEndedRunStatus(status string) bool {
 // newest run. An earlier run of the same mission has no snapshot. Only one run
 // of a mission is active at a time, so an earlier run that the store still holds
 // as not ended has ended, and its outcome is not in the World. It reads
-// StatusRunUnknown and not "running".
+// StatusRunUnknown and not "working".
 func overlayRunsFromWorld(runs []api.MissionRunData, snapshots []brain.MissionSnapshot) {
 	byRun := make(map[string]brain.MissionSnapshot, len(snapshots))
 	newestOf := make(map[string]string, len(snapshots)) // mission id -> run id of its snapshot

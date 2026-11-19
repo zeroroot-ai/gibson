@@ -4,9 +4,11 @@
 package agent
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // Task represents work assigned to an agent.
@@ -33,6 +35,12 @@ type Task struct {
 	//
 	// Spec: per-node-slot-override (gibson#539).
 	SlotOverrides map[string]*SlotConfig `json:"slot_overrides,omitempty"`
+
+	// MaxTokensPerCall is the effective token cap of one model call of the
+	// mission node that this task runs (the node value, else the mission
+	// value). Zero means no cap. The daemon gives it to the agent in the
+	// ResolveModel reply. The model gateway does not enforce it.
+	MaxTokensPerCall int32 `json:"max_tokens_per_call,omitempty"`
 
 	// Network is the network scope of the mission node that this task runs
 	// (owner decision S6, gibson#865). The sandbox of the node, and each tool
@@ -136,6 +144,13 @@ type Result struct {
 	Metrics     TaskMetrics    `json:"metrics"`
 	StartedAt   time.Time      `json:"started_at"`
 	CompletedAt time.Time      `json:"completed_at"`
+	// Deliverables are the protojson gibson.job.v1.Deliverable messages that
+	// left the sandbox in this run. The agent sends them in the result metadata
+	// of its A2A Task.
+	Deliverables []json.RawMessage `json:"deliverables,omitempty"`
+	// ClaudeSessionID is the coding agent session of this run. The agent sends
+	// it in the result metadata of its A2A Task.
+	ClaudeSessionID string `json:"claude_session_id,omitempty"`
 }
 
 // NewResult creates a new result for the given task
@@ -209,19 +224,19 @@ type ResultError struct {
 
 // Finding represents a security finding discovered during task execution
 type Finding struct {
-	ID          types.ID        `json:"id"`
-	TenantID    string          `json:"tenant_id,omitempty" yaml:"tenant_id,omitempty"` // Multi-tenant isolation
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	Severity    FindingSeverity `json:"severity"`
-	Confidence  float64         `json:"confidence"` // 0.0 - 1.0
-	Category    string          `json:"category"`
-	TargetID    *types.ID       `json:"target_id,omitempty"`
-	Evidence    []Evidence      `json:"evidence,omitempty"`
-	CVSS        *CVSSScore      `json:"cvss,omitempty"`
-	CWE         []string        `json:"cwe,omitempty"`
-	Metadata    map[string]any  `json:"metadata,omitempty"`
-	CreatedAt   time.Time       `json:"created_at"`
+	ID          types.ID            `json:"id"`
+	TenantID    string              `json:"tenant_id,omitempty" yaml:"tenant_id,omitempty"` // Multi-tenant isolation
+	Title       string              `json:"title"`
+	Description string              `json:"description"`
+	Severity    FindingSeverity     `json:"severity"`
+	Confidence  float64             `json:"confidence"` // 0.0 - 1.0
+	Category    string              `json:"category"`
+	TargetID    *types.ID           `json:"target_id,omitempty"`
+	Evidence    []*typespb.Evidence `json:"evidence,omitempty"`
+	CVSS        *CVSSScore          `json:"cvss,omitempty"`
+	CWE         []string            `json:"cwe,omitempty"`
+	Metadata    map[string]any      `json:"metadata,omitempty"`
+	CreatedAt   time.Time           `json:"created_at"`
 
 	// SubmittedBy is the verified principal that submitted the finding over the
 	// component path (gibson#208), as the FGA user ref ext-authz asserted, for
@@ -245,14 +260,6 @@ const (
 	SeverityLow      FindingSeverity = "low"
 	SeverityInfo     FindingSeverity = "info"
 )
-
-// Evidence represents evidence supporting a finding
-type Evidence struct {
-	Type        string         `json:"type"`
-	Description string         `json:"description"`
-	Data        map[string]any `json:"data"`
-	Timestamp   time.Time      `json:"timestamp"`
-}
 
 // CVSSScore represents a CVSS scoring
 type CVSSScore struct {
@@ -284,7 +291,7 @@ func NewFinding(title, description string, severity FindingSeverity) Finding {
 		Description: description,
 		Severity:    severity,
 		Confidence:  1.0,
-		Evidence:    []Evidence{},
+		Evidence:    []*typespb.Evidence{},
 		CWE:         []string{},
 		Metadata:    make(map[string]any),
 		CreatedAt:   time.Now(),
@@ -304,7 +311,7 @@ func (f Finding) WithCategory(category string) Finding {
 }
 
 // WithEvidence adds evidence to a finding
-func (f Finding) WithEvidence(evidence ...Evidence) Finding {
+func (f Finding) WithEvidence(evidence ...*typespb.Evidence) Finding {
 	f.Evidence = append(f.Evidence, evidence...)
 	return f
 }
@@ -327,12 +334,16 @@ func (f Finding) WithTenant(tenantID string) Finding {
 	return f
 }
 
-// NewEvidence creates a new evidence object
-func NewEvidence(evidenceType, description string, data map[string]any) Evidence {
-	return Evidence{
-		Type:        evidenceType,
-		Description: description,
-		Data:        data,
-		Timestamp:   time.Now(),
+// WithoutRecordedEvidence returns the finding with its tier 1 evidence removed.
+// Tier 1 evidence comes from the record of the daemon, so the emit bounds that
+// apply to what an agent sent do not apply to it.
+func (f Finding) WithoutRecordedEvidence() Finding {
+	typed := make([]*typespb.Evidence, 0, len(f.Evidence))
+	for _, e := range f.Evidence {
+		if e.GetTier() != typespb.EvidenceTier_EVIDENCE_TIER_RECORDED {
+			typed = append(typed, e)
+		}
 	}
+	f.Evidence = typed
+	return f
 }

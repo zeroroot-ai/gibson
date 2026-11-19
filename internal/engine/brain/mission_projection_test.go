@@ -170,7 +170,7 @@ func TestProjection_LateEventOfRun1DoesNotChangeRun2(t *testing.T) {
 	tickN(e, 3)
 
 	ms := e.Missions()
-	if len(ms) != 1 || ms[0].RunID != "run-2" || ms[0].Status != MissionRunning {
+	if len(ms) != 1 || ms[0].RunID != "run-2" || ms[0].Status != MissionWorking {
 		t.Fatalf("missions = %+v, want run-2 still running", ms)
 	}
 	for _, wi := range e.Work() {
@@ -247,7 +247,7 @@ func TestProjection_PendingMissionGetsItsWork(t *testing.T) {
 	Reduce(w, MissionStarted{ID: "m1", RunID: "run-1"})
 
 	ms := w.MissionSnapshot()
-	if len(ms) != 1 || ms[0].Status != MissionRunning || ms[0].RunID != "run-1" || ms[0].Name != "recon" {
+	if len(ms) != 1 || ms[0].Status != MissionWorking || ms[0].RunID != "run-1" || ms[0].Name != "recon" {
 		t.Fatalf("missions = %+v, want one running mission of run-1 that keeps its name", ms)
 	}
 	if got := len(w.WorkSnapshot()); got != 2 {

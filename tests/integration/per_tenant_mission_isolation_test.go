@@ -82,7 +82,7 @@ func TestPerTenantMissionIsolation_TwoTenants(t *testing.T) {
 	mA := &mission.Mission{
 		ID:       types.NewID(),
 		Name:     "mission-for-a",
-		Status:   mission.MissionStatusPending,
+		Status:   mission.MissionStatusSubmitted,
 		TargetID: types.NewID(),
 	}
 	if err := storeA.Save(ctx, mA); err != nil {
@@ -141,7 +141,7 @@ func TestPerTenantMissionIsolation_CrossTenantGetReturnsNotFound(t *testing.T) {
 	mA := &mission.Mission{
 		ID:       types.NewID(),
 		Name:     "secret-mission",
-		Status:   mission.MissionStatusRunning,
+		Status:   mission.MissionStatusWorking,
 		TargetID: types.NewID(), // required by Mission.Validate()
 	}
 	if err := storeA.Save(ctx, mA); err != nil {

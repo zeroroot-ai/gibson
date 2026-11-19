@@ -10,8 +10,6 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -158,15 +156,15 @@ func testTargetFacts() TargetFactsLookup { return &stubTargetFacts{} }
 // with no provider, and Create refuses a provider that answers nil. The daemon
 // sets its target store during start, so either case is a wiring defect.
 func TestHarnessFactory_RequiresTheTargetLookup(t *testing.T) {
-	slots := llmtest.NewSlotManager(llm.NewLLMRegistry())
+	slots := newStubSlotManager()
 
-	if f, err := NewHarnessFactory(HarnessConfig{SlotManager: slots}); err == nil {
+	if f, err := NewHarnessFactory(HarnessConfig{SlotManagerForTenant: fixedSlotManager(slots)}); err == nil {
 		t.Fatalf("NewHarnessFactory with no TargetFacts = %v, nil; want an error", f)
 	}
 
 	f, err := NewHarnessFactory(HarnessConfig{
-		SlotManager: slots,
-		TargetFacts: func() TargetFactsLookup { return nil },
+		SlotManagerForTenant: fixedSlotManager(slots),
+		TargetFacts:          func() TargetFactsLookup { return nil },
 	})
 	if err != nil {
 		t.Fatalf("NewHarnessFactory: %v", err)
@@ -177,8 +175,8 @@ func TestHarnessFactory_RequiresTheTargetLookup(t *testing.T) {
 
 	stub := &stubTargetFacts{}
 	f, err = NewHarnessFactory(HarnessConfig{
-		SlotManager: slots,
-		TargetFacts: func() TargetFactsLookup { return stub },
+		SlotManagerForTenant: fixedSlotManager(slots),
+		TargetFacts:          func() TargetFactsLookup { return stub },
 	})
 	if err != nil {
 		t.Fatalf("NewHarnessFactory: %v", err)

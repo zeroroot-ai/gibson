@@ -1,10 +1,10 @@
 module github.com/zeroroot-ai/gibson/plugins/github
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/google/go-github/v90 v90.0.0
-	github.com/zeroroot-ai/sdk v0.209.1
+	github.com/zeroroot-ai/sdk v0.210.0
 )
 
 require (

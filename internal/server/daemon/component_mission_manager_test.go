@@ -260,7 +260,7 @@ func TestOriginateMission_BadTargetID(t *testing.T) {
 // ---- oneMission / GetMissionStatus / GetMissionResults --------------------
 
 func TestGetMissionStatus_FoundAndNotFound(t *testing.T) {
-	m := &mission.Mission{ID: types.NewID(), TenantID: "acme", Name: "m", Status: mission.MissionStatusRunning}
+	m := &mission.Mission{ID: types.NewID(), TenantID: "acme", Name: "m", Status: mission.MissionStatusWorking}
 	store := &fakeCMMStore{byID: map[string]*mission.Mission{m.ID.String(): m}}
 	mgr := newCMMTest(t, store, &fakeCMMLedger{})
 
@@ -303,7 +303,7 @@ func TestWaitForMission_TerminalReturnsImmediately(t *testing.T) {
 }
 
 func TestWaitForMission_TimeoutWhileRunning(t *testing.T) {
-	m := &mission.Mission{ID: types.NewID(), TenantID: "acme", Status: mission.MissionStatusRunning}
+	m := &mission.Mission{ID: types.NewID(), TenantID: "acme", Status: mission.MissionStatusWorking}
 	store := &fakeCMMStore{byID: map[string]*mission.Mission{m.ID.String(): m}}
 	mgr := newCMMTest(t, store, &fakeCMMLedger{})
 
@@ -320,7 +320,7 @@ func TestWaitForMission_NotFound(t *testing.T) {
 // ---- ListMissions ---------------------------------------------------------
 
 func TestListMissions_ProjectsRecords(t *testing.T) {
-	a := &mission.Mission{ID: types.NewID(), TenantID: "acme", Name: "a", Status: mission.MissionStatusRunning}
+	a := &mission.Mission{ID: types.NewID(), TenantID: "acme", Name: "a", Status: mission.MissionStatusWorking}
 	b := &mission.Mission{ID: types.NewID(), TenantID: "acme", Name: "b", Status: mission.MissionStatusCompleted}
 	store := &fakeCMMStore{list: []*mission.Mission{a, b}}
 	mgr := newCMMTest(t, store, &fakeCMMLedger{})
@@ -344,7 +344,7 @@ func TestGetMissionRunHistory_ProjectsRuns(t *testing.T) {
 	mid := types.NewID()
 	runs := []*mission.MissionRun{
 		{ID: types.NewID(), MissionID: mid, RunNumber: 1, Status: mission.MissionRunStatusCompleted},
-		{ID: types.NewID(), MissionID: mid, RunNumber: 2, Status: mission.MissionRunStatusRunning},
+		{ID: types.NewID(), MissionID: mid, RunNumber: 2, Status: mission.MissionRunStatusWorking},
 	}
 	mgr := newCMMTest(t, &fakeCMMStore{}, &fakeCMMLedger{})
 	mgr.runStoreFactory = func(*datapool.Conn) mission.MissionRunStore {
@@ -405,7 +405,7 @@ func TestMissionRecordAndLineage(t *testing.T) {
 	m := &mission.Mission{
 		ID:              types.NewID(),
 		Name:            "child",
-		Status:          mission.MissionStatusRunning,
+		Status:          mission.MissionStatusWorking,
 		ParentMissionID: &parentID,
 	}
 	lineage := lineageRecord(brain.MissionLineage{

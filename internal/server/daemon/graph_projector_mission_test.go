@@ -52,7 +52,7 @@ func TestGraphProjector_ProjectsAMissionsTerminalStatus(t *testing.T) {
 		ID: "m1", Name: "sweep", Description: "Sweep the fleet.",
 		TargetID: "t1", TenantID: "acme", CreatedBy: principal.Principal{Kind: principal.User, ID: "u1"},
 	})
-	waitForMissionStatus(t, eng, "m1", brain.MissionRunning)
+	waitForMissionStatus(t, eng, "m1", brain.MissionWorking)
 
 	writer := newFakeGraphWriter()
 	p := NewGraphProjector(reg, writer, time.Hour, nil)
@@ -64,7 +64,7 @@ func TestGraphProjector_ProjectsAMissionsTerminalStatus(t *testing.T) {
 	if len(running) != 1 {
 		t.Fatalf("projected %d missions while running, want 1", len(running))
 	}
-	if running[0].Status != string(brain.MissionRunning) {
+	if running[0].Status != string(brain.MissionWorking) {
 		t.Errorf("status while running = %q, want running", running[0].Status)
 	}
 
@@ -150,7 +150,7 @@ func TestGraphProjector_AMissionUpsertFailureDoesNotStopTheTick(t *testing.T) {
 	eng.Submit(brain.MissionStarted{ID: "m1", Name: "one", TenantID: "acme"})
 	eng.Submit(brain.MissionStarted{ID: "m2", Name: "two", TenantID: "acme"})
 	eng.Submit(brain.HostObserved{ScopeID: "m1", Address: "10.0.0.5", OpenPorts: []int{22}})
-	waitForMissionStatus(t, eng, "m2", brain.MissionRunning)
+	waitForMissionStatus(t, eng, "m2", brain.MissionWorking)
 
 	writer := &failingMissionWriter{fakeGraphWriter: newFakeGraphWriter()}
 	p := NewGraphProjector(reg, writer, time.Hour, nil)

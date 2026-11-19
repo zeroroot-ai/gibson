@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"log/slog"
 	"net/url"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	bankengine "github.com/zeroroot-ai/gibson/internal/engine/bank"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -37,6 +39,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/reconciler"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
@@ -47,6 +50,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto/providers"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets/jwtsource"
@@ -98,8 +102,15 @@ type AgentRuntimeState struct {
 //   - Callback manager (harness callback server for agents)
 //   - Redis daemon registration for client discovery
 type daemonImpl struct {
+	// publicGateways are the gateways that ResolveModel and ResolveAgent return.
+	publicGateways publicGateways
+
 	// config is the loaded Gibson configuration
 	config *config.Config
+
+	// findingStore writes findings to the findings table of each tenant. It is
+	// nil until findings() builds it on the data pool. A test sets it.
+	findingStore finding.FindingStore
 
 	// homeDir is the resolved Gibson home directory (e.g. ~/.gibson).
 	// Set via WithHomeDir option; falls back to cfg.Core.HomeDir, then $HOME/.gibson.
@@ -123,6 +134,9 @@ type daemonImpl struct {
 	// WorldService read path reads through it. Lazily created at gRPC registration.
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
+	// missionGates holds the mission gate tap of each tenant engine (tenant id to
+	// *missionGateTap). The brain executor waits on it before it starts work.
+	missionGates sync.Map
 	// tenantBeliefs gives each tenant engine the belief version of its own
 	// tenant from the platform Postgres (ADR-0106, gibson#615). Held here so
 	// the mission launch path can pin the version of its tenant.
@@ -194,6 +208,10 @@ type daemonImpl struct {
 	// grpcSubsystem owns the gRPC server lifecycle. Constructed by buildGRPCServer;
 	// Serve(ctx) launched in a goroutine from Start. Wire into eg.Go in task 7.3.
 	grpcSubsystem *grpcSubsystem
+
+	// modelClient sends each model call of the daemon to the model gateway
+	// (gibson#1392).
+	modelClient *modelclient.Client
 
 	// grpcAddr is the address the gRPC server listens on (added in Phase 3)
 	grpcAddr string
@@ -452,6 +470,14 @@ type daemonImpl struct {
 	// Shutdown via pool.Close() in stopServices().
 	pool datapool.Pool
 
+	// agentSkills is the Agent Skill store. registerAgentSkill sets it.
+	agentSkills agentskillstore.Store
+	// outsideAgents is the outside agent store. registerOutsideAgent sets it.
+	outsideAgents outsideagentstore.Store
+	// sharedAgentSkills is the operator source of Agent Skills. registerAgentSkill
+	// sets it.
+	sharedAgentSkills *SharedAgentSkills
+
 	// graphBus is the in-process per-tenant graph-update bus.
 	// Created during buildGRPCServer and shared between graphServer (for
 	// WatchGraphUpdates SSE) and CreateMission (for NODE_ADDED publish).
@@ -606,6 +632,12 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	d.eventBus = NewEventBus(d.logger.Slog(), WithEventBufferSize(100))
 	callbackOpts := make([]harness.CallbackServiceOption, 0, 10)
 	callbackOpts = append(callbackOpts, harness.WithEventBus(NewEventBusAdapter(d.eventBus)))
+	// The public gateways that ResolveModel and ResolveAgent return. Start
+	// refuses to run when one is missing (gatewaysErr).
+	modelGW, modelGWErr := modelGatewayInfoFromEnv()
+	agentGW, agentGWErr := agentGatewayInfoFromEnv()
+	d.publicGateways = publicGateways{model: modelGW, agent: agentGW, err: errors.Join(modelGWErr, agentGWErr)}
+	callbackOpts = append(callbackOpts, harness.WithModelGateway(modelGW), harness.WithAgentGateway(agentGW))
 	sessionClient, sessErr := NewSetecSessionClient(cfg.Sandbox, daemonSVIDSource{d: d})
 	if sessErr != nil {
 		slogLogger.Warn("session sandboxes unavailable; DevboxExec will report Unavailable",
@@ -639,6 +671,8 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithJobDriver(&lazyJobDriver{daemon: d}),
 		harness.WithConnectors(d.connectorMCPClient()),
 		harness.WithMissionBlockedTools(d.storedBlockedTools),
+		harness.WithAgentSkillStore(d.agentSkillStore),
+		harness.WithOutsideAgentStore(d.outsideAgentStore),
 		harness.WithMemberLookup(&lazyMemberLookup{daemon: d}),
 		harness.WithTurnGrantMinter(&lazyTurnGrantMinter{daemon: d}),
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),
@@ -1109,8 +1143,18 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// concrete Dispatcher + DeciderLLM bindings over the component registry, and
 	// install them onto every per-tenant engine via WireExecutor. Registered
 	// before any engine is created (engines fault in lazily on the first event).
+	if d.publicGateways.err != nil {
+		return fmt.Errorf("public gateways: %w", d.publicGateways.err)
+	}
+	models, mcErr := d.newModelClient()
+	if mcErr != nil {
+		return fmt.Errorf("model client: %w", mcErr)
+	}
+	d.modelClient = models
 	if d.brainRegistry != nil {
 		d.brainExecutor = newBrainExecutor(d.registryAdapter, d.logger.WithComponent("brain-executor").Slog())
+		d.brainExecutor.gate = d.missionGateOf
+		d.brainExecutor.models = d.modelClient
 		// A job node's jobs live in the tenant's data plane, which is built
 		// later in Start, so the store is read per dispatch (gibson#1713).
 		d.brainExecutor.jobClosed = newJobGraphLink(d.brainRegistry, d.logger.WithComponent("job-graph-link").Slog())
@@ -1146,6 +1190,23 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			)
 		})
 		d.logger.Info(ctx, "Timeline→lifecycle projector installed on brain registry")
+
+		// Install the mission gate on every per-tenant engine (gibson#1389). It
+		// keeps the FGA tuple that ext-authz reads on a model call true to the
+		// World: active while a mission works, not active once it pauses or ends.
+		// FGA is required at start, so the authorizer is read when the engine is
+		// created. An authorizer that cannot write a conditioned tuple leaves the
+		// tuple absent, and ext-authz then refuses each model call (fail closed).
+		d.brainRegistry.OnEngine(func(e *brain.Engine) {
+			gw, ok := d.authorizer.(authz.MissionGateWriter)
+			if !ok {
+				d.logger.Error(ctx, "mission gate not installed: the authorizer cannot write the mission gate tuple",
+					"tenant", e.World.Tenant)
+				return
+			}
+			d.missionGates.Store(e.World.Tenant,
+				InstallMissionGate(ctx, e.World.Tenant, e, gw, d.logger.WithComponent("mission-gate").Slog()))
+		})
 	}
 
 	// Share proto resolver between registry adapter and callback manager for unified caching
@@ -1493,26 +1554,13 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.callback.SetWorldViewSource(worldViewSource(d.brainRegistry, minter))
 		d.logger.Info(ctx, "wired callback WorldView RPC to the ECS brain")
 
-		// Wire the LLM completion RPCs to the per-tenant World's LlmCall capture
-		// (gibson#1083): mission/agent LLM calls reach the model through this
-		// callback path (slot → local provider), never through ExecuteLLM, so
-		// without this they never become LlmCallObserved events and a
-		// mission-scoped frame's LLM panel stays empty. Reuses the #1078 ingest
-		// sink (the sole LlmCallObserved producer) — no parallel capture, no
-		// double-capture. The harness record carries the mission context already
-		// on the callback request; we map it onto the daemon's api record.
-		llmSink := ingestLLMCall(d.brainRegistry)
-		d.callback.SetLLMCallSink(func(ctx context.Context, tenant string, call harness.LLMCallRecord) {
-			llmSink(ctx, tenant, harnessLLMCallToAPI(call))
-		})
-		d.logger.Info(ctx, "wired callback LLM completion RPCs to the ECS brain World")
-
 		// Wire CallToolProto to the per-tenant World's AgentToolCall capture —
 		// the flight recorder's tool-I/O half (ADR-0120, gibson#271). Before
 		// this, a fleet agent's tool calls reached the daemon only as bare
 		// tool.call.* pub/sub metadata with no argument/result text, so they
 		// never became part of the Timeline.
 		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
+		d.callback.SetSkillLoadSink(ingestSkillLoad(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")
 
 		// Wire PlaceBet's belief substrate (ADR-0122, ADR-0129,
@@ -1647,6 +1695,31 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	go func() {
 		if serveErr := grpcSys.Serve(ctx); serveErr != nil {
 			d.logger.Error(ctx, "gRPC server error", "error", serveErr)
+		}
+	}()
+
+	// The OTLP trace listener has its own port (gibson#1390).
+	traceSys, err := d.buildTraceServer()
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to build trace listener: %w", err)
+	}
+	go func() {
+		if serveErr := traceSys.Serve(ctx); serveErr != nil {
+			d.logger.Error(ctx, "trace listener error", "error", serveErr)
+		}
+	}()
+
+	// The A2A listener has its own port (gibson#1400). Only the Agent gateway
+	// can call it.
+	a2aSys, err := d.buildA2AServer()
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to build A2A listener: %w", err)
+	}
+	go func() {
+		if serveErr := a2aSys.Serve(ctx); serveErr != nil {
+			d.logger.Error(ctx, "A2A listener error", "error", serveErr)
 		}
 	}()
 
@@ -1961,6 +2034,15 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// The refusal is a state, not a log line: /readyz names the credential
 		// an operator has to mount (gibson#1744).
 		d.registerComponentCatalogReadiness(ctx, catalogGate)
+
+		// Seed the platform gate of the Shared Agent Skills (epic gibson#1364):
+		// each offered name gets its platform_enabled tuple. Startup converge,
+		// best-effort, as for the connector gate above.
+		if d.sharedAgentSkills != nil {
+			if err := seedSharedAgentSkillGate(ctx, d.authorizer, d.sharedAgentSkills, d.logger.Slog()); err != nil {
+				d.logger.Warn(ctx, "shared Agent Skill gate seed failed (non-fatal)", "error", err)
+			}
+		}
 
 		// Seed the Domain Pack platform catalog gate (ADR-0133, gibson#381):
 		// every catalog pack gets its platform_enabled tuple, so
@@ -2444,4 +2526,15 @@ func requireSPIFFETrustDomain(configured string, envoy spiffeid.ID) error {
 		return fmt.Errorf("GIBSON_SPIFFE_ENVOY_ID=%q is not in the configured trust domain %q", envoy.String(), configured)
 	}
 	return nil
+}
+
+// missionGateOf returns the mission gate of a tenant, or noMissionGate when the
+// gate is not installed for it.
+func (d *daemonImpl) missionGateOf(tenant string) MissionGateAwaiter {
+	if v, ok := d.missionGates.Load(tenant); ok {
+		if tap, ok := v.(*missionGateTap); ok {
+			return tap
+		}
+	}
+	return noMissionGate{}
 }

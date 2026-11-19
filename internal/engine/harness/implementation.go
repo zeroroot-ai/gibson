@@ -15,10 +15,11 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/agentwire"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	sdkqueue "github.com/zeroroot-ai/gibson/internal/infra/queue"
@@ -27,9 +28,9 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
-	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
-	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
@@ -67,8 +68,7 @@ const defaultMaxDelegationDepth = 8
 // for shared resources and coordinates access across multiple agents.
 type DefaultAgentHarness struct {
 	// LLM components
-	slotManager llm.SlotManager
-	llmRegistry llm.LLMRegistry
+	slotManager SlotManager
 
 	// Registry adapter for unified component discovery via the component registry
 	// Used for agent delegation operations (DelegateToAgent, ListAgents)
@@ -86,13 +86,15 @@ type DefaultAgentHarness struct {
 	contextProvider MissionContextProvider
 
 	// Observability
-	tracer     trace.Tracer
-	logger     *slog.Logger
-	metrics    MetricsRecorder
-	tokenUsage llm.TokenTracker
+	tracer  trace.Tracer
+	logger  *slog.Logger
+	metrics MetricsRecorder
 
 	// delegationSink folds agent-delegation run-provenance into the World (ADR-0107).
 	delegationSink DelegationSink
+
+	// findingSink raises the finding node in the World (nil = none).
+	findingSink FindingSink
 
 	// Mission management (optional, nil = mission methods return error)
 	missionClient MissionOperator
@@ -245,20 +247,11 @@ type DefaultAgentHarness struct {
 	inFlightTasksMu sync.Mutex
 	inFlightTasks   map[string]int
 
-	// currentNode is the mission node being executed by this harness instance.
-	// When set, EffectivePerCallCap reads per-noun max_tokens_per_call from
-	// the node config and uses it to clamp LLM requests. nil disables the
-	// per-node override (mission-level cap still applies if missionConstraints
-	// is set).
-	// Spec: mission-author-experience M4 (gibson#133).
-	currentNode *missionv1.MissionNode
-
-	// missionConstraints carries the mission-level token budget constraints
-	// for this execution. EffectivePerCallCap falls back to
-	// missionConstraints.MaxTokensPerCall when no per-node override is
-	// present. nil means no mission-level cap from this mechanism.
-	// Spec: mission-author-experience M4 (gibson#133).
-	missionConstraints *missionv1.MissionConstraints
+	// maxTokensPerCall is the effective token cap of one model call of the
+	// agent node that runs through this harness. Zero means no cap.
+	// ResolveSlotModel puts it in the answer, so the agent applies it. The
+	// model gateway does not enforce it.
+	maxTokensPerCall int32
 
 	// nodeSlotOverrides carries per-slot LLM provider/model bindings for the
 	// agent node executing through this harness instance. Keyed by slot name;
@@ -300,431 +293,9 @@ func (h *DefaultAgentHarness) slotOverride(slot string) *agent.SlotConfig {
 	return h.nodeSlotOverrides[slot]
 }
 
-// WithPerCallCapContext wires the per-call token cap into the harness.
-//
-// node is the mission node being executed by this harness (may be nil when
-// no per-node override applies). constraints carries the mission-level
-// MissionConstraints (may be nil when no mission-level cap is configured).
-//
-// When both are set, EffectivePerCallCap applies the cascade documented in
-// per_call_cap.go: per-noun MaxTokensPerCall → mission-level MaxTokensPerCall
-// → 0 (no cap). The effective cap is applied before every LLM provider call
-// in Complete, CompleteWithTools, and Stream.
-//
-// This method returns the receiver so it can be chained at construction time.
-// Spec: mission-author-experience M4 (gibson#133).
-func (h *DefaultAgentHarness) WithPerCallCapContext(node *missionv1.MissionNode, constraints *missionv1.MissionConstraints) *DefaultAgentHarness {
-	h.currentNode = node
-	h.missionConstraints = constraints
-	return h
-}
-
-// applyPerCallCap clamps req.MaxTokens to the effective per-call cap.
-//
-// If no cap applies (EffectivePerCallCap returns 0), req.MaxTokens is left
-// unchanged. If the caller already set a lower MaxTokens, that lower value
-// is preserved (the cap is a ceiling, not a floor).
-//
-// Called immediately before each provider call in Complete, CompleteWithTools,
-// and Stream.
-func (h *DefaultAgentHarness) applyPerCallCap(req *llm.CompletionRequest) {
-	cap := EffectivePerCallCap(h.currentNode, h.missionConstraints)
-	if cap <= 0 {
-		return
-	}
-	capInt := int(cap)
-	if req.MaxTokens == 0 || req.MaxTokens > capInt {
-		req.MaxTokens = capInt
-	}
-}
-
 // ────────────────────────────────────────────────────────────────────────────
 // LLM Access Methods
 // ────────────────────────────────────────────────────────────────────────────
-
-// Complete performs a synchronous LLM completion using the specified slot.
-func (h *DefaultAgentHarness) Complete(ctx context.Context, slot string, messages []llm.Message, opts ...CompletionOption) (*llm.CompletionResponse, error) {
-	// Create span for distributed tracing
-	ctx, span := h.tracer.Start(ctx, "harness.Complete")
-	defer span.End()
-
-	// Apply completion options
-	options := applyOptions(opts...)
-
-	// Create slot definition for the named slot
-	slotDef := agent.NewSlotDefinition(slot, "LLM slot", true)
-
-	// Resolve slot to provider and model; honor any per-node binding (gibson#539).
-	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
-	if err != nil {
-		h.logger.Error("failed to resolve LLM slot",
-			"slot", slot,
-			"error", err)
-		return nil, types.WrapError(
-			ErrHarnessCompletionFailed,
-			fmt.Sprintf("failed to resolve slot %s", slot),
-			err,
-		)
-	}
-
-	// Build completion request
-	req := llm.CompletionRequest{
-		Model:    modelInfo.Name,
-		Messages: messages,
-	}
-
-	// Apply options to request
-	if options.Temperature != nil {
-		req.Temperature = *options.Temperature
-	}
-	if options.MaxTokens != nil {
-		req.MaxTokens = *options.MaxTokens
-	}
-	if options.TopP != nil {
-		req.TopP = *options.TopP
-	}
-	if options.StopSequences != nil {
-		req.StopSequences = options.StopSequences
-	}
-	if options.SystemPrompt != nil && *options.SystemPrompt != "" {
-		// Prepend system message if provided
-		req.Messages = append([]llm.Message{
-			llm.NewSystemMessage(*options.SystemPrompt),
-		}, req.Messages...)
-	}
-
-	// Apply per-call token cap (per-node override → mission-level → no cap).
-	// Must be called after all caller-provided options are applied so it
-	// acts as a ceiling, never a floor.
-	// Spec: mission-author-experience M4 (gibson#133).
-	h.applyPerCallCap(&req)
-
-	// Emit LLM request event
-	if h.eventLogger != nil {
-		h.eventLogger.Event(ctx, EventLLMRequest, "llm request", LLMRequestEventData{
-			Model:        modelInfo.Name,
-			MessageCount: len(req.Messages),
-			Slot:         slot,
-		})
-	}
-
-	// Execute completion
-	resp, err := provider.Complete(ctx, req)
-	if err != nil {
-		h.logger.Error("LLM completion failed",
-			"slot", slot,
-			"provider", provider.Name(),
-			"model", modelInfo.Name,
-			"error", err)
-		return nil, types.WrapError(
-			ErrHarnessCompletionFailed,
-			"LLM completion failed",
-			err,
-		)
-	}
-
-	// Track token usage
-	scope := llm.UsageScope{
-		MissionID: h.missionCtx.ID,
-		AgentName: h.missionCtx.CurrentAgent,
-		SlotName:  slot,
-	}
-	tokenUsage := llm.TokenUsage{
-		InputTokens:  resp.Usage.PromptTokens,
-		OutputTokens: resp.Usage.CompletionTokens,
-	}
-	err = h.tokenUsage.RecordUsage(scope, provider.Name(), resp.Model, tokenUsage)
-	if err != nil {
-		h.logger.Warn("failed to record token usage",
-			"error", err)
-		// Don't fail the request if tracking fails
-	}
-
-	// Record metrics
-	h.metrics.RecordCounter("llm.completions", 1, map[string]string{
-		"slot":     slot,
-		"provider": provider.Name(),
-		"model":    resp.Model,
-		"status":   "success",
-	})
-	h.metrics.RecordCounter("llm.tokens.input", int64(resp.Usage.PromptTokens), map[string]string{
-		"slot":     slot,
-		"provider": provider.Name(),
-		"model":    resp.Model,
-	})
-	h.metrics.RecordCounter("llm.tokens.output", int64(resp.Usage.CompletionTokens), map[string]string{
-		"slot":     slot,
-		"provider": provider.Name(),
-		"model":    resp.Model,
-	})
-
-	h.logger.Debug("LLM completion successful",
-		"slot", slot,
-		"provider", provider.Name(),
-		"model", resp.Model,
-		"input_tokens", resp.Usage.PromptTokens,
-		"output_tokens", resp.Usage.CompletionTokens)
-
-	// Emit LLM response event
-	if h.eventLogger != nil {
-		h.eventLogger.Event(ctx, EventLLMResponse, "llm response", LLMResponseEventData{
-			Model:            resp.Model,
-			PromptTokens:     resp.Usage.PromptTokens,
-			CompletionTokens: resp.Usage.CompletionTokens,
-			TotalTokens:      resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
-			Slot:             slot,
-		})
-	}
-
-	return resp, nil
-}
-
-// CompleteWithTools performs a completion with tool-calling capabilities.
-func (h *DefaultAgentHarness) CompleteWithTools(ctx context.Context, slot string, messages []llm.Message, tools []llm.ToolDef, opts ...CompletionOption) (*llm.CompletionResponse, error) {
-	// Create span for distributed tracing
-	ctx, span := h.tracer.Start(ctx, "harness.CompleteWithTools")
-	defer span.End()
-
-	// Apply completion options
-	options := applyOptions(opts...)
-
-	// Create slot definition for the named slot
-	slotDef := agent.NewSlotDefinition(slot, "LLM slot", true)
-
-	// Resolve slot to provider and model; honor any per-node binding (gibson#539).
-	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
-	if err != nil {
-		h.logger.Error("failed to resolve LLM slot",
-			"slot", slot,
-			"error", err)
-		return nil, types.WrapError(
-			ErrHarnessCompletionFailed,
-			fmt.Sprintf("failed to resolve slot %s", slot),
-			err,
-		)
-	}
-
-	// Build completion request
-	req := llm.CompletionRequest{
-		Model:    modelInfo.Name,
-		Messages: messages,
-	}
-
-	// Apply options to request
-	if options.Temperature != nil {
-		req.Temperature = *options.Temperature
-	}
-	if options.MaxTokens != nil {
-		req.MaxTokens = *options.MaxTokens
-	}
-	if options.TopP != nil {
-		req.TopP = *options.TopP
-	}
-	if options.StopSequences != nil {
-		req.StopSequences = options.StopSequences
-	}
-	if options.SystemPrompt != nil && *options.SystemPrompt != "" {
-		req.Messages = append([]llm.Message{
-			llm.NewSystemMessage(*options.SystemPrompt),
-		}, req.Messages...)
-	}
-
-	// Apply per-call token cap (per-node override → mission-level → no cap).
-	// Spec: mission-author-experience M4 (gibson#133).
-	h.applyPerCallCap(&req)
-
-	// Emit LLM request event
-	if h.eventLogger != nil {
-		h.eventLogger.Event(ctx, EventLLMRequest, "llm request with tools", LLMRequestEventData{
-			Model:        modelInfo.Name,
-			MessageCount: len(req.Messages),
-			Slot:         slot,
-		})
-	}
-
-	// Execute completion with tools
-	resp, err := provider.CompleteWithTools(ctx, req, tools)
-	if err != nil {
-		h.logger.Error("LLM completion with tools failed",
-			"slot", slot,
-			"provider", provider.Name(),
-			"model", modelInfo.Name,
-			"error", err)
-		return nil, types.WrapError(
-			ErrHarnessCompletionFailed,
-			"LLM completion with tools failed",
-			err,
-		)
-	}
-
-	// Track token usage
-	scope := llm.UsageScope{
-		MissionID: h.missionCtx.ID,
-		AgentName: h.missionCtx.CurrentAgent,
-		SlotName:  slot,
-	}
-	tokenUsage := llm.TokenUsage{
-		InputTokens:  resp.Usage.PromptTokens,
-		OutputTokens: resp.Usage.CompletionTokens,
-	}
-	err = h.tokenUsage.RecordUsage(scope, provider.Name(), resp.Model, tokenUsage)
-	if err != nil {
-		h.logger.Warn("failed to record token usage",
-			"error", err)
-	}
-
-	// Record metrics
-	h.metrics.RecordCounter("llm.completions.with_tools", 1, map[string]string{
-		"slot":     slot,
-		"provider": provider.Name(),
-		"model":    resp.Model,
-		"status":   "success",
-	})
-	h.metrics.RecordCounter("llm.tokens.input", int64(resp.Usage.PromptTokens), map[string]string{
-		"slot":     slot,
-		"provider": provider.Name(),
-		"model":    resp.Model,
-	})
-	h.metrics.RecordCounter("llm.tokens.output", int64(resp.Usage.CompletionTokens), map[string]string{
-		"slot":     slot,
-		"provider": provider.Name(),
-		"model":    resp.Model,
-	})
-
-	h.logger.Debug("LLM completion with tools successful",
-		"slot", slot,
-		"provider", provider.Name(),
-		"model", resp.Model,
-		"tool_calls", len(resp.Message.ToolCalls),
-		"input_tokens", resp.Usage.PromptTokens,
-		"output_tokens", resp.Usage.CompletionTokens)
-
-	// Emit LLM response event
-	if h.eventLogger != nil {
-		h.eventLogger.Event(ctx, EventLLMResponse, "llm response with tools", LLMResponseEventData{
-			Model:            resp.Model,
-			PromptTokens:     resp.Usage.PromptTokens,
-			CompletionTokens: resp.Usage.CompletionTokens,
-			TotalTokens:      resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
-			Slot:             slot,
-		})
-	}
-
-	return resp, nil
-}
-
-// Stream performs a streaming LLM completion, returning chunks as they arrive.
-func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages []llm.Message, opts ...CompletionOption) (<-chan llm.StreamChunk, error) {
-	// Create span for distributed tracing
-	ctx, span := h.tracer.Start(ctx, "harness.Stream")
-	defer span.End()
-
-	// Apply completion options
-	options := applyOptions(opts...)
-
-	// Create slot definition for the named slot
-	slotDef := agent.NewSlotDefinition(slot, "LLM slot", true)
-
-	// Resolve slot to provider and model; honor any per-node binding (gibson#539).
-	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
-	if err != nil {
-		h.logger.Error("failed to resolve LLM slot",
-			"slot", slot,
-			"error", err)
-		return nil, types.WrapError(
-			ErrHarnessCompletionFailed,
-			fmt.Sprintf("failed to resolve slot %s", slot),
-			err,
-		)
-	}
-
-	// Build completion request
-	req := llm.CompletionRequest{
-		Model:    modelInfo.Name,
-		Messages: messages,
-	}
-
-	// Apply options to request
-	if options.Temperature != nil {
-		req.Temperature = *options.Temperature
-	}
-	if options.MaxTokens != nil {
-		req.MaxTokens = *options.MaxTokens
-	}
-	if options.TopP != nil {
-		req.TopP = *options.TopP
-	}
-	if options.StopSequences != nil {
-		req.StopSequences = options.StopSequences
-	}
-	if options.SystemPrompt != nil && *options.SystemPrompt != "" {
-		req.Messages = append([]llm.Message{
-			llm.NewSystemMessage(*options.SystemPrompt),
-		}, req.Messages...)
-	}
-
-	// Apply per-call token cap (per-node override → mission-level → no cap).
-	// Spec: mission-author-experience M4 (gibson#133).
-	h.applyPerCallCap(&req)
-
-	// Execute streaming completion
-	chunks, err := provider.Stream(ctx, req)
-	if err != nil {
-		h.logger.Error("LLM stream failed",
-			"slot", slot,
-			"provider", provider.Name(),
-			"model", modelInfo.Name,
-			"error", err)
-		return nil, types.WrapError(
-			ErrHarnessCompletionFailed,
-			"LLM stream failed",
-			err,
-		)
-	}
-
-	// Record metrics
-	h.metrics.RecordCounter("llm.streams", 1, map[string]string{
-		"slot":     slot,
-		"provider": provider.Name(),
-		"model":    modelInfo.Name,
-		"status":   "started",
-	})
-
-	h.logger.Debug("LLM stream started",
-		"slot", slot,
-		"provider", provider.Name(),
-		"model", modelInfo.Name)
-
-	// Wrap channel to record stream completion and aggregate response
-	wrappedChan := make(chan llm.StreamChunk)
-	go func() {
-		defer close(wrappedChan)
-
-		for chunk := range chunks {
-			wrappedChan <- chunk
-
-			// If this is the final chunk, record completion metrics
-			// Note: Token usage tracking for streaming requires provider-specific support
-			// and is typically only available after the stream completes
-			if chunk.FinishReason != "" {
-				// Record completion metrics
-				h.metrics.RecordCounter("llm.streams.completed", 1, map[string]string{
-					"slot":     slot,
-					"provider": provider.Name(),
-					"model":    modelInfo.Name,
-				})
-
-				h.logger.Debug("LLM stream completed",
-					"slot", slot,
-					"provider", provider.Name(),
-					"model", modelInfo.Name,
-					"finish_reason", string(chunk.FinishReason))
-			}
-		}
-	}()
-
-	return wrappedChan, nil
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Tool Execution Methods
@@ -884,22 +455,21 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	task agent.Task,
 	info component.ComponentInfo,
 ) (agent.Result, error) {
-	req := &agentpb.ExecuteRequest{
-		Task:      agent.TaskToProto(task),
-		TimeoutMs: task.Timeout.Milliseconds(),
-		// The run travels in the request, so an agent that serves the work
+	run := agentwire.Run{
+		// The run travels in the message, so an agent that serves the work
 		// item sends it on every callback (gibson#1235).
-		MissionRunId: h.missionCtx.MissionRunID,
-		AgentRunId:   h.missionCtx.AgentRunID,
+		MissionRunID: h.missionCtx.MissionRunID,
+		AgentRunID:   h.missionCtx.AgentRunID,
+		PinnedSkills: h.missionCtx.PinnedSkills,
 	}
 	if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
-		req.TraceId = spanCtx.TraceID().String()
-		req.ParentSpanId = spanCtx.SpanID().String()
+		run.TraceID = spanCtx.TraceID().String()
+		run.ParentSpanID = spanCtx.SpanID().String()
 	}
-	payload, err := protojson.Marshal(req)
+	payload, err := agentwire.BuildMessage(task, run)
 	if err != nil {
 		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
-			"failed to marshal agent request for work queue: "+name, err)
+			"failed to build the a2a message for work queue: "+name, err)
 	}
 
 	// The remote agent calls back over HarnessCallbackService with
@@ -912,6 +482,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 		childMissionCtx.CurrentAgent = name
 		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
+		childMissionCtx.NodeMaxTokensPerCall = task.MaxTokensPerCall
 		childMissionCtx.NodeNetwork = task.Network
 		childMissionCtx.NodeID = task.NodeID
 		childMissionCtx.TaskID = task.ID.String()
@@ -936,8 +507,8 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	// heartbeat does (gibson#1602).
 	// The LLM slot pins of the node go on the work item, so an agent served
 	// with sdk.ServeAgent gets them on its completions (gibson#1203).
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, component.WorkTypeAgentExecute, payload, nil,
-		WorkSlotPins(task.SlotOverrides), info, waitPolicy{bound: task.Timeout, livenessBounded: true}, task.ID.String())
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, agentwire.WorkType, payload, nil,
+		WorkSlotPins(task.SlotOverrides), task.MaxTokensPerCall, info, waitPolicy{bound: task.Timeout, livenessBounded: true}, task.ID.String())
 	if err != nil {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 			"agent": name, "status": "failed", "transport": "work_queue",
@@ -946,22 +517,37 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 			"agent work queue call failed: "+name, err)
 	}
 
-	resp := &agentpb.ExecuteResponse{}
-	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(resultBytes, resp); err != nil {
+	outcome, err := agentwire.ParseTask(resultBytes)
+	if err != nil {
 		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
-			"failed to unmarshal agent work result: "+name, err)
+			"failed to read the a2a task of the agent work result: "+name, err)
 	}
-	if e := resp.GetError(); e != nil && (e.GetMessage() != "" || e.GetCode() != "") {
+	// The agent run takes its state from the work item (decision 16). The one
+	// mapping from the Task state is brain.WorkStateFromTask.
+	switch brain.WorkStateFromTask(outcome.State) {
+	case brain.WorkCanceled, brain.WorkInputRequired:
+		// The node does not fail with a plain error. The state travels with the
+		// error, so the work item gets the state canceled or input_required.
+		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
+			"agent": name, "status": "stopped", "transport": "work_queue",
+		})
+		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
+			fmt.Sprintf("remote agent %q ended in state %s", name, outcome.State),
+			&agentwire.StateError{State: outcome.State, Message: outcome.Result.Error.Message})
+	case brain.WorkPending, brain.WorkRunning, brain.WorkDone, brain.WorkFailed, brain.WorkSkipped:
+		// The checks below handle these states.
+	}
+	if brain.WorkStateFromTask(outcome.State) == brain.WorkFailed {
 		// A remote agent that reports a failure fails the node with its own
-		// reason; swallowing it would leave the mission looking successful.
+		// reason. Swallowing it would leave the mission looking successful.
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 			"agent": name, "status": "failed", "transport": "work_queue",
 		})
 		return agent.Result{}, types.NewError(ErrHarnessDelegationFailed,
-			fmt.Sprintf("remote agent %q returned error [%s]: %s", name, e.GetCode(), e.GetMessage()))
+			fmt.Sprintf("remote agent %q ended in state %s: %s", name, outcome.State, outcome.Result.Error.Message))
 	}
 
-	result := agent.ProtoToResult(resp.GetResult())
+	result := outcome.Result
 	result.TaskID = task.ID
 
 	h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
@@ -1075,7 +661,7 @@ func (h *DefaultAgentHarness) callToolViaWorkQueue(
 	// (workCtx, AuthzContext, task CG-JWT, _system config injection, enqueue,
 	// wait) are shared across agent/tool/plugin via dispatchWorkAndWait; this
 	// wrapper only owns the tool-specific proto marshal/unmarshal + metrics.
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "tool", name, "execute_proto", inputJSON, nil, nil, info, waitPolicy{}, "")
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "tool", name, "execute_proto", inputJSON, nil, nil, 0, info, waitPolicy{}, "")
 	if err != nil {
 		h.logger.Error("tool work queue dispatch failed",
 			"tool", name, "tenant", tenant, "instance_id", info.InstanceID, "error", err)
@@ -1155,7 +741,7 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 	// Kind-uniform work-queue dispatch (gibson#663). The "method" goes in the
 	// work context; everything else (CG-JWT, AuthzContext, _system config
 	// injection, enqueue, wait) is shared via dispatchWorkAndWait.
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "plugin", name, "query_plugin", payload, map[string]string{"method": method}, nil, info, waitPolicy{}, "")
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "plugin", name, "query_plugin", payload, map[string]string{"method": method}, nil, 0, info, waitPolicy{}, "")
 	if err != nil {
 		h.logger.Error("plugin work queue dispatch failed",
 			"plugin", name, "method", method, "tenant", tenant, "instance_id", info.InstanceID, "error", err)
@@ -1212,6 +798,7 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 	payload []byte,
 	extraCtx map[string]string,
 	slotPins map[string]agent.SlotConfig,
+	maxTokensPerCall int32,
 	info component.ComponentInfo,
 	wait waitPolicy,
 	grantTask string,
@@ -1279,6 +866,9 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 		Payload:  payload,
 		Context:  workCtx,
 		SlotPins: slotPins,
+		// The token cap of one model call of the node binds to the work id,
+		// as the slot pins do.
+		MaxTokensPerCall: maxTokensPerCall,
 	}
 
 	if _, err := h.workQueue.Enqueue(ctx, tenant, kind, name, workItem); err != nil {
@@ -2074,7 +1664,11 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 	// rejected whole and never truncated, and rejecting here — ahead of
 	// every write on this path — is what makes "a rejected emit creates no
 	// partial state" a property of the ordering rather than of cleanup.
-	if err := emitbounds.CheckObservation(finding); err != nil {
+	//
+	// The bounds apply to what the agent sent. Tier 1 evidence comes from the
+	// record of the daemon, so the check leaves it out. The store has its own
+	// size limit for each evidence item.
+	if err := emitbounds.CheckObservation(finding.WithoutRecordedEvidence()); err != nil {
 		h.logger.Warn("finding rejected by emit bounds",
 			"finding_id", finding.ID.String(),
 			"error", err)
@@ -2178,6 +1772,23 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 			Title:       finding.Title,
 			Confidence:  fmt.Sprintf("%.2f", finding.Confidence),
 			TargetAsset: targetAsset,
+		})
+	}
+
+	// The finding node in the graph has the ID of the row in Postgres. The graph
+	// keeps the node for relations. The reader gets the fields and the evidence
+	// from Postgres by this ID.
+	if h.findingSink != nil {
+		h.findingSink(ctx, FindingRaised{
+			Tenant:       h.missionCtx.TenantID,
+			ID:           finding.ID.String(),
+			Title:        finding.Title,
+			Description:  finding.Description,
+			Severity:     string(finding.Severity),
+			ScopeID:      h.missionCtx.ID.String(),
+			MissionID:    h.missionCtx.ID.String(),
+			MissionRunID: h.missionCtx.MissionRunID,
+			AgentName:    h.missionCtx.CurrentAgent,
 		})
 	}
 
@@ -2338,11 +1949,6 @@ func (h *DefaultAgentHarness) Logger() *slog.Logger {
 // Metrics returns the metrics recorder for operational metrics.
 func (h *DefaultAgentHarness) Metrics() MetricsRecorder {
 	return h.metrics
-}
-
-// TokenUsage returns the token usage tracker for the current execution.
-func (h *DefaultAgentHarness) TokenUsage() *llm.TokenTracker {
-	return &h.tokenUsage
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2553,6 +2159,7 @@ func (h *DefaultAgentHarness) mintCGForWork(componentName, kind, taskID string) 
 		MissionID:      h.missionCtx.ID.String(),
 		TaskID:         taskID,
 		MissionRunID:   h.missionCtx.MissionRunID,
+		Initiator:      missionInitiator(h.missionCtx.CreatedBy),
 		RecipientClass: kind,
 		AllowedRPCs:    taskGrantAllowedRPCs(),
 	})
@@ -2660,7 +2267,7 @@ func (h *DefaultAgentHarness) resolveAgentStanding(ctx context.Context, name str
 // taskGrantAllowedRPCs is the callback surface a dispatched component's task
 // grant may call: every HarnessCallbackService method except secret
 // resolution (the minter refuses that for non-plugin recipients), plus the
-// grant renewal RPC. Derived from the service descriptor so a new callback
+// grant renewal RPC and the model call routes. Derived from the service descriptor so a new callback
 // RPC (Observe, WorldView, QueryNodes, ... gibson#1603) is never left off
 // a hand-kept list.
 func taskGrantAllowedRPCs() []string {
@@ -2676,5 +2283,15 @@ func taskGrantAllowedRPCs() []string {
 		out = append(out, "/"+desc.ServiceName+"/"+st.StreamName)
 	}
 	out = append(out, "/gibson.daemon.v1.DaemonService/RenewCapabilityGrant")
+	// The model call routes of the gateway (gibson#1388). A grant that does not
+	// list them cannot call a model through the gateway.
+	out = append(out, modelcall.GrantRoutes()...)
+	// The A2A route of the Agent gateway. A grant that does not list it cannot
+	// delegate to another agent (gibson#1400).
+	out = append(out, agentcall.GrantRoutes()...)
 	return out
 }
+
+// MaxDelegationDepth is the limit on the length of a delegation chain. A
+// DelegateToAgent call and an A2A message both stop at it.
+func MaxDelegationDepth() int { return defaultMaxDelegationDepth }

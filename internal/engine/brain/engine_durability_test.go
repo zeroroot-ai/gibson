@@ -291,6 +291,22 @@ func TestEngine_RunReturnsWhenStopped(t *testing.T) {
 	require.ErrorIs(t, e.Err(), errStoreDown)
 }
 
+// Stopped closes when the engine stops, and not before.
+func TestEngine_StoppedClosesWhenTheEngineStops(t *testing.T) {
+	e := NewEngine("t1", &faultyStore{})
+	select {
+	case <-e.Stopped():
+		t.Fatal("Stopped is closed on a running engine")
+	default:
+	}
+	e.stop(errStoreDown)
+	select {
+	case <-e.Stopped():
+	case <-time.After(time.Second):
+		t.Fatal("Stopped did not close after the engine stopped")
+	}
+}
+
 // gibson#726: a store factory that fails, or that returns no store, gives a
 // stopped engine whose Err names the cause. The Registry does not keep it, no
 // hook runs, and the next call tries the factory again.

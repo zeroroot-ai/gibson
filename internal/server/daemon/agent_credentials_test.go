@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 )
@@ -34,8 +33,8 @@ func (f *fakeProviderStore) Resolve(_ context.Context, _, name string) (*provide
 }
 
 func TestProviderCredentialSource(t *testing.T) {
-	anthropic := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: llm.ProviderType("anthropic"), Enabled: true}
-	openai := &providerconfig.ProviderConfig{Name: "oai", Type: llm.ProviderType("openai"), Enabled: true}
+	anthropic := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: providerconfig.ProviderType("anthropic"), Enabled: true}
+	openai := &providerconfig.ProviderConfig{Name: "oai", Type: providerconfig.ProviderType("openai"), Enabled: true}
 	secrets := map[string]map[string]string{"anthropic-prod": {"api_key": "sk-ant-1"}}
 
 	t.Run("the only enabled provider of the type wins", func(t *testing.T) {
@@ -55,7 +54,7 @@ func TestProviderCredentialSource(t *testing.T) {
 	})
 
 	t.Run("two enabled providers with no default is refused, the default wins when set", func(t *testing.T) {
-		second := &providerconfig.ProviderConfig{Name: "anthropic-lab", Type: llm.ProviderType("anthropic"), Enabled: true}
+		second := &providerconfig.ProviderConfig{Name: "anthropic-lab", Type: providerconfig.ProviderType("anthropic"), Enabled: true}
 		st := &fakeProviderStore{configs: []*providerconfig.ProviderConfig{anthropic, second}, secrets: map[string]map[string]string{"anthropic-prod": {"api_key": "prod"}, "anthropic-lab": {"api_key": "lab"}}}
 		s := &providerCredentialSource{store: st}
 		if _, err := s.ResolveProviderCredential(context.Background(), "acme", "anthropic", "api_key"); !errors.Is(err, harness.ErrTenantCredentialMissing) {
@@ -69,7 +68,7 @@ func TestProviderCredentialSource(t *testing.T) {
 	})
 
 	t.Run("a disabled provider does not count", func(t *testing.T) {
-		off := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: llm.ProviderType("anthropic"), Enabled: false}
+		off := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: providerconfig.ProviderType("anthropic"), Enabled: false}
 		s := &providerCredentialSource{store: &fakeProviderStore{configs: []*providerconfig.ProviderConfig{off}, secrets: secrets}}
 		if _, err := s.ResolveProviderCredential(context.Background(), "acme", "anthropic", "api_key"); !errors.Is(err, harness.ErrTenantCredentialMissing) {
 			t.Fatalf("err = %v, want ErrTenantCredentialMissing for a disabled provider", err)
@@ -96,7 +95,7 @@ func (f *failingProviderStore) Resolve(_ context.Context, _, _ string) (*provide
 }
 
 func TestProviderCredentialSource_Failures(t *testing.T) {
-	anthropic := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: llm.ProviderType("anthropic"), Enabled: true}
+	anthropic := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: providerconfig.ProviderType("anthropic"), Enabled: true}
 
 	t.Run("nil source and nil store are a missing credential, never a panic", func(t *testing.T) {
 		var nilSource *providerCredentialSource
@@ -138,7 +137,7 @@ func TestProviderCredentialSource_Failures(t *testing.T) {
 // both, a dispatch is refused with ErrTenantCredentialMissing; once it does,
 // the same source resolves without a restart.
 func TestProviderCredentialSource_ResolvesTheStoreLazily(t *testing.T) {
-	anthropic := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: llm.ProviderType("anthropic"), Enabled: true}
+	anthropic := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: providerconfig.ProviderType("anthropic"), Enabled: true}
 	var ready providerconfig.ProviderConfigStore
 	calls := 0
 	s := &providerCredentialSource{resolve: func() (providerconfig.ProviderConfigStore, error) {
@@ -188,19 +187,19 @@ func TestTenantCredentialResolver_BindsOnceTheDaemonHasPoolAndBroker(t *testing.
 // that fails the check refuses the launch, whoever wrote it, and a good value
 // reaches the sandbox in its canonical form.
 func TestProviderCredentialSource_ChecksCustomHeaders(t *testing.T) {
-	anthropic := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: llm.ProviderType("anthropic"), Enabled: true}
+	anthropic := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: providerconfig.ProviderType("anthropic"), Enabled: true}
 	source := func(value string) *providerCredentialSource {
 		return &providerCredentialSource{store: &fakeProviderStore{
 			configs: []*providerconfig.ProviderConfig{anthropic},
-			secrets: map[string]map[string]string{"anthropic-prod": {"api_key": "k", llm.CustomHeadersKey: value}},
+			secrets: map[string]map[string]string{"anthropic-prod": {"api_key": "k", providerconfig.CustomHeadersKey: value}},
 		}}
 	}
-	got, err := source(" ANTHROPIC-WORKSPACE-ID:wrkspc_1 ").ResolveProviderCredential(context.Background(), "acme", "anthropic", llm.CustomHeadersKey)
+	got, err := source(" ANTHROPIC-WORKSPACE-ID:wrkspc_1 ").ResolveProviderCredential(context.Background(), "acme", "anthropic", providerconfig.CustomHeadersKey)
 	if err != nil || got != "anthropic-workspace-id: wrkspc_1" {
 		t.Fatalf("got %q, %v; want the canonical value", got, err)
 	}
 	for _, bad := range []string{"x-api-key: other", "anthropic-workspace-id: a b", "X-Other: v\nanthropic-workspace-id: wrkspc_1"} {
-		got, err := source(bad).ResolveProviderCredential(context.Background(), "acme", "anthropic", llm.CustomHeadersKey)
+		got, err := source(bad).ResolveProviderCredential(context.Background(), "acme", "anthropic", providerconfig.CustomHeadersKey)
 		if err == nil || got != "" {
 			t.Errorf("value %q: got %q, %v; want a refusal", bad, got, err)
 		}

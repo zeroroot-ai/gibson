@@ -3017,6 +3017,742 @@ func (x *GetConnectorCredentialResponse) GetWithdraw() bool {
 	return false
 }
 
+// GetModelProviderCredentialRequest asks for the Secret content of one model
+// provider.
+type GetModelProviderCredentialRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// tenant_id is the tenant slug. Required.
+	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	// credential_secret is the name of the credential secret of the provider, as
+	// GetTenantModelProviders returned it. Required.
+	CredentialSecret string `protobuf:"bytes,2,opt,name=credential_secret,json=credentialSecret,proto3" json:"credential_secret,omitempty"`
+	// provider_type is the type of the ModelProvider. It selects the key names of
+	// the Secret. Required.
+	ProviderType string `protobuf:"bytes,3,opt,name=provider_type,json=providerType,proto3" json:"provider_type,omitempty"`
+	// ca_bundle_secret is the name of the tenant secret that holds the PEM CA
+	// bundle of the backend, or is empty. When it is set, the daemon checks the
+	// bundle and adds it to data under the key ca.crt.
+	CaBundleSecret string `protobuf:"bytes,4,opt,name=ca_bundle_secret,json=caBundleSecret,proto3" json:"ca_bundle_secret,omitempty"`
+}
+
+func (x *GetModelProviderCredentialRequest) Reset() {
+	*x = GetModelProviderCredentialRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[49]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetModelProviderCredentialRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetModelProviderCredentialRequest) ProtoMessage() {}
+
+func (x *GetModelProviderCredentialRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[49]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetModelProviderCredentialRequest.ProtoReflect.Descriptor instead.
+func (*GetModelProviderCredentialRequest) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *GetModelProviderCredentialRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *GetModelProviderCredentialRequest) GetCredentialSecret() string {
+	if x != nil {
+		return x.CredentialSecret
+	}
+	return ""
+}
+
+func (x *GetModelProviderCredentialRequest) GetProviderType() string {
+	if x != nil {
+		return x.ProviderType
+	}
+	return ""
+}
+
+func (x *GetModelProviderCredentialRequest) GetCaBundleSecret() string {
+	if x != nil {
+		return x.CaBundleSecret
+	}
+	return ""
+}
+
+type GetModelProviderCredentialResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// secret is the content of the credential Secret, by the key names that the
+	// gateway reads.
+	Secret *SecretData `protobuf:"bytes,1,opt,name=secret,proto3" json:"secret,omitempty"`
+}
+
+func (x *GetModelProviderCredentialResponse) Reset() {
+	*x = GetModelProviderCredentialResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[50]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetModelProviderCredentialResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetModelProviderCredentialResponse) ProtoMessage() {}
+
+func (x *GetModelProviderCredentialResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[50]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetModelProviderCredentialResponse.ProtoReflect.Descriptor instead.
+func (*GetModelProviderCredentialResponse) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *GetModelProviderCredentialResponse) GetSecret() *SecretData {
+	if x != nil {
+		return x.Secret
+	}
+	return nil
+}
+
+// SecretData is the content of one Kubernetes Secret. It is one object, not a
+// list.
+type SecretData struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// data is the value of each key of the Secret.
+	Data map[string][]byte `protobuf:"bytes,1,rep,name=data,proto3" json:"data,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+}
+
+func (x *SecretData) Reset() {
+	*x = SecretData{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[51]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SecretData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretData) ProtoMessage() {}
+
+func (x *SecretData) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[51]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretData.ProtoReflect.Descriptor instead.
+func (*SecretData) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *SecretData) GetData() map[string][]byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+// GetTenantModelProvidersRequest names one tenant.
+type GetTenantModelProvidersRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// tenant_id is the tenant slug. Required.
+	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	// page_size is the largest number of provider records on one page. Zero means the
+	// server default. The server also caps it.
+	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// page_token is the next_page_token of the previous page. Empty for the
+	// first page.
+	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+}
+
+func (x *GetTenantModelProvidersRequest) Reset() {
+	*x = GetTenantModelProvidersRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[52]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetTenantModelProvidersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTenantModelProvidersRequest) ProtoMessage() {}
+
+func (x *GetTenantModelProvidersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[52]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTenantModelProvidersRequest.ProtoReflect.Descriptor instead.
+func (*GetTenantModelProvidersRequest) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *GetTenantModelProvidersRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *GetTenantModelProvidersRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *GetTenantModelProvidersRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+// DesiredModelProvider is one provider record of a tenant, in the shape of the
+// ModelProvider resource.
+type DesiredModelProvider struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// name is the name of the provider in the tenant.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// type is the ModelProvider type: anthropic, openai, openai-compatible,
+	// bedrock, gemini or vertexai.
+	Type string `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	// base_url replaces the default endpoint of the provider, or is empty.
+	BaseUrl string `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	// region is the cloud region of a bedrock or vertexai provider, or is empty.
+	Region string `protobuf:"bytes,4,opt,name=region,proto3" json:"region,omitempty"`
+	// project_id is the Google Cloud project of a vertexai provider, or is empty.
+	ProjectId string `protobuf:"bytes,5,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	// credential_secret is the name of the tenant secret that holds the
+	// credential. It is a name and never a value.
+	CredentialSecret string `protobuf:"bytes,6,opt,name=credential_secret,json=credentialSecret,proto3" json:"credential_secret,omitempty"`
+	// ca_bundle_secret is the name of the tenant secret that holds the PEM CA
+	// bundle of the backend, or is empty. It is a name and never a value.
+	CaBundleSecret string `protobuf:"bytes,7,opt,name=ca_bundle_secret,json=caBundleSecret,proto3" json:"ca_bundle_secret,omitempty"`
+}
+
+func (x *DesiredModelProvider) Reset() {
+	*x = DesiredModelProvider{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[53]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *DesiredModelProvider) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesiredModelProvider) ProtoMessage() {}
+
+func (x *DesiredModelProvider) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[53]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesiredModelProvider.ProtoReflect.Descriptor instead.
+func (*DesiredModelProvider) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *DesiredModelProvider) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DesiredModelProvider) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *DesiredModelProvider) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *DesiredModelProvider) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *DesiredModelProvider) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *DesiredModelProvider) GetCredentialSecret() string {
+	if x != nil {
+		return x.CredentialSecret
+	}
+	return ""
+}
+
+func (x *DesiredModelProvider) GetCaBundleSecret() string {
+	if x != nil {
+		return x.CaBundleSecret
+	}
+	return ""
+}
+
+type GetTenantModelProvidersResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Providers []*DesiredModelProvider `protobuf:"bytes,1,rep,name=providers,proto3" json:"providers,omitempty"`
+	// skipped lists each record that has no gateway route, as "<name>: <reason>".
+	Skipped []string `protobuf:"bytes,2,rep,name=skipped,proto3" json:"skipped,omitempty"`
+	// next_page_token is empty on the last page. A page holds the skipped
+	// records of its own records only, so the caller reads each page.
+	NextPageToken string `protobuf:"bytes,3,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+}
+
+func (x *GetTenantModelProvidersResponse) Reset() {
+	*x = GetTenantModelProvidersResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[54]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetTenantModelProvidersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTenantModelProvidersResponse) ProtoMessage() {}
+
+func (x *GetTenantModelProvidersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[54]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTenantModelProvidersResponse.ProtoReflect.Descriptor instead.
+func (*GetTenantModelProvidersResponse) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *GetTenantModelProvidersResponse) GetProviders() []*DesiredModelProvider {
+	if x != nil {
+		return x.Providers
+	}
+	return nil
+}
+
+func (x *GetTenantModelProvidersResponse) GetSkipped() []string {
+	if x != nil {
+		return x.Skipped
+	}
+	return nil
+}
+
+func (x *GetTenantModelProvidersResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
+// GetTenantOutsideAgentsRequest names one tenant.
+type GetTenantOutsideAgentsRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// tenant_id is the tenant slug. Required.
+	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	// page_size is the largest number of outside agents on one page. Zero means the
+	// server default. The server also caps it.
+	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// page_token is the next_page_token of the previous page. Empty for the
+	// first page.
+	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+}
+
+func (x *GetTenantOutsideAgentsRequest) Reset() {
+	*x = GetTenantOutsideAgentsRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[55]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetTenantOutsideAgentsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTenantOutsideAgentsRequest) ProtoMessage() {}
+
+func (x *GetTenantOutsideAgentsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[55]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTenantOutsideAgentsRequest.ProtoReflect.Descriptor instead.
+func (*GetTenantOutsideAgentsRequest) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *GetTenantOutsideAgentsRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *GetTenantOutsideAgentsRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *GetTenantOutsideAgentsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+// DesiredOutsideAgent is one outside agent record of a tenant.
+type DesiredOutsideAgent struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// name is the name of the agent in the tenant. It is a DNS label.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// a2a_url is the HTTPS URL of the A2A endpoint of the agent.
+	A2AUrl string `protobuf:"bytes,2,opt,name=a2a_url,json=a2aUrl,proto3" json:"a2a_url,omitempty"`
+	// credential_secret is the name of the tenant secret that holds the
+	// credential, or is empty when the agent needs none. It is a name and never a
+	// value.
+	CredentialSecret string `protobuf:"bytes,3,opt,name=credential_secret,json=credentialSecret,proto3" json:"credential_secret,omitempty"`
+	// ca_bundle_secret is the name of the tenant secret that holds the PEM CA
+	// bundle of the agent, or is empty. It is a name and never a value.
+	CaBundleSecret string `protobuf:"bytes,4,opt,name=ca_bundle_secret,json=caBundleSecret,proto3" json:"ca_bundle_secret,omitempty"`
+}
+
+func (x *DesiredOutsideAgent) Reset() {
+	*x = DesiredOutsideAgent{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[56]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *DesiredOutsideAgent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesiredOutsideAgent) ProtoMessage() {}
+
+func (x *DesiredOutsideAgent) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[56]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesiredOutsideAgent.ProtoReflect.Descriptor instead.
+func (*DesiredOutsideAgent) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *DesiredOutsideAgent) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DesiredOutsideAgent) GetA2AUrl() string {
+	if x != nil {
+		return x.A2AUrl
+	}
+	return ""
+}
+
+func (x *DesiredOutsideAgent) GetCredentialSecret() string {
+	if x != nil {
+		return x.CredentialSecret
+	}
+	return ""
+}
+
+func (x *DesiredOutsideAgent) GetCaBundleSecret() string {
+	if x != nil {
+		return x.CaBundleSecret
+	}
+	return ""
+}
+
+type GetTenantOutsideAgentsResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Agents []*DesiredOutsideAgent `protobuf:"bytes,1,rep,name=agents,proto3" json:"agents,omitempty"`
+	// next_page_token is empty on the last page.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+}
+
+func (x *GetTenantOutsideAgentsResponse) Reset() {
+	*x = GetTenantOutsideAgentsResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[57]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetTenantOutsideAgentsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTenantOutsideAgentsResponse) ProtoMessage() {}
+
+func (x *GetTenantOutsideAgentsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[57]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTenantOutsideAgentsResponse.ProtoReflect.Descriptor instead.
+func (*GetTenantOutsideAgentsResponse) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *GetTenantOutsideAgentsResponse) GetAgents() []*DesiredOutsideAgent {
+	if x != nil {
+		return x.Agents
+	}
+	return nil
+}
+
+func (x *GetTenantOutsideAgentsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
+// GetOutsideAgentCredentialRequest asks for the Secret content of one outside
+// agent.
+type GetOutsideAgentCredentialRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// tenant_id is the tenant slug. Required.
+	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	// name is the name of the outside agent. The daemon reads the credential
+	// secret that the record of this agent names. Required.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+}
+
+func (x *GetOutsideAgentCredentialRequest) Reset() {
+	*x = GetOutsideAgentCredentialRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[58]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetOutsideAgentCredentialRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetOutsideAgentCredentialRequest) ProtoMessage() {}
+
+func (x *GetOutsideAgentCredentialRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[58]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetOutsideAgentCredentialRequest.ProtoReflect.Descriptor instead.
+func (*GetOutsideAgentCredentialRequest) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *GetOutsideAgentCredentialRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *GetOutsideAgentCredentialRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type GetOutsideAgentCredentialResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// secret is the content of the credential Secret, by the key names that the
+	// gateway reads. It holds Authorization for the credential and ca.crt for
+	// the CA bundle.
+	Secret *SecretData `protobuf:"bytes,1,opt,name=secret,proto3" json:"secret,omitempty"`
+}
+
+func (x *GetOutsideAgentCredentialResponse) Reset() {
+	*x = GetOutsideAgentCredentialResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[59]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetOutsideAgentCredentialResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetOutsideAgentCredentialResponse) ProtoMessage() {}
+
+func (x *GetOutsideAgentCredentialResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[59]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetOutsideAgentCredentialResponse.ProtoReflect.Descriptor instead.
+func (*GetOutsideAgentCredentialResponse) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{59}
+}
+
+func (x *GetOutsideAgentCredentialResponse) GetSecret() *SecretData {
+	if x != nil {
+		return x.Secret
+	}
+	return nil
+}
+
 // ListDesiredCatalogPluginsRequest asks for one page of the desired plugins,
 // in (tenant_id, plugin_id) order (ADR-0028).
 type ListDesiredCatalogPluginsRequest struct {
@@ -3033,7 +3769,7 @@ type ListDesiredCatalogPluginsRequest struct {
 func (x *ListDesiredCatalogPluginsRequest) Reset() {
 	*x = ListDesiredCatalogPluginsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[49]
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[60]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3046,7 +3782,7 @@ func (x *ListDesiredCatalogPluginsRequest) String() string {
 func (*ListDesiredCatalogPluginsRequest) ProtoMessage() {}
 
 func (x *ListDesiredCatalogPluginsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[49]
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[60]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3059,7 +3795,7 @@ func (x *ListDesiredCatalogPluginsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDesiredCatalogPluginsRequest.ProtoReflect.Descriptor instead.
 func (*ListDesiredCatalogPluginsRequest) Descriptor() ([]byte, []int) {
-	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{49}
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *ListDesiredCatalogPluginsRequest) GetPageSize() int32 {
@@ -3098,7 +3834,7 @@ type DesiredCatalogPlugin struct {
 func (x *DesiredCatalogPlugin) Reset() {
 	*x = DesiredCatalogPlugin{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[50]
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[61]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3111,7 +3847,7 @@ func (x *DesiredCatalogPlugin) String() string {
 func (*DesiredCatalogPlugin) ProtoMessage() {}
 
 func (x *DesiredCatalogPlugin) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[50]
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[61]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3124,7 +3860,7 @@ func (x *DesiredCatalogPlugin) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesiredCatalogPlugin.ProtoReflect.Descriptor instead.
 func (*DesiredCatalogPlugin) Descriptor() ([]byte, []int) {
-	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{50}
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *DesiredCatalogPlugin) GetTenantId() string {
@@ -3168,7 +3904,7 @@ type ListDesiredCatalogPluginsResponse struct {
 func (x *ListDesiredCatalogPluginsResponse) Reset() {
 	*x = ListDesiredCatalogPluginsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[51]
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[62]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3181,7 +3917,7 @@ func (x *ListDesiredCatalogPluginsResponse) String() string {
 func (*ListDesiredCatalogPluginsResponse) ProtoMessage() {}
 
 func (x *ListDesiredCatalogPluginsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[51]
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[62]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3194,7 +3930,7 @@ func (x *ListDesiredCatalogPluginsResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ListDesiredCatalogPluginsResponse.ProtoReflect.Descriptor instead.
 func (*ListDesiredCatalogPluginsResponse) Descriptor() ([]byte, []int) {
-	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{51}
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *ListDesiredCatalogPluginsResponse) GetPlugins() []*DesiredCatalogPlugin {
@@ -3229,7 +3965,7 @@ type ReportCatalogPluginStatusRequest struct {
 func (x *ReportCatalogPluginStatusRequest) Reset() {
 	*x = ReportCatalogPluginStatusRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[52]
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[63]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3242,7 +3978,7 @@ func (x *ReportCatalogPluginStatusRequest) String() string {
 func (*ReportCatalogPluginStatusRequest) ProtoMessage() {}
 
 func (x *ReportCatalogPluginStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[52]
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[63]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3255,7 +3991,7 @@ func (x *ReportCatalogPluginStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportCatalogPluginStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportCatalogPluginStatusRequest) Descriptor() ([]byte, []int) {
-	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{52}
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *ReportCatalogPluginStatusRequest) GetTenantId() string {
@@ -3298,7 +4034,7 @@ type ReportCatalogPluginStatusResponse struct {
 func (x *ReportCatalogPluginStatusResponse) Reset() {
 	*x = ReportCatalogPluginStatusResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[53]
+		mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[64]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3311,7 +4047,7 @@ func (x *ReportCatalogPluginStatusResponse) String() string {
 func (*ReportCatalogPluginStatusResponse) ProtoMessage() {}
 
 func (x *ReportCatalogPluginStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[53]
+	mi := &file_gibson_daemon_operator_v1_operator_proto_msgTypes[64]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3324,7 +4060,7 @@ func (x *ReportCatalogPluginStatusResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ReportCatalogPluginStatusResponse.ProtoReflect.Descriptor instead.
 func (*ReportCatalogPluginStatusResponse) Descriptor() ([]byte, []int) {
-	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{53}
+	return file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *ReportCatalogPluginStatusResponse) GetUpdated() bool {
@@ -3749,7 +4485,113 @@ var file_gibson_daemon_operator_v1_operator_proto_rawDesc = []byte{
 	0x68, 0x64, 0x72, 0x61, 0x77, 0x1a, 0x37, 0x0a, 0x09, 0x44, 0x61, 0x74, 0x61, 0x45, 0x6e, 0x74,
 	0x72, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52,
 	0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20,
-	0x01, 0x28, 0x0c, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0x74,
+	0x01, 0x28, 0x0c, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0xe9,
+	0x01, 0x0a, 0x21, 0x47, 0x65, 0x74, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x50, 0x72, 0x6f, 0x76, 0x69,
+	0x64, 0x65, 0x72, 0x43, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x52, 0x65, 0x71,
+	0x75, 0x65, 0x73, 0x74, 0x12, 0x27, 0x0a, 0x09, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x69,
+	0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x42, 0x0a, 0xba, 0x48, 0x07, 0x72, 0x05, 0x10, 0x01,
+	0x18, 0x80, 0x08, 0x52, 0x08, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x37, 0x0a,
+	0x11, 0x63, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x5f, 0x73, 0x65, 0x63, 0x72,
+	0x65, 0x74, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x42, 0x0a, 0xba, 0x48, 0x07, 0x72, 0x05, 0x10,
+	0x01, 0x18, 0x80, 0x08, 0x52, 0x10, 0x63, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c,
+	0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x12, 0x2e, 0x0a, 0x0d, 0x70, 0x72, 0x6f, 0x76, 0x69, 0x64,
+	0x65, 0x72, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x42, 0x09, 0xba,
+	0x48, 0x06, 0x72, 0x04, 0x10, 0x01, 0x18, 0x40, 0x52, 0x0c, 0x70, 0x72, 0x6f, 0x76, 0x69, 0x64,
+	0x65, 0x72, 0x54, 0x79, 0x70, 0x65, 0x12, 0x32, 0x0a, 0x10, 0x63, 0x61, 0x5f, 0x62, 0x75, 0x6e,
+	0x64, 0x6c, 0x65, 0x5f, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09,
+	0x42, 0x08, 0xba, 0x48, 0x05, 0x72, 0x03, 0x18, 0x80, 0x08, 0x52, 0x0e, 0x63, 0x61, 0x42, 0x75,
+	0x6e, 0x64, 0x6c, 0x65, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x22, 0x63, 0x0a, 0x22, 0x47, 0x65,
+	0x74, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x50, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x43, 0x72,
+	0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+	0x12, 0x3d, 0x0a, 0x06, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b,
+	0x32, 0x25, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e,
+	0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x65, 0x63,
+	0x72, 0x65, 0x74, 0x44, 0x61, 0x74, 0x61, 0x52, 0x06, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x22,
+	0x8a, 0x01, 0x0a, 0x0a, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x44, 0x61, 0x74, 0x61, 0x12, 0x43,
+	0x0a, 0x04, 0x64, 0x61, 0x74, 0x61, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x2f, 0x2e, 0x67,
+	0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65,
+	0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x44,
+	0x61, 0x74, 0x61, 0x2e, 0x44, 0x61, 0x74, 0x61, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x52, 0x04, 0x64,
+	0x61, 0x74, 0x61, 0x1a, 0x37, 0x0a, 0x09, 0x44, 0x61, 0x74, 0x61, 0x45, 0x6e, 0x74, 0x72, 0x79,
+	0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b,
+	0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28,
+	0x0c, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0x8f, 0x01, 0x0a,
+	0x1e, 0x47, 0x65, 0x74, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x50,
+	0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12,
+	0x27, 0x0a, 0x09, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x09, 0x42, 0x0a, 0xba, 0x48, 0x07, 0x72, 0x05, 0x10, 0x01, 0x18, 0x80, 0x08, 0x52, 0x08,
+	0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x1b, 0x0a, 0x09, 0x70, 0x61, 0x67, 0x65,
+	0x5f, 0x73, 0x69, 0x7a, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x05, 0x52, 0x08, 0x70, 0x61, 0x67,
+	0x65, 0x53, 0x69, 0x7a, 0x65, 0x12, 0x27, 0x0a, 0x0a, 0x70, 0x61, 0x67, 0x65, 0x5f, 0x74, 0x6f,
+	0x6b, 0x65, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x42, 0x08, 0xba, 0x48, 0x05, 0x72, 0x03,
+	0x18, 0x80, 0x08, 0x52, 0x09, 0x70, 0x61, 0x67, 0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x22, 0xe7,
+	0x01, 0x0a, 0x14, 0x44, 0x65, 0x73, 0x69, 0x72, 0x65, 0x64, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x50,
+	0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18,
+	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x12, 0x12, 0x0a, 0x04, 0x74,
+	0x79, 0x70, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x74, 0x79, 0x70, 0x65, 0x12,
+	0x19, 0x0a, 0x08, 0x62, 0x61, 0x73, 0x65, 0x5f, 0x75, 0x72, 0x6c, 0x18, 0x03, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x07, 0x62, 0x61, 0x73, 0x65, 0x55, 0x72, 0x6c, 0x12, 0x16, 0x0a, 0x06, 0x72, 0x65,
+	0x67, 0x69, 0x6f, 0x6e, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x72, 0x65, 0x67, 0x69,
+	0x6f, 0x6e, 0x12, 0x1d, 0x0a, 0x0a, 0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x5f, 0x69, 0x64,
+	0x18, 0x05, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x49,
+	0x64, 0x12, 0x2b, 0x0a, 0x11, 0x63, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x5f,
+	0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52, 0x10, 0x63, 0x72,
+	0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x12, 0x28,
+	0x0a, 0x10, 0x63, 0x61, 0x5f, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x5f, 0x73, 0x65, 0x63, 0x72,
+	0x65, 0x74, 0x18, 0x07, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0e, 0x63, 0x61, 0x42, 0x75, 0x6e, 0x64,
+	0x6c, 0x65, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x22, 0xb2, 0x01, 0x0a, 0x1f, 0x47, 0x65, 0x74,
+	0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x50, 0x72, 0x6f, 0x76, 0x69,
+	0x64, 0x65, 0x72, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x4d, 0x0a, 0x09,
+	0x70, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32,
+	0x2f, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e,
+	0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x73, 0x69,
+	0x72, 0x65, 0x64, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x50, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72,
+	0x52, 0x09, 0x70, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x12, 0x18, 0x0a, 0x07, 0x73,
+	0x6b, 0x69, 0x70, 0x70, 0x65, 0x64, 0x18, 0x02, 0x20, 0x03, 0x28, 0x09, 0x52, 0x07, 0x73, 0x6b,
+	0x69, 0x70, 0x70, 0x65, 0x64, 0x12, 0x26, 0x0a, 0x0f, 0x6e, 0x65, 0x78, 0x74, 0x5f, 0x70, 0x61,
+	0x67, 0x65, 0x5f, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0d,
+	0x6e, 0x65, 0x78, 0x74, 0x50, 0x61, 0x67, 0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x22, 0x8e, 0x01,
+	0x0a, 0x1d, 0x47, 0x65, 0x74, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x4f, 0x75, 0x74, 0x73, 0x69,
+	0x64, 0x65, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12,
+	0x27, 0x0a, 0x09, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x09, 0x42, 0x0a, 0xba, 0x48, 0x07, 0x72, 0x05, 0x10, 0x01, 0x18, 0x80, 0x08, 0x52, 0x08,
+	0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x1b, 0x0a, 0x09, 0x70, 0x61, 0x67, 0x65,
+	0x5f, 0x73, 0x69, 0x7a, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x05, 0x52, 0x08, 0x70, 0x61, 0x67,
+	0x65, 0x53, 0x69, 0x7a, 0x65, 0x12, 0x27, 0x0a, 0x0a, 0x70, 0x61, 0x67, 0x65, 0x5f, 0x74, 0x6f,
+	0x6b, 0x65, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x42, 0x08, 0xba, 0x48, 0x05, 0x72, 0x03,
+	0x18, 0x80, 0x08, 0x52, 0x09, 0x70, 0x61, 0x67, 0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x22, 0x99,
+	0x01, 0x0a, 0x13, 0x44, 0x65, 0x73, 0x69, 0x72, 0x65, 0x64, 0x4f, 0x75, 0x74, 0x73, 0x69, 0x64,
+	0x65, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x12, 0x17, 0x0a, 0x07, 0x61, 0x32,
+	0x61, 0x5f, 0x75, 0x72, 0x6c, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x61, 0x32, 0x61,
+	0x55, 0x72, 0x6c, 0x12, 0x2b, 0x0a, 0x11, 0x63, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61,
+	0x6c, 0x5f, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x10,
+	0x63, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74,
+	0x12, 0x28, 0x0a, 0x10, 0x63, 0x61, 0x5f, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x5f, 0x73, 0x65,
+	0x63, 0x72, 0x65, 0x74, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0e, 0x63, 0x61, 0x42, 0x75,
+	0x6e, 0x64, 0x6c, 0x65, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x22, 0x90, 0x01, 0x0a, 0x1e, 0x47,
+	0x65, 0x74, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x4f, 0x75, 0x74, 0x73, 0x69, 0x64, 0x65, 0x41,
+	0x67, 0x65, 0x6e, 0x74, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x46, 0x0a,
+	0x06, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x2e, 0x2e,
+	0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70,
+	0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x73, 0x69, 0x72, 0x65,
+	0x64, 0x4f, 0x75, 0x74, 0x73, 0x69, 0x64, 0x65, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x52, 0x06, 0x61,
+	0x67, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x26, 0x0a, 0x0f, 0x6e, 0x65, 0x78, 0x74, 0x5f, 0x70, 0x61,
+	0x67, 0x65, 0x5f, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0d,
+	0x6e, 0x65, 0x78, 0x74, 0x50, 0x61, 0x67, 0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x22, 0x6b, 0x0a,
+	0x20, 0x47, 0x65, 0x74, 0x4f, 0x75, 0x74, 0x73, 0x69, 0x64, 0x65, 0x41, 0x67, 0x65, 0x6e, 0x74,
+	0x43, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0x74, 0x12, 0x27, 0x0a, 0x09, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x09, 0x42, 0x0a, 0xba, 0x48, 0x07, 0x72, 0x05, 0x10, 0x01, 0x18, 0x80, 0x08,
+	0x52, 0x08, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x1e, 0x0a, 0x04, 0x6e, 0x61,
+	0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x42, 0x0a, 0xba, 0x48, 0x07, 0x72, 0x05, 0x10,
+	0x01, 0x18, 0xff, 0x01, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x22, 0x62, 0x0a, 0x21, 0x47, 0x65,
+	0x74, 0x4f, 0x75, 0x74, 0x73, 0x69, 0x64, 0x65, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x43, 0x72, 0x65,
+	0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12,
+	0x3d, 0x0a, 0x06, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x25, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e,
+	0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x65, 0x63, 0x72,
+	0x65, 0x74, 0x44, 0x61, 0x74, 0x61, 0x52, 0x06, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x22, 0x74,
 	0x0a, 0x20, 0x4c, 0x69, 0x73, 0x74, 0x44, 0x65, 0x73, 0x69, 0x72, 0x65, 0x64, 0x43, 0x61, 0x74,
 	0x61, 0x6c, 0x6f, 0x67, 0x50, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65,
 	0x73, 0x74, 0x12, 0x27, 0x0a, 0x09, 0x70, 0x61, 0x67, 0x65, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x18,
@@ -3791,7 +4633,7 @@ var file_gibson_daemon_operator_v1_operator_proto_rawDesc = []byte{
 	0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x61, 0x74, 0x61, 0x6c, 0x6f, 0x67, 0x50, 0x6c, 0x75,
 	0x67, 0x69, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
 	0x65, 0x12, 0x18, 0x0a, 0x07, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x64, 0x18, 0x01, 0x20, 0x01,
-	0x28, 0x08, 0x52, 0x07, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x64, 0x32, 0xa2, 0x23, 0x0a, 0x15,
+	0x28, 0x08, 0x52, 0x07, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x64, 0x32, 0xde, 0x29, 0x0a, 0x15,
 	0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x4f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x53, 0x65,
 	0x72, 0x76, 0x69, 0x63, 0x65, 0x12, 0xb7, 0x01, 0x0a, 0x11, 0x57, 0x72, 0x69, 0x74, 0x65, 0x41,
 	0x63, 0x63, 0x65, 0x73, 0x73, 0x54, 0x75, 0x70, 0x6c, 0x65, 0x73, 0x12, 0x33, 0x2e, 0x67, 0x69,
@@ -4047,52 +4889,104 @@ var file_gibson_daemon_operator_v1_operator_proto_rawDesc = []byte{
 	0x6e, 0x73, 0x65, 0x22, 0x37, 0x8a, 0xb5, 0x18, 0x33, 0x0a, 0x11, 0x70, 0x6c, 0x61, 0x74, 0x66,
 	0x6f, 0x72, 0x6d, 0x5f, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x12, 0x0d, 0x73, 0x79,
 	0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x0d, 0x73, 0x79, 0x73,
-	0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x20, 0x03, 0x12, 0xcf, 0x01, 0x0a,
-	0x19, 0x4c, 0x69, 0x73, 0x74, 0x44, 0x65, 0x73, 0x69, 0x72, 0x65, 0x64, 0x43, 0x61, 0x74, 0x61,
-	0x6c, 0x6f, 0x67, 0x50, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x73, 0x12, 0x3b, 0x2e, 0x67, 0x69, 0x62,
-	0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61,
-	0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x44, 0x65, 0x73, 0x69, 0x72,
-	0x65, 0x64, 0x43, 0x61, 0x74, 0x61, 0x6c, 0x6f, 0x67, 0x50, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x73,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x3c, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e,
-	0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72,
-	0x2e, 0x76, 0x31, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x44, 0x65, 0x73, 0x69, 0x72, 0x65, 0x64, 0x43,
-	0x61, 0x74, 0x61, 0x6c, 0x6f, 0x67, 0x50, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x73, 0x52, 0x65, 0x73,
-	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x37, 0x8a, 0xb5, 0x18, 0x33, 0x0a, 0x11, 0x70, 0x6c, 0x61,
-	0x74, 0x66, 0x6f, 0x72, 0x6d, 0x5f, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x12, 0x0d,
-	0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x0d, 0x73,
-	0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x20, 0x03, 0x12, 0xcf,
-	0x01, 0x0a, 0x19, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x61, 0x74, 0x61, 0x6c, 0x6f, 0x67,
-	0x50, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x3b, 0x2e, 0x67,
-	0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65,
-	0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43,
-	0x61, 0x74, 0x61, 0x6c, 0x6f, 0x67, 0x50, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x53, 0x74, 0x61, 0x74,
-	0x75, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x3c, 0x2e, 0x67, 0x69, 0x62, 0x73,
+	0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x20, 0x03, 0x12, 0xd2, 0x01, 0x0a,
+	0x1a, 0x47, 0x65, 0x74, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x50, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65,
+	0x72, 0x43, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x12, 0x3c, 0x2e, 0x67, 0x69,
+	0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72,
+	0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x4d, 0x6f, 0x64, 0x65, 0x6c,
+	0x50, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x43, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69,
+	0x61, 0x6c, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x3d, 0x2e, 0x67, 0x69, 0x62, 0x73,
 	0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74,
-	0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x61, 0x74, 0x61,
-	0x6c, 0x6f, 0x67, 0x50, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52,
-	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x37, 0x8a, 0xb5, 0x18, 0x33, 0x0a, 0x11, 0x70,
-	0x6c, 0x61, 0x74, 0x66, 0x6f, 0x72, 0x6d, 0x5f, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72,
-	0x12, 0x0d, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a,
-	0x0d, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x20, 0x03,
-	0x42, 0x9a, 0x02, 0x0a, 0x1d, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e,
+	0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x50, 0x72,
+	0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x43, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c,
+	0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x37, 0x8a, 0xb5, 0x18, 0x33, 0x0a, 0x11,
+	0x70, 0x6c, 0x61, 0x74, 0x66, 0x6f, 0x72, 0x6d, 0x5f, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f,
+	0x72, 0x12, 0x0d, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74,
+	0x1a, 0x0d, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x20,
+	0x03, 0x12, 0xc9, 0x01, 0x0a, 0x17, 0x47, 0x65, 0x74, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x4d,
+	0x6f, 0x64, 0x65, 0x6c, 0x50, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x12, 0x39, 0x2e,
+	0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70,
+	0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x54, 0x65, 0x6e,
+	0x61, 0x6e, 0x74, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x50, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72,
+	0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x3a, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f,
+	0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f,
+	0x72, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x4d, 0x6f,
+	0x64, 0x65, 0x6c, 0x50, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x22, 0x37, 0x8a, 0xb5, 0x18, 0x33, 0x0a, 0x11, 0x70, 0x6c, 0x61, 0x74,
+	0x66, 0x6f, 0x72, 0x6d, 0x5f, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x12, 0x0d, 0x73,
+	0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x0d, 0x73, 0x79,
+	0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x20, 0x03, 0x12, 0xc6, 0x01,
+	0x0a, 0x16, 0x47, 0x65, 0x74, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x4f, 0x75, 0x74, 0x73, 0x69,
+	0x64, 0x65, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x38, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f,
+	0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f,
+	0x72, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x4f, 0x75,
+	0x74, 0x73, 0x69, 0x64, 0x65, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x73, 0x74, 0x1a, 0x39, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d,
+	0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x47,
+	0x65, 0x74, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x4f, 0x75, 0x74, 0x73, 0x69, 0x64, 0x65, 0x41,
+	0x67, 0x65, 0x6e, 0x74, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x37, 0x8a,
+	0xb5, 0x18, 0x33, 0x0a, 0x11, 0x70, 0x6c, 0x61, 0x74, 0x66, 0x6f, 0x72, 0x6d, 0x5f, 0x6f, 0x70,
+	0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x12, 0x0d, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74,
+	0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x0d, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65,
+	0x6e, 0x61, 0x6e, 0x74, 0x20, 0x03, 0x12, 0xcf, 0x01, 0x0a, 0x19, 0x47, 0x65, 0x74, 0x4f, 0x75,
+	0x74, 0x73, 0x69, 0x64, 0x65, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x43, 0x72, 0x65, 0x64, 0x65, 0x6e,
+	0x74, 0x69, 0x61, 0x6c, 0x12, 0x3b, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61,
+	0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31,
+	0x2e, 0x47, 0x65, 0x74, 0x4f, 0x75, 0x74, 0x73, 0x69, 0x64, 0x65, 0x41, 0x67, 0x65, 0x6e, 0x74,
+	0x43, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0x74, 0x1a, 0x3c, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f,
+	0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65,
+	0x74, 0x4f, 0x75, 0x74, 0x73, 0x69, 0x64, 0x65, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x43, 0x72, 0x65,
+	0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22,
+	0x37, 0x8a, 0xb5, 0x18, 0x33, 0x0a, 0x11, 0x70, 0x6c, 0x61, 0x74, 0x66, 0x6f, 0x72, 0x6d, 0x5f,
+	0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x12, 0x0d, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d,
+	0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x0d, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f,
+	0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x20, 0x03, 0x12, 0xcf, 0x01, 0x0a, 0x19, 0x4c, 0x69, 0x73,
+	0x74, 0x44, 0x65, 0x73, 0x69, 0x72, 0x65, 0x64, 0x43, 0x61, 0x74, 0x61, 0x6c, 0x6f, 0x67, 0x50,
+	0x6c, 0x75, 0x67, 0x69, 0x6e, 0x73, 0x12, 0x3b, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e,
 	0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e,
-	0x76, 0x31, 0x42, 0x0d, 0x4f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x50, 0x72, 0x6f, 0x74,
-	0x6f, 0x50, 0x01, 0x5a, 0x63, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f,
-	0x7a, 0x65, 0x72, 0x6f, 0x72, 0x6f, 0x6f, 0x74, 0x2d, 0x61, 0x69, 0x2f, 0x67, 0x69, 0x62, 0x73,
-	0x6f, 0x6e, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x73, 0x65, 0x72, 0x76,
-	0x65, 0x72, 0x2f, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2f, 0x61, 0x70, 0x69, 0x2f, 0x67, 0x69,
-	0x62, 0x73, 0x6f, 0x6e, 0x2f, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2f, 0x6f, 0x70, 0x65, 0x72,
-	0x61, 0x74, 0x6f, 0x72, 0x2f, 0x76, 0x31, 0x3b, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x6f, 0x70,
-	0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x76, 0x31, 0xa2, 0x02, 0x03, 0x47, 0x44, 0x4f, 0xaa, 0x02,
-	0x19, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x4f,
-	0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x56, 0x31, 0xca, 0x02, 0x19, 0x47, 0x69, 0x62,
-	0x73, 0x6f, 0x6e, 0x5c, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x5c, 0x4f, 0x70, 0x65, 0x72, 0x61,
-	0x74, 0x6f, 0x72, 0x5c, 0x56, 0x31, 0xe2, 0x02, 0x25, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c,
+	0x76, 0x31, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x44, 0x65, 0x73, 0x69, 0x72, 0x65, 0x64, 0x43, 0x61,
+	0x74, 0x61, 0x6c, 0x6f, 0x67, 0x50, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x73, 0x52, 0x65, 0x71, 0x75,
+	0x65, 0x73, 0x74, 0x1a, 0x3c, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65,
+	0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x2e,
+	0x4c, 0x69, 0x73, 0x74, 0x44, 0x65, 0x73, 0x69, 0x72, 0x65, 0x64, 0x43, 0x61, 0x74, 0x61, 0x6c,
+	0x6f, 0x67, 0x50, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x65, 0x22, 0x37, 0x8a, 0xb5, 0x18, 0x33, 0x0a, 0x11, 0x70, 0x6c, 0x61, 0x74, 0x66, 0x6f, 0x72,
+	0x6d, 0x5f, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x12, 0x0d, 0x73, 0x79, 0x73, 0x74,
+	0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x0d, 0x73, 0x79, 0x73, 0x74, 0x65,
+	0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x20, 0x03, 0x12, 0xcf, 0x01, 0x0a, 0x19, 0x52,
+	0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x61, 0x74, 0x61, 0x6c, 0x6f, 0x67, 0x50, 0x6c, 0x75, 0x67,
+	0x69, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x3b, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f,
+	0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f,
+	0x72, 0x2e, 0x76, 0x31, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x61, 0x74, 0x61, 0x6c,
+	0x6f, 0x67, 0x50, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x3c, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64,
+	0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76,
+	0x31, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x61, 0x74, 0x61, 0x6c, 0x6f, 0x67, 0x50,
+	0x6c, 0x75, 0x67, 0x69, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f,
+	0x6e, 0x73, 0x65, 0x22, 0x37, 0x8a, 0xb5, 0x18, 0x33, 0x0a, 0x11, 0x70, 0x6c, 0x61, 0x74, 0x66,
+	0x6f, 0x72, 0x6d, 0x5f, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x12, 0x0d, 0x73, 0x79,
+	0x73, 0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x0d, 0x73, 0x79, 0x73,
+	0x74, 0x65, 0x6d, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x20, 0x03, 0x42, 0x9a, 0x02, 0x0a,
+	0x1d, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d,
+	0x6f, 0x6e, 0x2e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x2e, 0x76, 0x31, 0x42, 0x0d,
+	0x4f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x50, 0x01, 0x5a,
+	0x63, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x7a, 0x65, 0x72, 0x6f,
+	0x72, 0x6f, 0x6f, 0x74, 0x2d, 0x61, 0x69, 0x2f, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2f, 0x69,
+	0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2f, 0x64,
+	0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2f, 0x61, 0x70, 0x69, 0x2f, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e,
+	0x2f, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2f, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72,
+	0x2f, 0x76, 0x31, 0x3b, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x6f, 0x70, 0x65, 0x72, 0x61, 0x74,
+	0x6f, 0x72, 0x76, 0x31, 0xa2, 0x02, 0x03, 0x47, 0x44, 0x4f, 0xaa, 0x02, 0x19, 0x47, 0x69, 0x62,
+	0x73, 0x6f, 0x6e, 0x2e, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x4f, 0x70, 0x65, 0x72, 0x61,
+	0x74, 0x6f, 0x72, 0x2e, 0x56, 0x31, 0xca, 0x02, 0x19, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c,
 	0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x5c, 0x4f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x5c,
-	0x56, 0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02,
-	0x1c, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x3a, 0x3a, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x3a,
-	0x3a, 0x4f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x3a, 0x3a, 0x56, 0x31, 0x62, 0x06, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x56, 0x31, 0xe2, 0x02, 0x25, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c, 0x44, 0x61, 0x65, 0x6d,
+	0x6f, 0x6e, 0x5c, 0x4f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x5c, 0x56, 0x31, 0x5c, 0x47,
+	0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x1c, 0x47, 0x69, 0x62,
+	0x73, 0x6f, 0x6e, 0x3a, 0x3a, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x3a, 0x3a, 0x4f, 0x70, 0x65,
+	0x72, 0x61, 0x74, 0x6f, 0x72, 0x3a, 0x3a, 0x56, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x33,
 }
 
 var (
@@ -4107,7 +5001,7 @@ func file_gibson_daemon_operator_v1_operator_proto_rawDescGZIP() []byte {
 	return file_gibson_daemon_operator_v1_operator_proto_rawDescData
 }
 
-var file_gibson_daemon_operator_v1_operator_proto_msgTypes = make([]protoimpl.MessageInfo, 57)
+var file_gibson_daemon_operator_v1_operator_proto_msgTypes = make([]protoimpl.MessageInfo, 69)
 var file_gibson_daemon_operator_v1_operator_proto_goTypes = []any{
 	(*AccessTuple)(nil),                           // 0: gibson.daemon.operator.v1.AccessTuple
 	(*WriteAccessTuplesRequest)(nil),              // 1: gibson.daemon.operator.v1.WriteAccessTuplesRequest
@@ -4158,83 +5052,108 @@ var file_gibson_daemon_operator_v1_operator_proto_goTypes = []any{
 	(*ConnectorCredentialRef)(nil),                // 46: gibson.daemon.operator.v1.ConnectorCredentialRef
 	(*GetConnectorCredentialRequest)(nil),         // 47: gibson.daemon.operator.v1.GetConnectorCredentialRequest
 	(*GetConnectorCredentialResponse)(nil),        // 48: gibson.daemon.operator.v1.GetConnectorCredentialResponse
-	(*ListDesiredCatalogPluginsRequest)(nil),      // 49: gibson.daemon.operator.v1.ListDesiredCatalogPluginsRequest
-	(*DesiredCatalogPlugin)(nil),                  // 50: gibson.daemon.operator.v1.DesiredCatalogPlugin
-	(*ListDesiredCatalogPluginsResponse)(nil),     // 51: gibson.daemon.operator.v1.ListDesiredCatalogPluginsResponse
-	(*ReportCatalogPluginStatusRequest)(nil),      // 52: gibson.daemon.operator.v1.ReportCatalogPluginStatusRequest
-	(*ReportCatalogPluginStatusResponse)(nil),     // 53: gibson.daemon.operator.v1.ReportCatalogPluginStatusResponse
-	nil, // 54: gibson.daemon.operator.v1.AuditEventMessage.FieldsEntry
-	nil, // 55: gibson.daemon.operator.v1.BeliefTrainingRow.VarsEntry
-	nil, // 56: gibson.daemon.operator.v1.GetConnectorCredentialResponse.DataEntry
-	(*v1.GetConnectorAuthStatusResponse)(nil), // 57: gibson.tenant.v1.GetConnectorAuthStatusResponse
-	(*v1.RevokeConnectorGrantResponse)(nil),   // 58: gibson.tenant.v1.RevokeConnectorGrantResponse
+	(*GetModelProviderCredentialRequest)(nil),     // 49: gibson.daemon.operator.v1.GetModelProviderCredentialRequest
+	(*GetModelProviderCredentialResponse)(nil),    // 50: gibson.daemon.operator.v1.GetModelProviderCredentialResponse
+	(*SecretData)(nil),                            // 51: gibson.daemon.operator.v1.SecretData
+	(*GetTenantModelProvidersRequest)(nil),        // 52: gibson.daemon.operator.v1.GetTenantModelProvidersRequest
+	(*DesiredModelProvider)(nil),                  // 53: gibson.daemon.operator.v1.DesiredModelProvider
+	(*GetTenantModelProvidersResponse)(nil),       // 54: gibson.daemon.operator.v1.GetTenantModelProvidersResponse
+	(*GetTenantOutsideAgentsRequest)(nil),         // 55: gibson.daemon.operator.v1.GetTenantOutsideAgentsRequest
+	(*DesiredOutsideAgent)(nil),                   // 56: gibson.daemon.operator.v1.DesiredOutsideAgent
+	(*GetTenantOutsideAgentsResponse)(nil),        // 57: gibson.daemon.operator.v1.GetTenantOutsideAgentsResponse
+	(*GetOutsideAgentCredentialRequest)(nil),      // 58: gibson.daemon.operator.v1.GetOutsideAgentCredentialRequest
+	(*GetOutsideAgentCredentialResponse)(nil),     // 59: gibson.daemon.operator.v1.GetOutsideAgentCredentialResponse
+	(*ListDesiredCatalogPluginsRequest)(nil),      // 60: gibson.daemon.operator.v1.ListDesiredCatalogPluginsRequest
+	(*DesiredCatalogPlugin)(nil),                  // 61: gibson.daemon.operator.v1.DesiredCatalogPlugin
+	(*ListDesiredCatalogPluginsResponse)(nil),     // 62: gibson.daemon.operator.v1.ListDesiredCatalogPluginsResponse
+	(*ReportCatalogPluginStatusRequest)(nil),      // 63: gibson.daemon.operator.v1.ReportCatalogPluginStatusRequest
+	(*ReportCatalogPluginStatusResponse)(nil),     // 64: gibson.daemon.operator.v1.ReportCatalogPluginStatusResponse
+	nil, // 65: gibson.daemon.operator.v1.AuditEventMessage.FieldsEntry
+	nil, // 66: gibson.daemon.operator.v1.BeliefTrainingRow.VarsEntry
+	nil, // 67: gibson.daemon.operator.v1.GetConnectorCredentialResponse.DataEntry
+	nil, // 68: gibson.daemon.operator.v1.SecretData.DataEntry
+	(*v1.GetConnectorAuthStatusResponse)(nil), // 69: gibson.tenant.v1.GetConnectorAuthStatusResponse
+	(*v1.RevokeConnectorGrantResponse)(nil),   // 70: gibson.tenant.v1.RevokeConnectorGrantResponse
 }
 var file_gibson_daemon_operator_v1_operator_proto_depIdxs = []int32{
 	0,  // 0: gibson.daemon.operator.v1.WriteAccessTuplesRequest.add:type_name -> gibson.daemon.operator.v1.AccessTuple
 	0,  // 1: gibson.daemon.operator.v1.WriteAccessTuplesRequest.delete:type_name -> gibson.daemon.operator.v1.AccessTuple
-	54, // 2: gibson.daemon.operator.v1.AuditEventMessage.fields:type_name -> gibson.daemon.operator.v1.AuditEventMessage.FieldsEntry
+	65, // 2: gibson.daemon.operator.v1.AuditEventMessage.fields:type_name -> gibson.daemon.operator.v1.AuditEventMessage.FieldsEntry
 	9,  // 3: gibson.daemon.operator.v1.EmitAuditEventRequest.event:type_name -> gibson.daemon.operator.v1.AuditEventMessage
 	14, // 4: gibson.daemon.operator.v1.ListPendingTenantProvisioningResponse.pending:type_name -> gibson.daemon.operator.v1.PendingTenant
 	25, // 5: gibson.daemon.operator.v1.ListPendingTenantOpsResponse.ops:type_name -> gibson.daemon.operator.v1.TenantOp
-	57, // 6: gibson.daemon.operator.v1.GetConnectorAuthStatusResponse.status:type_name -> gibson.tenant.v1.GetConnectorAuthStatusResponse
-	55, // 7: gibson.daemon.operator.v1.BeliefTrainingRow.vars:type_name -> gibson.daemon.operator.v1.BeliefTrainingRow.VarsEntry
+	69, // 6: gibson.daemon.operator.v1.GetConnectorAuthStatusResponse.status:type_name -> gibson.tenant.v1.GetConnectorAuthStatusResponse
+	66, // 7: gibson.daemon.operator.v1.BeliefTrainingRow.vars:type_name -> gibson.daemon.operator.v1.BeliefTrainingRow.VarsEntry
 	34, // 8: gibson.daemon.operator.v1.GetBeliefTrainingDataResponse.rows:type_name -> gibson.daemon.operator.v1.BeliefTrainingRow
 	35, // 9: gibson.daemon.operator.v1.GetBeliefTrainingDataResponse.edge_outcomes:type_name -> gibson.daemon.operator.v1.EdgeOutcomeCount
 	40, // 10: gibson.daemon.operator.v1.ListDesiredConnectorsResponse.connectors:type_name -> gibson.daemon.operator.v1.DesiredConnector
 	46, // 11: gibson.daemon.operator.v1.GetConnectorCredentialRequest.credentials:type_name -> gibson.daemon.operator.v1.ConnectorCredentialRef
-	56, // 12: gibson.daemon.operator.v1.GetConnectorCredentialResponse.data:type_name -> gibson.daemon.operator.v1.GetConnectorCredentialResponse.DataEntry
-	50, // 13: gibson.daemon.operator.v1.ListDesiredCatalogPluginsResponse.plugins:type_name -> gibson.daemon.operator.v1.DesiredCatalogPlugin
-	1,  // 14: gibson.daemon.operator.v1.DaemonOperatorService.WriteAccessTuples:input_type -> gibson.daemon.operator.v1.WriteAccessTuplesRequest
-	3,  // 15: gibson.daemon.operator.v1.DaemonOperatorService.UpsertTenantQuota:input_type -> gibson.daemon.operator.v1.UpsertTenantQuotaRequest
-	5,  // 16: gibson.daemon.operator.v1.DaemonOperatorService.ListFeatureTuples:input_type -> gibson.daemon.operator.v1.ListFeatureTuplesRequest
-	7,  // 17: gibson.daemon.operator.v1.DaemonOperatorService.SeedCatalogTenantEnabled:input_type -> gibson.daemon.operator.v1.SeedCatalogTenantEnabledRequest
-	10, // 18: gibson.daemon.operator.v1.DaemonOperatorService.EmitAuditEvent:input_type -> gibson.daemon.operator.v1.EmitAuditEventRequest
-	12, // 19: gibson.daemon.operator.v1.DaemonOperatorService.SetTenantZitadelOrg:input_type -> gibson.daemon.operator.v1.SetTenantZitadelOrgRequest
-	15, // 20: gibson.daemon.operator.v1.DaemonOperatorService.ListPendingTenantProvisioning:input_type -> gibson.daemon.operator.v1.ListPendingTenantProvisioningRequest
-	19, // 21: gibson.daemon.operator.v1.DaemonOperatorService.EnqueueTenantProvisioning:input_type -> gibson.daemon.operator.v1.EnqueueTenantProvisioningRequest
-	17, // 22: gibson.daemon.operator.v1.DaemonOperatorService.AckTenantProvisioned:input_type -> gibson.daemon.operator.v1.AckTenantProvisionedRequest
-	22, // 23: gibson.daemon.operator.v1.DaemonOperatorService.SetAgentEnrollmentLimits:input_type -> gibson.daemon.operator.v1.SetAgentEnrollmentLimitsRequest
-	21, // 24: gibson.daemon.operator.v1.DaemonOperatorService.ReportTenantStatus:input_type -> gibson.daemon.operator.v1.ReportTenantStatusRequest
-	26, // 25: gibson.daemon.operator.v1.DaemonOperatorService.ListPendingTenantOps:input_type -> gibson.daemon.operator.v1.ListPendingTenantOpsRequest
-	28, // 26: gibson.daemon.operator.v1.DaemonOperatorService.AckTenantOp:input_type -> gibson.daemon.operator.v1.AckTenantOpRequest
-	30, // 27: gibson.daemon.operator.v1.DaemonOperatorService.RevokeConnectorGrant:input_type -> gibson.daemon.operator.v1.RevokeConnectorGrantRequest
-	31, // 28: gibson.daemon.operator.v1.DaemonOperatorService.GetConnectorAuthStatus:input_type -> gibson.daemon.operator.v1.GetConnectorAuthStatusRequest
-	33, // 29: gibson.daemon.operator.v1.DaemonOperatorService.GetBeliefTrainingData:input_type -> gibson.daemon.operator.v1.GetBeliefTrainingDataRequest
-	37, // 30: gibson.daemon.operator.v1.DaemonOperatorService.StoreBeliefArtifact:input_type -> gibson.daemon.operator.v1.StoreBeliefArtifactRequest
-	39, // 31: gibson.daemon.operator.v1.DaemonOperatorService.ListDesiredConnectors:input_type -> gibson.daemon.operator.v1.ListDesiredConnectorsRequest
-	42, // 32: gibson.daemon.operator.v1.DaemonOperatorService.ReportConnectorStatus:input_type -> gibson.daemon.operator.v1.ReportConnectorStatusRequest
-	44, // 33: gibson.daemon.operator.v1.DaemonOperatorService.AdoptConnector:input_type -> gibson.daemon.operator.v1.AdoptConnectorRequest
-	47, // 34: gibson.daemon.operator.v1.DaemonOperatorService.GetConnectorCredential:input_type -> gibson.daemon.operator.v1.GetConnectorCredentialRequest
-	49, // 35: gibson.daemon.operator.v1.DaemonOperatorService.ListDesiredCatalogPlugins:input_type -> gibson.daemon.operator.v1.ListDesiredCatalogPluginsRequest
-	52, // 36: gibson.daemon.operator.v1.DaemonOperatorService.ReportCatalogPluginStatus:input_type -> gibson.daemon.operator.v1.ReportCatalogPluginStatusRequest
-	2,  // 37: gibson.daemon.operator.v1.DaemonOperatorService.WriteAccessTuples:output_type -> gibson.daemon.operator.v1.WriteAccessTuplesResponse
-	4,  // 38: gibson.daemon.operator.v1.DaemonOperatorService.UpsertTenantQuota:output_type -> gibson.daemon.operator.v1.UpsertTenantQuotaResponse
-	6,  // 39: gibson.daemon.operator.v1.DaemonOperatorService.ListFeatureTuples:output_type -> gibson.daemon.operator.v1.ListFeatureTuplesResponse
-	8,  // 40: gibson.daemon.operator.v1.DaemonOperatorService.SeedCatalogTenantEnabled:output_type -> gibson.daemon.operator.v1.SeedCatalogTenantEnabledResponse
-	11, // 41: gibson.daemon.operator.v1.DaemonOperatorService.EmitAuditEvent:output_type -> gibson.daemon.operator.v1.EmitAuditEventResponse
-	13, // 42: gibson.daemon.operator.v1.DaemonOperatorService.SetTenantZitadelOrg:output_type -> gibson.daemon.operator.v1.SetTenantZitadelOrgResponse
-	16, // 43: gibson.daemon.operator.v1.DaemonOperatorService.ListPendingTenantProvisioning:output_type -> gibson.daemon.operator.v1.ListPendingTenantProvisioningResponse
-	20, // 44: gibson.daemon.operator.v1.DaemonOperatorService.EnqueueTenantProvisioning:output_type -> gibson.daemon.operator.v1.EnqueueTenantProvisioningResponse
-	18, // 45: gibson.daemon.operator.v1.DaemonOperatorService.AckTenantProvisioned:output_type -> gibson.daemon.operator.v1.AckTenantProvisionedResponse
-	23, // 46: gibson.daemon.operator.v1.DaemonOperatorService.SetAgentEnrollmentLimits:output_type -> gibson.daemon.operator.v1.SetAgentEnrollmentLimitsResponse
-	24, // 47: gibson.daemon.operator.v1.DaemonOperatorService.ReportTenantStatus:output_type -> gibson.daemon.operator.v1.ReportTenantStatusResponse
-	27, // 48: gibson.daemon.operator.v1.DaemonOperatorService.ListPendingTenantOps:output_type -> gibson.daemon.operator.v1.ListPendingTenantOpsResponse
-	29, // 49: gibson.daemon.operator.v1.DaemonOperatorService.AckTenantOp:output_type -> gibson.daemon.operator.v1.AckTenantOpResponse
-	58, // 50: gibson.daemon.operator.v1.DaemonOperatorService.RevokeConnectorGrant:output_type -> gibson.tenant.v1.RevokeConnectorGrantResponse
-	32, // 51: gibson.daemon.operator.v1.DaemonOperatorService.GetConnectorAuthStatus:output_type -> gibson.daemon.operator.v1.GetConnectorAuthStatusResponse
-	36, // 52: gibson.daemon.operator.v1.DaemonOperatorService.GetBeliefTrainingData:output_type -> gibson.daemon.operator.v1.GetBeliefTrainingDataResponse
-	38, // 53: gibson.daemon.operator.v1.DaemonOperatorService.StoreBeliefArtifact:output_type -> gibson.daemon.operator.v1.StoreBeliefArtifactResponse
-	41, // 54: gibson.daemon.operator.v1.DaemonOperatorService.ListDesiredConnectors:output_type -> gibson.daemon.operator.v1.ListDesiredConnectorsResponse
-	43, // 55: gibson.daemon.operator.v1.DaemonOperatorService.ReportConnectorStatus:output_type -> gibson.daemon.operator.v1.ReportConnectorStatusResponse
-	45, // 56: gibson.daemon.operator.v1.DaemonOperatorService.AdoptConnector:output_type -> gibson.daemon.operator.v1.AdoptConnectorResponse
-	48, // 57: gibson.daemon.operator.v1.DaemonOperatorService.GetConnectorCredential:output_type -> gibson.daemon.operator.v1.GetConnectorCredentialResponse
-	51, // 58: gibson.daemon.operator.v1.DaemonOperatorService.ListDesiredCatalogPlugins:output_type -> gibson.daemon.operator.v1.ListDesiredCatalogPluginsResponse
-	53, // 59: gibson.daemon.operator.v1.DaemonOperatorService.ReportCatalogPluginStatus:output_type -> gibson.daemon.operator.v1.ReportCatalogPluginStatusResponse
-	37, // [37:60] is the sub-list for method output_type
-	14, // [14:37] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	67, // 12: gibson.daemon.operator.v1.GetConnectorCredentialResponse.data:type_name -> gibson.daemon.operator.v1.GetConnectorCredentialResponse.DataEntry
+	51, // 13: gibson.daemon.operator.v1.GetModelProviderCredentialResponse.secret:type_name -> gibson.daemon.operator.v1.SecretData
+	68, // 14: gibson.daemon.operator.v1.SecretData.data:type_name -> gibson.daemon.operator.v1.SecretData.DataEntry
+	53, // 15: gibson.daemon.operator.v1.GetTenantModelProvidersResponse.providers:type_name -> gibson.daemon.operator.v1.DesiredModelProvider
+	56, // 16: gibson.daemon.operator.v1.GetTenantOutsideAgentsResponse.agents:type_name -> gibson.daemon.operator.v1.DesiredOutsideAgent
+	51, // 17: gibson.daemon.operator.v1.GetOutsideAgentCredentialResponse.secret:type_name -> gibson.daemon.operator.v1.SecretData
+	61, // 18: gibson.daemon.operator.v1.ListDesiredCatalogPluginsResponse.plugins:type_name -> gibson.daemon.operator.v1.DesiredCatalogPlugin
+	1,  // 19: gibson.daemon.operator.v1.DaemonOperatorService.WriteAccessTuples:input_type -> gibson.daemon.operator.v1.WriteAccessTuplesRequest
+	3,  // 20: gibson.daemon.operator.v1.DaemonOperatorService.UpsertTenantQuota:input_type -> gibson.daemon.operator.v1.UpsertTenantQuotaRequest
+	5,  // 21: gibson.daemon.operator.v1.DaemonOperatorService.ListFeatureTuples:input_type -> gibson.daemon.operator.v1.ListFeatureTuplesRequest
+	7,  // 22: gibson.daemon.operator.v1.DaemonOperatorService.SeedCatalogTenantEnabled:input_type -> gibson.daemon.operator.v1.SeedCatalogTenantEnabledRequest
+	10, // 23: gibson.daemon.operator.v1.DaemonOperatorService.EmitAuditEvent:input_type -> gibson.daemon.operator.v1.EmitAuditEventRequest
+	12, // 24: gibson.daemon.operator.v1.DaemonOperatorService.SetTenantZitadelOrg:input_type -> gibson.daemon.operator.v1.SetTenantZitadelOrgRequest
+	15, // 25: gibson.daemon.operator.v1.DaemonOperatorService.ListPendingTenantProvisioning:input_type -> gibson.daemon.operator.v1.ListPendingTenantProvisioningRequest
+	19, // 26: gibson.daemon.operator.v1.DaemonOperatorService.EnqueueTenantProvisioning:input_type -> gibson.daemon.operator.v1.EnqueueTenantProvisioningRequest
+	17, // 27: gibson.daemon.operator.v1.DaemonOperatorService.AckTenantProvisioned:input_type -> gibson.daemon.operator.v1.AckTenantProvisionedRequest
+	22, // 28: gibson.daemon.operator.v1.DaemonOperatorService.SetAgentEnrollmentLimits:input_type -> gibson.daemon.operator.v1.SetAgentEnrollmentLimitsRequest
+	21, // 29: gibson.daemon.operator.v1.DaemonOperatorService.ReportTenantStatus:input_type -> gibson.daemon.operator.v1.ReportTenantStatusRequest
+	26, // 30: gibson.daemon.operator.v1.DaemonOperatorService.ListPendingTenantOps:input_type -> gibson.daemon.operator.v1.ListPendingTenantOpsRequest
+	28, // 31: gibson.daemon.operator.v1.DaemonOperatorService.AckTenantOp:input_type -> gibson.daemon.operator.v1.AckTenantOpRequest
+	30, // 32: gibson.daemon.operator.v1.DaemonOperatorService.RevokeConnectorGrant:input_type -> gibson.daemon.operator.v1.RevokeConnectorGrantRequest
+	31, // 33: gibson.daemon.operator.v1.DaemonOperatorService.GetConnectorAuthStatus:input_type -> gibson.daemon.operator.v1.GetConnectorAuthStatusRequest
+	33, // 34: gibson.daemon.operator.v1.DaemonOperatorService.GetBeliefTrainingData:input_type -> gibson.daemon.operator.v1.GetBeliefTrainingDataRequest
+	37, // 35: gibson.daemon.operator.v1.DaemonOperatorService.StoreBeliefArtifact:input_type -> gibson.daemon.operator.v1.StoreBeliefArtifactRequest
+	39, // 36: gibson.daemon.operator.v1.DaemonOperatorService.ListDesiredConnectors:input_type -> gibson.daemon.operator.v1.ListDesiredConnectorsRequest
+	42, // 37: gibson.daemon.operator.v1.DaemonOperatorService.ReportConnectorStatus:input_type -> gibson.daemon.operator.v1.ReportConnectorStatusRequest
+	44, // 38: gibson.daemon.operator.v1.DaemonOperatorService.AdoptConnector:input_type -> gibson.daemon.operator.v1.AdoptConnectorRequest
+	47, // 39: gibson.daemon.operator.v1.DaemonOperatorService.GetConnectorCredential:input_type -> gibson.daemon.operator.v1.GetConnectorCredentialRequest
+	49, // 40: gibson.daemon.operator.v1.DaemonOperatorService.GetModelProviderCredential:input_type -> gibson.daemon.operator.v1.GetModelProviderCredentialRequest
+	52, // 41: gibson.daemon.operator.v1.DaemonOperatorService.GetTenantModelProviders:input_type -> gibson.daemon.operator.v1.GetTenantModelProvidersRequest
+	55, // 42: gibson.daemon.operator.v1.DaemonOperatorService.GetTenantOutsideAgents:input_type -> gibson.daemon.operator.v1.GetTenantOutsideAgentsRequest
+	58, // 43: gibson.daemon.operator.v1.DaemonOperatorService.GetOutsideAgentCredential:input_type -> gibson.daemon.operator.v1.GetOutsideAgentCredentialRequest
+	60, // 44: gibson.daemon.operator.v1.DaemonOperatorService.ListDesiredCatalogPlugins:input_type -> gibson.daemon.operator.v1.ListDesiredCatalogPluginsRequest
+	63, // 45: gibson.daemon.operator.v1.DaemonOperatorService.ReportCatalogPluginStatus:input_type -> gibson.daemon.operator.v1.ReportCatalogPluginStatusRequest
+	2,  // 46: gibson.daemon.operator.v1.DaemonOperatorService.WriteAccessTuples:output_type -> gibson.daemon.operator.v1.WriteAccessTuplesResponse
+	4,  // 47: gibson.daemon.operator.v1.DaemonOperatorService.UpsertTenantQuota:output_type -> gibson.daemon.operator.v1.UpsertTenantQuotaResponse
+	6,  // 48: gibson.daemon.operator.v1.DaemonOperatorService.ListFeatureTuples:output_type -> gibson.daemon.operator.v1.ListFeatureTuplesResponse
+	8,  // 49: gibson.daemon.operator.v1.DaemonOperatorService.SeedCatalogTenantEnabled:output_type -> gibson.daemon.operator.v1.SeedCatalogTenantEnabledResponse
+	11, // 50: gibson.daemon.operator.v1.DaemonOperatorService.EmitAuditEvent:output_type -> gibson.daemon.operator.v1.EmitAuditEventResponse
+	13, // 51: gibson.daemon.operator.v1.DaemonOperatorService.SetTenantZitadelOrg:output_type -> gibson.daemon.operator.v1.SetTenantZitadelOrgResponse
+	16, // 52: gibson.daemon.operator.v1.DaemonOperatorService.ListPendingTenantProvisioning:output_type -> gibson.daemon.operator.v1.ListPendingTenantProvisioningResponse
+	20, // 53: gibson.daemon.operator.v1.DaemonOperatorService.EnqueueTenantProvisioning:output_type -> gibson.daemon.operator.v1.EnqueueTenantProvisioningResponse
+	18, // 54: gibson.daemon.operator.v1.DaemonOperatorService.AckTenantProvisioned:output_type -> gibson.daemon.operator.v1.AckTenantProvisionedResponse
+	23, // 55: gibson.daemon.operator.v1.DaemonOperatorService.SetAgentEnrollmentLimits:output_type -> gibson.daemon.operator.v1.SetAgentEnrollmentLimitsResponse
+	24, // 56: gibson.daemon.operator.v1.DaemonOperatorService.ReportTenantStatus:output_type -> gibson.daemon.operator.v1.ReportTenantStatusResponse
+	27, // 57: gibson.daemon.operator.v1.DaemonOperatorService.ListPendingTenantOps:output_type -> gibson.daemon.operator.v1.ListPendingTenantOpsResponse
+	29, // 58: gibson.daemon.operator.v1.DaemonOperatorService.AckTenantOp:output_type -> gibson.daemon.operator.v1.AckTenantOpResponse
+	70, // 59: gibson.daemon.operator.v1.DaemonOperatorService.RevokeConnectorGrant:output_type -> gibson.tenant.v1.RevokeConnectorGrantResponse
+	32, // 60: gibson.daemon.operator.v1.DaemonOperatorService.GetConnectorAuthStatus:output_type -> gibson.daemon.operator.v1.GetConnectorAuthStatusResponse
+	36, // 61: gibson.daemon.operator.v1.DaemonOperatorService.GetBeliefTrainingData:output_type -> gibson.daemon.operator.v1.GetBeliefTrainingDataResponse
+	38, // 62: gibson.daemon.operator.v1.DaemonOperatorService.StoreBeliefArtifact:output_type -> gibson.daemon.operator.v1.StoreBeliefArtifactResponse
+	41, // 63: gibson.daemon.operator.v1.DaemonOperatorService.ListDesiredConnectors:output_type -> gibson.daemon.operator.v1.ListDesiredConnectorsResponse
+	43, // 64: gibson.daemon.operator.v1.DaemonOperatorService.ReportConnectorStatus:output_type -> gibson.daemon.operator.v1.ReportConnectorStatusResponse
+	45, // 65: gibson.daemon.operator.v1.DaemonOperatorService.AdoptConnector:output_type -> gibson.daemon.operator.v1.AdoptConnectorResponse
+	48, // 66: gibson.daemon.operator.v1.DaemonOperatorService.GetConnectorCredential:output_type -> gibson.daemon.operator.v1.GetConnectorCredentialResponse
+	50, // 67: gibson.daemon.operator.v1.DaemonOperatorService.GetModelProviderCredential:output_type -> gibson.daemon.operator.v1.GetModelProviderCredentialResponse
+	54, // 68: gibson.daemon.operator.v1.DaemonOperatorService.GetTenantModelProviders:output_type -> gibson.daemon.operator.v1.GetTenantModelProvidersResponse
+	57, // 69: gibson.daemon.operator.v1.DaemonOperatorService.GetTenantOutsideAgents:output_type -> gibson.daemon.operator.v1.GetTenantOutsideAgentsResponse
+	59, // 70: gibson.daemon.operator.v1.DaemonOperatorService.GetOutsideAgentCredential:output_type -> gibson.daemon.operator.v1.GetOutsideAgentCredentialResponse
+	62, // 71: gibson.daemon.operator.v1.DaemonOperatorService.ListDesiredCatalogPlugins:output_type -> gibson.daemon.operator.v1.ListDesiredCatalogPluginsResponse
+	64, // 72: gibson.daemon.operator.v1.DaemonOperatorService.ReportCatalogPluginStatus:output_type -> gibson.daemon.operator.v1.ReportCatalogPluginStatusResponse
+	46, // [46:73] is the sub-list for method output_type
+	19, // [19:46] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_gibson_daemon_operator_v1_operator_proto_init() }
@@ -4832,7 +5751,7 @@ func file_gibson_daemon_operator_v1_operator_proto_init() {
 			}
 		}
 		file_gibson_daemon_operator_v1_operator_proto_msgTypes[49].Exporter = func(v any, i int) any {
-			switch v := v.(*ListDesiredCatalogPluginsRequest); i {
+			switch v := v.(*GetModelProviderCredentialRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4844,7 +5763,7 @@ func file_gibson_daemon_operator_v1_operator_proto_init() {
 			}
 		}
 		file_gibson_daemon_operator_v1_operator_proto_msgTypes[50].Exporter = func(v any, i int) any {
-			switch v := v.(*DesiredCatalogPlugin); i {
+			switch v := v.(*GetModelProviderCredentialResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4856,7 +5775,7 @@ func file_gibson_daemon_operator_v1_operator_proto_init() {
 			}
 		}
 		file_gibson_daemon_operator_v1_operator_proto_msgTypes[51].Exporter = func(v any, i int) any {
-			switch v := v.(*ListDesiredCatalogPluginsResponse); i {
+			switch v := v.(*SecretData); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4868,7 +5787,7 @@ func file_gibson_daemon_operator_v1_operator_proto_init() {
 			}
 		}
 		file_gibson_daemon_operator_v1_operator_proto_msgTypes[52].Exporter = func(v any, i int) any {
-			switch v := v.(*ReportCatalogPluginStatusRequest); i {
+			switch v := v.(*GetTenantModelProvidersRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -4880,6 +5799,138 @@ func file_gibson_daemon_operator_v1_operator_proto_init() {
 			}
 		}
 		file_gibson_daemon_operator_v1_operator_proto_msgTypes[53].Exporter = func(v any, i int) any {
+			switch v := v.(*DesiredModelProvider); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[54].Exporter = func(v any, i int) any {
+			switch v := v.(*GetTenantModelProvidersResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[55].Exporter = func(v any, i int) any {
+			switch v := v.(*GetTenantOutsideAgentsRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[56].Exporter = func(v any, i int) any {
+			switch v := v.(*DesiredOutsideAgent); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[57].Exporter = func(v any, i int) any {
+			switch v := v.(*GetTenantOutsideAgentsResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[58].Exporter = func(v any, i int) any {
+			switch v := v.(*GetOutsideAgentCredentialRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[59].Exporter = func(v any, i int) any {
+			switch v := v.(*GetOutsideAgentCredentialResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[60].Exporter = func(v any, i int) any {
+			switch v := v.(*ListDesiredCatalogPluginsRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[61].Exporter = func(v any, i int) any {
+			switch v := v.(*DesiredCatalogPlugin); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[62].Exporter = func(v any, i int) any {
+			switch v := v.(*ListDesiredCatalogPluginsResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[63].Exporter = func(v any, i int) any {
+			switch v := v.(*ReportCatalogPluginStatusRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_operator_v1_operator_proto_msgTypes[64].Exporter = func(v any, i int) any {
 			switch v := v.(*ReportCatalogPluginStatusResponse); i {
 			case 0:
 				return &v.state
@@ -4898,7 +5949,7 @@ func file_gibson_daemon_operator_v1_operator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_gibson_daemon_operator_v1_operator_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   57,
+			NumMessages:   69,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

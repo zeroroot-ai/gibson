@@ -34,7 +34,7 @@ func componentCaller(tenant, subject string) context.Context {
 }
 
 func TestEnrollComponent_TakesTheTenantAndTheProducerFromTheIdentity(t *testing.T) {
-	svc := NewComponentServiceServer(&countingRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil)
+	svc := NewComponentServiceServer(&countingRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil)
 	enr := &recordingEnroller{}
 	svc.WithProducedComponentEnroller(enr)
 
@@ -56,7 +56,7 @@ func TestEnrollComponent_TakesTheTenantAndTheProducerFromTheIdentity(t *testing.
 }
 
 func TestEnrollComponent_Refusals(t *testing.T) {
-	svc := NewComponentServiceServer(&countingRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil)
+	svc := NewComponentServiceServer(&countingRegistry{}, &noopWorkQueue{}, testLogger(), nil, nil, nil)
 	req := &componentpb.EnrollComponentRequest{Kind: "tool", Name: "a-tool", Version: "1", Image: "img@sha256:abc"}
 
 	if _, err := svc.EnrollComponent(componentCaller("acme", "agent_principal:p-1"), req); status.Code(err) != codes.Unavailable {

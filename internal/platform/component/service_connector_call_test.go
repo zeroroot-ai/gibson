@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
@@ -89,8 +90,9 @@ func newConnectorEnv(t *testing.T, allow bool, durable func(*audittest.Recorder)
 		env.policyRuns = append(env.policyRuns, run)
 		return env.policy, env.policyErr
 	})
-	srv.WithToolCallRecorder(func(_ context.Context, rec metatool.CallRecord, _ []byte, _ string) {
+	srv.WithToolCallRecorder(func(_ context.Context, rec metatool.CallRecord, _ []byte, _ string) string {
 		env.recorded = append(env.recorded, rec)
+		return fmt.Sprintf("call-%d", len(env.recorded))
 	})
 	srv.WithGrantVerifier(fakeGrants{})
 	env.srv = srv
@@ -470,4 +472,64 @@ func TestCallTool_AFailedResultRecordDoesNotChangeTheAnswer(t *testing.T) {
 	resp, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq(""))
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"name":"demo"}`, resp.GetOutputJson())
+}
+
+// Each reply of CallTool carries the id that the flight recorder gave to the
+// call, also when the call failed. A finding cites this id.
+func TestCallTool_TheReplyCarriesTheIDOfTheRecordedCall(t *testing.T) {
+	env := newConnectorEnv(t, true, nil)
+	resp, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq(""))
+	require.NoError(t, err)
+	assert.Equal(t, "call-1", resp.GetToolCallId())
+
+	env.caller.err = errors.New("upstream failed")
+	failed, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq(""))
+	require.NoError(t, err)
+	require.NotNil(t, failed.GetError())
+	assert.Equal(t, "call-2", failed.GetToolCallId())
+}
+
+// A tool call through the work queue is recorded with the mission and the run of
+// its work item, and the reply carries the id of the record.
+func TestCallTool_ANativeToolCallIsRecordedAndCarriesItsID(t *testing.T) {
+	env := newWorkIDEnv(t)
+	env.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "tool", Name: "nmap", InstanceID: "inst-tool"}}
+	env.svc.WithMissionPolicy(func(context.Context, string, string) (metatool.MissionPolicy, error) {
+		return metatool.MissionPolicy{}, nil
+	})
+	var got metatool.CallRecord
+	var gotResult []byte
+	env.svc.WithToolCallRecorder(func(_ context.Context, rec metatool.CallRecord, result []byte, _ string) string {
+		got, gotResult = rec, result
+		return "recorded-1"
+	})
+	go func() {
+		ctx := context.Background()
+		for range 100 {
+			item, err := env.queue.Claim(ctx, victimTenant, "tool", "nmap", "inst-tool", 100*time.Millisecond)
+			if err == nil && item != nil {
+				_ = env.queue.DeliverResult(ctx, item.WorkID, WorkResult{WorkID: item.WorkID, Result: []byte(`{"ports":[80]}`)})
+				return
+			}
+		}
+	}()
+	// The caller claims a work item of a run, as an agent in pull mode does.
+	// It is agent work. The tool claim loop above takes tool work only, so it
+	// cannot take this item in place of the tool call.
+	_, err := env.queue.Enqueue(context.Background(), victimTenant, "agent", "caller", WorkItem{
+		WorkID: "agent-work-1", WorkType: "execute",
+		Context: map[string]string{authz.AuthzContextWorkKey: `{"run_id":"run-1"}`},
+	})
+	require.NoError(t, err)
+	workID := "agent-work-1"
+	ctx := env.claimedBy(auth.ContextWithTenantString(context.Background(), victimTenant), t, workID, "component-1")
+
+	resp, err := env.svc.CallTool(ctx, &componentpb.CallToolRequest{
+		WorkId: workID, ToolName: "nmap", InputJson: `{"target":"10.0.0.1"}`, TimeoutMs: 10000,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "recorded-1", resp.GetToolCallId())
+	assert.JSONEq(t, `{"ports":[80]}`, string(gotResult))
+	assert.Equal(t, "nmap", got.Tool)
+	assert.Equal(t, "run-1", got.RunID)
 }

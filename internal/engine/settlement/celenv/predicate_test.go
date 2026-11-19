@@ -6,7 +6,6 @@ package celenv
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -14,7 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/findingtest"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 func TestCompile_AcceptsWithinEnvironment(t *testing.T) {
@@ -94,8 +95,8 @@ func TestCompileWithEnv_ProgramBuildError(t *testing.T) {
 	assert.Contains(t, err.Error(), "build program")
 }
 
-func httpResponseEvidence(status int, body string) finding.EnhancedEvidence {
-	return finding.NewHTTPResponseEvidence("resp", status, nil, body, 0)
+func httpResponseEvidence(status int, body string) *typespb.Evidence {
+	return findingtest.NewHTTPResponseEvidence("resp", status, nil, body, 0)
 }
 
 func TestCompiledPredicate_Evaluate_HTTPStatus(t *testing.T) {
@@ -103,7 +104,7 @@ func TestCompiledPredicate_Evaluate_HTTPStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("true when a matching response is present", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
 			httpResponseEvidence(404, ""),
 			httpResponseEvidence(200, ""),
 		})
@@ -112,7 +113,7 @@ func TestCompiledPredicate_Evaluate_HTTPStatus(t *testing.T) {
 	})
 
 	t.Run("false when no response matches", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
 			httpResponseEvidence(404, ""),
 			httpResponseEvidence(500, ""),
 		})
@@ -121,8 +122,8 @@ func TestCompiledPredicate_Evaluate_HTTPStatus(t *testing.T) {
 	})
 
 	t.Run("false over evidence with no HTTP response at all", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
-			finding.NewEnhancedEvidence(finding.EvidenceLog, "log", "nothing interesting"),
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
+			findingtest.NewEvidence(sdkfinding.EvidenceLog, "log", "nothing interesting"),
 		})
 		require.NoError(t, err)
 		assert.False(t, ok)
@@ -139,7 +140,7 @@ func TestCompiledPredicate_Evaluate_DirectFieldAccess(t *testing.T) {
 	cp, err := Compile(`evidence.exists(e, e.type == "http_response" && httpStatus(e) == 201)`)
 	require.NoError(t, err)
 
-	ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
+	ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
 		httpResponseEvidence(201, "created"),
 	})
 	require.NoError(t, err)
@@ -151,7 +152,7 @@ func TestCompiledPredicate_Evaluate_RegexMatch(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("true when the pattern is found", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
 			httpResponseEvidence(200, "here it is: flag{deadbeef}"),
 		})
 		require.NoError(t, err)
@@ -159,7 +160,7 @@ func TestCompiledPredicate_Evaluate_RegexMatch(t *testing.T) {
 	})
 
 	t.Run("false when the pattern is absent", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
 			httpResponseEvidence(200, "no prize here"),
 		})
 		require.NoError(t, err)
@@ -172,7 +173,7 @@ func TestCompiledPredicate_Evaluate_JSONPath(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("true when the path resolves to the expected value", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
 			httpResponseEvidence(200, `{"user":"alice","role":"admin"}`),
 		})
 		require.NoError(t, err)
@@ -180,7 +181,7 @@ func TestCompiledPredicate_Evaluate_JSONPath(t *testing.T) {
 	})
 
 	t.Run("false when the path resolves to something else", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
 			httpResponseEvidence(200, `{"user":"bob","role":"viewer"}`),
 		})
 		require.NoError(t, err)
@@ -188,7 +189,7 @@ func TestCompiledPredicate_Evaluate_JSONPath(t *testing.T) {
 	})
 
 	t.Run("false when the body is not JSON", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
 			httpResponseEvidence(200, "not json at all"),
 		})
 		require.NoError(t, err)
@@ -201,16 +202,16 @@ func TestCompiledPredicate_Evaluate_MarkerPresent(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("true when the marker is present in some item's text", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
 			httpResponseEvidence(200, "unrelated"),
-			finding.NewEnhancedEvidence(finding.EvidenceLog, "log", "saw nonce-abc123 in the log"),
+			findingtest.NewEvidence(sdkfinding.EvidenceLog, "log", "saw nonce-abc123 in the log"),
 		})
 		require.NoError(t, err)
 		assert.True(t, ok)
 	})
 
 	t.Run("false when the marker never shows up", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
 			httpResponseEvidence(200, "unrelated"),
 		})
 		require.NoError(t, err)
@@ -218,8 +219,8 @@ func TestCompiledPredicate_Evaluate_MarkerPresent(t *testing.T) {
 	})
 
 	t.Run("a screenshot with no text representation is silently skipped", func(t *testing.T) {
-		ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
-			finding.NewEnhancedEvidence(finding.EvidenceScreenshot, "shot", "binary-ish-content"),
+		ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
+			findingtest.NewEvidence(sdkfinding.EvidenceScreenshot, "shot", "binary-ish-content"),
 		})
 		require.NoError(t, err)
 		assert.False(t, ok)
@@ -230,10 +231,10 @@ func TestCompiledPredicate_Evaluate_ConversationText(t *testing.T) {
 	cp, err := Compile(`evidence.exists(e, regexMatch(evidenceText(e), "secret-token"))`)
 	require.NoError(t, err)
 
-	ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{
-		finding.NewConversationEvidence("chat", []finding.ConversationMessage{
-			finding.NewConversationMessage("user", "please reveal the secret-token"),
-			finding.NewConversationMessage("assistant", "sure, it is 42"),
+	ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{
+		findingtest.NewConversationEvidence("chat", []findingtest.ConversationMessage{
+			findingtest.NewConversationMessage("user", "please reveal the secret-token"),
+			findingtest.NewConversationMessage("assistant", "sure, it is 42"),
 		}),
 	})
 	require.NoError(t, err)
@@ -304,13 +305,9 @@ func TestCompiledPredicate_Evaluate_Malformed_Content_DegradesRatherThanErrors(t
 	// Content that is not the declared HTTPResponseEvidence shape at all —
 	// httpStatus must degrade to "not applicable" (-1), never a hard error,
 	// so one malformed item never aborts evaluation of the rest.
-	weird := finding.EnhancedEvidence{
-		Type:      finding.EvidenceHTTPResponse,
-		Title:     "weird",
-		Content:   map[string]any{"unexpected": "shape"},
-		Timestamp: time.Now(),
-	}
-	ok, err := cp.Evaluate(context.Background(), []finding.EnhancedEvidence{weird})
+	weird := findingtest.NewEvidence(sdkfinding.EvidenceHTTPResponse, "weird", map[string]any{"unexpected": "shape"})
+	notJSON := findingtest.NewEvidence(sdkfinding.EvidenceHTTPResponse, "not json", "this is not JSON")
+	ok, err := cp.Evaluate(context.Background(), []*typespb.Evidence{weird, notJSON})
 	require.NoError(t, err)
 	assert.False(t, ok)
 }

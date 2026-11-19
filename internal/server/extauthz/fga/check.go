@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	fgasdk "github.com/openfga/go-sdk"
 	fgaclient "github.com/openfga/go-sdk/client"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -532,6 +533,70 @@ func (c *CachedChecker) sharedSessionGate(ctx context.Context, key string, fn fu
 	}
 	allowed, _ := v.(bool) // fn returns a bool; a failed assertion is a deny, never a panic
 	return allowed, nil
+}
+
+// CheckRelation asks FGA one plain question: does user hold relation on
+// object. condCtx is the optional condition context of the request. It is the
+// primitive behind the model access check (gibson#1388).
+//
+// Returns (true, nil) on ALLOW, (false, nil) on DENY and (false, err) on an
+// infrastructure failure.
+func (c *Checker) CheckRelation(
+	ctx context.Context, user, relation, object string, condCtx map[string]any,
+) (bool, error) {
+	if user == "" || relation == "" || object == "" {
+		return false, errors.New("fga.CheckRelation: user, relation and object are required")
+	}
+	body := fgaclient.ClientCheckRequest{User: user, Relation: relation, Object: object}
+	if len(condCtx) > 0 {
+		body.Context = &condCtx
+	}
+	resp, err := c.fga.Check(ctx).Body(body).Execute()
+	if err != nil {
+		return false, fmt.Errorf("fga.CheckRelation: FGA Check RPC failed: %w", err)
+	}
+	if resp.Allowed == nil {
+		return false, nil
+	}
+	return *resp.Allowed, nil
+}
+
+// CheckMissionActive asks the mission gate (gibson#1389): is the mission of the
+// tenant active? It asks OpenFGA for HIGHER_CONSISTENCY. The default,
+// MINIMIZE_LATENCY, may answer from the check cache of the server, a state older
+// than a write that the daemon already confirmed. The daemon confirms the gate
+// before it dispatches work, so a call of a new mission must see the tuple. The
+// cost is one read of the datastore for each gate check, and no use of the
+// OpenFGA check cache for this one question. Every other check keeps the default.
+func (c *Checker) CheckMissionActive(ctx context.Context, tenant, mission string) (bool, error) {
+	if tenant == "" || mission == "" {
+		return false, errors.New("fga.CheckMissionActive: tenant and mission are required")
+	}
+	pref := fgasdk.CONSISTENCYPREFERENCE_HIGHER_CONSISTENCY
+	resp, err := c.fga.Check(ctx).Body(fgaclient.ClientCheckRequest{
+		User: "tenant:" + tenant, Relation: authz.RelationMissionActive, Object: authz.MissionObject(mission),
+	}).Options(fgaclient.ClientCheckOptions{Consistency: &pref}).Execute()
+	if err != nil {
+		return false, fmt.Errorf("fga.CheckMissionActive: FGA Check RPC failed: %w", err)
+	}
+	if resp.Allowed == nil {
+		return false, nil
+	}
+	return *resp.Allowed, nil
+}
+
+// CheckMissionActive delegates to the inner Checker. It is NOT cached: a mission
+// that paused or ended must stop the next call.
+func (c *CachedChecker) CheckMissionActive(ctx context.Context, tenant, mission string) (bool, error) {
+	return c.inner.CheckMissionActive(ctx, tenant, mission)
+}
+
+// CheckRelation delegates to the inner Checker. The result is deliberately NOT
+// cached: a revoked grant must stop the next model call.
+func (c *CachedChecker) CheckRelation(
+	ctx context.Context, user, relation, object string, condCtx map[string]any,
+) (bool, error) {
+	return c.inner.CheckRelation(ctx, user, relation, object, condCtx)
 }
 
 // userSessionProbeIAT is a token_issued_at value far enough in the future that

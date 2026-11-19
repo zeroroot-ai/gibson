@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -167,36 +166,7 @@ func (m *mockHarnessForResolver) CallToolProtoStream(ctx context.Context, name s
 	return nil
 }
 
-// Stub implementations
-func (m *mockHarnessForResolver) Complete(ctx context.Context, slot string, messages []llm.Message, opts ...CompletionOption) (*llm.CompletionResponse, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *mockHarnessForResolver) CompleteWithTools(ctx context.Context, slot string, messages []llm.Message, tools []llm.ToolDef, opts ...CompletionOption) (*llm.CompletionResponse, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *mockHarnessForResolver) Stream(ctx context.Context, slot string, messages []llm.Message, opts ...CompletionOption) (<-chan llm.StreamChunk, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *mockHarnessForResolver) CompleteStructuredAny(ctx context.Context, slot string, messages []llm.Message, schemaType any, opts ...CompletionOption) (any, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *mockHarnessForResolver) CompleteStructuredAnyWithUsage(ctx context.Context, slot string, messages []llm.Message, schemaType any, opts ...CompletionOption) (*StructuredCompletionResult, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
 func (m *mockHarnessForResolver) ListTools() []ToolDescriptor {
-	return nil
-}
-
-func (m *mockHarnessForResolver) QueryPlugin(ctx context.Context, componentName string, method string, params map[string]any) (any, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *mockHarnessForResolver) ListPlugins() []PluginDescriptor {
 	return nil
 }
 
@@ -205,6 +175,14 @@ func (m *mockHarnessForResolver) DelegateToAgent(ctx context.Context, agentName 
 }
 
 func (m *mockHarnessForResolver) ListAgents() []AgentDescriptor {
+	return nil
+}
+
+func (m *mockHarnessForResolver) QueryPlugin(ctx context.Context, componentName string, method string, params map[string]any) (any, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockHarnessForResolver) ListPlugins() []PluginDescriptor {
 	return nil
 }
 
@@ -269,10 +247,6 @@ func (m *mockHarnessForResolver) Tracer() trace.Tracer {
 }
 
 func (m *mockHarnessForResolver) Metrics() MetricsRecorder {
-	return nil
-}
-
-func (m *mockHarnessForResolver) TokenUsage() *llm.TokenTracker {
 	return nil
 }
 

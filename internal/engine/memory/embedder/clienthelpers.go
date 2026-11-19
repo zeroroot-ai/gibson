@@ -9,11 +9,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-// maxResponseBytes caps how much of an upstream response body we read into
-// memory — both successful embedding payloads (bounded by model dimension × batch)
-// and error bodies. 32 MiB comfortably holds a large batch of 3072-dim vectors.
-const maxResponseBytes = 32 << 20
-
 // resolveAndRegisterDimension looks up the output dimension for a model and
 // records it in the model→dimension source of truth so the vector index sized
 // from DimensionForModel matches what this embedder emits (#807). An unknown
@@ -33,7 +28,7 @@ func resolveAndRegisterDimension(provider, model string) (int, error) {
 	return dim, nil
 }
 
-// assertDimension fails closed when an upstream returns a vector whose length
+// assertDimension fails closed when the gateway returns a vector whose length
 // does not match the dimension the index was sized for. Storing a mismatched
 // vector would silently fail RediSearch indexing of the whole document.
 func assertDimension(provider string, want, got int) error {
@@ -43,24 +38,4 @@ func assertDimension(provider string, want, got int) error {
 			provider, want, got))
 	}
 	return nil
-}
-
-// firstNonEmptyStr returns the first non-empty string, or "" if all are empty.
-func firstNonEmptyStr(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-// snippet returns a short, log-safe prefix of an upstream error body.
-func snippet(b []byte) string {
-	const max = 256
-	s := string(b)
-	if len(s) > max {
-		return s[:max] + "…"
-	}
-	return s
 }

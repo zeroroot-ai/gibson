@@ -151,16 +151,20 @@ type MissionFilter struct {
 type MissionStatus string
 
 const (
-	// MissionStatusPending indicates the mission has been created but not yet started.
-	MissionStatusPending MissionStatus = "pending"
-	// MissionStatusRunning indicates the mission is currently executing.
-	MissionStatusRunning MissionStatus = "running"
+	// MissionStatusSubmitted indicates the mission has been created but not yet started.
+	MissionStatusSubmitted MissionStatus = "submitted"
+	// MissionStatusWorking indicates the mission is currently executing.
+	MissionStatusWorking MissionStatus = "working"
 	// MissionStatusCompleted indicates the mission finished successfully.
 	MissionStatusCompleted MissionStatus = "completed"
 	// MissionStatusFailed indicates the mission finished with an error.
 	MissionStatusFailed MissionStatus = "failed"
-	// MissionStatusCancelled indicates the mission was cancelled before completion.
-	MissionStatusCancelled MissionStatus = "cancelled"
+	// MissionStatusCanceled indicates the mission was canceled before completion.
+	MissionStatusCanceled MissionStatus = "canceled"
+	// MissionStatusPaused indicates an operator halted the mission.
+	MissionStatusPaused MissionStatus = "paused"
+	// MissionStatusInputRequired indicates the mission waits for a person.
+	MissionStatusInputRequired MissionStatus = "input_required"
 )
 
 // MissionRecord represents minimal mission information needed for spawn limits.
@@ -255,7 +259,7 @@ func CheckSpawnLimits(ctx context.Context, lister MissionLister, missionID types
 
 	// Check concurrent missions
 	// Query all missions currently in running state
-	runningStatus := MissionStatusRunning
+	runningStatus := MissionStatusWorking
 	running, err := lister.List(ctx, &MissionFilter{
 		Status: &runningStatus,
 	})

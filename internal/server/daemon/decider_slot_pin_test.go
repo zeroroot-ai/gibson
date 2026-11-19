@@ -15,29 +15,56 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
-// deciderProvider is a provider with structured output that answers every
-// Decider call with "wait" and records the model of each call.
-type deciderProvider struct {
-	*servingProvider
+// modelRecorder is the test gateway of the Decider. It answers every call with
+// "wait" and records the target and the request of each call.
+type modelRecorder struct {
+	targets []modelclient.Target
+	callers []modelclient.Caller
+	reqs    []modelclient.Request
+	err     error
 }
 
-func (p *deciderProvider) SupportsStructuredOutput(types.ResponseFormatType) bool { return true }
-
-func (p *deciderProvider) CompleteStructured(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	resp, err := p.Complete(ctx, req)
-	if err != nil {
-		return nil, err
+func (r *modelRecorder) Respond(
+	_ context.Context, c modelclient.Caller, t modelclient.Target, req modelclient.Request,
+) (*modelclient.Response, error) {
+	r.callers = append(r.callers, c)
+	r.targets = append(r.targets, t)
+	r.reqs = append(r.reqs, req)
+	if r.err != nil {
+		return nil, r.err
 	}
-	resp.RawJSON = `{"action":"wait"}`
-	return resp, nil
+	return &modelclient.Response{Output: []modelclient.Item{{
+		Type: modelclient.ItemMessage, Role: modelclient.RoleAssistant,
+		Content: []modelclient.ContentPart{{Type: modelclient.PartOutputText, Text: `{"action":"wait"}`}},
+	}}}, nil
+}
+
+// servedBy returns a view of the models that the gateway got for one provider.
+func (r *modelRecorder) servedBy(provider string) *servedModels {
+	return &servedModels{r: r, provider: provider}
+}
+
+type servedModels struct {
+	r        *modelRecorder
+	provider string
+}
+
+func (s *servedModels) servedModels() []string {
+	var out []string
+	for _, t := range s.r.targets {
+		if t.Provider == s.provider {
+			out = append(out, t.Model)
+		}
+	}
+	return out
 }
 
 // noTargets is a target lookup that has no target.
@@ -52,23 +79,24 @@ func (noTargets) Get(context.Context, types.ID) (*types.Target, error) {
 // harness comes from the real harness factory over a real DaemonSlotManager.
 // The tenant has the default provider "default-p" and a second provider
 // "fast-p". A non-nil filter is the model gate.
-func decideWith(t *testing.T, def *missionpb.MissionDefinition, filter modelgate.Filter) (defaultP, fastP *deciderProvider, out brain.DeciderOutput, err error) {
+func decideWith(t *testing.T, def *missionpb.MissionDefinition, filter modelgate.Filter) (defaultP, fastP *servedModels, out brain.DeciderOutput, err error) {
 	t.Helper()
-	defaultP = &deciderProvider{&servingProvider{name: "default-p", models: []string{"d-1"}}}
-	fastP = &deciderProvider{&servingProvider{name: "fast-p", models: []string{"f-small", "f-large"}}}
-	registry := llm.NewLLMRegistry()
-	require.NoError(t, registry.RegisterProvider(defaultP))
-	require.NoError(t, registry.RegisterProvider(fastP))
+	providers := []SlotProvider{
+		{Name: "default-p", DefaultModel: "d-1"},
+		{Name: "fast-p", DefaultModel: "f-small"},
+	}
+	gateway := &modelRecorder{}
+	defaultP, fastP = gateway.servedBy("default-p"), gateway.servedBy("fast-p")
 	logger := slog.New(slog.DiscardHandler)
-	manager := NewDaemonSlotManager(registry, logger).WithDefaultProvider("default-p")
+	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("default-p")
 	if filter != nil {
 		manager.WithModelFilter(filter)
 	}
 
 	factory, ferr := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
-		LLMRegistry: registry,
-		SlotManager: manager,
-		Logger:      logger,
+		SlotManagerForTenant: fixedTenantSlots(manager),
+
+		Logger: logger,
 		// The Decider dispatches no tool, so it reads no target.
 		TargetFacts: func() gibsonharness.TargetFactsLookup { return noTargets{} },
 	})
@@ -80,9 +108,10 @@ func decideWith(t *testing.T, def *missionpb.MissionDefinition, filter modelgate
 	require.NoError(t, herr)
 
 	exec := newBrainExecutor(nil, logger)
+	exec.models = gateway
 	exec.register("m1", &missionBinding{
 		ctx: context.Background(), tenant: chainTenant, harness: h, slot: deciderSlot,
-		deciderPin: deciderSlotFrom(def.GetDeciderSlot()),
+		deciderPin: deciderSlotFrom(def.GetDeciderSlot()), initiator: "user:u1",
 	})
 	out, err = exec.Decide(context.Background(), brain.MissionContext{MissionID: "m1", Goal: "find things"})
 	return defaultP, fastP, out, err
@@ -234,4 +263,110 @@ func TestExecuteMission_TheMissionHarnessCarriesTheDeciderPin(t *testing.T) {
 	require.NotNil(t, pin, "the mission harness carries the decider pin")
 	assert.Equal(t, "fast-p", pin.Provider)
 	assert.Equal(t, "f-large", pin.Model)
+}
+
+// The Decider sends its call to the model gateway with the exact model name, the
+// tenant and the mission of the binding, and the structured output schema. It
+// emits no event of its own: the gateway trace is the one source.
+func TestDecide_SendsOneGatewayCallWithTheIdentityOfTheMission(t *testing.T) {
+	gateway := &modelRecorder{}
+	providers := []SlotProvider{{Name: "default-p", DefaultModel: "d-1"}}
+	logger := slog.New(slog.DiscardHandler)
+	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("default-p")
+	factory, err := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
+		SlotManagerForTenant: fixedTenantSlots(manager),
+		Logger:               logger,
+		TargetFacts:          func() gibsonharness.TargetFactsLookup { return noTargets{} },
+	})
+	require.NoError(t, err)
+	def := &missionpb.MissionDefinition{Id: "m1"}
+	m := &mission.Mission{ID: types.NewID(), Name: "pin", TenantID: chainTenant}
+	missionCtx := newRunMissionContext(m, &mission.MissionRun{RunNumber: 1}, def, "run-1")
+	h, err := newMissionHarness(factory, missionCtx, def, gibsonharness.TargetInfo{})
+	require.NoError(t, err)
+
+	exec := newBrainExecutor(nil, logger)
+	exec.models = gateway
+	exec.register("m1", &missionBinding{
+		ctx: context.Background(), tenant: chainTenant, harness: h, slot: deciderSlot, initiator: "user:u1",
+	})
+	_, err = exec.Decide(context.Background(), brain.MissionContext{MissionID: "m1", Goal: "find things"})
+	require.NoError(t, err)
+
+	require.Len(t, gateway.targets, 1)
+	assert.Equal(t, modelclient.Target{Tenant: chainTenant, Provider: "default-p", Model: "d-1"}, gateway.targets[0])
+	c := gateway.callers[0]
+	assert.Equal(t, chainTenant, c.Tenant)
+	assert.Equal(t, "m1", c.Mission)
+	assert.NotEmpty(t, c.Task)
+	assert.Equal(t, "user:u1", c.Initiator)
+	assert.Equal(t, "brain-decider", c.Purpose)
+	req := gateway.reqs[0]
+	require.NotNil(t, req.Text)
+	assert.Equal(t, "json_schema", req.Text.Format.Type)
+	assert.Contains(t, string(req.Text.Format.Schema), `"additionalProperties":false`)
+	assert.NotEmpty(t, req.Input)
+}
+
+// A gateway refusal of a pinned Decider ends the mission with the reason, as a
+// refusal by the slot gate did.
+func TestDecide_AGatewayRefusalOfAPinnedDeciderFailsTheMission(t *testing.T) {
+	providers := []SlotProvider{{Name: "fast-p", DefaultModel: "f-large"}}
+	logger := slog.New(slog.DiscardHandler)
+	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("fast-p")
+	factory, err := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
+		SlotManagerForTenant: fixedTenantSlots(manager),
+		Logger:               logger,
+		TargetFacts:          func() gibsonharness.TargetFactsLookup { return noTargets{} },
+	})
+	require.NoError(t, err)
+	def := &missionpb.MissionDefinition{
+		Id: "m1", DeciderSlot: &missionpb.LLMSlotConfig{Provider: "fast-p", Model: "f-large"},
+	}
+	m := &mission.Mission{ID: types.NewID(), Name: "pin", TenantID: chainTenant}
+	h, err := newMissionHarness(factory, newRunMissionContext(m, &mission.MissionRun{RunNumber: 1}, def, "run-1"),
+		def, gibsonharness.TargetInfo{})
+	require.NoError(t, err)
+
+	exec := newBrainExecutor(nil, logger)
+	exec.models = &modelRecorder{err: &modelclient.APIError{Status: 403, Body: "denied"}}
+	exec.register("m1", &missionBinding{
+		ctx: context.Background(), tenant: chainTenant, harness: h, slot: deciderSlot,
+		deciderPin: deciderSlotFrom(def.GetDeciderSlot()),
+	})
+	out, err := exec.Decide(context.Background(), brain.MissionContext{MissionID: "m1"})
+	require.NoError(t, err)
+	require.NotNil(t, out.Complete)
+	assert.Equal(t, "failed", out.Complete.Outcome)
+	assert.Contains(t, out.Complete.Reason, "decider_slot")
+}
+
+// An error of the gateway that is not a refusal goes back to the brain, which
+// retries on the next evidence change.
+func TestDecide_AGatewayOutageKeepsTheRetry(t *testing.T) {
+	providers := []SlotProvider{{Name: "default-p", DefaultModel: "d-1"}}
+	logger := slog.New(slog.DiscardHandler)
+	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("default-p")
+	factory, err := gibsonharness.NewHarnessFactory(gibsonharness.HarnessConfig{
+		SlotManagerForTenant: fixedTenantSlots(manager),
+		Logger:               logger,
+		TargetFacts:          func() gibsonharness.TargetFactsLookup { return noTargets{} },
+	})
+	require.NoError(t, err)
+	def := &missionpb.MissionDefinition{Id: "m1"}
+	m := &mission.Mission{ID: types.NewID(), Name: "pin", TenantID: chainTenant}
+	h, err := newMissionHarness(factory, newRunMissionContext(m, &mission.MissionRun{RunNumber: 1}, def, "run-1"),
+		def, gibsonharness.TargetInfo{})
+	require.NoError(t, err)
+	exec := newBrainExecutor(nil, logger)
+	exec.models = &modelRecorder{err: &modelclient.APIError{Status: 502, Body: "bad gateway"}}
+	exec.register("m1", &missionBinding{ctx: context.Background(), tenant: chainTenant, harness: h, slot: deciderSlot})
+	out, err := exec.Decide(context.Background(), brain.MissionContext{MissionID: "m1"})
+	require.Error(t, err)
+	assert.Nil(t, out.Complete)
+}
+
+// fixedTenantSlots gives the same slot manager to each tenant.
+func fixedTenantSlots(sm gibsonharness.SlotManager) func(context.Context, string) (gibsonharness.SlotManager, error) {
+	return func(context.Context, string) (gibsonharness.SlotManager, error) { return sm, nil }
 }

@@ -43,7 +43,7 @@ func testMission() *Mission {
 		Description: "description",
 		Objective:   "objective",
 		TargetRef:   "target",
-		Status:      MissionStatusPending,
+		Status:      MissionStatusSubmitted,
 		CreatedAt:   time.Now(),
 		YAMLSource:  "yaml",
 	}

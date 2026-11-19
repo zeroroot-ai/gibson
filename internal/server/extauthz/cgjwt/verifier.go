@@ -61,6 +61,10 @@ type Verifier struct {
 	expectedIssuer   string
 	expectedAudience string
 
+	// replay records each accepted daemon call grant, so one grant is accepted
+	// one time. Nil means that no daemon call grant is accepted.
+	replay ReplayStore
+
 	mu    sync.RWMutex
 	cache map[string]cachedKey // kid -> daemon public key
 }
@@ -101,6 +105,10 @@ type Config struct {
 	// ExpectedAudience is the aud value CG-JWTs must carry.
 	// Required; the daemon's identifier ("gibson-daemon" by default).
 	ExpectedAudience string
+
+	// ReplayStore records each daemon call grant, which is single use. With nil,
+	// the verifier accepts no daemon call grant. A task grant needs no store.
+	ReplayStore ReplayStore
 }
 
 // NewVerifier constructs a Verifier. Returns an error if required
@@ -125,6 +133,7 @@ func NewVerifier(cfg Config) (*Verifier, error) {
 		expectedIssuer:   cfg.ExpectedIssuer,
 		expectedAudience: cfg.ExpectedAudience,
 		cache:            map[string]cachedKey{},
+		replay:           cfg.ReplayStore,
 	}
 	if v.ttl <= 0 {
 		v.ttl = time.Hour

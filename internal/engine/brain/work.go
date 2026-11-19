@@ -26,6 +26,14 @@ const (
 	// executed, and (unlike failed) not a mission failure. Its dependents become
 	// dead (their dep never reaches `done`) and are ignored by completion.
 	WorkSkipped WorkState = "skipped"
+	// WorkCanceled is work that was canceled after it started, for example by
+	// CancelTask of an A2A Task. It is terminal. It is not done, so the
+	// dependents of the item never run.
+	WorkCanceled WorkState = "canceled"
+	// WorkInputRequired is work that stopped to wait for input or for auth from
+	// a caller (A2A Task state input-required or auth-required). It is not
+	// terminal. A later WorkCompleted moves it to done, failed or canceled.
+	WorkInputRequired WorkState = "input_required"
 )
 
 // WorkItem is a unit of work tracked as an entity — a tool call, agent run, or
@@ -41,12 +49,17 @@ const (
 // `running` (dispatched directly). DependsOn references other WorkItem IDs that
 // must reach `done` before this one is dispatchable.
 type WorkItem struct {
-	ID         string
-	MissionID  string   // owning mission (empty for free-standing work)
-	RunID      string   // the run of the mission that owns the item (gibson#1217)
-	Kind       string   // "tool" | "agent" | "plugin"
-	Target     string   // the capability being executed
-	Input      string   // opaque dispatch input (e.g. the CUE node config), carried for dispatch
+	ID        string
+	MissionID string // owning mission (empty for free-standing work)
+	RunID     string // the run of the mission that owns the item (gibson#1217)
+	Kind      string // "tool" | "agent" | "plugin"
+	Target    string // the capability being executed
+	Input     string // opaque dispatch input (e.g. the CUE node config), carried for dispatch
+	// ParentID is the id of the work item whose run delegated to this one, for
+	// example an A2A message from an agent to another agent. Empty means the
+	// mission itself started the item. The chain of parents is the delegation
+	// depth.
+	ParentID   string
 	DependsOn  []string // WorkItem IDs that must be `done` before this is dispatchable
 	State      WorkState
 	Result     string
@@ -93,6 +106,10 @@ type WorkItem struct {
 	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
 	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
 	SlotPins map[string]agent.SlotConfig
+	// MaxTokensPerCall is the effective token cap of one model call of the node
+	// (the node value, else the mission value). Zero means no cap. It travels
+	// with SlotPins to the dispatch.
+	MaxTokensPerCall int32
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -123,6 +140,9 @@ type WorkDispatched struct {
 	ItemKind string // tool | agent | plugin
 	Target   string
 	Input    string
+	// ParentID names the work item whose run delegated to this one. See
+	// WorkItem.ParentID.
+	ParentID string
 	// Timeout carries the node's execution bound to the dispatch effect-handler
 	// so it does not have to read the World back inside the locked tick — the
 	// same reason MissionID and Input are carried here (gibson#1602).
@@ -139,6 +159,10 @@ type WorkDispatched struct {
 	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
 	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
 	SlotPins map[string]agent.SlotConfig
+	// MaxTokensPerCall is the effective token cap of one model call of the node
+	// (the node value, else the mission value). Zero means no cap. It travels
+	// with SlotPins to the dispatch.
+	MaxTokensPerCall int32
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -163,7 +187,7 @@ type WorkRetried struct {
 func (WorkRetried) Kind() string { return "work.retried" }
 
 // WorkCompleted records that a previously-dispatched unit of work finished —
-// whenever that is. Err non-empty means failure.
+// whenever that is. Err non-empty means failure, unless State says otherwise.
 type WorkCompleted struct {
 	ID string
 	// RunID names the run this event belongs to. The daemon mints it when a run
@@ -173,6 +197,11 @@ type WorkCompleted struct {
 	RunID  string
 	Result string
 	Err    string
+	// State is the state this event sets on the work item. The values are
+	// canceled and input_required. Empty means the state follows from Err:
+	// failed when Err is not empty, done when it is empty. For canceled and
+	// input_required, Err holds the status message of the Task.
+	State WorkState `json:",omitempty"`
 	// Snapshot is the id of the sandbox snapshot that the node left in the
 	// sandbox checkpoint mode (ADR-0170). Empty when it left none.
 	Snapshot string `json:",omitempty"`
@@ -217,6 +246,9 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		if e.SlotPins != nil {
 			wi.SlotPins = e.SlotPins
 		}
+		if e.MaxTokensPerCall > 0 {
+			wi.MaxTokensPerCall = e.MaxTokensPerCall
+		}
 		if e.StartsFrom != "" {
 			wi.StartsFrom = e.StartsFrom
 		}
@@ -232,23 +264,25 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		return
 	}
 	w.work.NewEntity(&WorkItem{
-		ID:           e.ID,
-		MissionID:    e.MissionID,
-		RunID:        e.RunID,
-		Kind:         e.ItemKind,
-		Target:       e.Target,
-		Input:        e.Input,
-		State:        WorkRunning,
-		Attempts:     1,
-		Timeout:      e.Timeout,
-		Group:        e.Group,
-		Limit:        e.Limit,
-		Network:      e.Network,
-		SlotPins:     e.SlotPins,
-		StartsFrom:   e.StartsFrom,
-		Forkable:     e.Forkable,
-		Checkpoint:   e.Checkpoint,
-		FromSnapshot: e.FromSnapshot,
+		ID:               e.ID,
+		MissionID:        e.MissionID,
+		RunID:            e.RunID,
+		Kind:             e.ItemKind,
+		Target:           e.Target,
+		Input:            e.Input,
+		ParentID:         e.ParentID,
+		State:            WorkRunning,
+		Attempts:         1,
+		Timeout:          e.Timeout,
+		Group:            e.Group,
+		Limit:            e.Limit,
+		Network:          e.Network,
+		SlotPins:         e.SlotPins,
+		MaxTokensPerCall: e.MaxTokensPerCall,
+		StartsFrom:       e.StartsFrom,
+		Forkable:         e.Forkable,
+		Checkpoint:       e.Checkpoint,
+		FromSnapshot:     e.FromSnapshot,
 	})
 	// A fresh dispatch under an open Decider decision is one of that decision's
 	// chosen actions (gibson#1062). Only first dispatches link — a retry re-arms an
@@ -280,11 +314,21 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 	// ResumeFailInFlight) is a no-op. This prevents a worker that outlived the
 	// daemon from corrupting the World after a restart (ADR-0163).
 	switch wi.State {
-	case WorkFailed, WorkDone, WorkSkipped:
+	case WorkFailed, WorkDone, WorkSkipped, WorkCanceled:
+		return
+	}
+	if e.State == WorkInputRequired {
+		// The work waits for input. It is not finished, so it gets no
+		// completion order and keeps its attempt count.
+		wi.State, wi.Err = WorkInputRequired, e.Err
 		return
 	}
 	w.nextCompletedSeq++
 	wi.CompletedSeq = w.nextCompletedSeq
+	if e.State == WorkCanceled {
+		wi.State, wi.Err = WorkCanceled, e.Err
+		return
+	}
 	if e.Err != "" {
 		wi.State, wi.Err = WorkFailed, e.Err
 		return
@@ -300,6 +344,7 @@ type WorkSnapshot struct {
 	Kind       string
 	Target     string
 	Input      string
+	ParentID   string
 	DependsOn  []string
 	State      WorkState
 	Result     string
@@ -322,6 +367,10 @@ type WorkSnapshot struct {
 	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
 	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
 	SlotPins map[string]agent.SlotConfig
+	// MaxTokensPerCall is the effective token cap of one model call of the node
+	// (the node value, else the mission value). Zero means no cap. It travels
+	// with SlotPins to the dispatch.
+	MaxTokensPerCall int32
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -351,6 +400,7 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 			Kind:                   wi.Kind,
 			Target:                 wi.Target,
 			Input:                  wi.Input,
+			ParentID:               wi.ParentID,
 			DependsOn:              append([]string(nil), wi.DependsOn...),
 			State:                  wi.State,
 			Result:                 wi.Result,
@@ -363,6 +413,7 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 			Limit:                  wi.Limit,
 			Network:                wi.Network,
 			SlotPins:               wi.SlotPins,
+			MaxTokensPerCall:       wi.MaxTokensPerCall,
 			StartsFrom:             wi.StartsFrom,
 			Forkable:               wi.Forkable,
 			Checkpoint:             wi.Checkpoint,

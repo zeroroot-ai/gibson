@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 )
 
@@ -69,7 +68,7 @@ func (s *providerCredentialSource) ResolveProviderCredential(ctx context.Context
 	}
 	candidates := make([]*providerconfig.ProviderConfig, 0, len(configs))
 	for _, c := range configs {
-		if c == nil || !c.Enabled || c.Type != llm.ProviderType(provider) {
+		if c == nil || !c.Enabled || c.Type != providerconfig.ProviderType(provider) {
 			continue
 		}
 		if c.IsDefault {
@@ -95,8 +94,8 @@ func (s *providerCredentialSource) ResolveProviderCredential(ctx context.Context
 	}
 	// The sandbox receives the value as it is read here. A value that does not
 	// pass the check, whoever wrote it, refuses the launch.
-	if key == llm.CustomHeadersKey {
-		canonical, cerr := llm.CanonicalCustomHeaders(value)
+	if key == providerconfig.CustomHeadersKey {
+		canonical, cerr := providerconfig.CanonicalCustomHeaders(value)
 		if cerr != nil {
 			return "", fmt.Errorf("provider %q: %w", candidates[0].Name, cerr)
 		}

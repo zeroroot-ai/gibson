@@ -16,7 +16,6 @@ import (
 // Group names are shared with the SDK's agent.Harness deliberately; see
 // ADR-0162.
 var (
-	_ LLMCaller       = AgentHarness(nil)
 	_ ToolCaller      = AgentHarness(nil)
 	_ PluginCaller    = AgentHarness(nil)
 	_ Delegator       = AgentHarness(nil)
@@ -31,8 +30,6 @@ func TestAgentHarnessMethodSetUnchanged(t *testing.T) {
 	want := []string{
 		"CallToolProto", "CallToolProtoStream", "ListTools",
 		"GetToolDescriptor", "GetToolCapabilities", "GetAllToolCapabilities",
-		"Complete", "CompleteWithTools", "Stream",
-		"CompleteStructuredAny", "CompleteStructuredAnyWithUsage",
 		"DelegateToAgent", "ListAgents",
 		"GetFindings", "GetMissionRunHistory", "GetRunFindings",
 		// Graph reads, added deliberately (#492): the daemon-side harness had no
@@ -46,7 +43,7 @@ func TestAgentHarnessMethodSetUnchanged(t *testing.T) {
 		"ApplicationFindings",
 		"ListPlugins", "QueryPlugin",
 		"Logger", "Metrics", "Mission", "MissionExecutionContext", "MissionID",
-		"SubmitFinding", "Target", "TokenUsage", "Tracer",
+		"SubmitFinding", "Target", "Tracer",
 		// ForTarget is a per-unit-of-work VIEW of this harness, added deliberately
 		// (#526) so a for_each instance's findings carry the target that instance
 		// assessed. Every scope reader in the callback surface resolves from
@@ -84,7 +81,6 @@ func TestAgentHarnessMethodSetUnchanged(t *testing.T) {
 // group owns it.
 func TestGroupsAreDisjoint(t *testing.T) {
 	groups := map[string]reflect.Type{
-		"LLMCaller":       reflect.TypeOf((*LLMCaller)(nil)).Elem(),
 		"ToolCaller":      reflect.TypeOf((*ToolCaller)(nil)).Elem(),
 		"PluginCaller":    reflect.TypeOf((*PluginCaller)(nil)).Elem(),
 		"Delegator":       reflect.TypeOf((*Delegator)(nil)).Elem(),

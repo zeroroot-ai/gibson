@@ -45,7 +45,7 @@ func TestComponentServiceAuthorize_RunsTheRealDecision(t *testing.T) {
 	}}, az)
 
 	queue := component.NewRedisWorkQueue(sc.Client())
-	svc := component.NewComponentServiceServer(unusedRegistry{}, queue, slog.New(slog.DiscardHandler), nil, nil, nil, nil).
+	svc := component.NewComponentServiceServer(unusedRegistry{}, queue, slog.New(slog.DiscardHandler), nil, nil, nil).
 		WithWorkContextRegistry(component.NewRedisWorkContextRegistry(sc)).
 		WithRunAuthorizer(decision)
 

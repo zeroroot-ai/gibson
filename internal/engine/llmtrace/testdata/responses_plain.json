@@ -1,0 +1,31 @@
+{
+  "attributes": {
+    "client.address": "127.0.0.1",
+    "duration": "0ms",
+    "endpoint": "127.0.0.1:35577",
+    "gateway": "default/default",
+    "gen_ai.operation.name": "chat",
+    "gen_ai.provider.name": "openai",
+    "gen_ai.request.model": "gpt-fixture",
+    "gen_ai.response.model": "gpt-fixture",
+    "gen_ai.usage.input_tokens": 120,
+    "gen_ai.usage.output_tokens": 45,
+    "gibson.request_body": "{\"model\":\"gpt-fixture\",\"stream\":false,\"input\":[{\"role\":\"user\",\"content\":\"scan 10.0.0.5 marker-responses-1\"},{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"nmap\",\"arguments\":\"{\\\"target\\\":\\\"10.0.0.5\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call_1\",\"output\":\"open ports: 22/tcp ssh, 80/tcp http\"}]}",
+    "gibson.response_body": "{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"I must scan the host first.\"}]},{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"annotations\":[],\"logprobs\":null,\"text\":\"I will run a port scan.\"}],\"id\":\"msg_1\",\"role\":\"assistant\",\"status\":\"completed\"},{\"type\":\"function_call\",\"arguments\":\"{\\\"target\\\":\\\"10.0.0.5\\\",\\\"ports\\\":\\\"1-1024\\\"}\",\"call_id\":\"toolu_2\",\"name\":\"nmap\",\"id\":\"fc_1\",\"status\":\"completed\"}],\"model\":\"gpt-fixture\",\"usage\":{\"input_tokens\":120,\"output_tokens\":45,\"total_tokens\":165},\"created_at\":1700000000,\"object\":\"response\"}",
+    "gibson.subject": "user-from-authz",
+    "gibson.tenant": "tenant-e",
+    "http.request.method": "POST",
+    "http.response.status_code": 200,
+    "listener": "listener0",
+    "network.protocol.version": "1.1",
+    "protocol": "llm",
+    "route": "default/tenant-e",
+    "server.address": "127.0.0.1",
+    "server.port": 45127,
+    "span.id": "35812d81d07f6583",
+    "trace.id": "42ba69194b7ff65db4f48e586bfae8d8",
+    "url.path": "/v1/responses",
+    "url.scheme": "http"
+  },
+  "name": "POST /*"
+}

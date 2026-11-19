@@ -26,10 +26,10 @@ import (
 // in the cluster-bound suites.
 
 func TestMissionMatchesFilter_StatusPredicate(t *testing.T) {
-	running := MissionStatusRunning
+	running := MissionStatusWorking
 	paused := MissionStatusPaused
 
-	m := &Mission{Status: MissionStatusRunning}
+	m := &Mission{Status: MissionStatusWorking}
 
 	assert.True(t, missionMatchesFilter(m, &MissionFilter{Status: &running}),
 		"a running mission must match a running filter")
@@ -49,7 +49,7 @@ func TestListStatusFilter_TakesScanPath(t *testing.T) {
 	// JSON doc under miniredis) are skipped, not fatal.
 	require.NoError(t, mr.Set("gibson:mission:0123456789abcdef", "not-a-json-doc"))
 
-	running := MissionStatusRunning
+	running := MissionStatusWorking
 	missions, err := store.List(ctx, &MissionFilter{Status: &running})
 	require.NoError(t, err,
 		"a status-filtered List must take the SCAN path without a status index")
@@ -69,7 +69,7 @@ func TestGetActive_ComposesStatusFilteredLists(t *testing.T) {
 func TestGetByNameAndStatus_NotFoundOnEmptyNameIndex(t *testing.T) {
 	store, _ := newTestConnBoundStore(t)
 
-	_, err := store.GetByNameAndStatus(context.Background(), "no-such-mission", MissionStatusRunning)
+	_, err := store.GetByNameAndStatus(context.Background(), "no-such-mission", MissionStatusWorking)
 	require.Error(t, err)
 	assert.True(t, IsNotFoundError(err), "empty name index -> NotFound, got: %v", err)
 }
@@ -86,7 +86,7 @@ func TestGetByNameAndStatus_SkipsUnloadableCandidates(t *testing.T) {
 	_, err = mr.SAdd(cbMissionByNameKey("recon"), types.NewID().String())
 	require.NoError(t, err)
 
-	_, gerr := store.GetByNameAndStatus(ctx, "recon", MissionStatusRunning)
+	_, gerr := store.GetByNameAndStatus(ctx, "recon", MissionStatusWorking)
 	require.Error(t, gerr)
 	assert.True(t, IsNotFoundError(gerr),
 		"unloadable candidates are skipped and the tail is NotFound, got: %v", gerr)

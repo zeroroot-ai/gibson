@@ -239,6 +239,7 @@ jobs:
           - "integration"
           - "e2e"
           - "test_fixtures"
+          - "agentgateway_fixture"
           - "openbao_integration,openbao_smoke,llm_integration,integration_spire"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -456,7 +457,8 @@ jobs:
         run: make check-config-field-readers
       - name: Every served proto field has a consumer or a recorded verdict
         # gibson#502, ADR-0094 layer 5, in the merge gate since gibson#1166.
-        # The scan reads six other repos at their main, so a field that loses
+        # The scan reads six other repos at their main (or at the one branch
+        # that .proto-consumer-ref names), so a field that loses
         # its last reader fails the next PR here, not a nightly run nobody
         # watches (it was red on main for five days before gibson#1166). The
         # make target runs the offline fixture first. Every consumer is
@@ -465,13 +467,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          c="$RUNNER_TEMP/consumers"
-          for r in sdk adk gibson-executor setec dashboard sdk-ts; do
-            git clone --quiet --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/zeroroot-ai/${r}.git" "$c/$r"
-            echo "${r} $(git -C "$c/$r" rev-parse --short HEAD)"
-          done
-          CONSUMER_ROOTS=". $c/sdk $c/adk $c/gibson-executor $c/setec $c/dashboard $c/sdk-ts" \
-            make check-proto-field-consumers
+          bash scripts/__tests__/proto-field-consumer-roots.test.sh
+          roots="$(PROTO_CONSUMERS_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/zeroroot-ai" \
+            bash scripts/proto-field-consumer-roots.sh "$RUNNER_TEMP/consumers")"
+          CONSUMER_ROOTS="$roots" make check-proto-field-consumers
       - name: Guard gofmt cleanliness
         # gibson#1415: no lane ever CHECKED formatting -- `make fmt` rewrites
         # instead of failing, and .golangci.yml enables no formatter -- so

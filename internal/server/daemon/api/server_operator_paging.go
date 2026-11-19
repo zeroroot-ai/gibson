@@ -26,6 +26,8 @@ const (
 	pageScopePendingTenantOps          = "operator-pending-tenant-ops"
 	pageScopeDesiredCatalogPlugins     = "operator-desired-catalog-plugins"
 	pageScopeDesiredConnectors         = "operator-desired-connectors"
+	pageScopeTenantModelProviders      = "operator-tenant-model-providers"
+	pageScopeTenantOutsideAgents       = "operator-tenant-outside-agents"
 )
 
 // errNoPageTokenKey reports a daemon that has no page token key.
@@ -58,6 +60,17 @@ func (s *DaemonServer) pageSigner(list string) (*pagetoken.Signer, error) {
 		return nil, status.Errorf(codes.Internal, "page token key: %v", err)
 	}
 	return sg, nil
+}
+
+// tenantPage checks the token of an operator list that reads one tenant. The
+// scope of the token holds the tenant, so a token of another tenant is refused.
+// A daemon with no page token keys answers Unavailable, as the other operator
+// lists do.
+func (s *DaemonServer) tenantPage(list string, size int32, token, tenantID string) (pagetoken.Request, error) {
+	if s.pageKeys == nil {
+		return pagetoken.Request{}, status.Error(codes.Unavailable, errNoPageTokenKey.Error())
+	}
+	return pageOf(s.pageKeys, list, size, token, tenantID)
 }
 
 // pageStart returns the sort key that a page token holds, as fields, or nil for

@@ -156,6 +156,10 @@ func explicitRunID(ev Event) string {
 		return e.MissionRunID
 	case AgentToolCallObserved:
 		return e.MissionRunID
+	case AgentSkillLoaded:
+		return e.MissionRunID
+	case OutsideAgentCalled:
+		return ""
 	default:
 		return ""
 	}
@@ -229,6 +233,12 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		// LlmCallObserved, so a mission-scoped frame's Timeline shows the tool
 		// calls that mission's agents made, attached to the mission they served.
 		// Empty MissionID = tenant-ambient, same as an ExecuteLLM call.
+		return e.MissionID != "" && e.MissionID == missionID
+	case AgentSkillLoaded:
+		// A load belongs to the mission whose agent made it.
+		return e.MissionID != "" && e.MissionID == missionID
+	case OutsideAgentCalled:
+		// A delegation belongs to the mission of the grant of the caller.
 		return e.MissionID != "" && e.MissionID == missionID
 	default:
 		// Any other unattributable observation is tenant-ambient.

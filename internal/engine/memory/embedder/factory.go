@@ -5,11 +5,8 @@ package embedder
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
-	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/infra/netguard"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -48,126 +45,66 @@ const (
 	// KindCohere is Cohere's native /v1/embed endpoint.
 	KindCohere Kind = "cohere"
 
-	// KindVoyage is Voyage AI's /v1/embeddings endpoint.
+	// KindVoyage is refused: the gateway does not accept the reply of Voyage.
 	KindVoyage Kind = "voyage"
 )
 
-// Config is the provider-agnostic input the factory maps to a concrete
-// Embedder. It is deliberately decoupled from the provider proto so this
-// package stays infra-light and easy to unit-test: the daemon's provider
-// handler translates a gibson.tenant.v1.ProviderRecord (type, credentials,
-// default_embedding_model) into this struct at the wiring seam.
+// Config is the input of the factory. The embedder holds no credential and no
+// endpoint: the model gateway holds both for the provider of the tenant.
 type Config struct {
-	// Kind selects the backend. Empty selects the bundled mock default.
+	// Kind is the type of the provider record. It must be a kind that serves
+	// embeddings. Voyage is refused.
 	Kind Kind
 
-	// Model is the embedding model to use — typically the provider's
-	// default_embedding_model. Required for every non-bundled backend; it both
-	// selects the upstream model and (via RegisterModelDimension /
-	// DimensionForModel) sizes the vector index.
+	// Model is the exact embedding model name, typically the default
+	// embedding model of the provider. Required. It selects the upstream model
+	// and, through the model table, the dimension of the vector index.
 	Model string
 
-	// APIKey is the provider API key for HTTP backends (OpenAI, Cohere, Voyage,
-	// and OpenAI-compatible/TEI endpoints that require auth). Bedrock ignores it
-	// and uses the AWS credential chain instead.
-	APIKey string
+	// Tenant and Provider name the route: the ModelProvider of the tenant.
+	Tenant   string
+	Provider string
 
-	// BaseURL overrides the upstream endpoint. Required for the generic
-	// OpenAI-compatible and TEI backends (the self-host / air-gap path); optional
-	// for OpenAI (defaults to https://api.openai.com).
-	BaseURL string
-
-	// Region is the AWS region for the Bedrock backend. Falls back to AWS_REGION
-	// then us-east-1.
-	Region string
-
-	// Extra carries provider-specific credentials/options that do not map to the
-	// fields above — e.g. Bedrock's aws_access_key_id / aws_secret_access_key.
-	// Keys mirror the provider's CredentialField keys.
-	Extra map[string]string
-
-	// AllowPrivateEndpoint disables the SSRF guard on BaseURL. The daemon sets
-	// this from security.allow_private_llm_endpoints for operators running a
-	// local/in-cluster embedder. Off by default: tenant-supplied endpoints
-	// resolving to private/link-local/metadata addresses are rejected.
-	AllowPrivateEndpoint bool
-
-	// Timeout bounds a single embedding request. Zero uses defaultTimeout.
-	Timeout time.Duration
-
-	// HTTPClient is injected by tests to stub upstream responses. Nil uses a
-	// package default client honouring Timeout.
-	HTTPClient *http.Client
+	// Gateway sends the call. The model client of the daemon implements it.
+	Gateway Gateway
 }
 
-const defaultTimeout = 30 * time.Second
-
-// builder constructs a concrete Embedder from a Config. The factory registry
-// maps a Kind to one of these.
-type builder func(Config) (Embedder, error)
-
-// registry maps a provider Kind to its Embedder builder. It is the single
-// dispatch table the factory keys on; adding a backend means adding one entry.
-var registry = map[Kind]builder{
-	KindOpenAI:           newOpenAIEmbedder,
-	KindOpenAICompatible: newOpenAICompatibleEmbedder,
-	KindTEI:              newTEIEmbedder,
-	KindBedrock:          newBedrockEmbedder,
-	KindCohere:           newCohereEmbedder,
-	KindVoyage:           newVoyageEmbedder,
-}
+// ErrVoyageNotSupported is the message for the voyage kind.
+const voyageRefusal = "voyage is not an embedding provider type: the model gateway does not accept its reply. " +
+	"Use openai, openai-compatible, tei, bedrock or cohere"
 
 // NewFromProvider constructs the Embedder for a tenant's configured embedding
 // provider. It is THE way an embedder is built (ADR-0027 wholesale): there is no
-// parallel "old vs new" path.
+// parallel "old vs new" path. All kinds go through the one gateway client.
 //
 // An empty Kind is the onboarding gate (ADR-0059 §4, gibson#810): the live path
-// no longer silently falls back to a bundled embedder. NewFromProvider returns
-// ErrNoEmbeddingProvider so the caller can surface the "configure an embedding
-// provider" prompt to the user, exactly like the LLM-provider gate. Tests that
-// need a deterministic offline embedder inject NewMockEmbedder() directly rather
-// than relying on an empty-Kind fallback.
+// returns ErrNoEmbeddingProvider so the caller can surface the "configure an
+// embedding provider" prompt to the user. Tests that need a deterministic
+// offline embedder inject NewMockEmbedder() directly.
 //
-// For every backend the returned Embedder has already registered its
-// model→dimension mapping (RegisterModelDimension), so the vector index sized
-// from DimensionForModel(cfg.Model) matches what the embedder emits. A wrong
-// dimension would silently fail RediSearch indexing of the whole document, so
-// unknown models fail closed here rather than guessing.
+// The returned Embedder has registered its model→dimension mapping
+// (RegisterModelDimension), so the vector index sized from
+// DimensionForModel(cfg.Model) matches what the embedder emits. Unknown models
+// fail closed here rather than guessing.
 func NewFromProvider(cfg Config) (Embedder, error) {
-	if normalizeKind(cfg.Kind) == KindUnset {
+	switch kind := normalizeKind(cfg.Kind); kind {
+	case KindUnset:
 		return nil, ErrNoEmbeddingProvider()
-	}
-	build, ok := registry[normalizeKind(cfg.Kind)]
-	if !ok {
+	case KindVoyage:
+		return nil, types.NewError(ErrCodeInvalidConfig, voyageRefusal)
+	case KindOpenAI, KindOpenAICompatible, KindTEI, KindBedrock, KindCohere:
+		cfg.Kind = kind
+		return newGatewayEmbedder(cfg)
+	default:
 		return nil, types.NewError(ErrCodeInvalidConfig,
 			fmt.Sprintf("unknown embedding provider kind %q", cfg.Kind))
 	}
-	return build(cfg)
 }
 
 // normalizeKind lower-cases and trims a Kind so the daemon can pass a provider
 // "type" string through without worrying about casing.
 func normalizeKind(k Kind) Kind {
 	return Kind(strings.ToLower(strings.TrimSpace(string(k))))
-}
-
-// httpClient returns the configured HTTP client (tests only) or the guarded
-// package default: a client whose dialer refuses, at connect time, to reach
-// loopback / link-local (169.254.169.254) / RFC1918 / CGNAT / IPv6-ULA
-// addresses unless AllowPrivateEndpoint is set.
-//
-// validateEndpoint checks the configured BaseURL once; only this connect-time
-// guard also covers redirects and DNS rebinding, so it is the load-bearing
-// control. Same reasoning as the LLM providers — see internal/infra/netguard.
-func (c Config) httpClient() *http.Client {
-	if c.HTTPClient != nil {
-		return c.HTTPClient
-	}
-	to := c.Timeout
-	if to <= 0 {
-		to = defaultTimeout
-	}
-	return netguard.HTTPClient(to, c.AllowPrivateEndpoint)
 }
 
 // requireModel returns the configured model or a fail-closed error. Every

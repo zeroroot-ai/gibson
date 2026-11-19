@@ -101,6 +101,11 @@ type WorkContextRegistry interface {
 	// set for slot, as bound by WorkQueue.Enqueue. It returns nil when the
 	// work item has no pin for that slot.
 	WorkSlotPin(ctx context.Context, workID, slot string) (*agent.SlotConfig, error)
+
+	// WorkMaxTokensPerCall returns the token cap of one model call that the
+	// mission node of workID set, as bound by WorkQueue.Enqueue. Zero means
+	// no cap.
+	WorkMaxTokensPerCall(ctx context.Context, workID string) (int32, error)
 }
 
 // bindWorkOwner records tenant as the owner of workID.

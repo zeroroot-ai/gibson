@@ -98,6 +98,26 @@ type ComponentInfo struct {
 	// catalog (SearchTools) reads the descriptions from here so an agent can
 	// disambiguate a connector's tools. Per ADR-0065.
 	Methods []MethodInfo `json:"methods,omitempty"`
+
+	// CardSkills, DefaultInputModes and DefaultOutputModes come from the
+	// registration of an agent. The daemon builds the A2A Agent Card of the
+	// agent from them (BuildAgentCard). A CardSkill is an A2A AgentSkill, an
+	// entry of a card. It is not an Agent Skill in the SKILL.md format.
+	CardSkills         []CardSkillInfo `json:"card_skills,omitempty"`
+	DefaultInputModes  []string        `json:"default_input_modes,omitempty"`
+	DefaultOutputModes []string        `json:"default_output_modes,omitempty"`
+}
+
+// CardSkillInfo is one A2A AgentSkill of an Agent Card, as the agent registered
+// it.
+type CardSkillInfo struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Examples    []string `json:"examples,omitempty"`
+	InputModes  []string `json:"input_modes,omitempty"`
+	OutputModes []string `json:"output_modes,omitempty"`
 }
 
 // MethodInfo is the per-method metadata stored for a plugin/connector method.

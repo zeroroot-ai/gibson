@@ -4,6 +4,7 @@
 package brain
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,14 +24,10 @@ func TestFlightRecorder_ReplayReproducesTheWorld(t *testing.T) {
 	apply(LlmCallObserved{
 		CallID: "call-1", RunID: "run-1", MissionID: "mission-1", Model: "claude-haiku-4-5",
 		PromptTokens: 42, CompletionTokens: 9,
-		Messages: []LlmMessage{
-			{Role: "user", Content: "scan the target"},
-			{Role: "assistant", ToolCalls: []LlmToolCall{
-				{ID: "tc-1", Type: "function", Name: "nmap", Arguments: `{"host":"10.0.0.5"}`},
-			}},
-		},
-		CompletionToolCalls: []LlmToolCall{
-			{ID: "tc-1", Type: "function", Name: "nmap", Arguments: `{"host":"10.0.0.5"}`},
+		RequestItems: 1,
+		Items: []json.RawMessage{
+			json.RawMessage(`{"type":"message","role":"user","content":"scan the target"}`),
+			json.RawMessage(`{"type":"function_call","call_id":"tc-1","name":"nmap","arguments":"{\"host\":\"10.0.0.5\"}"}`),
 		},
 		RecordedAtUnixNano: 1_000_000,
 	})
@@ -65,9 +62,12 @@ func TestFlightRecorder_SnapshotRoundTrips(t *testing.T) {
 	w := NewWorld("t")
 	Reduce(w, FlightRecorderPolicySet{Redact: true, RetentionDays: 14})
 	Reduce(w, LlmCallObserved{
-		CallID: "call-1", Model: "m", Completion: "safe text",
-		CompletionToolCalls: []LlmToolCall{{ID: "tc-1", Name: "nmap", Arguments: "safe args"}},
-		RecordedAtUnixNano:  500,
+		CallID: "call-1", Model: "m", ErrorText: "safe text",
+		Items:              []json.RawMessage{json.RawMessage(`{"type":"function_call","name":"nmap"}`)},
+		RequestItems:       1,
+		HTTPStatus:         502,
+		Cost:               "0.01",
+		RecordedAtUnixNano: 500,
 	})
 	Reduce(w, AgentToolCallObserved{
 		ToolCallID: "tc-1", ToolName: "nmap", Arguments: "safe args", Result: "safe result",
@@ -98,9 +98,9 @@ func TestFlightRecorder_SnapshotRoundTrips(t *testing.T) {
 // time — the fold order on the Timeline, not wall-clock time, decides it.
 func TestFlightRecorder_PolicyChangeMidTimeline_ReplaysSameEachTime(t *testing.T) {
 	events := []Event{
-		LlmCallObserved{CallID: "before", Completion: "api_key=leakedsecret12345"},
+		LlmCallObserved{CallID: "before", ErrorText: "api_key=leakedsecret12345"},
 		FlightRecorderPolicySet{Redact: true},
-		LlmCallObserved{CallID: "after", Completion: "api_key=leakedsecret12345"},
+		LlmCallObserved{CallID: "after", ErrorText: "api_key=leakedsecret12345"},
 	}
 	fold := func() []LlmCallSnapshot {
 		w := NewWorld("t")
@@ -121,11 +121,11 @@ func TestFlightRecorder_PolicyChangeMidTimeline_ReplaysSameEachTime(t *testing.T
 			after = c
 		}
 	}
-	if !strings.Contains(before.Completion, "leakedsecret12345") {
-		t.Fatalf("a call folded before the policy took effect must stay unredacted, got %q", before.Completion)
+	if !strings.Contains(before.ErrorText, "leakedsecret12345") {
+		t.Fatalf("a call folded before the policy took effect must stay unredacted, got %q", before.ErrorText)
 	}
-	if strings.Contains(after.Completion, "leakedsecret12345") {
-		t.Fatalf("a call folded after the policy took effect must be redacted, got %q", after.Completion)
+	if strings.Contains(after.ErrorText, "leakedsecret12345") {
+		t.Fatalf("a call folded after the policy took effect must be redacted, got %q", after.ErrorText)
 	}
 }
 
@@ -183,12 +183,12 @@ func TestEngine_AgentToolCallsAndFlightRecorderPolicy(t *testing.T) {
 // an unset CutoffUnixNano wiping every captured call.
 func TestFlightRecorderRetentionSwept_ZeroCutoffIsNoOp(t *testing.T) {
 	w := NewWorld("t1")
-	Reduce(w, LlmCallObserved{CallID: "c1", Completion: "keep me", RecordedAtUnixNano: 100})
+	Reduce(w, LlmCallObserved{CallID: "c1", ErrorText: "keep me", RecordedAtUnixNano: 100})
 	Reduce(w, AgentToolCallObserved{ToolCallID: "tc1", Result: "keep me too", RecordedAtUnixNano: 100})
 
 	Reduce(w, FlightRecorderRetentionSwept{}) // CutoffUnixNano: 0
 
-	if got := w.LlmCallSnapshot()[0].Completion; got != "keep me" {
+	if got := w.LlmCallSnapshot()[0].ErrorText; got != "keep me" {
 		t.Fatalf("a zero cutoff must not purge, got %q", got)
 	}
 	if got := w.AgentToolCallSnapshot()[0].Result; got != "keep me too" {

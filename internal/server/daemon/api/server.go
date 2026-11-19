@@ -7,11 +7,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 
@@ -21,13 +25,12 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
 	"github.com/zeroroot-ai/gibson/internal/engine/target"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/infra/netguard"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
@@ -129,6 +132,23 @@ type DaemonServer struct {
 	connectorCredStore ConnectorSecretResolver
 	connectorCredPeer  string
 	connectorCredNow   func() time.Time
+
+	// modelCredStore and modelCredPeer back GetModelProviderCredential
+	// (gibson#1387): the tenant secret store, and the one SPIFFE ID that may
+	// call the RPC (the tenant operator).
+	modelCredStore ConnectorSecretResolver
+	modelCredPeer  string
+
+	// modelEndpointResolver resolves the host of the base_url of a provider
+	// when the provider is saved. allowPrivateModelEndpoints is
+	// security.allow_private_llm_endpoints. When it is false, a base_url whose
+	// host has a private, loopback, link-local or metadata address is refused.
+	modelEndpointResolver      netguard.Resolver
+	allowPrivateModelEndpoints bool
+
+	// outsideAgents backs GetTenantOutsideAgents and GetOutsideAgentCredential
+	// (gibson#1403). The tenant secret store and the peer are the two above.
+	outsideAgents outsideagentstore.Store
 
 	// cgMinter / cgVerifier back the RenewCapabilityGrant RPC.
 	// liveMissions gates CG renewal on the mission run still executing
@@ -269,24 +289,6 @@ type DaemonServer struct {
 	// Added by spec 25-daemon-driven-provider-config task 4.
 	execLimiter execLimiterIface
 
-	// providerFactory constructs an llm.LLMProvider from a resolved ProviderConfig.
-	// Defaults to the package-level providerFactoryFunc; overridden in tests via
-	// WithProviderFactory. Must never be nil after NewDaemonServer.
-	// Added by spec 25-daemon-driven-provider-config task 4.
-	providerFactory func(cfg llm.ProviderConfig) (llm.LLMProvider, error)
-
-	// allowPrivateLLMEndpoints mirrors security.allow_private_llm_endpoints.
-	// False (the zero value, and the secure default) keeps the connect-time
-	// SSRF egress guard on for every provider this server constructs. Wired via
-	// WithAllowPrivateLLMEndpoints.
-	allowPrivateLLMEndpoints bool
-
-	// embedderFactory constructs an embedder.Embedder from a transient
-	// embedder.Config for the TestProvider / ProbeProvider embedding probe
-	// (gibson#1013). Defaults to embedder.NewFromProvider; overridden in tests via
-	// WithEmbedderFactory. Must never be nil after NewDaemonServer.
-	embedderFactory func(cfg embedder.Config) (embedder.Embedder, error)
-
 	// budgetEnforcer enforces per-user/team/tenant token and spend
 	// budgets around ExecuteLLM / StreamLLM. May be nil; when nil budget
 	// enforcement is skipped (absent-budget = unlimited, so this
@@ -294,11 +296,18 @@ type DaemonServer struct {
 	// Spec: llm-user-attribution-governance (Requirement 3).
 	budgetEnforcer budgetEnforcerIface
 
-	// llmCallSink captures completed LLM calls into the per-tenant ECS brain
-	// World (gibson#755 — the World LlmCall entity replaces Langfuse trace/cost
-	// views). May be nil; when nil, capture is skipped. Brain-agnostic by design
-	// (api must not import internal/brain) — the daemon supplies the closure.
-	llmCallSink LLMCallSink
+	// chatModels sends the chat call of ExecuteLLM to the model gateway.
+	chatModels chatModels
+
+	// modelLister and providerListCache serve the model list of a saved provider
+	// (gibson#1394).
+	modelLister       modelLister
+	providerListCache *providerListCache
+	listCacheOnce     sync.Once
+	// routeWait and routeInterval set the wait of a provider test for a new
+	// route. Zero means providerRouteWait and providerRouteInterval. A test sets
+	// short values.
+	routeWait, routeInterval time.Duration
 
 	// modelGateInvalidator is called from Grant/Revoke so that the
 	// next slot resolution picks up the new grant state within
@@ -310,7 +319,6 @@ type DaemonServer struct {
 
 	// modelFilter decides which provider and model the calling user may use.
 	// ExecuteLLM denies every call while it is nil.
-	modelFilter modelgate.Filter
 
 	// secretPlaneProbe backs AdminGetPlatformHealth (hosted#174). Wired via
 	// WithSecretPlaneProbe. When nil the RPC reports the secret plane as
@@ -959,93 +967,16 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 		credentialHandler: credentialHandler,
 		logger:            logger.With("component", "daemon-grpc"),
 		sessionCounter:    0,
-		providerFactory:   providerFactoryFunc,
-		embedderFactory:   embedder.NewFromProvider,
 		gibsonPublicURL:   os.Getenv("GIBSON_PUBLIC_URL"),
 		// Always-non-nil default so provider-config handlers never need a
 		// request-path nil-guard ([[0003]]). WithReembedTrigger swaps in the
 		// production trigger at startup; nil there restores this no-op.
 		reembedTrigger: noopReembedTrigger{},
+		// The resolver of the base_url check at provider save.
+		// WithPrivateModelEndpoints sets the one setting of that check.
+		modelEndpointResolver: net.DefaultResolver,
 	}
 }
-
-// LLMCallRecord is a completed LLM call reported to the World (gibson#755). It
-// carries call metadata only — model + token counts + provenance ids — never the
-// prompt/completion transcript, so the brain Timeline stays lean.
-type LLMCallRecord struct {
-	CallID string
-	Model  string
-	// MissionID is the mission whose work issued the call — the mission-evidence
-	// edge (gibson#1078). A mission-aware caller stamps mission_id on the
-	// ExecuteLLM request; the handler copies it here so the call attaches to its
-	// mission's frame. Empty for non-mission callers (e.g. dashboard chat), which
-	// stay tenant-ambient.
-	MissionID string
-	// MissionRunID is the mission run that issued the call (gibson#1217).
-	MissionRunID     string
-	ScopeID          string
-	RunID            string
-	PromptTokens     int
-	CompletionTokens int
-	// Transcript: prompt messages + the assistant completion, captured in full
-	// every time (ADR-0120 flight recorder, gibson#271 — never optional), so
-	// the World can back the dashboard conversation view without a separate
-	// trace store.
-	Messages   []LLMMessage
-	Completion string
-	// CompletionToolCalls carries the tool calls the model made as part of
-	// THIS completion — distinct from Completion, which is the assistant's
-	// text content and is often empty on a tool-calling turn (gibson#271).
-	CompletionToolCalls []LLMToolCall
-	// RecordedAtUnixNano stamps when the daemon observed this call, so a
-	// tenant's retention policy can be swept deterministically later.
-	RecordedAtUnixNano int64
-}
-
-// LLMMessage is one prompt message in an LLMCallRecord transcript. Role +
-// Content cover a plain turn; ToolCalls carries any tool calls an assistant
-// message in the prompt history made, and ToolCallID/Name identify a
-// tool-result message (role "tool") replaying that call's result back to the
-// model (gibson#271).
-type LLMMessage struct {
-	Role       string
-	Content    string
-	Name       string
-	ToolCalls  []LLMToolCall
-	ToolCallID string
-}
-
-// LLMToolCall is one tool call an LLM made as part of a completion. Mirrors
-// internal/engine/llm.ToolCall.
-type LLMToolCall struct {
-	ID        string
-	Type      string
-	Name      string
-	Arguments string
-}
-
-// toLLMToolCalls converts llm.ToolCall values (internal/engine/llm) to the
-// capture-record shape, preserving full fidelity — the gibson#271 fix for a
-// tool-calling turn's transcript silently dropping its tool calls.
-func toLLMToolCalls(calls []llm.ToolCall) []LLMToolCall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]LLMToolCall, 0, len(calls))
-	for _, c := range calls {
-		out = append(out, LLMToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
-	}
-	return out
-}
-
-// LLMCallSink consumes a completed LLM call for per-tenant World capture. It is
-// brain-agnostic so the api package need not import internal/brain; the daemon
-// supplies a closure that folds the record into the tenant's brain engine.
-type LLMCallSink func(ctx context.Context, tenant string, call LLMCallRecord)
-
-// SetLLMCallSink wires the World-capture sink (gibson#755). Called once at
-// startup; nil disables capture.
-func (s *DaemonServer) SetLLMCallSink(sink LLMCallSink) { s.llmCallSink = sink }
 
 // WithQuotaManager attaches a MissionQuotaChecker to the server so that
 // RunMission enforces per-tenant mission quotas.  Call this immediately
@@ -1140,11 +1071,19 @@ func (s *DaemonServer) WithPlatformDB(db *sql.DB) *DaemonServer {
 }
 
 // WithPoolGetter wires the per-tenant data-plane pool getter.
-// Required by ExportFindings (Neo4j DashboardQueries path) and
+// Required by ExportFindings, GetFinding and
 // GetMissionSourceYAML. When nil those RPCs return codes.Unavailable.
 // Spec: dashboard-neo4j-crud-removal.
 func (s *DaemonServer) WithPoolGetter(getter func() datapool.Pool) *DaemonServer {
 	s.poolGetter = getter
+	return s
+}
+
+// WithPrivateModelEndpoints sets security.allow_private_llm_endpoints. When
+// allow is true, a provider save does not check the address of the base_url
+// host. An install with an in-cluster model server sets it.
+func (s *DaemonServer) WithPrivateModelEndpoints(allow bool) *DaemonServer {
+	s.allowPrivateModelEndpoints = allow
 	return s
 }
 
@@ -2269,7 +2208,7 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 	protoMission := &daemonpb.Mission{
 		Id:                  result.MissionID,
 		Name:                result.Name,
-		Status:              daemonpb.MissionStatus_MISSION_STATUS_PENDING,
+		Status:              daemonpb.MissionStatus_MISSION_STATUS_SUBMITTED,
 		TargetId:            result.TargetID,
 		MissionDefinitionId: result.MissionDefinitionID,
 		CreatedBy:           principal.ToProto(result.CreatedBy),

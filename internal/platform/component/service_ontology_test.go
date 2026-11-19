@@ -57,12 +57,12 @@ func newTestServiceWithReasoner(or OntologyReasoner) *ComponentServiceServer {
 	svc := NewComponentServiceServer(
 		&noopRegistry{},
 		&noopWorkQueue{},
-		nil, // logger — defaults to slog.Default()
-		nil, // llmCompleter
-		nil, // findingSubmitter
-		nil, // componentAccess
-		nil, // auditLog
-	)
+		nil,
+
+		nil,
+		nil,
+		nil)
+
 	svc.WithOntologyReasoner(or)
 	return svc
 }

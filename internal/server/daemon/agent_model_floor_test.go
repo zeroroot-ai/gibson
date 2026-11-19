@@ -13,14 +13,14 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 )
 
 // fakeSlotManager records the slot it was asked to resolve and answers with a
 // fixed model, so the floor's translation into a slot constraint is observable
 // without a provider store.
 type fakeSlotManager struct {
-	info llm.ModelInfo
+	info harness.SlotModel
 	err  error
 
 	gotSlot     agent.SlotDefinition
@@ -28,25 +28,25 @@ type fakeSlotManager struct {
 	calls       int
 }
 
-func (f *fakeSlotManager) ResolveSlot(_ context.Context, slot agent.SlotDefinition, override *agent.SlotConfig) (llm.LLMProvider, llm.ModelInfo, error) {
+func (f *fakeSlotManager) ResolveSlot(_ context.Context, slot agent.SlotDefinition, override *agent.SlotConfig) (harness.SlotModel, error) {
 	f.calls++
 	f.gotSlot = slot
 	f.gotOverride = override
 	if f.err != nil {
-		return nil, llm.ModelInfo{}, f.err
+		return harness.SlotModel{}, f.err
 	}
-	return nil, f.info, nil
+	return f.info, nil
 }
 
 func (f *fakeSlotManager) ValidateSlot(context.Context, agent.SlotDefinition) error { return nil }
 
 func resolverWith(m *fakeSlotManager, err error) *slotModelResolver {
 	return &slotModelResolver{
-		forTenant: func(context.Context, string) (llm.SlotManager, llm.LLMRegistry, error) {
+		forTenant: func(context.Context, string) (harness.SlotManager, error) {
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
-			return m, nil, nil
+			return m, nil
 		},
 	}
 }
@@ -58,7 +58,7 @@ func resolverWith(m *fakeSlotManager, err error) *slotModelResolver {
 func TestResolveAgentModel_FloorBecomesTheSlotConstraint(t *testing.T) {
 	t.Parallel()
 
-	m := &fakeSlotManager{info: llm.ModelInfo{Name: "big", ContextWindow: 200000}}
+	m := &fakeSlotManager{info: harness.SlotModel{Model: "big", ContextWindow: 200000}}
 	r := resolverWith(m, nil)
 
 	model, window, err := r.ResolveAgentModel(context.Background(), "acme", "", 32000)
@@ -85,7 +85,7 @@ func TestResolveAgentModel_FloorBecomesTheSlotConstraint(t *testing.T) {
 func TestResolveAgentModel_PinnedModelBecomesTheOverride(t *testing.T) {
 	t.Parallel()
 
-	m := &fakeSlotManager{info: llm.ModelInfo{Name: "pinned", ContextWindow: 100000}}
+	m := &fakeSlotManager{info: harness.SlotModel{Model: "pinned", ContextWindow: 100000}}
 	r := resolverWith(m, nil)
 
 	if _, _, err := r.ResolveAgentModel(context.Background(), "acme", "pinned", 32000); err != nil {

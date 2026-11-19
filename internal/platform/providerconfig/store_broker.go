@@ -67,6 +67,29 @@ func withTenant(ctx context.Context, tenantID string) context.Context {
 	return auth.ContextWithTenantString(ctx, tenantID)
 }
 
+// ReadActor is the audit actor of a read of the credentials of a provider that
+// no caller started. The slot resolution of the daemon and the sync of the
+// tenant operator read them. A secret read records its actor, and with no actor
+// on the context the audit logger refuses the entry (gibson#676).
+const ReadActor = "system:provider-record-reader"
+
+// readContext returns ctx for a read of the credentials of tenantID. A request
+// that carries an identity keeps it, so the audit record names the caller. A
+// read that no caller started gets the daemon as the actor.
+func readContext(ctx context.Context, tenantID string) (context.Context, error) {
+	tctx := withTenant(ctx, tenantID)
+	if id, err := auth.IdentityFromContext(tctx); err == nil && id.Subject != "" {
+		return tctx, nil
+	}
+	tid, err := auth.NewTenantID(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("providerconfig: invalid tenant %q: %w", tenantID, err)
+	}
+	return auth.WithIdentity(tctx, auth.Identity{
+		Subject: ReadActor, Tenant: tid, CredentialType: auth.CredentialClientCredentials,
+	}), nil
+}
+
 // acquireConn acquires a per-tenant Conn from the pool.
 func (s *brokerBackedStore) acquireConn(ctx context.Context, tenantID string) (*datapool.Conn, error) {
 	tid, err := auth.NewTenantID(tenantID)
@@ -94,7 +117,10 @@ func (s *brokerBackedStore) putCredentials(ctx context.Context, tenantID, name s
 // getCredentials lists and resolves all credential fields for the provider from
 // the secrets broker. Returns an empty (non-nil) map when no credentials exist.
 func (s *brokerBackedStore) getCredentials(ctx context.Context, tenantID, name string) (map[string]string, error) {
-	tctx := withTenant(ctx, tenantID)
+	tctx, err := readContext(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
 	prefix := credKeyPrefix(name)
 	keys, err := s.svc.List(tctx, sdksecrets.Filter{Prefix: prefix})
 	if err != nil {
@@ -180,6 +206,9 @@ func (s *brokerBackedStore) Get(ctx context.Context, tenantID, name string) (*Pr
 }
 
 func (s *brokerBackedStore) Create(ctx context.Context, tenantID string, input *ProviderConfigInput) (*ProviderConfig, error) {
+	if err := validateName(input.Name); err != nil {
+		return nil, err
+	}
 	if err := validateType(input.Type); err != nil {
 		return nil, err
 	}
@@ -315,3 +344,12 @@ func (s *brokerBackedStore) Resolve(ctx context.Context, tenantID, name string) 
 		Credentials:    creds,
 	}, nil
 }
+
+// CredentialSecretName returns the name of the credential secret of a provider.
+// It is the prefix of the broker keys of its credential fields. A provider
+// record holds this name and never a credential value.
+func CredentialSecretName(name string) string { return "provider_cred:" + name }
+
+// CredentialFieldKey returns the broker key of one credential field of a
+// provider, from the name that CredentialSecretName returned.
+func CredentialFieldKey(secretName, field string) string { return secretName + ":" + field }

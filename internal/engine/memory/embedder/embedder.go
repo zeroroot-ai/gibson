@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
+// Package embedder defines the Embedder interface, which turns text into
+// embedding vectors. It also holds the gateway embedder and a mock.
 package embedder
 
 import (

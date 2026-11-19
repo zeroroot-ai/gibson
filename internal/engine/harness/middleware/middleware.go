@@ -118,11 +118,6 @@ func GetMissionContext(ctx context.Context) (missionID, agentName string) {
 
 // Request and response wrapper types for type-safe operation payloads.
 
-// WithSlotName returns a new context with the LLM slot name set.
-func WithSlotName(ctx context.Context, slot string) context.Context {
-	return context.WithValue(ctx, CtxSlotName, slot)
-}
-
 // GetProvider retrieves the LLM provider name from the context.
 // Returns empty string if not set.
 func GetProvider(ctx context.Context) string {
@@ -156,11 +151,6 @@ func WithPluginInfo(ctx context.Context, name, method string) context.Context {
 // WithAgentTargetName returns a new context with the target agent name set.
 func WithAgentTargetName(ctx context.Context, name string) context.Context {
 	return context.WithValue(ctx, CtxAgentTargetName, name)
-}
-
-// WithMessages returns a new context with the LLM messages set.
-func WithMessages(ctx context.Context, msgs []Message) context.Context {
-	return context.WithValue(ctx, CtxMessages, msgs)
 }
 
 // Message is a simplified message type for context storage.

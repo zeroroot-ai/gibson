@@ -16,9 +16,10 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // listingProviderStore lists a fixed set of provider configs of the tenant.
@@ -31,44 +32,45 @@ func (s *listingProviderStore) List(context.Context, string) ([]*providerconfig.
 	return s.configs, nil
 }
 
-// listingProvider is a provider whose live model list is fixed.
-type listingProvider struct {
-	stubMockProvider
-	models []llm.ModelInfo
-	err    error
+// fakeLister is the model list of the gateway. Each provider has a fixed list,
+// an error, or a block until the context ends.
+type fakeLister struct {
+	models map[string][]modelclient.ModelEntry
+	errs   map[string]error
+	block  map[string]bool
 }
 
-func (p *listingProvider) Models(context.Context) ([]llm.ModelInfo, error) { return p.models, p.err }
+func (f *fakeLister) Models(ctx context.Context, _ modelclient.Caller, t modelclient.Target) ([]modelclient.ModelEntry, error) {
+	if f.block[t.Provider] {
+		<-ctx.Done()
+		return nil, fmt.Errorf("the list call ended: %w", ctx.Err())
+	}
+	if err := f.errs[t.Provider]; err != nil {
+		return nil, err
+	}
+	return f.models[t.Provider], nil
+}
 
 func grantServer(t *testing.T) (*DaemonServer, *fakeAuthorizer) {
 	t.Helper()
 	az := newFakeAuthorizer().allow("user:user-test", "admin", "tenant:tenant-a")
 	store := &listingProviderStore{configs: []*providerconfig.ProviderConfig{
-		{Name: "my-openai", Type: llm.ProviderOpenAI, DefaultModel: "gpt-4o", Enabled: true},
-		{Name: "off", Type: llm.ProviderGoogle, DefaultModel: "gemini-x", Enabled: false},
-		{Name: "embed-only-type", Type: llm.ProviderVoyage, DefaultModel: "voyage-3", Enabled: true},
-		{Name: "embed-capability", Type: llm.ProviderMistral, DefaultModel: "mistral-embed", Enabled: true,
+		{Name: "my-openai", Type: providerconfig.ProviderOpenAI, DefaultModel: "gpt-4o", Enabled: true},
+		{Name: "off", Type: providerconfig.ProviderGoogle, DefaultModel: "gemini-x", Enabled: false},
+		{Name: "embed-only-type", Type: providerconfig.ProviderVoyage, DefaultModel: "voyage-3", Enabled: true},
+		{Name: "embed-capability", Type: providerconfig.ProviderMistral, DefaultModel: "mistral-embed", Enabled: true,
 			Capabilities: []string{providerconfig.CapabilityEmbedding}},
-		{Name: "broken", Type: llm.ProviderCohere, DefaultModel: "command", Enabled: true},
+		{Name: "broken", Type: providerconfig.ProviderCohere, DefaultModel: "command", Enabled: true},
 	}}
-	store.resolveFunc = func(_ context.Context, _, name string) (*providerconfig.DecryptedConfig, error) {
-		dec := knownDecryptedConfig()
-		dec.Name = name
-		dec.Type = llm.ProviderType(map[string]string{"my-openai": "openai", "broken": "cohere"}[name])
-		return dec, nil
-	}
-	s := newExecServer(store, func(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
-		if cfg.Type == llm.ProviderCohere {
-			return &listingProvider{err: errors.New("the list call failed")}, nil
-		}
-		return &listingProvider{models: []llm.ModelInfo{
-			{Name: "gpt-4o-mini", Features: []string{"chat"}},
-			{Name: "text-embedding-3", Features: []string{"embedding"}},
-			{Name: "no-features-reported"},
-		}}, nil
-	})
+	s := newExecServer(store)
 	s.logger = slog.Default()
 	s.authorizer = az
+	s.modelLister = &fakeLister{
+		models: map[string][]modelclient.ModelEntry{
+			"my-openai": {{ID: "gpt-4o-mini"}, {ID: "text-embedding-3"}},
+		},
+		errs: map[string]error{"broken": errors.New("the list call failed")},
+	}
 	return s, az
 }
 
@@ -81,7 +83,7 @@ func grantReq(kind tenantv1.GrantTargetKind, id string) *tenantv1.GrantAccessReq
 	}}
 }
 
-// GrantAccess refuses a target that matches no registered provider type or
+// GrantAccess refuses a target that matches no provider name or
 // known model, and accepts one that does.
 func TestGrantAccess_RefusesATargetThatMatchesNothing(t *testing.T) {
 	prov := tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER
@@ -92,16 +94,15 @@ func TestGrantAccess_RefusesATargetThatMatchesNothing(t *testing.T) {
 		id   string
 		want codes.Code
 	}{
-		{"provider type", prov, "openai", codes.OK},
-		{"embedding-only type", prov, "voyage", codes.InvalidArgument},
-		{"provider with only the embedding capability", prov, "mistral", codes.InvalidArgument},
-		{"provider config name is not the gate name", prov, "my-openai", codes.InvalidArgument},
+		{"provider name", prov, "my-openai", codes.OK},
+		{"embedding-only type", prov, "embed-only-type", codes.InvalidArgument},
+		{"provider with only the embedding capability", prov, "embed-capability", codes.InvalidArgument},
+		{"provider type is not the gate name", prov, "openai", codes.InvalidArgument},
 		{"free text provider", prov, "nonsense", codes.InvalidArgument},
-		{"disabled provider", prov, "google", codes.InvalidArgument},
+		{"disabled provider", prov, "off", codes.InvalidArgument},
 		{"default model", model, "gpt-4o", codes.OK},
 		{"live chat model", model, "gpt-4o-mini", codes.OK},
-		{"live model with no features reported", model, "no-features-reported", codes.OK},
-		{"live embedding model", model, "text-embedding-3", codes.InvalidArgument},
+		{"live model in the list", model, "text-embedding-3", codes.OK},
 		{"default model of an embedding-only config", model, "voyage-3", codes.InvalidArgument},
 		{"default model of an embedding-capability config", model, "mistral-embed", codes.InvalidArgument},
 		{"model of a provider whose list fails", model, "command-x", codes.InvalidArgument},
@@ -134,14 +135,6 @@ func TestRevokeAccess_AcceptsATargetThatMatchesNothing(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// blockingProvider waits for its context to end, as a provider that hangs does.
-type blockingProvider struct{ stubMockProvider }
-
-func (blockingProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
-	<-ctx.Done()
-	return nil, fmt.Errorf("the list call ended: %w", ctx.Err())
-}
-
 // The live lists are asked at once under one deadline for all of them. A slow
 // provider does not delay a model that another provider names, and a tenant with
 // only hanging providers waits for one deadline, not one per provider.
@@ -151,36 +144,30 @@ func TestGrantAccess_ModelListsAreAskedAtOnceUnderOneDeadline(t *testing.T) {
 	t.Cleanup(func() { grantListTimeout = old })
 
 	configs := []*providerconfig.ProviderConfig{
-		{Name: "slow-1", Type: llm.ProviderOpenAI, Enabled: true},
-		{Name: "slow-2", Type: llm.ProviderMistral, Enabled: true},
-		{Name: "quick", Type: llm.ProviderCohere, Enabled: true},
+		{Name: "slow-1", Type: providerconfig.ProviderOpenAI, Enabled: true},
+		{Name: "slow-2", Type: providerconfig.ProviderMistral, Enabled: true},
+		{Name: "quick", Type: providerconfig.ProviderCohere, Enabled: true},
 	}
 	build := func(withQuick bool) *DaemonServer {
-		store := &listingProviderStore{configs: configs}
-		store.resolveFunc = func(_ context.Context, _, name string) (*providerconfig.DecryptedConfig, error) {
-			dec := knownDecryptedConfig()
-			dec.Name = name
-			if name == "quick" {
-				dec.Type = llm.ProviderCohere
-			}
-			return dec, nil
-		}
-		s := newExecServer(store, func(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
-			if withQuick && cfg.Type == llm.ProviderCohere {
-				return &listingProvider{models: []llm.ModelInfo{{Name: "wanted", Features: []string{"chat"}}}}, nil
-			}
-			return &blockingProvider{}, nil
-		})
+		s := newExecServer(&listingProviderStore{configs: configs})
 		s.logger = slog.Default()
+		l := &fakeLister{
+			block:  map[string]bool{"slow-1": true, "slow-2": true, "quick": !withQuick},
+			models: map[string][]modelclient.ModelEntry{"quick": {{ID: "wanted"}}},
+		}
+		s.modelLister = l
 		return s
 	}
 
+	// The list call needs the identity of a caller (callerInitiator).
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "user:alice"})
+
 	start := time.Now()
-	assert.True(t, build(true).anyProviderListsModel(context.Background(), "tenant-a", configs, "wanted"))
+	assert.True(t, build(true).anyProviderListsModel(ctx, "tenant-a", configs, "wanted"))
 	assert.Less(t, time.Since(start), 90*time.Millisecond, "a quick answer must not wait for the slow providers")
 
 	start = time.Now()
-	assert.False(t, build(false).anyProviderListsModel(context.Background(), "tenant-a", configs, "wanted"))
+	assert.False(t, build(false).anyProviderListsModel(ctx, "tenant-a", configs, "wanted"))
 	assert.Less(t, time.Since(start), 250*time.Millisecond, "three hanging providers must cost one deadline, not three")
 }
 
@@ -215,36 +202,14 @@ func TestCheckGrantTarget_RefusesWhatItCannotCheck(t *testing.T) {
 	}
 }
 
-// A provider that cannot be resolved, built or listed names no model. A tenant
-// with no chat config names none either.
+// A provider whose list fails names no model. A tenant with no chat config names
+// none.
 func TestProviderListsModel_NamesNothingWhenItFails(t *testing.T) {
 	ctx := context.Background()
-	cfg := &providerconfig.ProviderConfig{Name: "my-openai", Type: llm.ProviderOpenAI, Enabled: true}
+	cfg := &providerconfig.ProviderConfig{Name: "broken", Type: providerconfig.ProviderOpenAI, Enabled: true}
 
-	t.Run("resolve fails", func(t *testing.T) {
+	t.Run("the list fails", func(t *testing.T) {
 		s, _ := grantServer(t)
-		store := &listingProviderStore{}
-		store.resolveFunc = func(context.Context, string, string) (*providerconfig.DecryptedConfig, error) {
-			return nil, errors.New("no credential")
-		}
-		s.providerConfig = store
-		assert.False(t, s.providerListsModel(ctx, "tenant-a", cfg, "m"))
-	})
-	t.Run("factory fails", func(t *testing.T) {
-		s, _ := grantServer(t)
-		s.providerFactory = func(llm.ProviderConfig) (llm.LLMProvider, error) { return nil, errors.New("cannot build") }
-		assert.False(t, s.providerListsModel(ctx, "tenant-a", cfg, "m"))
-	})
-	t.Run("default factory refuses an embedding-only type", func(t *testing.T) {
-		s, _ := grantServer(t)
-		store := &listingProviderStore{}
-		store.resolveFunc = func(context.Context, string, string) (*providerconfig.DecryptedConfig, error) {
-			dec := knownDecryptedConfig()
-			dec.Type = llm.ProviderVoyage
-			return dec, nil
-		}
-		s.providerConfig = store
-		s.providerFactory = nil
 		assert.False(t, s.providerListsModel(ctx, "tenant-a", cfg, "m"))
 	})
 	t.Run("no config", func(t *testing.T) {

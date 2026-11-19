@@ -5,14 +5,16 @@ package finding
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 )
 
 // FindingStore provides persistence for EnhancedFindings
 type FindingStore interface {
-	// Store persists an enhanced finding
-	Store(ctx context.Context, finding EnhancedFinding) error
+	// Store persists an enhanced finding in the database of the tenant.
+	Store(ctx context.Context, tenantID string, finding EnhancedFinding) error
 }
 
 // FindingFilter provides filtering options for finding queries.
@@ -28,4 +30,60 @@ type FindingFilter struct {
 	MaxRisk    *float64
 	AgentName  *string
 	SearchText *string
+}
+
+// MaxEvidenceContentBytes is the size limit of the content of one evidence
+// item. The limit is 1 MiB.
+//
+// The emit bound in package emitbounds does not fit this purpose. It caps the
+// whole payload that an agent sends at 100 KiB. A tier 1 item holds the result
+// of a tool call that the daemon read from its own record, and a screenshot or
+// a network trace can be larger than 100 KiB.
+const MaxEvidenceContentBytes = 1 << 20
+
+// ErrEvidenceTooLarge reports that the content of an evidence item is over
+// MaxEvidenceContentBytes. The store never truncates. The submit fails.
+var ErrEvidenceTooLarge = errors.New("finding: evidence content is over the size limit")
+
+// ErrInvalidEvidence reports an evidence item that the store refuses. The
+// daemon sets the tier and the tool call ID, so an item with a wrong pair is a
+// defect of the daemon and not of the agent.
+var ErrInvalidEvidence = errors.New("finding: invalid evidence item")
+
+// ErrNotFound reports that the database of the tenant holds no finding with
+// the requested ID.
+var ErrNotFound = errors.New("finding: not found")
+
+// Matches reports whether the finding passes the filter. A nil filter matches
+// each finding.
+func (f *FindingFilter) Matches(finding EnhancedFinding) bool {
+	if f == nil {
+		return true
+	}
+	if f.Severity != nil && finding.Severity != *f.Severity {
+		return false
+	}
+	if f.Category != nil && finding.Category != string(*f.Category) {
+		return false
+	}
+	if f.Status != nil && finding.Status != *f.Status {
+		return false
+	}
+	if f.MinRisk != nil && finding.RiskScore < *f.MinRisk {
+		return false
+	}
+	if f.MaxRisk != nil && finding.RiskScore > *f.MaxRisk {
+		return false
+	}
+	if f.AgentName != nil && finding.AgentName != *f.AgentName {
+		return false
+	}
+	if f.SearchText != nil {
+		text := strings.ToLower(*f.SearchText)
+		if !strings.Contains(strings.ToLower(finding.Title), text) &&
+			!strings.Contains(strings.ToLower(finding.Description), text) {
+			return false
+		}
+	}
+	return true
 }

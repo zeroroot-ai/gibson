@@ -1,0 +1,118 @@
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  annotations:
+    gibson.zeroroot.ai/credential-secret: provider-gcp
+  labels:
+    app.kubernetes.io/managed-by: gibson-tenant-operator
+    gibson.zeroroot.ai/model-provider: gcp
+    gibson.zeroroot.ai/model-provider-namespace: tenant-acme
+    gibson.zeroroot.ai/tenant: acme
+  name: mp-acme-gcp
+  namespace: gibson-gateway
+spec:
+  ai:
+    provider:
+      vertexai:
+        projectId: my-project
+        region: us-central1
+  policies:
+    ai:
+      routes:
+        /v1/embeddings: Embeddings
+        /v1/models: Passthrough
+        /v1/responses: Responses
+    auth:
+      secretRef:
+        name: mp-acme-gcp-credential
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: gibson-tenant-operator
+    gibson.zeroroot.ai/model-provider: gcp
+    gibson.zeroroot.ai/model-provider-namespace: tenant-acme
+    gibson.zeroroot.ai/tenant: acme
+  name: mp-acme-gcp
+  namespace: gibson-gateway
+spec:
+  parentRefs:
+  - name: model-gateway
+  rules:
+  - backendRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: mp-acme-gcp
+    filters:
+    - requestHeaderModifier:
+        remove:
+        - x-gibson-tenant
+        - x-gibson-subject
+        - x-gibson-mission
+        - x-gibson-task
+        - x-gibson-identity-subject
+        - x-gibson-identity-issuer
+        - x-gibson-identity-credential-type
+        - x-gibson-identity-tenant
+        - x-gibson-identity-issued-at
+        - x-gibson-route-tenant
+        - x-gibson-route-provider
+        - x-gibson-route-agent
+        - x-gibson-route-bank
+        - x-capability-grant
+      type: RequestHeaderModifier
+    matches:
+    - headers:
+      - name: x-gibson-route-tenant
+        type: Exact
+        value: acme
+      - name: x-gibson-route-provider
+        type: Exact
+        value: gcp
+      path:
+        type: Exact
+        value: /v1/responses
+    - headers:
+      - name: x-gibson-route-tenant
+        type: Exact
+        value: acme
+      - name: x-gibson-route-provider
+        type: Exact
+        value: gcp
+      path:
+        type: Exact
+        value: /v1/embeddings
+  - backendRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: mp-acme-gcp
+    filters:
+    - requestHeaderModifier:
+        remove:
+        - x-gibson-tenant
+        - x-gibson-subject
+        - x-gibson-mission
+        - x-gibson-task
+        - x-gibson-identity-subject
+        - x-gibson-identity-issuer
+        - x-gibson-identity-credential-type
+        - x-gibson-identity-tenant
+        - x-gibson-identity-issued-at
+        - x-gibson-route-tenant
+        - x-gibson-route-provider
+        - x-gibson-route-agent
+        - x-gibson-route-bank
+        - x-capability-grant
+      type: RequestHeaderModifier
+    matches:
+    - headers:
+      - name: x-gibson-route-tenant
+        type: Exact
+        value: acme
+      - name: x-gibson-route-provider
+        type: Exact
+        value: gcp
+      path:
+        type: Exact
+        value: /v1/models

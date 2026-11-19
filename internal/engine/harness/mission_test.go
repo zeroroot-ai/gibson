@@ -83,13 +83,13 @@ func (m *mockMissionOperator) Run(ctx context.Context, missionID string) error {
 
 	// Update mission status to running
 	if info, ok := m.missions[missionID]; ok {
-		info.Status = MissionStatusRunning
+		info.Status = MissionStatusWorking
 	}
 
 	// Update records
 	for _, r := range m.records {
 		if r.ID.String() == missionID {
-			r.Status = MissionStatusRunning
+			r.Status = MissionStatusWorking
 			break
 		}
 	}
@@ -110,7 +110,7 @@ func (m *mockMissionOperator) GetStatus(ctx context.Context, missionID string) (
 
 	// Return default status if not set
 	return &MissionStatusInfo{
-		Status:   MissionStatusRunning,
+		Status:   MissionStatusWorking,
 		Progress: 0.5,
 		Phase:    "executing",
 		FindingCounts: map[string]int{
@@ -216,13 +216,13 @@ func (m *mockMissionOperator) Cancel(ctx context.Context, missionID types.ID) er
 
 	// Update mission status to cancelled
 	if info, ok := m.missions[missionID.String()]; ok {
-		info.Status = "cancelled"
+		info.Status = "canceled"
 	}
 
 	// Update records
 	for _, r := range m.records {
 		if r.ID == missionID {
-			r.Status = "cancelled"
+			r.Status = "canceled"
 			break
 		}
 	}
@@ -285,7 +285,7 @@ func TestCreateMission(t *testing.T) {
 		ID:              parentID,
 		ParentMissionID: nil,
 		Depth:           0,
-		Status:          MissionStatusRunning,
+		Status:          MissionStatusWorking,
 	})
 
 	harness := createTestMissionHarness(mockClient, DefaultSpawnLimits())
@@ -412,7 +412,7 @@ func TestCreateMission_SpawnLimitExceeded(t *testing.T) {
 		ID:              parentID,
 		ParentMissionID: nil,
 		Depth:           0,
-		Status:          MissionStatusRunning,
+		Status:          MissionStatusWorking,
 	})
 
 	// Add 10 children (at limit)
@@ -542,7 +542,7 @@ func TestGetMissionStatus(t *testing.T) {
 
 	missionID := types.NewID()
 	expectedStatus := &MissionStatusInfo{
-		Status:   MissionStatusRunning,
+		Status:   MissionStatusWorking,
 		Progress: 0.75,
 		Phase:    "scanning",
 		FindingCounts: map[string]int{
@@ -668,7 +668,7 @@ func TestListMissions(t *testing.T) {
 			ID:              types.NewID(),
 			ParentMissionID: &parentID,
 			Depth:           1,
-			Status:          MissionStatusRunning,
+			Status:          MissionStatusWorking,
 		},
 		{
 			ID:              types.NewID(),
@@ -680,7 +680,7 @@ func TestListMissions(t *testing.T) {
 			ID:              types.NewID(),
 			ParentMissionID: nil,
 			Depth:           0,
-			Status:          MissionStatusRunning,
+			Status:          MissionStatusWorking,
 		},
 	}
 
@@ -706,7 +706,7 @@ func TestListMissions(t *testing.T) {
 		{
 			name: "filter by status",
 			filter: &sdkmission.MissionFilter{
-				Status: sdkMissionStatusPtr(string(MissionStatusRunning)),
+				Status: sdkMissionStatusPtr(string(MissionStatusWorking)),
 			},
 			expectedCount: 2,
 		},
@@ -764,7 +764,7 @@ func TestCancelMission(t *testing.T) {
 	mockClient.missions[missionID.String()] = &MissionInfo{
 		ID:     missionID,
 		Name:   "Test Mission",
-		Status: MissionStatusRunning,
+		Status: MissionStatusWorking,
 	}
 
 	harness := createTestMissionHarness(mockClient, DefaultSpawnLimits())
@@ -806,7 +806,7 @@ func TestCancelMission_Idempotent(t *testing.T) {
 	mockClient.missions[missionID.String()] = &MissionInfo{
 		ID:     missionID,
 		Name:   "Test Mission",
-		Status: MissionStatusRunning,
+		Status: MissionStatusWorking,
 	}
 
 	harness := createTestMissionHarness(mockClient, DefaultSpawnLimits())
@@ -905,7 +905,7 @@ func TestMissionLineageTracking(t *testing.T) {
 		ID:              parentID,
 		ParentMissionID: nil,
 		Depth:           0,
-		Status:          MissionStatusRunning,
+		Status:          MissionStatusWorking,
 	})
 
 	harness := createTestMissionHarness(mockClient, DefaultSpawnLimits())
@@ -965,7 +965,7 @@ func TestEndToEndMissionFlow(t *testing.T) {
 		ID:              parentID,
 		ParentMissionID: nil,
 		Depth:           0,
-		Status:          MissionStatusRunning,
+		Status:          MissionStatusWorking,
 	})
 
 	harness := createTestMissionHarness(mockClient, DefaultSpawnLimits())
@@ -1013,7 +1013,7 @@ func TestEndToEndMissionFlow(t *testing.T) {
 		t.Fatalf("Step 3 (GetStatus) failed: %v", err)
 	}
 
-	if status.Status != sdkmission.MissionStatus(MissionStatusRunning) {
+	if status.Status != sdkmission.MissionStatus(MissionStatusWorking) {
 		t.Errorf("Expected status 'running', got %q", status.Status)
 	}
 
@@ -1130,7 +1130,7 @@ func TestSpawnLimitIntegration(t *testing.T) {
 				ID:              parentID,
 				ParentMissionID: nil,
 				Depth:           tt.existingDepth,
-				Status:          MissionStatusRunning,
+				Status:          MissionStatusWorking,
 			})
 
 			// Add existing children
@@ -1149,7 +1149,7 @@ func TestSpawnLimitIntegration(t *testing.T) {
 					ID:              types.NewID(),
 					ParentMissionID: nil,
 					Depth:           0,
-					Status:          MissionStatusRunning,
+					Status:          MissionStatusWorking,
 				})
 			}
 
