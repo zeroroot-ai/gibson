@@ -54,6 +54,22 @@ type fakeAuthorizer struct {
 	deletes   [][]authz.Tuple
 	failWrite bool
 	listObjs  map[string][]string // user -> objects
+	// stored holds the tuples that ReadTuples answers with. A test seeds the
+	// bindings that exist.
+	stored []authz.Tuple
+}
+
+// ReadTuples answers the stored question: the tuples that match the filter.
+func (f *fakeAuthorizer) ReadTuples(_ context.Context, user, relation, object string) ([]authz.Tuple, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []authz.Tuple
+	for _, t := range f.stored {
+		if t.User == user && t.Relation == relation && t.Object == object {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeAuthorizer) Check(_ context.Context, _, _, _ string) (bool, error) { return true, nil }
@@ -219,6 +235,7 @@ func TestRevokePluginSecretBinding_RefusesAnInstallItCannotAddress(t *testing.T)
 func TestEditPluginSecretBinding_DeletesThenWrites(t *testing.T) {
 	srv, reg, az, _ := newPluginsTestServer(t)
 	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p", PrincipalRef: "plugin_principal:p"}
+	az.stored = []authz.Tuple{{User: "plugin_principal:p", Relation: "can_resolve", Object: authz.SecretObject("acme", "cred:db")}}
 	ctx := ctxWithTenant(t, "acme")
 
 	_, err := srv.EditPluginSecretBinding(ctx, &tenantv1.EditPluginSecretBindingRequest{
@@ -336,9 +353,28 @@ func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
 	}
 }
 
-func TestEditPluginSecretBinding_TellsThePluginTheValueMoved(t *testing.T) {
-	srv, reg, _, _ := newPluginsTestServer(t)
+// TestEditPluginSecretBinding_AnUnboundNameIsNotFound: a delete of an absent
+// tuple is a no-op, so the edit reads the stored tuple. A name that was never
+// bound writes no grant and tells no plugin.
+func TestEditPluginSecretBinding_AnUnboundNameIsNotFound(t *testing.T) {
+	srv, reg, az, _ := newPluginsTestServer(t)
 	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p", PrincipalRef: "plugin_principal:p"}
+	pub := &recordingPublisher{}
+	srv.events = pub
+	ctx := ctxWithTenant(t, "acme")
+	_, err := srv.EditPluginSecretBinding(ctx, &tenantv1.EditPluginSecretBindingRequest{InstallId: "i1", DeclaredName: "cred:never", NewExistingRef: "cred:db_v2"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("an edit of a name that was never bound: want NotFound, got %v", err)
+	}
+	if len(az.writes) != 0 || len(az.deletes) != 0 || len(pub.events) != 0 {
+		t.Fatalf("a refused edit must leave no trace: writes=%d deletes=%d published=%d", len(az.writes), len(az.deletes), len(pub.events))
+	}
+}
+
+func TestEditPluginSecretBinding_TellsThePluginTheValueMoved(t *testing.T) {
+	srv, reg, az, _ := newPluginsTestServer(t)
+	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p", PrincipalRef: "plugin_principal:p"}
+	az.stored = []authz.Tuple{{User: "plugin_principal:p", Relation: "can_resolve", Object: authz.SecretObject("acme", "cred:db")}}
 	pub := &recordingPublisher{}
 	srv.events = pub
 	ctx := ctxWithTenant(t, "acme")

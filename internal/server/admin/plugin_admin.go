@@ -227,6 +227,20 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *t
 		Relation: "can_resolve",
 		Object:   authz.SecretObject(tenant.String(), req.GetNewExistingRef()),
 	}
+	// Delete of an absent tuple is a no-op, so it no longer says whether the
+	// declared name was bound. Read the stored tuple first. An edit of a name
+	// that was never bound is NotFound and writes no grant.
+	reader, ok := s.authzr.(authz.TupleReader)
+	if !ok {
+		return nil, status.Errorf(codes.Internal, "authorizer %T cannot read stored tuples", s.authzr)
+	}
+	stored, err := reader.ReadTuples(ctx, oldTuple.User, oldTuple.Relation, oldTuple.Object)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "read old tuple: %v", err)
+	}
+	if len(stored) == 0 {
+		return nil, status.Errorf(codes.NotFound, "the install has no binding for %q", req.GetDeclaredName())
+	}
 	if err := s.authzr.Delete(ctx, []authz.Tuple{oldTuple}); err != nil {
 		return nil, status.Errorf(codes.Internal, "delete old tuple: %v", err)
 	}
