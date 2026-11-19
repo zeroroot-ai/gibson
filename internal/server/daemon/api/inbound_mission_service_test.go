@@ -588,6 +588,18 @@ func TestGrantInboundCaller_RefusesAnIdentityThatIsNotACallerIdentity(t *testing
 		{"a relation on a component", func(f *inboundFixture) {
 			f.fga.stored = []authz.Tuple{{User: ref, Relation: "direct_execute", Object: "component:agent/x"}}
 		}, codes.FailedPrecondition},
+		{"membership of another tenant", func(f *inboundFixture) {
+			f.fga.stored = []authz.Tuple{{User: ref, Relation: "member", Object: "tenant:other"}}
+		}, codes.FailedPrecondition},
+		{"membership of a team", func(f *inboundFixture) {
+			f.fga.stored = []authz.Tuple{{User: ref, Relation: "member", Object: "team:acme/ops"}}
+		}, codes.FailedPrecondition},
+		{"the right to be invoked", func(f *inboundFixture) {
+			f.fga.stored = []authz.Tuple{{User: ref, Relation: "can_be_invoked_by", Object: "component:agent/x"}}
+		}, codes.FailedPrecondition},
+		{"membership of its own tenant", func(f *inboundFixture) {
+			f.fga.stored = []authz.Tuple{{User: ref, Relation: "member", Object: "tenant:acme"}}
+		}, codes.OK},
 		{"the capability read fails", func(f *inboundFixture) { f.identities.err = errInboundBoom }, codes.Internal},
 		{"the tuple read fails", func(f *inboundFixture) { f.fga.readErr = errInboundBoom }, codes.Internal},
 	}
