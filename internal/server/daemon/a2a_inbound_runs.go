@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"

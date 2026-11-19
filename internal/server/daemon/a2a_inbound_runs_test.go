@@ -9,8 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 	"testing"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/stretchr/testify/assert"
