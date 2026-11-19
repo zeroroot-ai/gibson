@@ -45,3 +45,13 @@ func TestCardPathName(t *testing.T) {
 		}
 	}
 }
+
+func TestCardPathFor_IsReadByCardPathName(t *testing.T) {
+	p := CardPathFor("scout")
+	if p != "/agents/scout/.well-known/agent-card.json" {
+		t.Fatalf("CardPathFor = %q", p)
+	}
+	if n, ok := CardPathName(p); !ok || n != "scout" {
+		t.Errorf("CardPathName(%q) = %q, %v", p, n, ok)
+	}
+}

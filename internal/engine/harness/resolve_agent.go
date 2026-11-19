@@ -50,6 +50,6 @@ func BuildAgentResolution(tenant, name, bank string, gw GatewayInfo) (*AgentReso
 	}
 	return &AgentResolution{
 		GatewayURL: gw.URLFor(agentcall.RouteA2A), RouteHeaders: headers, GatewayCAPEM: gw.CAPEM,
-		AgentCardURL: gw.URLFor(agentcall.CardPath),
+		AgentCardURL: gw.URLFor(agentcall.CardPathFor(name)),
 	}, nil
 }

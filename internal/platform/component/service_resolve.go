@@ -186,6 +186,6 @@ func (s *ComponentServiceServer) ResolveAgent(
 	return &componentpb.ResolveAgentResponse{
 		GatewayUrl: s.agentGateway.URLFor(agentcall.RouteA2A), RouteHeaders: headers,
 		GatewayCaPem: s.agentGateway.CAPEM,
-		AgentCardUrl: s.agentGateway.URLFor(agentcall.CardPath),
+		AgentCardUrl: s.agentGateway.URLFor(agentcall.CardPathFor(name)),
 	}, nil
 }

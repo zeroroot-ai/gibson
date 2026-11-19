@@ -247,7 +247,7 @@ func TestResolveAgent_ReplyHoldsTheRouteTheCAAndTheCardURL(t *testing.T) {
 
 	assert.Equal(t, "https://agents.example.test/", resp.GetGatewayUrl())
 	assert.Equal(t, "AGENT-CA", resp.GetGatewayCaPem())
-	assert.Equal(t, "https://agents.example.test/.well-known/agent-card.json", resp.GetAgentCardUrl())
+	assert.Equal(t, "https://agents.example.test/agents/recon-agent/.well-known/agent-card.json", resp.GetAgentCardUrl())
 	want := map[string]string{}
 	for _, h := range agentcall.RouteHeaders(victimTenant, "recon-agent", "bank-1") {
 		want[h.Name] = h.Value
@@ -358,7 +358,7 @@ func TestResolveAgent_TheEdgePrefixMatchesTheEndpointAndTheCard(t *testing.T) {
 	resp, err := env.svc.ResolveAgent(ctx, &componentpb.ResolveAgentRequest{WorkId: "work-1", Name: "recon-agent"})
 	require.NoError(t, err)
 	assert.Equal(t, "https://api.localhost.zeroroot.ai:443/gateway/agent/", resp.GetGatewayUrl())
-	assert.Equal(t, "https://api.localhost.zeroroot.ai:443/gateway/agent/.well-known/agent-card.json",
+	assert.Equal(t, "https://api.localhost.zeroroot.ai:443/gateway/agent/agents/recon-agent/.well-known/agent-card.json",
 		resp.GetAgentCardUrl())
 	for _, u := range []string{resp.GetGatewayUrl(), resp.GetAgentCardUrl()} {
 		assert.True(t, strings.Contains(u, modelcall.EdgeAgentPrefix), "%s must match the Edge prefix", u)

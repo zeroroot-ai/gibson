@@ -160,7 +160,7 @@ func TestResolveAgent_ReplyHoldsTheRouteTheCAAndTheCardURL(t *testing.T) {
 
 	assert.Equal(t, "https://agents.example.test/", resp.GetGatewayUrl())
 	assert.Equal(t, "AGENT-CA", resp.GetGatewayCaPem())
-	assert.Equal(t, "https://agents.example.test/.well-known/agent-card.json", resp.GetAgentCardUrl())
+	assert.Equal(t, "https://agents.example.test/agents/peer-agent/.well-known/agent-card.json", resp.GetAgentCardUrl())
 	want := map[string]string{}
 	for _, h := range agentcall.RouteHeaders(resolveTenant, "peer-agent", bank) {
 		want[h.Name] = h.Value

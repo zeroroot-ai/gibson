@@ -250,7 +250,7 @@ func route(a Agent, cfg Config, name, basePath string) *unstructured.Unstructure
 			"parentRefs": []any{map[string]any{"name": cfg.GatewayName}},
 			"rules": []any{
 				rule(agentcall.RouteA2A, basePath),
-				rule("/agents/"+a.Name+agentcall.CardPath, basePath+agentcall.CardPath),
+				rule(agentcall.CardPathFor(a.Name), basePath+agentcall.CardPath),
 			},
 		},
 	}}

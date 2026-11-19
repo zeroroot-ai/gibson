@@ -98,6 +98,11 @@ const (
 	cardSuffix = CardPath
 )
 
+// CardPathFor returns the Agent Card path of one agent,
+// /agents/<name>/.well-known/agent-card.json. It is the one writer of the form
+// that CardPathName reads.
+func CardPathFor(name string) string { return cardPrefix + name + cardSuffix }
+
 // CardPathName returns the agent name of an Agent Card path of the form
 // /agents/<name>/.well-known/agent-card.json. It returns false for any other
 // path.
