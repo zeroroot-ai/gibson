@@ -124,6 +124,10 @@ func (e *Engine) Err() error {
 	}
 }
 
+// Stopped returns a channel that closes when the engine stops. A component that
+// lives as long as the engine (a tap) ends its own work on it.
+func (e *Engine) Stopped() <-chan struct{} { return e.stopped }
+
 // stop puts the engine in its terminal state. It is safe to call more than once.
 // The first error wins.
 func (e *Engine) stop(err error) {

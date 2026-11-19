@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -123,10 +124,13 @@ type missionGateTap struct {
 	// short one.
 	backoff func(attempt int) time.Duration
 	// retryDelay is the wait before retry n of a failed close (n starts at 1).
-	// done ends the retries. It is the done channel of the daemon context. A
-	// test injects both.
-	retryDelay func(retry int) time.Duration
-	done       <-chan struct{}
+	// done is the done channel of the daemon context. engineStopped closes when
+	// the engine of the tap stops. Either one ends the writes and the retries of
+	// the tap: a stopped engine is rebuilt with a new tap, and the new tap owns
+	// the gate. A test injects all three.
+	retryDelay    func(retry int) time.Duration
+	done          <-chan struct{}
+	engineStopped <-chan struct{}
 
 	mu       sync.Mutex
 	states   map[string]*gateState
@@ -250,6 +254,12 @@ func (t *missionGateTap) drain(ctx context.Context) {
 func (t *missionGateTap) write(ctx context.Context, w missionGateWrite) {
 	var err error
 	for attempt := 1; attempt <= missionGateAttempts; attempt++ {
+		if t.ended() {
+			// The engine or the daemon stopped. A write now could undo the
+			// write of the tap that replaced this one.
+			t.finish(w, errMissionGateTapStopped)
+			return
+		}
 		wctx, cancel := context.WithTimeout(ctx, missionGateWriteTimeout)
 		err = t.writer.SetMissionGate(wctx, t.tenant, w.mission, w.active)
 		cancel()
@@ -271,14 +281,33 @@ func (t *missionGateTap) write(ctx context.Context, w missionGateWrite) {
 	}
 }
 
+// errMissionGateTapStopped is the error of a write that the tap dropped because
+// its engine or the daemon stopped.
+var errMissionGateTapStopped = errors.New("the mission gate stopped with its engine")
+
+// ended reports whether the engine of the tap or the daemon stopped.
+func (t *missionGateTap) ended() bool {
+	select {
+	case <-t.done:
+		return true
+	case <-t.engineStopped:
+		return true
+	default:
+		return false
+	}
+}
+
 // retryClose queues a failed close again after a wait. It stops when the daemon
-// stops, or when a later value of the mission replaced this one.
+// or the engine of the tap stops, or when a later value of the mission replaced
+// this one.
 func (t *missionGateTap) retryClose(w missionGateWrite) {
 	w.retry++
 	timer := time.NewTimer(t.retryDelay(w.retry))
 	defer timer.Stop()
 	select {
 	case <-t.done:
+		return
+	case <-t.engineStopped:
 		return
 	case <-timer.C:
 	}
@@ -373,16 +402,17 @@ func InstallMissionGate(ctx context.Context, tenant string, eng *brain.Engine, w
 	// The writes outlive the caller on purpose: the tap lives as long as the engine.
 	bg := context.WithoutCancel(ctx)
 	tap := &missionGateTap{
-		ctx:        bg,
-		tenant:     tenant,
-		eng:        eng,
-		writer:     writer,
-		logger:     logger.With("component", "mission-gate", "tenant", tenant),
-		backoff:    func(attempt int) time.Duration { return time.Duration(attempt) * 200 * time.Millisecond },
-		retryDelay: missionGateRetryDelay,
-		done:       ctx.Done(),
-		states:     map[string]*gateState{},
-		notify:     make(chan struct{}),
+		ctx:           bg,
+		tenant:        tenant,
+		eng:           eng,
+		writer:        writer,
+		logger:        logger.With("component", "mission-gate", "tenant", tenant),
+		backoff:       func(attempt int) time.Duration { return time.Duration(attempt) * 200 * time.Millisecond },
+		retryDelay:    missionGateRetryDelay,
+		done:          ctx.Done(),
+		engineStopped: eng.Stopped(),
+		states:        map[string]*gateState{},
+		notify:        make(chan struct{}),
 	}
 	tap.sweep(bg)
 	eng.Subscribe(tap.apply)

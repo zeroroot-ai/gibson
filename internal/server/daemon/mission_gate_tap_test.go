@@ -541,3 +541,60 @@ func TestMissionGateRetryDelay_GrowsToTheBound(t *testing.T) {
 		t.Errorf("retry 100 = %v, want %v", got, missionGateRetryMax)
 	}
 }
+
+// A stopped engine is rebuilt with a new tap. The retry of the old tap must not
+// write after its engine stopped: the same mission can run again under the new
+// tap, and a late close would shut the gate of that run.
+func TestMissionGate_TheRetryEndsWhenTheEngineStops(t *testing.T) {
+	g := &gateRecorder{}
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	old := newGateTap(eng, g)
+	engineStopped := make(chan struct{})
+	old.engineStopped = engineStopped
+	release := make(chan struct{})
+	old.retryDelay = func(int) time.Duration { <-release; return time.Millisecond }
+
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	waitWrites(t, g, 1)
+	g.mu.Lock()
+	g.failNext = missionGateAttempts // the close fails and its retry waits
+	g.mu.Unlock()
+	eng.Submit(brain.MissionDone{ID: "m1", RunID: "r1", Outcome: brain.MissionFailed})
+	eng.Tick()
+	time.Sleep(50 * time.Millisecond)
+
+	// The engine stops. A new engine with a new tap runs the mission again.
+	close(engineStopped)
+	eng2 := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	newGateTap(eng2, g)
+	eng2.Submit(brain.MissionProjected{ID: "m1", RunID: "r2"})
+	eng2.Tick()
+	waitWrites(t, g, 2)
+
+	close(release)
+	time.Sleep(100 * time.Millisecond)
+	if got := g.actives(); !equalBools(got, []bool{true, true}) {
+		t.Fatalf("writes = %v, want [true true]: the old tap must not close the gate of the new run", got)
+	}
+}
+
+// A write of a tap whose engine stopped is dropped, and a waiter gets the error.
+func TestMissionGate_AStoppedTapWritesNothing(t *testing.T) {
+	g := &gateRecorder{}
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	tap := newGateTap(eng, g)
+	stopped := make(chan struct{})
+	close(stopped)
+	tap.engineStopped = stopped
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := tap.AwaitOpen(ctx, "m1"); !errors.Is(err, errMissionGateTapStopped) {
+		t.Fatalf("AwaitOpen = %v, want the stopped error", err)
+	}
+	if g.count() != 0 {
+		t.Fatalf("writes = %d, want 0", g.count())
+	}
+}
