@@ -110,7 +110,7 @@ func (r *recordingAuthorizer) Delete(_ context.Context, t []authz.Tuple) error {
 }
 
 func (r *recordingAuthorizer) ListUsersOfType(
-	_ context.Context, objectType, object, relation, userType string,
+	_ context.Context, objectType, object, relation, _ string,
 ) ([]string, error) {
 	return r.users[objectType+"|"+object+"|"+relation], nil
 }

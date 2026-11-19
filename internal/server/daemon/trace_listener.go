@@ -83,7 +83,7 @@ func (d *daemonImpl) buildTraceServer(ctx context.Context) (*grpcSubsystem, erro
 		return nil, fmt.Errorf("trace listener: the SPIFFE X.509 source is not open (got %T)", d.spiffeX509Source)
 	}
 
-	unaryRecovery, _, err := panicRecoveryInterceptors(d.logger.Slog(), nil)
+	unaryRecovery, err := d.traceRecovery()
 	if err != nil {
 		return nil, fmt.Errorf("trace listener: recovery interceptor: %w", err)
 	}
@@ -110,4 +110,12 @@ func (d *daemonImpl) buildTraceServer(ctx context.Context) (*grpcSubsystem, erro
 		logger:              d.logger,
 		gracefulStopTimeout: 10 * time.Second,
 	}, nil
+}
+
+// traceRecovery returns the unary interceptor that recovers a panic of the
+// trace service. The trace server has no stream method, so it drops the stream
+// interceptor.
+func (d *daemonImpl) traceRecovery() (grpc.UnaryServerInterceptor, error) {
+	unary, _, err := panicRecoveryInterceptors(d.logger.Slog(), nil)
+	return unary, err
 }

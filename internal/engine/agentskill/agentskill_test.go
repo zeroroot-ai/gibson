@@ -142,7 +142,7 @@ func TestValidate_SizeLimits(t *testing.T) {
 	}
 
 	// Nine files of 1 MiB are 9 MiB, over the 8 MiB folder limit.
-	var many []file
+	many := make([]file, 0, 9)
 	for i := range 9 {
 		many = append(many, file{Path: fmt.Sprintf("f%d.bin", i), Content: big})
 	}
@@ -150,7 +150,7 @@ func TestValidate_SizeLimits(t *testing.T) {
 		t.Errorf("a folder over the limit: error = %v, want ErrOverLimit", err)
 	}
 
-	var files []file
+	files := make([]file, 0, agentskill.MaxFiles)
 	for i := range agentskill.MaxFiles {
 		files = append(files, file{Path: fmt.Sprintf("f%d.md", i), Content: []byte("x")})
 	}

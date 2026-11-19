@@ -28,8 +28,10 @@ const (
 	// requires: the fleet runs on while the decision is pending. The state
 	// returns to MissionWorking when the last open request is decided.
 	MissionInputRequired MissionStatus = "input_required"
-	MissionCompleted     MissionStatus = "completed"
-	MissionFailed        MissionStatus = "failed"
+	// MissionCompleted is a mission that finished its work.
+	MissionCompleted MissionStatus = "completed"
+	// MissionFailed is a mission that ended with an error. It is terminal.
+	MissionFailed MissionStatus = "failed"
 	// MissionCanceled is a mission that a person stopped. It is terminal and
 	// it is not a failure.
 	MissionCanceled MissionStatus = "canceled"

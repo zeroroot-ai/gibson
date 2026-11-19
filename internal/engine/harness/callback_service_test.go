@@ -510,7 +510,7 @@ func (m *mockHarnessWithResolver) ListTools() []ToolDescriptor {
 	return nil
 }
 
-func (m *mockHarnessWithResolver) DelegateToAgent(_ context.Context, agentName string, task agent.Task) (agent.Result, error) {
+func (m *mockHarnessWithResolver) DelegateToAgent(_ context.Context, _ string, _ agent.Task) (agent.Result, error) {
 	return agent.Result{}, errors.New("not implemented")
 }
 
@@ -1159,9 +1159,9 @@ func TestMissionStatusProtoRoundTrip(t *testing.T) {
 		MissionStatusSubmitted, MissionStatusWorking, MissionStatusCompleted, MissionStatusFailed,
 		MissionStatusCanceled, MissionStatusPaused, MissionStatusInputRequired,
 	} {
-		proto := missionStatusToProto(status)
-		require.NotEqual(t, harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED, proto, "status %s", status)
-		assert.Equal(t, status, missionStatusFromProto(proto))
+		wire := missionStatusToProto(status)
+		require.NotEqual(t, harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED, wire, "status %s", status)
+		assert.Equal(t, status, missionStatusFromProto(wire))
 	}
 	assert.Empty(t, missionStatusFromProto(harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED))
 }
