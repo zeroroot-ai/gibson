@@ -89,6 +89,10 @@ type gateState struct {
 // on lifecycleProjectorTap.apply, gibson#1206). It does no I/O in the tick. One
 // drainer goroutine writes the queue in order.
 type missionGateTap struct {
+	// ctx is the parent of each write to FGA. A write outlives the call that
+	// installed the tap, so ctx keeps the values of that call and not its cancel
+	// signal.
+	ctx    context.Context
 	tenant string
 	eng    *brain.Engine
 	writer missionGateWriter
@@ -220,7 +224,7 @@ func (t *missionGateTap) drain() {
 func (t *missionGateTap) write(w missionGateWrite) {
 	var err error
 	for attempt := 1; attempt <= missionGateAttempts; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), missionGateWriteTimeout)
+		ctx, cancel := context.WithTimeout(t.ctx, missionGateWriteTimeout)
 		err = t.writer.SetMissionGate(ctx, t.tenant, w.mission, w.active)
 		cancel()
 		if err == nil {
@@ -301,11 +305,12 @@ func (noMissionGate) AwaitOpen(context.Context, string) error { return nil }
 // InstallMissionGate registers the mission gate tap on a tenant engine and
 // returns it as the gate that the brain executor waits on. It is called once
 // for each engine, from brain.Registry.OnEngine, before the tick loop starts.
-func InstallMissionGate(tenant string, eng *brain.Engine, writer missionGateWriter, logger *slog.Logger) missionGateAwaiter {
+func InstallMissionGate(ctx context.Context, tenant string, eng *brain.Engine, writer missionGateWriter, logger *slog.Logger) missionGateAwaiter {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	tap := &missionGateTap{
+		ctx:     context.WithoutCancel(ctx),
 		tenant:  tenant,
 		eng:     eng,
 		writer:  writer,

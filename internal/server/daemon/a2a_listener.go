@@ -59,7 +59,7 @@ func (s *httpSubsystem) Serve(ctx context.Context) error {
 	case err := <-serveErr:
 		return err
 	case <-ctx.Done():
-		stopCtx, cancel := context.WithTimeout(context.Background(), s.gracefulStopTimeout)
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.gracefulStopTimeout)
 		defer cancel()
 		if err := s.srv.Shutdown(stopCtx); err != nil {
 			s.logger.Warn(ctx, "A2A listener drain timed out, closing", "error", err.Error())

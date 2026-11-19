@@ -71,6 +71,7 @@ func (g *gateRecorder) count() int {
 
 func newGateTap(eng *brain.Engine, w missionGateWriter) *missionGateTap {
 	tap := &missionGateTap{
+		ctx:     context.Background(),
 		tenant:  "acme",
 		eng:     eng,
 		writer:  w,
@@ -260,7 +261,7 @@ func TestMissionGate_SweepWritesTheTupleOfEachMission(t *testing.T) {
 	eng.Tick()
 
 	g := &gateRecorder{}
-	InstallMissionGate("acme", eng, g, slog.New(slog.DiscardHandler))
+	InstallMissionGate(t.Context(), "acme", eng, g, slog.New(slog.DiscardHandler))
 	waitWrites(t, g, 4)
 
 	got := map[string]bool{}

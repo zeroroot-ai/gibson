@@ -1035,7 +1035,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 			// This doesn't block the tool response
 			// NOTE: Now passing proto directly (proto-first approach)
 			go func() {
-				processCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				processCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 				defer cancel()
 
 				result, err := s.discoveryProcessor.Process(processCtx, execCtx, pbDiscovery)

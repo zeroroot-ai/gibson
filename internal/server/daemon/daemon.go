@@ -1205,7 +1205,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				return
 			}
 			d.missionGates.Store(e.World.Tenant,
-				InstallMissionGate(e.World.Tenant, e, gw, d.logger.WithComponent("mission-gate").Slog()))
+				InstallMissionGate(ctx, e.World.Tenant, e, gw, d.logger.WithComponent("mission-gate").Slog()))
 		})
 	}
 
