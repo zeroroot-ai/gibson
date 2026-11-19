@@ -126,7 +126,12 @@ jobs:
       - name: The inbound route and the inbound listener exist
         run: |
           set -euo pipefail
-          if ! kubectl -n "$NS" get configmap -o yaml | grep -q '/a2a/inbound/'; then
+          # NEVER `kubectl ... | grep -q` under `set -o pipefail`: grep -q exits at the
+          # first match, kubectl then gets SIGPIPE, and the pipeline fails although the
+          # route is there. The ConfigMaps are larger than a pipe buffer. The output goes
+          # to a file first.
+          kubectl -n "$NS" get configmap -o yaml > "$RUNNER_TEMP/configmaps.yaml"
+          if ! grep -q '/a2a/inbound/' "$RUNNER_TEMP/configmaps.yaml"; then
             echo "::error::no Edge configuration names the route /a2a/inbound/. Is charts-ref the branch with the inbound route?"
             exit 1
           fi
