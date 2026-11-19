@@ -44,9 +44,9 @@ func TestMinterGrants(t *testing.T) {
 	if r.Tenant != "acme" || r.MissionID != "m1" || r.TaskID != "t1" || r.Initiator != "user:u1" {
 		t.Errorf("mint request = %+v", r)
 	}
-	want := map[string]bool{
-		modelcall.RouteResponses: true, modelcall.RouteEmbeddings: true, modelcall.RouteModels: true,
-	}
+	// A task grant lists the two call routes. The list route has its own
+	// daemon call grant, so a task grant never lists it.
+	want := map[string]bool{modelcall.RouteResponses: true, modelcall.RouteEmbeddings: true}
 	if len(r.AllowedRPCs) != len(want) {
 		t.Errorf("allowed = %v", r.AllowedRPCs)
 	}

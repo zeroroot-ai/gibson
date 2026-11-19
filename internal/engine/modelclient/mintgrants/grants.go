@@ -41,15 +41,15 @@ type MinterGrants struct {
 	routes []string
 }
 
-// New returns a grant source over the daemon signer. The grant lists
-// the model routes of modelcall.GrantRoutes and the list route, because the
-// daemon lists the models of a provider with its own identity.
+// New returns a grant source over the daemon signer. A task grant lists the
+// model routes of modelcall.GrantRoutes and nothing else. It does not list the
+// list route: the daemon lists the models of a provider with a daemon call
+// grant of the purpose model_list, which has no mission.
 func New(m Minter) (*MinterGrants, error) {
 	if m == nil {
 		return nil, errors.New("modelclient: the signer is required")
 	}
-	routes := append(modelcall.GrantRoutes(), modelcall.RouteModels)
-	return &MinterGrants{minter: m, routes: routes}, nil
+	return &MinterGrants{minter: m, routes: modelcall.GrantRoutes()}, nil
 }
 
 // Grant signs the grant of one call. A call of a mission gets a task grant. A
