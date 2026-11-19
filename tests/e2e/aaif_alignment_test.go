@@ -563,24 +563,15 @@ func TestAAIFAlignment_A2ADelegation(t *testing.T) {
 	require.NotEmpty(t, route.GetGatewayUrl(), "ResolveAgent must name the Agent gateway")
 	require.NotEmpty(t, route.GetRouteHeaders(), "ResolveAgent must name the route headers")
 
-	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("Please run the callee procedure."))
-	sendBody, err := json.Marshal(&a2a.SendMessageRequest{Message: msg})
+	client, err := helpers.HTTPClientWithCA(route.GetGatewayCaPem())
 	require.NoError(t, err)
-	rpc := fmt.Sprintf(`{"jsonrpc":"2.0","id":"1","method":"SendMessage","params":%s}`, sendBody)
-
-	type a2aReply struct {
-		status int
-		body   string
-		err    error
-	}
-	replyCh := make(chan a2aReply, 1)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), aaifMissionTimeout)
+	// Each call goes through the Edge with the task grant of the caller.
+	do := func(method, url string, body []byte) (int, string, error) {
+		ctx, cancel := context.WithTimeout(s.ctx, time.Minute)
 		defer cancel()
-		req, rerr := http.NewRequestWithContext(ctx, http.MethodPost, route.GetGatewayUrl(), bytes.NewReader([]byte(rpc)))
+		req, rerr := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 		if rerr != nil {
-			replyCh <- a2aReply{err: rerr}
-			return
+			return 0, "", fmt.Errorf("build the request: %w", rerr)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("A2A-Version", "1.0")
@@ -588,45 +579,85 @@ func TestAAIFAlignment_A2ADelegation(t *testing.T) {
 		for k, v := range route.GetRouteHeaders() {
 			req.Header.Set(k, v)
 		}
-		client, cerr := helpers.HTTPClientWithCA(route.GetGatewayCaPem())
-		if cerr != nil {
-			replyCh <- a2aReply{err: cerr}
-			return
-		}
 		resp, derr := client.Do(req)
 		if derr != nil {
-			replyCh <- a2aReply{err: derr}
-			return
+			return 0, "", fmt.Errorf("call %s: %w", url, derr)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		replyCh <- a2aReply{status: resp.StatusCode, body: string(b)}
-	}()
+		return resp.StatusCode, string(b), nil
+	}
+	rpc := func(method string, params any) (string, string) {
+		t.Helper()
+		p, merr := json.Marshal(params)
+		require.NoError(t, merr)
+		body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"1","method":%q,"params":%s}`, method, p)
+		status, reply, derr := do(http.MethodPost, route.GetGatewayUrl(), []byte(body))
+		require.NoError(t, derr, "%s through the Agent gateway", method)
+		require.Equal(t, http.StatusOK, status, "%s: the Agent gateway answered: %s", method, reply)
+		var env struct {
+			Result json.RawMessage `json:"result"`
+			Error  json.RawMessage `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(reply), &env), "%s: the reply is not JSON-RPC: %s", method, reply)
+		require.Empty(t, env.Error, "%s: the JSON-RPC reply holds an error: %s", method, reply)
+		require.NotEmpty(t, env.Result, "%s: the JSON-RPC reply holds no result: %s", method, reply)
+		var res struct {
+			Task *struct {
+				ID     string `json:"id"`
+				Status struct {
+					State string `json:"state"`
+				} `json:"status"`
+			} `json:"task"`
+			ID     string `json:"id"`
+			Status struct {
+				State string `json:"state"`
+			} `json:"status"`
+		}
+		require.NoError(t, json.Unmarshal(env.Result, &res), "%s: read the result: %s", method, reply)
+		// SendMessage wraps the Task in "task". GetTask returns the Task itself.
+		if res.Task != nil {
+			return res.Task.ID, res.Task.Status.State
+		}
+		return res.ID, res.Status.State
+	}
 
-	// The call of the caller ends at once when the Agent gateway refuses it.
-	// The test then reports that error and does not wait for a callee that
-	// got no work.
+	// SendMessage does not block. The daemon answers with a Task in the state
+	// SUBMITTED and starts the callee. The test then waits for the callee and
+	// polls GetTask until the Task is COMPLETED.
+	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("Please run the callee procedure."))
+	taskID, state := rpc("SendMessage", &a2a.SendMessageRequest{Message: msg})
+	require.NotEmpty(t, taskID, "the reply of SendMessage must name a Task")
+	require.Contains(t, state, "SUBMITTED", "the first reply holds a Task in the state SUBMITTED")
+
+	// The Agent Card through the Edge prefix. Its interface URL must be a URL
+	// that the caller can use through the Edge, so it has the prefix.
+	status, cardBody, err := do(http.MethodGet, route.GetAgentCardUrl(), nil)
+	require.NoError(t, err, "fetch the Agent Card")
+	require.Equal(t, http.StatusOK, status, "the Agent Card through the Edge answered: %s", cardBody)
+	var card struct {
+		SupportedInterfaces []struct {
+			URL string `json:"url"`
+		} `json:"supportedInterfaces"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(cardBody), &card), "read the Agent Card: %s", cardBody)
+	require.NotEmpty(t, card.SupportedInterfaces, "the Agent Card lists no interface: %s", cardBody)
+	require.Contains(t, card.SupportedInterfaces[0].URL, "/gateway/agent/",
+		"the interface URL of the card must be a URL that works through the Edge")
+
 	var workB *helpers.HeldWork
 	select {
 	case workB = <-callee.Works():
-	case r := <-replyCh:
-		require.NoError(t, r.err, "send the A2A message through the Agent gateway")
-		t.Fatalf("the A2A call ended with status %d before the callee got work: %s", r.status, r.body)
 	case <-time.After(aaifMissionTimeout):
 		t.Fatalf("the agent %s got no work item within %s: the mission never dispatched it", aaifAgentB, aaifMissionTimeout)
 	}
 	require.Equal(t, workA.MissionID, workB.MissionID, "the delegated run must be a work item of the mission of the caller")
 	workB.Complete()
 
-	select {
-	case r := <-replyCh:
-		require.NoError(t, r.err, "send the A2A message through the Agent gateway")
-		require.Equal(t, http.StatusOK, r.status, "the Agent gateway answered: %s", r.body)
-		require.NotContains(t, r.body, `"error"`, "the JSON-RPC reply must hold no error: %s", r.body)
-		require.Contains(t, r.body, `"result"`, "the JSON-RPC reply must hold a result: %s", r.body)
-	case <-time.After(aaifMissionTimeout):
-		t.Fatal("the A2A message got no reply after the callee finished")
-	}
+	helpers.Eventually(t, aaifTraceTimeout, "the Task of the delegation is COMPLETED", func() (bool, string) {
+		_, got := rpc("GetTask", map[string]string{"id": taskID})
+		return strings.Contains(got, "COMPLETED"), "state " + got
+	})
 
 	helpers.Eventually(t, aaifTraceTimeout, "the World holds the runs of both agents", func() (bool, string) {
 		events, rerr := helpers.ReadTimeline(s.ctx, s.world, workA.MissionID)
