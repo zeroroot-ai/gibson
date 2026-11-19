@@ -116,6 +116,34 @@ func rpcCall(h http.Handler, path, body string, headers map[string]string) *http
 	return rec
 }
 
+// rpcErrorCode returns the JSON-RPC error code of an answer, and 0 when the answer
+// has no error.
+func rpcErrorCode(t *testing.T, body string) int {
+	t.Helper()
+	var r struct {
+		Error *struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &r), body)
+	if r.Error == nil {
+		return 0
+	}
+	return r.Error.Code
+}
+
+// The JSON-RPC error codes that the inbound endpoint answers.
+const (
+	codeParse            = -32700
+	codeInvalidParams    = -32602
+	codeInternal         = -32603
+	codeServerBusy       = -32000
+	codeTaskNotFound     = -32001
+	codeNotCancelable    = -32002
+	codeUnsupported      = -32004
+	codePermissionDenied = -31403
+)
+
 const sendBody = `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":` +
 	`{"messageId":"m1","role":"ROLE_USER","parts":[{"text":"scan"},{"data":{"targets":["t1"]}}]}}}`
 
@@ -159,27 +187,30 @@ func TestInboundRPC_Refusals(t *testing.T) {
 		headers    map[string]string
 		starts     *fakeStarts
 		wantStatus int
-		wantBody   string
+		wantCode   int // the JSON-RPC error code, 0 for none
 		wantStart  int
 	}{
-		{"no caller headers", "/a2a/inbound/recon", sendBody, nil, &fakeStarts{}, http.StatusUnauthorized, "", 0},
+		{"no caller headers", "/a2a/inbound/recon", sendBody, nil, &fakeStarts{}, http.StatusUnauthorized, 0, 0},
 		{"a path with an invalid agent", agentcall.InboundPrefix + "Re_con", sendBody, trusted, &fakeStarts{},
-			http.StatusNotFound, "", 0},
+			http.StatusNotFound, 0, 0},
 		{"a message with no parts", "/a2a/inbound/recon",
 			`{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m","role":"ROLE_USER","parts":[]}}}`,
-			trusted, &fakeStarts{}, http.StatusOK, "error", 0},
+			trusted, &fakeStarts{}, http.StatusOK, codeInvalidParams, 0},
+		{"a body that is not JSON", "/a2a/inbound/recon", `{`, trusted, &fakeStarts{}, http.StatusOK, codeParse, 0},
 		{"a start that fails with an internal cause", "/a2a/inbound/recon", sendBody, trusted,
-			&fakeStarts{err: errors.New("redis is down")}, http.StatusOK, "error", 1},
+			&fakeStarts{err: errors.New("redis is down")}, http.StatusOK, codeInternal, 1},
 		{"a start that policy refuses", "/a2a/inbound/recon", sendBody, trusted,
-			&fakeStarts{err: ErrRefused}, http.StatusOK, "error", 1},
+			&fakeStarts{err: ErrRefused}, http.StatusOK, codePermissionDenied, 1},
 		{"a method that is not served", "/a2a/inbound/recon",
-			`{"jsonrpc":"2.0","id":1,"method":"ListTasks","params":{}}`, trusted, &fakeStarts{}, http.StatusOK, "error", 0},
+			`{"jsonrpc":"2.0","id":1,"method":"ListTasks","params":{}}`, trusted, &fakeStarts{}, http.StatusOK, codeUnsupported, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := rpcCall(NewInboundHandler(tt.starts, &recordingCards{}, allowGrants), tt.path, tt.body, tt.headers)
 			assert.Equal(t, tt.wantStatus, rec.Code)
-			assert.Contains(t, rec.Body.String(), tt.wantBody)
+			if tt.wantStatus == http.StatusOK {
+				assert.Equal(t, tt.wantCode, rpcErrorCode(t, rec.Body.String()))
+			}
 			assert.NotContains(t, rec.Body.String(), "redis is down", "an internal cause never reaches the caller")
 			assert.Len(t, tt.starts.got, tt.wantStart)
 		})
@@ -223,21 +254,22 @@ func TestInboundRPC_GetAndCancelRefusals(t *testing.T) {
 		name string
 		body string
 		err  error
-		want string
+		want int
 	}{
-		{"get with no task", `{"jsonrpc":"2.0","id":1,"method":"GetTask","params":{}}`, nil, "error"},
-		{"cancel with no task", `{"jsonrpc":"2.0","id":1,"method":"CancelTask","params":{}}`, nil, "error"},
-		{"get of a task that is not of the caller", getBody, ErrNotFound, "TASK_NOT_FOUND"},
-		{"cancel of a task that is not of the caller", cancelBody, ErrNotFound, "TASK_NOT_FOUND"},
-		{"cancel of a task in a final state", cancelBody, ErrNotCancelable, "TASK_NOT_CANCELABLE"},
-		{"cancel that fails inside", cancelBody, errors.New("redis is down"), "error"},
+		{"get with no task", `{"jsonrpc":"2.0","id":1,"method":"GetTask","params":{}}`, nil, codeInvalidParams},
+		{"cancel with no task", `{"jsonrpc":"2.0","id":1,"method":"CancelTask","params":{}}`, nil, codeInvalidParams},
+		{"get of a task that is not of the caller", getBody, ErrNotFound, codeTaskNotFound},
+		{"cancel of a task that is not of the caller", cancelBody, ErrNotFound, codeTaskNotFound},
+		{"cancel of a task in a final state", cancelBody, ErrNotCancelable, codeNotCancelable},
+		{"get with the permits used", getBody, ErrBusy, codeServerBusy},
+		{"cancel that fails inside", cancelBody, errors.New("redis is down"), codeInternal},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			starts := &fakeStarts{err: tt.err}
 			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, allowGrants), "/a2a/inbound/recon", tt.body, trusted)
 			assert.Equal(t, http.StatusOK, rec.Code)
-			assert.Contains(t, rec.Body.String(), tt.want)
+			assert.Equal(t, tt.want, rpcErrorCode(t, rec.Body.String()))
 			assert.NotContains(t, rec.Body.String(), "redis is down")
 		})
 	}
@@ -263,6 +295,7 @@ func TestInboundRPC_AMessageToATaskIsRefusedAndStartsNothing(t *testing.T) {
 	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, allowGrants), "/a2a/inbound/recon", body, trusted)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, codePermissionDenied, rpcErrorCode(t, rec.Body.String()))
 	assert.Contains(t, rec.Body.String(), "cannot answer an approval")
 	assert.Empty(t, starts.got, "no mission started")
 	assert.Empty(t, starts.asked)
@@ -283,8 +316,7 @@ func TestInboundRPC_AMalformedTargetListIsAnInvalidParamsError(t *testing.T) {
 			body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m","role":"ROLE_USER","parts":` + parts + `}}}`
 			h := NewInboundHandler(startsThatReadTargets{starts}, &recordingCards{}, allowGrants)
 			rec := rpcCall(h, "/a2a/inbound/recon", body, trusted)
-			assert.Contains(t, rec.Body.String(), "invalid params")
-			assert.NotContains(t, rec.Body.String(), "internal error")
+			assert.Equal(t, codeInvalidParams, rpcErrorCode(t, rec.Body.String()))
 		})
 	}
 }
@@ -309,7 +341,8 @@ func TestInboundRPC_ABodyOverTheLimitIsRefused(t *testing.T) {
 
 	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, allowGrants), "/a2a/inbound/recon", big, trusted)
 
-	assert.Contains(t, rec.Body.String(), "error")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, codeParse, rpcErrorCode(t, rec.Body.String()), "a body over the limit is a parse error")
 	assert.Empty(t, starts.got)
 
 	ok := rpcCall(NewInboundHandler(starts, &recordingCards{}, allowGrants), "/a2a/inbound/recon", sendBody, trusted)
@@ -351,8 +384,15 @@ func TestInboundRPC_TheGrantIsCheckedByTheMethodThatRuns(t *testing.T) {
 			starts := &fakeStarts{task: task}
 			grants := &fakeGrants{}
 			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, grants), "/a2a/inbound/recon", tt.body, trusted)
+			require.Equal(t, http.StatusOK, rec.Code)
 			if tt.wantGrant {
-				assert.Contains(t, rec.Body.String(), "error", "no grant refuses the call")
+				if tt.name == "a start" {
+					assert.Zero(t, rpcErrorCode(t, rec.Body.String()), "a start with no grant is a Task and not an error")
+					assert.Contains(t, rec.Body.String(), "TASK_STATE_REJECTED")
+					assert.Contains(t, rec.Body.String(), ReasonAgentNotAvailable)
+				} else {
+					assert.Equal(t, codePermissionDenied, rpcErrorCode(t, rec.Body.String()), "a cancel with no grant")
+				}
 				assert.Empty(t, starts.got)
 				assert.Empty(t, starts.asked, "a refused call reached no run")
 				assert.Equal(t, 1, grants.asked)
@@ -366,7 +406,7 @@ func TestInboundRPC_TheGrantIsCheckedByTheMethodThatRuns(t *testing.T) {
 	starts := &fakeStarts{task: task}
 	rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, &fakeGrants{err: errors.New("fga down")}),
 		"/a2a/inbound/recon", sendBody, trusted)
-	assert.Contains(t, rec.Body.String(), "error")
+	assert.Equal(t, codeInternal, rpcErrorCode(t, rec.Body.String()))
 	assert.NotContains(t, rec.Body.String(), "fga down")
 	assert.Empty(t, starts.got)
 }
@@ -375,8 +415,9 @@ func TestInboundCard_NeedsTheLiveGrant(t *testing.T) {
 	cards := &recordingCards{cards: map[string]*a2a.AgentCard{"recon": {Name: "recon"}}}
 	hdr := map[string]string{"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"}
 
+	// No grant gives the answer of an agent with no card: 404.
 	rec := inboundGet(NewInboundHandler(&fakeStarts{}, cards, &fakeGrants{}), "/a2a/inbound/recon"+agentcall.CardPath, hdr)
-	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Zero(t, cards.asked, "no card is read for a caller with no grant")
 
 	rec = inboundGet(NewInboundHandler(&fakeStarts{}, cards, &fakeGrants{err: errors.New("fga down")}),
@@ -403,4 +444,32 @@ func TestMapError_BusyIsARetryableServerError(t *testing.T) {
 	err := MapError(ErrBusy)
 	require.ErrorIs(t, err, a2a.ErrServerError)
 	assert.Contains(t, err.Error(), "retry later")
+}
+
+// The handler wraps only the SendMessage result as {"task": ...}. GetTask and
+// CancelTask put the Task directly in "result". The SDK client and the exit test
+// decode by this shape.
+func TestInboundRPC_ResultShapePerMethod(t *testing.T) {
+	task := &a2a.Task{ID: "m-1", ContextID: "m-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted}}
+	tests := []struct {
+		method, body string
+		wrapped      bool
+	}{
+		{"SendMessage", sendBody, true},
+		{"GetTask", getBody, false},
+		{"CancelTask", cancelBody, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			rec := rpcCall(NewInboundHandler(&fakeStarts{task: task}, &recordingCards{}, allowGrants), "/a2a/inbound/recon", tt.body, map[string]string{"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"})
+			var r struct {
+				Result map[string]json.RawMessage `json:"result"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &r), rec.Body.String())
+			_, hasTask := r.Result["task"]
+			assert.Equal(t, tt.wrapped, hasTask, rec.Body.String())
+			_, hasStatus := r.Result["status"]
+			assert.Equal(t, !tt.wrapped, hasStatus, rec.Body.String())
+		})
+	}
 }

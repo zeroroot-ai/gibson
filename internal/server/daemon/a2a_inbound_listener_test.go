@@ -259,10 +259,10 @@ func TestBuildA2AInboundServer_ServesThePublishedCardAndNothingElse(t *testing.T
 	rec := get("/a2a/inbound/recon/.well-known/agent-card.json")
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "https://edge.example/a2a/inbound/recon", "the trailing slash of the URL is trimmed")
-	assert.Equal(t, http.StatusForbidden, get("/a2a/inbound/scanner/.well-known/agent-card.json").Code,
-		"an agent that the caller has no grant to: the daemon refuses")
+	assert.Equal(t, http.StatusNotFound, get("/a2a/inbound/scanner/.well-known/agent-card.json").Code,
+		"an agent that the caller has no grant to has no card, as an agent that is not published")
 
-	// A message to an agent that the caller has no grant to is refused by the daemon.
+	// A message to an agent that the caller has no grant to gets a rejected Task and no mission.
 	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":` +
 		`{"messageId":"m","role":"ROLE_USER","parts":[{"text":"scan"}]}}}`
 	req := httptest.NewRequest(http.MethodPost, "/a2a/inbound/scanner", strings.NewReader(body))
@@ -272,7 +272,8 @@ func TestBuildA2AInboundServer_ServesThePublishedCardAndNothingElse(t *testing.T
 	rpc := httptest.NewRecorder()
 	sub.srv.Handler.ServeHTTP(rpc, req)
 	assert.Equal(t, http.StatusOK, rpc.Code)
-	assert.Contains(t, rpc.Body.String(), "no grant to this agent")
+	assert.Contains(t, rpc.Body.String(), "TASK_STATE_REJECTED")
+	assert.Contains(t, rpc.Body.String(), a2aserver.ReasonAgentNotAvailable)
 }
 
 func TestBuildA2AInboundServer_RefusesAResultLimitThatIsNotAPositiveNumber(t *testing.T) {

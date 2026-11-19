@@ -148,6 +148,21 @@ type InboundGrants interface {
 	CanOriginate(ctx context.Context, caller InboundCaller, agent string) (bool, error)
 }
 
+// ReasonAgentNotAvailable is the text of a rejected Task for a caller that has no
+// grant to the agent, and for an agent that is not published. The two get the same
+// answer, so a caller cannot tell which agents exist.
+const ReasonAgentNotAvailable = "the agent is not available for inbound calls"
+
+// RejectedTask is the Task of a refused message. The state is rejected, the status
+// message holds the reason, and no mission exists for it. Its ID is new and no one can
+// read or cancel it later.
+func RejectedTask(reason string) *a2a.Task {
+	id := a2a.NewTaskID()
+	t := &a2a.Task{ID: id, ContextID: string(id), Status: a2a.TaskStatus{State: a2a.TaskStateRejected}}
+	t.Status.Message = a2a.NewMessageForTask(a2a.MessageRoleAgent, t, a2a.NewTextPart(reason))
+	return t
+}
+
 // ErrNoGrant reports a caller with no grant to the published definition.
 var ErrNoGrant = fmt.Errorf("%w: the caller has no grant to this agent", ErrRefused)
 
@@ -206,6 +221,11 @@ func (h *inboundRPC) SendMessage(ctx context.Context, req *a2a.SendMessageReques
 		return nil, MapError(ErrApprovalAnswer)
 	}
 	if err := requireGrant(ctx, h.grants, c, agent); err != nil {
+		if errors.Is(err, ErrNoGrant) {
+			// A caller with no grant gets what a caller of an agent that is not
+			// published gets: a rejected Task, and no mission.
+			return RejectedTask(ReasonAgentNotAvailable), nil
+		}
 		return nil, MapError(err)
 	}
 	task, err := h.runs.Start(ctx, InboundStart{Caller: c, Agent: agent, Message: req.Message})
@@ -299,7 +319,8 @@ func inboundCardHandler(cards Cards, grants InboundGrants) http.Handler {
 		}
 		if err := requireGrant(req.Context(), grants, c, agent); err != nil {
 			if errors.Is(err, ErrNoGrant) {
-				http.Error(w, "permission denied", http.StatusForbidden)
+				// The same answer as an agent that is not published.
+				http.NotFound(w, req)
 				return
 			}
 			http.Error(w, "the grant is not available", http.StatusInternalServerError)

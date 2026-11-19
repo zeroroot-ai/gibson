@@ -226,7 +226,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	c := req.Caller
 	pub, err := r.published.Get(ctx, c.Tenant, req.Agent)
 	if errors.Is(err, inboundmissionstore.ErrNotFound) {
-		return rejectedInboundTask("the agent is not published for inbound calls"), nil
+		return a2aserver.RejectedTask(a2aserver.ReasonAgentNotAvailable), nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read the publication of agent %s: %w", req.Agent, err)
@@ -236,7 +236,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	if err != nil {
 		var refused refusedTargets
 		if errors.As(err, &refused) {
-			return rejectedInboundTask(refused.Error()), nil
+			return a2aserver.RejectedTask(refused.Error()), nil
 		}
 		return nil, err
 	}
@@ -253,7 +253,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		return nil, fmt.Errorf("check the publication of agent %s: %w", req.Agent, err)
 	}
 	if reason != "" {
-		return rejectedInboundTask(reason + ". An admin of the tenant must publish it again"), nil
+		return a2aserver.RejectedTask(reason + ". An admin of the tenant must publish it again"), nil
 	}
 	ctx = auth.WithIdentity(ctx, auth.Identity{
 		Subject: c.Subject, Issuer: auth.IssuerCapabilityGrant, CredentialType: auth.CredentialCapabilityGrant,
@@ -268,9 +268,9 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	slot, err := r.published.Reserve(ctx, c.Tenant, req.Agent, c.Subject, missionID, r.missionKnown(c.Tenant), inboundReservationGrace)
 	switch {
 	case errors.Is(err, inboundmissionstore.ErrLimit):
-		return rejectedInboundTask(fmt.Sprintf("the agent already has its most active missions (%d). Wait for one to end", pub.MaxActive)), nil
+		return a2aserver.RejectedTask(fmt.Sprintf("the agent already has its most active missions (%d). Wait for one to end", pub.MaxActive)), nil
 	case errors.Is(err, inboundmissionstore.ErrNotFound):
-		return rejectedInboundTask("the agent is not published for inbound calls"), nil
+		return a2aserver.RejectedTask(a2aserver.ReasonAgentNotAvailable), nil
 	case err != nil:
 		return nil, fmt.Errorf("reserve a place for agent %s: %w", req.Agent, err)
 	}
@@ -294,7 +294,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		// are refusals of policy. The Task is rejected, as for any other refusal of a
 		// well formed message.
 		if code := status.Code(err); rerr == nil && (code == codes.ResourceExhausted || code == codes.FailedPrecondition) {
-			return rejectedInboundTask("the mission cannot start now: " + status.Convert(err).Message()), nil
+			return a2aserver.RejectedTask("the mission cannot start now: " + status.Convert(err).Message()), nil
 		}
 		if rerr != nil {
 			err = errors.Join(err, rerr)
@@ -556,13 +556,4 @@ func (r *inboundRuns) narrowedTargets(pub *inboundmissionstore.Entry, msg *a2a.M
 		targets = append(targets, id)
 	}
 	return targets, nil
-}
-
-// rejectedInboundTask is the Task of a refused message. It holds no mission, so
-// no one can read or cancel it later.
-func rejectedInboundTask(reason string) *a2a.Task {
-	id := uuid.NewString()
-	t := &a2a.Task{ID: a2a.TaskID(id), ContextID: id, Status: a2a.TaskStatus{State: a2a.TaskStateRejected}}
-	t.Status.Message = a2a.NewMessageForTask(a2a.MessageRoleAgent, t, a2a.NewTextPart(reason))
-	return t
 }

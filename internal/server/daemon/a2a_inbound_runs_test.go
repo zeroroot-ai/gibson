@@ -235,6 +235,7 @@ func TestInboundRuns_AnAgentWithNoPublishedDefinitionIsRejected(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateRejected, task.Status.State)
+	assert.Equal(t, a2aserver.ReasonAgentNotAvailable, a2aserver.TextOf(task.Status.Message), "the answer of an agent that is not published is the answer of no grant")
 	assert.Empty(t, starter.started)
 }
 
@@ -281,7 +282,7 @@ func TestInboundRuns_Failures(t *testing.T) {
 }
 
 func TestRejectedInboundTask_HoldsNoMissionAndAReason(t *testing.T) {
-	a, b := rejectedInboundTask("no"), rejectedInboundTask("no")
+	a, b := a2aserver.RejectedTask("no"), a2aserver.RejectedTask("no")
 	assert.Equal(t, a2a.TaskStateRejected, a.Status.State)
 	assert.NotEqual(t, a.ID, b.ID, "a rejected task has an ID of its own")
 	assert.Equal(t, "no", a2aserver.TextOf(a.Status.Message))
@@ -690,7 +691,7 @@ func TestInboundRuns_ARefusedPlaceIsRejectedAndNoMissionStarts(t *testing.T) {
 		want string
 	}{
 		{"the publication has its most active missions", inboundmissionstore.ErrLimit, "most active missions"},
-		{"the publication is gone", inboundmissionstore.ErrNotFound, "not published"},
+		{"the publication is gone", inboundmissionstore.ErrNotFound, a2aserver.ReasonAgentNotAvailable},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -896,9 +897,10 @@ func TestInboundHandler_AfterTheGrantIsGoneACallerKeepsTheReadAndNothingElse(t *
 	assert.Contains(t, read, "Open SSH", "and the full result")
 
 	assert.Contains(t, call("agent_principal:other", "GetTask", id), "TASK_NOT_FOUND", "another caller reads nothing")
-	assert.Contains(t, call(inboundCallerRef, "CancelTask", id), "no grant", "the cancel needs the live grant")
+	assert.Contains(t, call(inboundCallerRef, "CancelTask", id), `"code":-31403`, "the cancel needs the live grant")
 	start := call(inboundCallerRef, "SendMessage", `{"message":{"messageId":"m","role":"ROLE_USER","parts":[{"text":"x"}]}}`)
-	assert.Contains(t, start, "no grant", "a new start is refused")
+	assert.Contains(t, start, "TASK_STATE_REJECTED", "a new start is rejected")
+	assert.Contains(t, start, a2aserver.ReasonAgentNotAvailable)
 	assert.Empty(t, f.stopped, "no mission was ended")
 }
 
