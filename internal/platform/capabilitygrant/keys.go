@@ -5,9 +5,17 @@ package capabilitygrant
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
+
+// ErrKeyNotAvailable reports that an agent has no key to serve: the row does not
+// exist, the agent is not active, its credential lapsed, or its key does not parse.
+// The key server answers 404 for it. Any other error of AgentKeyDescriptor is a store
+// error, and the key server answers 503, so a short database problem is not taken for
+// an unknown kid.
+var ErrKeyNotAvailable = errors.New("capabilitygrant: no key is available for the agent")
 
 // AgentKeyDescriptor returns the per-kid key descriptor for the agent whose id
 // is kid (ADR-0045, gibson#648). The descriptor is a JWKS superset:
@@ -32,10 +40,10 @@ func (s *CapabilityGrantService) AgentKeyDescriptor(ctx context.Context, kid str
 		return nil, fmt.Errorf("capabilitygrant: AgentKeyDescriptor: lookup %q: %w", kid, err)
 	}
 	if agent == nil {
-		return nil, fmt.Errorf("capabilitygrant: AgentKeyDescriptor: agent %q not found", kid)
+		return nil, fmt.Errorf("%w: agent %q not found", ErrKeyNotAvailable, kid)
 	}
 	if agent.Status != "active" {
-		return nil, fmt.Errorf("capabilitygrant: AgentKeyDescriptor: agent %q status %q (not active)", kid, agent.Status)
+		return nil, fmt.Errorf("%w: agent %q status %q (not active)", ErrKeyNotAvailable, kid, agent.Status)
 	}
 	// Withhold a lapsed agent's key. Without this the sentence above about
 	// expired agents was decoration: ext-authz would keep fetching the key and
@@ -44,12 +52,12 @@ func (s *CapabilityGrantService) AgentKeyDescriptor(ctx context.Context, kid str
 	// refusing here tells an unauthenticated fetcher nothing it did not already
 	// know from asking for an unknown kid.
 	if agentCredentialLapsed(agent, time.Now()) {
-		return nil, fmt.Errorf("capabilitygrant: AgentKeyDescriptor: agent %q lapsed at %s",
-			kid, agent.ExpiresAt.Format(time.RFC3339))
+		return nil, fmt.Errorf("%w: agent %q lapsed at %s",
+			ErrKeyNotAvailable, kid, agent.ExpiresAt.Format(time.RFC3339))
 	}
 	pub, err := parseJWKEd25519(agent.PublicKeyJWK)
 	if err != nil {
-		return nil, fmt.Errorf("capabilitygrant: AgentKeyDescriptor: parse %q public key: %w", kid, err)
+		return nil, fmt.Errorf("%w: parse the public key of %q: %v", ErrKeyNotAvailable, kid, err)
 	}
 	held, err := s.store.ActiveCapabilityNames(ctx, agent.TenantID, agent.PrincipalRef)
 	if err != nil {

@@ -784,3 +784,34 @@ func TestComponentVerify_TheNegativeCacheIsBounded(t *testing.T) {
 	}
 	assert.Len(t, v.missing, maxMissingKids)
 }
+
+// A 503 from the key server is a transient failure. The call is refused, and the kid is
+// not remembered as unknown, so the next call after the daemon recovers works.
+func TestComponentVerifyFresh_A503IsNotCachedAsAnUnknownKid(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	var down atomic.Bool
+	doc := map[string]any{
+		"keys":      []map[string]string{{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pub), "kid": "agent-1"}},
+		"principal": "agent_principal:9", "tenant": "acme", "status": "active",
+	}
+	body, _ := json.Marshal(doc)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if down.Load() {
+			http.Error(w, "key lookup unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+	mint := func() string { return mintAgentJWT(t, priv, "agent-1", "agent+jwt", time.Now().Add(55*time.Second)) }
+
+	down.Store(true)
+	_, err := v.VerifyFresh(context.Background(), mint(), testMethod)
+	require.ErrorIs(t, err, ErrUnknownKey, "the call fails closed")
+	assert.False(t, v.knownMissing("agent-1"), "a 503 makes no negative cache entry")
+
+	down.Store(false)
+	_, err = v.VerifyFresh(context.Background(), mint(), testMethod)
+	require.NoError(t, err, "the next call works as soon as the daemon is back")
+}

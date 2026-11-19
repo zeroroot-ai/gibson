@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -81,11 +83,23 @@ func TestCGKeys_AgentKid_ServesAgentJWKS(t *testing.T) {
 
 func TestCGKeys_UnknownAgent_404(t *testing.T) {
 	minter := fakeKeyMinter{keyID: "cg-v1"}
-	lookup := &fakeAgentKeyLookup{err: context.DeadlineExceeded} // any error → withheld
+	lookup := &fakeAgentKeyLookup{err: fmt.Errorf("%w: agent missing", capabilitygrant.ErrKeyNotAvailable)}
 	rr := getKey(t, capabilityGrantKeysHandler(minter, lookup), "missing")
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+// A store error is not an unknown kid. The answer is 503, so ext-authz caches nothing
+// and a short database problem does not refuse an active identity.
+func TestCGKeys_StoreError_503(t *testing.T) {
+	minter := fakeKeyMinter{keyID: "cg-v1"}
+	lookup := &fakeAgentKeyLookup{err: context.DeadlineExceeded}
+	rr := getKey(t, capabilityGrantKeysHandler(minter, lookup), "agent-1")
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rr.Code)
 	}
 }
 
@@ -124,7 +138,7 @@ func TestCGKeys_PreviousDaemonKid_IsServedDuringTheRotationWindow(t *testing.T) 
 		previousKeyID: "cg-old",
 		jwks:          []byte(`{"keys":[{"kty":"OKP","kid":"cg-new"},{"kty":"OKP","kid":"cg-old"}]}`),
 	}
-	lookup := &fakeAgentKeyLookup{err: errNoSuchAgentKey}
+	lookup := &fakeAgentKeyLookup{err: fmt.Errorf("%w: %v", capabilitygrant.ErrKeyNotAvailable, errNoSuchAgentKey)}
 	rr := getKey(t, capabilityGrantKeysHandler(minter, lookup), "cg-old")
 
 	if rr.Code != http.StatusOK {
@@ -143,7 +157,7 @@ func TestCGKeys_PreviousDaemonKid_IsServedDuringTheRotationWindow(t *testing.T) 
 // unknown kid.
 func TestCGKeys_RetiredDaemonKid_IsNotServed(t *testing.T) {
 	minter := fakeKeyMinter{keyID: "cg-new", jwks: []byte(`{"keys":[{"kty":"OKP","kid":"cg-new"}]}`)}
-	lookup := &fakeAgentKeyLookup{err: errNoSuchAgentKey}
+	lookup := &fakeAgentKeyLookup{err: fmt.Errorf("%w: %v", capabilitygrant.ErrKeyNotAvailable, errNoSuchAgentKey)}
 	rr := getKey(t, capabilityGrantKeysHandler(minter, lookup), "cg-old")
 
 	if rr.Code != http.StatusNotFound {

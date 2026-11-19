@@ -5,6 +5,8 @@ package daemon
 
 import (
 	"context"
+	"errors"
+	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"net/http"
 	"strings"
 )
@@ -82,8 +84,14 @@ func capabilityGrantKeysHandler(minter cgKeyMinter, lookup cgAgentKeyLookup) htt
 			body, err = lookup.AgentKeyDescriptor(r.Context(), kid)
 		}
 		if err != nil {
-			// Unknown kid / inactive agent / parse failure — do not echo detail.
-			http.Error(w, "unknown key", http.StatusNotFound)
+			if errors.Is(err, capabilitygrant.ErrKeyNotAvailable) {
+				// Unknown kid / inactive agent / lapsed / bad key: do not echo detail.
+				http.Error(w, "unknown key", http.StatusNotFound)
+				return
+			}
+			// A store error is not "no such key". ext-authz must not take a short
+			// database problem for an unknown kid, so it gets 503 and caches nothing.
+			http.Error(w, "key lookup unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
