@@ -583,3 +583,51 @@ func TestComponentVerify_RejectsMissingMethod(t *testing.T) {
 		t.Fatalf("err = %v, want ErrMalformed (unbound token with no method claim must be rejected)", err)
 	}
 }
+
+// startCapabilityServer serves a descriptor that lists capabilities.
+func startCapabilityServer(t *testing.T, pub ed25519.PublicKey, kid string, capabilities []string) *httptest.Server {
+	t.Helper()
+	doc := map[string]any{
+		"keys": []map[string]string{{
+			"kty": "OKP", "crv": "Ed25519",
+			"x":   base64.RawURLEncoding.EncodeToString(pub),
+			"kid": kid, "alg": "EdDSA", "use": "sig",
+		}},
+		"principal": "agent_principal:9", "tenant": "acme", "status": "active",
+		"capabilities": capabilities,
+	}
+	body, _ := json.Marshal(doc)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// The capabilities of the identity come from the descriptor of the daemon, and
+// never from the token.
+func TestComponentVerify_ReadsTheCapabilitiesOfTheDescriptor(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	tests := []struct {
+		name          string
+		capabilities  []string
+		wantOriginate bool
+	}{
+		{"the descriptor lists the ceiling", []string{"mission:originate"}, true},
+		{"the descriptor lists no capability", nil, false},
+		{"the descriptor lists another capability", []string{"mission:delegate"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := startCapabilityServer(t, pub, "agent-1", tt.capabilities)
+			v := newComponentVerifier(t, srv.URL+"/capabilitygrant/v1/keys")
+			tok := mintAgentJWT(t, priv, "agent-1", "agent+jwt", time.Now().Add(55*time.Second))
+
+			id, err := v.Verify(context.Background(), tok, testMethod)
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			if got := id.Has("mission:originate"); got != tt.wantOriginate {
+				t.Errorf("Has(mission:originate) = %v, want %v", got, tt.wantOriginate)
+			}
+		})
+	}
+}

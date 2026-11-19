@@ -7,6 +7,7 @@
 package agentcall
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -116,4 +117,47 @@ func CardPathName(path string) (string, bool) {
 		return "", false
 	}
 	return name, true
+}
+
+// The inbound A2A path (epic gibson#1367). An outside A2A client calls a Gibson
+// agent through the Edge, and the call does not cross the Agent gateway. The
+// agent is a segment of the path, because the Edge sets no route header for it.
+// ext-authz and the daemon read the agent with InboundPathAgent, so they cannot
+// disagree about it.
+const (
+	// InboundPrefix is the path prefix that the Edge routes to the daemon.
+	InboundPrefix = "/a2a/inbound/"
+)
+
+// inboundAgentPattern is a DNS label. The same rule holds for the agent name of
+// a published mission definition.
+var inboundAgentPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+
+// InboundPathFor returns the path of the A2A JSON-RPC endpoint of one published
+// agent.
+func InboundPathFor(agent string) string { return InboundPrefix + agent }
+
+// InboundCardPathFor returns the path of the Agent Card of one published agent.
+func InboundCardPathFor(agent string) string { return InboundPathFor(agent) + CardPath }
+
+// IsInboundPath reports whether a path is on the inbound prefix. It says nothing
+// about the rest of the path.
+func IsInboundPath(path string) bool { return strings.HasPrefix(path, InboundPrefix) }
+
+// InboundPathAgent returns the agent name of an inbound path and whether the
+// path is the Agent Card of the agent. The two forms are /a2a/inbound/<agent>
+// and /a2a/inbound/<agent>/.well-known/agent-card.json. It returns ok=false for
+// any other path, and for a name that is not a DNS label.
+func InboundPathAgent(path string) (agent string, card, ok bool) {
+	rest, found := strings.CutPrefix(path, InboundPrefix)
+	if !found {
+		return "", false, false
+	}
+	if name, isCard := strings.CutSuffix(rest, CardPath); isCard {
+		rest, card = name, true
+	}
+	if !inboundAgentPattern.MatchString(rest) {
+		return "", false, false
+	}
+	return rest, card, true
 }

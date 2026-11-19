@@ -52,6 +52,7 @@ import (
 	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/fga"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/headers"
@@ -211,6 +212,12 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 	}
 	if gateway {
 		return s.gatewayCallResponse(ctx, req), nil
+	}
+	if agentcall.IsInboundPath(method) {
+		// An outside A2A client calls a published agent through the Edge. Only the
+		// Capability Grant JWT of an enrolled agent identity is accepted
+		// (inbound_a2a.go). A gateway peer never reaches this branch.
+		return s.inboundA2AResponse(ctx, req), nil
 	}
 	if modelcall.IsEdgeForwardPath(method) {
 		// The sandbox path: the Edge forwards to the gateway. The grant check is

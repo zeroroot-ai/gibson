@@ -559,18 +559,20 @@ func newJWK(pub ed25519.PublicKey, kid string) jwk {
 // `principal`/`tenant` — it trusts no caller-asserted identity. The `keys` field
 // keeps the standard JWKS shape so the same parser handles both this and the
 // daemon's own key document.
-func buildKeyDescriptor(pub ed25519.PublicKey, kid, principal, tenant, status string) ([]byte, error) {
+func buildKeyDescriptor(pub ed25519.PublicKey, kid, principal, tenant, status string, capabilities []string) ([]byte, error) {
 	type descriptor struct {
-		Keys      []jwk  `json:"keys"`
-		Principal string `json:"principal,omitempty"`
-		Tenant    string `json:"tenant,omitempty"`
-		Status    string `json:"status,omitempty"`
+		Keys         []jwk    `json:"keys"`
+		Principal    string   `json:"principal,omitempty"`
+		Tenant       string   `json:"tenant,omitempty"`
+		Status       string   `json:"status,omitempty"`
+		Capabilities []string `json:"capabilities,omitempty"`
 	}
 	return json.Marshal(descriptor{
-		Keys:      []jwk{newJWK(pub, kid)},
-		Principal: principal,
-		Tenant:    tenant,
-		Status:    status,
+		Keys:         []jwk{newJWK(pub, kid)},
+		Principal:    principal,
+		Tenant:       tenant,
+		Status:       status,
+		Capabilities: capabilities,
 	})
 }
 

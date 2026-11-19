@@ -218,9 +218,10 @@ type keyDescriptor struct {
 	Keys []struct {
 		Kty, Crv, X, Kid, Use, Alg string
 	} `json:"keys"`
-	Principal string `json:"principal"`
-	Tenant    string `json:"tenant"`
-	Status    string `json:"status"`
+	Principal    string   `json:"principal"`
+	Tenant       string   `json:"tenant"`
+	Status       string   `json:"status"`
+	Capabilities []string `json:"capabilities"`
 }
 
 func TestBuildKeyDescriptor(t *testing.T) {
@@ -229,7 +230,7 @@ func TestBuildKeyDescriptor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	raw, err := buildKeyDescriptor(pub, "kid-1", "agent_principal:acme", "acme", "active")
+	raw, err := buildKeyDescriptor(pub, "kid-1", "agent_principal:acme", "acme", "active", []string{"mission:originate"})
 	if err != nil {
 		t.Fatalf("buildKeyDescriptor: %v", err)
 	}
@@ -254,6 +255,9 @@ func TestBuildKeyDescriptor(t *testing.T) {
 	if d.Principal != "agent_principal:acme" || d.Tenant != "acme" || d.Status != "active" {
 		t.Fatalf("authz fields wrong: principal=%q tenant=%q status=%q", d.Principal, d.Tenant, d.Status)
 	}
+	if len(d.Capabilities) != 1 || d.Capabilities[0] != "mission:originate" {
+		t.Fatalf("capabilities = %v, want [mission:originate]", d.Capabilities)
+	}
 	// The descriptor must parse back through the production single-JWK parser.
 	jwkBytes, _ := json.Marshal(map[string]string{"kty": k.Kty, "crv": k.Crv, "x": k.X})
 	if _, err := parseJWKEd25519(jwkBytes); err != nil {
@@ -263,12 +267,12 @@ func TestBuildKeyDescriptor(t *testing.T) {
 
 func TestBuildKeyDescriptor_OmitsEmptyAuthzFields(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
-	raw, err := buildKeyDescriptor(pub, "kid", "", "", "")
+	raw, err := buildKeyDescriptor(pub, "kid", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("buildKeyDescriptor: %v", err)
 	}
 	s := string(raw)
-	for _, field := range []string{"principal", "tenant", "status"} {
+	for _, field := range []string{"principal", "tenant", "status", "capabilities"} {
 		if strings.Contains(s, field) {
 			t.Fatalf("empty %q should be omitted, got %s", field, s)
 		}

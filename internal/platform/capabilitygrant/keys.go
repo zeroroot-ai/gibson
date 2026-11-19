@@ -7,13 +7,23 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/capname"
 )
+
+// descriptorCapabilities are the capability bits that the key descriptor lists.
+// ext-authz reads them without a database. An inbound A2A call needs
+// mission:originate (gibson#1410).
+var descriptorCapabilities = []string{capname.MissionOriginate}
 
 // AgentKeyDescriptor returns the per-kid key descriptor for the agent whose id
 // is kid (ADR-0045, gibson#648). The descriptor is a JWKS superset:
 //
 //	{"keys":[{ed25519 jwk}], "principal":"agent_principal:<acct>",
-//	 "tenant":"<tenant>", "status":"active"}
+//	 "tenant":"<tenant>", "status":"active", "capabilities":["mission:originate"]}
+//
+// capabilities lists each bit of descriptorCapabilities that the agent holds in
+// an active grant. The list is absent when the agent holds none.
 //
 // ext-authz fetches this by kid to verify a component's self-signed agent+jwt
 // (kid = agent row id) and then runs its NORMAL per-method FGA check on the
@@ -45,5 +55,15 @@ func (s *CapabilityGrantService) AgentKeyDescriptor(ctx context.Context, kid str
 	if err != nil {
 		return nil, fmt.Errorf("capabilitygrant: AgentKeyDescriptor: parse %q public key: %w", kid, err)
 	}
-	return buildKeyDescriptor(pub, kid, agent.PrincipalRef, agent.TenantID, agent.Status)
+	var held []string
+	for _, name := range descriptorCapabilities {
+		has, err := s.store.HasActiveGrant(ctx, agent.TenantID, agent.PrincipalRef, name)
+		if err != nil {
+			return nil, fmt.Errorf("capabilitygrant: AgentKeyDescriptor: read %s of %q: %w", name, kid, err)
+		}
+		if has {
+			held = append(held, name)
+		}
+	}
+	return buildKeyDescriptor(pub, kid, agent.PrincipalRef, agent.TenantID, agent.Status, held)
 }

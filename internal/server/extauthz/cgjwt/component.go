@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -80,11 +81,12 @@ type ComponentVerifier struct {
 const DefaultComponentMaxLifetime = 5 * time.Minute
 
 type cachedDescriptor struct {
-	key       ed25519.PublicKey
-	principal string
-	tenant    string
-	status    string
-	exp       time.Time
+	key          ed25519.PublicKey
+	principal    string
+	tenant       string
+	status       string
+	capabilities []string
+	exp          time.Time
 }
 
 // ComponentIdentity is the verified, daemon-asserted identity of a component.
@@ -109,6 +111,16 @@ type ComponentIdentity struct {
 	// the empty value instead, so an absent claim denies exactly the requests
 	// that depend on it and nothing else.
 	ComponentScope string
+	// Capabilities are the session capability bits that the daemon lists in the
+	// descriptor, for example "mission:originate". They are as trustworthy as the
+	// descriptor, which the SVID-pinned fetch protects. The token never names
+	// them.
+	Capabilities []string
+}
+
+// Has reports whether the descriptor lists the capability.
+func (c ComponentIdentity) Has(capability string) bool {
+	return slices.Contains(c.Capabilities, capability)
 }
 
 // ComponentConfig configures a ComponentVerifier.
@@ -342,6 +354,7 @@ func (v *ComponentVerifier) Verify(ctx context.Context, token, method string) (C
 		Tenant:         desc.tenant,
 		Subject:        sub,
 		ComponentScope: scope,
+		Capabilities:   desc.capabilities,
 	}, nil
 }
 
@@ -480,11 +493,12 @@ func (v *ComponentVerifier) fetch(ctx context.Context, kid string) (cachedDescri
 		return cachedDescriptor{}, err
 	}
 	return cachedDescriptor{
-		key:       key,
-		principal: doc.Principal,
-		tenant:    doc.Tenant,
-		status:    doc.Status,
-		exp:       time.Now().Add(v.ttl),
+		key:          key,
+		principal:    doc.Principal,
+		tenant:       doc.Tenant,
+		status:       doc.Status,
+		capabilities: doc.Capabilities,
+		exp:          time.Now().Add(v.ttl),
 	}, nil
 }
 

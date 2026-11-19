@@ -15,6 +15,7 @@ package capabilitygrant
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -80,16 +81,25 @@ func TestAgentKeyDescriptor_WithholdsALapsedAgentsKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "lapsed")
 }
 
+// expectOriginateGrant answers the read of the mission:originate bit.
+func expectOriginateGrant(m *mockedService, held bool) {
+	m.mock.ExpectQuery("JOIN capability_grant_agents a ON a.id = g.agent_id").
+		WithArgs("acme", "agent_principal:acct-1", "mission:originate").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(held))
+}
+
 func TestAgentKeyDescriptor_ServesAnAgentInsideItsLifetime(t *testing.T) {
 	m := newMockedService(t)
 	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
 		WithArgs("agt_1").
 		WillReturnRows(agentRowExpiring("agt_1", "acme", time.Now().Add(time.Hour)))
+	expectOriginateGrant(m, false)
 
 	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
 
 	require.NoError(t, err)
 	assert.Contains(t, string(body), `"tenant":"acme"`)
+	assert.NotContains(t, string(body), "capabilities", "an agent with no bit lists none")
 }
 
 func TestAgentKeyDescriptor_ServesAnAgentWithNoRecordedExpiry(t *testing.T) {
@@ -97,11 +107,39 @@ func TestAgentKeyDescriptor_ServesAnAgentWithNoRecordedExpiry(t *testing.T) {
 	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
 		WithArgs("agt_1").
 		WillReturnRows(agentRowExpiring("agt_1", "acme", nil))
+	expectOriginateGrant(m, false)
 
 	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
 
 	require.NoError(t, err)
 	assert.Contains(t, string(body), `"principal":"agent_principal:acct-1"`)
+}
+
+func TestAgentKeyDescriptor_ListsTheOriginateCeiling(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
+		WithArgs("agt_1").
+		WillReturnRows(agentRowExpiring("agt_1", "acme", nil))
+	expectOriginateGrant(m, true)
+
+	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
+
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"capabilities":["mission:originate"]`)
+}
+
+func TestAgentKeyDescriptor_RefusesWhenTheGrantReadFails(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1").
+		WithArgs("agt_1").
+		WillReturnRows(agentRowExpiring("agt_1", "acme", nil))
+	m.mock.ExpectQuery("JOIN capability_grant_agents a ON a.id = g.agent_id").
+		WillReturnError(errors.New("db down"))
+
+	body, err := m.svc.AgentKeyDescriptor(context.Background(), "agt_1")
+
+	require.ErrorContains(t, err, "mission:originate")
+	assert.Nil(t, body)
 }
 
 // ---------------------------------------------------------------------------

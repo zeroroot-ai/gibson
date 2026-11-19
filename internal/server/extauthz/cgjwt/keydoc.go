@@ -46,6 +46,10 @@ type keyDoc struct {
 	Principal string `json:"principal"`
 	Tenant    string `json:"tenant"`
 	Status    string `json:"status"`
+	// Capabilities lists the session capability bits that the agent holds in an
+	// active grant, for example mission:originate. It is absent for an agent
+	// that holds none.
+	Capabilities []string `json:"capabilities"`
 }
 
 // isBare reports whether the document carries no component binding — the shape
