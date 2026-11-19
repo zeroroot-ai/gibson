@@ -317,8 +317,9 @@ func route(
 	mp *gibsonv1alpha1.ModelProvider, cfg Config, name, modelBackend, listBackend string,
 ) *unstructured.Unstructured {
 	match := func(path string) map[string]any {
-		headers := []any{}
-		for _, h := range modelcall.RouteHeaders(mp.Spec.TenantID, mp.Name) {
+		routeHeaders := modelcall.RouteHeaders(mp.Spec.TenantID, mp.Name)
+		headers := make([]any, 0, len(routeHeaders))
+		for _, h := range routeHeaders {
 			headers = append(headers, map[string]any{"type": "Exact", "name": h.Name, "value": h.Value})
 		}
 		return map[string]any{

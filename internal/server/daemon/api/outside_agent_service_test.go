@@ -40,7 +40,7 @@ func (m *memOutsideStore) Register(
 }
 
 func (m *memOutsideStore) List(context.Context, string) ([]outsideagentstore.Entry, error) {
-	out := []outsideagentstore.Entry{}
+	out := make([]outsideagentstore.Entry, 0, len(m.entries))
 	for _, e := range m.entries {
 		out = append(out, e)
 	}

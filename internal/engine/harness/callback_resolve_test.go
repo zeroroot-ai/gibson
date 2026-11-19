@@ -55,9 +55,8 @@ func resolveService(t *testing.T, h AgentHarness, opts ...CallbackServiceOption)
 	t.Helper()
 	registry := NewCallbackHarnessRegistry()
 	mustRegister(t, registry, "mission-A", "recon-agent", h)
-	base := []CallbackServiceOption{
-		testEventBus(), WithModelGateway(resolveModelGateway), WithAgentGateway(resolveAgentGateway),
-	}
+	base := make([]CallbackServiceOption, 0, 3+len(opts))
+	base = append(base, testEventBus(), WithModelGateway(resolveModelGateway), WithAgentGateway(resolveAgentGateway))
 	opts = append(base, opts...)
 	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, opts...)
 }

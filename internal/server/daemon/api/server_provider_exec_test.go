@@ -255,7 +255,7 @@ func TestExecuteLLM_ToolsAndToolCalls(t *testing.T) {
 	assert.Equal(t, "tool_calls", out.FinishReason)
 	req := gw.reqs[0]
 	require.Len(t, req.Tools, 1)
-	var kinds []string
+	kinds := make([]string, 0, len(req.Input))
 	for _, it := range req.Input {
 		kinds = append(kinds, it.Type)
 	}

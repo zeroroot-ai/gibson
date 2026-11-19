@@ -208,12 +208,14 @@ func backend(a Agent, cfg Config, name, host string, port int) *unstructured.Uns
 // route renders the HTTPRoute. Two exact paths match. Each one is rewritten to
 // the path of the agent, and the same filter removes the headers.
 func route(a Agent, cfg Config, name, basePath string) *unstructured.Unstructured {
-	headers := []any{}
-	for _, h := range agentcall.RouteHeaders(a.Tenant, a.Name, "") {
+	routeHeaders := agentcall.RouteHeaders(a.Tenant, a.Name, "")
+	headers := make([]any, 0, len(routeHeaders))
+	for _, h := range routeHeaders {
 		headers = append(headers, map[string]any{"type": "Exact", "name": h.Name, "value": h.Value})
 	}
-	remove := []any{}
-	for _, h := range RemovedHeaders() {
+	removed := RemovedHeaders()
+	remove := make([]any, 0, len(removed))
+	for _, h := range removed {
 		remove = append(remove, h)
 	}
 	rule := func(matchPath, targetPath string) map[string]any {
