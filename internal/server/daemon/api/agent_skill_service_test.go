@@ -77,10 +77,9 @@ func (m *memSkillStore) ListPage(
 	out := []agentskillstore.Entry{}
 	for _, e := range entries {
 		if after != nil {
-			k := agentskillstore.KeyOf(e)
-			follows := k.Name > after.Name ||
-				(k.Name == after.Name && k.PublishedAt.Before(after.PublishedAt)) ||
-				(k.Name == after.Name && k.PublishedAt.Equal(after.PublishedAt) && k.Digest > after.Digest)
+			follows := e.Name > after.Name ||
+				(e.Name == after.Name && e.PublishedAt.Before(after.PublishedAt)) ||
+				(e.Name == after.Name && e.PublishedAt.Equal(after.PublishedAt) && e.Digest > after.Digest)
 			if !follows {
 				continue
 			}
