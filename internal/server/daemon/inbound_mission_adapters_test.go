@@ -165,3 +165,41 @@ func TestRegisterInboundMission_NeedsThePoolTheAuthorizerAndTheTargetStore(t *te
 	assert.NotNil(t, d.inboundMissions)
 	assert.Contains(t, srv.GetServiceInfo(), "gibson.tenant.v1.InboundMissionService")
 }
+
+// The hash of a pin must not depend on the bytes of the encoder. The protojson
+// encoder may add a space after a comma, and the choice depends on the binary. A
+// hash that changed with it would turn every publication stale after an upgrade.
+func TestCanonicalJSONHash_IgnoresSpacingAndKeyOrder(t *testing.T) {
+	compact, err := canonicalJSONHash([]byte(`{"b":[1,2],"a":{"y":"1","x":true}}`))
+	require.NoError(t, err)
+	spaced, err := canonicalJSONHash([]byte("{\"a\": {\"x\":true, \"y\":\"1\"},\n \"b\":[1, 2]}"))
+	require.NoError(t, err)
+	assert.Equal(t, compact, spaced)
+
+	other, err := canonicalJSONHash([]byte(`{"b":[1,3],"a":{"y":"1","x":true}}`))
+	require.NoError(t, err)
+	assert.NotEqual(t, compact, other, "a change of a value changes the hash")
+}
+
+// A golden value fixes the canonical form. A change of the form changes every
+// pin, so it must fail this test and be a decision.
+func TestDefinitionHash_Golden(t *testing.T) {
+	def := &missionpb.MissionDefinition{
+		Id:    "00000000-0000-0000-0000-000000000001",
+		Name:  "golden",
+		Nodes: map[string]*missionpb.MissionNode{"n1": inboundAgentNode("n1", "recon")},
+	}
+	got, err := definitionHash(def)
+	require.NoError(t, err)
+	assert.Equal(t, "2f4f0d5e66d6dfcd2b4776229b4274386b85edadbd442ed0c61d66c81399686a", got)
+}
+
+func TestTargetHash_Golden(t *testing.T) {
+	target := &types.Target{
+		Name: "t", Type: "http_api", URL: "https://example.test",
+		Capabilities: []string{"a", "b"}, Headers: map[string]string{"z": "1", "a": "2"},
+	}
+	got, err := targetHash(target)
+	require.NoError(t, err)
+	assert.Equal(t, "043ac3433b605c3b8a2a052bc69824b57b09201b314794ad17d73a9c51750767", got)
+}

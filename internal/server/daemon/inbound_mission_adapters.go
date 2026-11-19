@@ -4,6 +4,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -64,10 +65,31 @@ var _ api.InboundMissionSource = (*inboundMissionSource)(nil)
 // definitionHash is the SHA-256 of the canonical JSON of the whole definition, so a
 // change of a node, the budget or the scope changes it. A publication pins it, and
 // the mission start compares it with the definition that it loaded.
+//
+// The protojson output is not stable. It may add a space after a comma, and the
+// choice depends on the binary. So the hash does not use those bytes. The code
+// decodes them into a value and encodes the value with encoding/json, which sorts
+// the keys and writes no space. The hash is the same in every binary.
 func definitionHash(def *missionpb.MissionDefinition) (string, error) {
-	canonical, err := mission.MarshalDefinitionJSON(def)
+	raw, err := mission.MarshalDefinitionJSON(def)
 	if err != nil {
 		return "", fmt.Errorf("encode the definition: %w", err)
+	}
+	return canonicalJSONHash(raw)
+}
+
+// canonicalJSONHash hashes the canonical form of a JSON text: the keys sorted and
+// no space. Two texts of the same value give the same hash.
+func canonicalJSONHash(raw []byte) (string, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return "", fmt.Errorf("decode the definition: %w", err)
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf("encode the canonical definition: %w", err)
 	}
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:]), nil
