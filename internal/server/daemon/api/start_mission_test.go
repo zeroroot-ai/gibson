@@ -60,7 +60,7 @@ func TestStartMission_RefusesBeforeTheDaemonStartsAnything(t *testing.T) {
 		{name: "the mission quota is used up", quota: scriptedQuota{missionErr: boom}, want: boom},
 		{name: "the agent quota is used up", quota: scriptedQuota{agentErr: boom}, want: boom},
 		{
-			name:  "the tenant is suspended",
+			name: "the tenant is suspended",
 			setup: func(_ *DaemonServer, m sqlmock.Sqlmock) {
 				m.ExpectQuery("SELECT activation FROM tenant_status").WithArgs("acme").
 					WillReturnRows(sqlmock.NewRows([]string{"activation"}).AddRow("suspended"))
