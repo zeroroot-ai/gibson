@@ -44,10 +44,10 @@ type missionStarter interface {
 type inboundRuns struct {
 	published inboundmissionstore.Store
 	// source reads the definition and the targets, to compare them with the pin.
-	source  api.InboundMissionSource
-	starter missionStarter
-	registry  *brain.Registry
-	findings  missionFindingReader
+	source   api.InboundMissionSource
+	starter  missionStarter
+	registry *brain.Registry
+	findings missionFindingReader
 	// stop ends a running mission of the tenant on the context.
 	stop func(ctx context.Context, missionID string) error
 

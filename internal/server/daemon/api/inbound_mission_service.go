@@ -116,9 +116,9 @@ type InboundMissionFGA interface {
 type InboundMissionService struct {
 	tenantv1.UnimplementedInboundMissionServiceServer
 
-	store    inboundmissionstore.Store
-	source   InboundMissionSource
-	fga      InboundMissionFGA
+	store  inboundmissionstore.Store
+	source InboundMissionSource
+	fga    InboundMissionFGA
 	// identities reads the Capability Grant record of a caller identity.
 	identities InboundIdentities
 	pageKeys   *pagetoken.Keys
