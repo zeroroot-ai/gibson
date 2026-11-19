@@ -154,8 +154,7 @@ func (s *EnvoyAuthzServer) modelCallResponse(
 	// daemon changes the FGA tuple when the mission is paused or ends. A call with
 	// no mission, such as a component call, has no mission to gate.
 	if caller.mission != "" {
-		active, aErr := s.cache.CheckRelation(ctx, "tenant:"+caller.tenant,
-			authz.RelationMissionActive, authz.MissionObject(caller.mission), nil)
+		active, aErr := s.cache.CheckMissionActive(ctx, caller.tenant, caller.mission)
 		if aErr != nil {
 			extauthzFGAUnavailableTotal.Inc()
 			s.log.ErrorContext(ctx, "ext-authz: FGA unavailable (mission gate)",

@@ -110,8 +110,7 @@ func (s *EnvoyAuthzServer) a2aCallResponse(ctx context.Context, req *authv3.Chec
 	// The grant verifier refuses a grant with no mission or no task, so the
 	// caller here always has both.
 
-	active, err := s.cache.CheckRelation(ctx, "tenant:"+caller.tenant,
-		authz.RelationMissionActive, authz.MissionObject(caller.mission), nil)
+	active, err := s.cache.CheckMissionActive(ctx, caller.tenant, caller.mission)
 	if err != nil {
 		extauthzFGAUnavailableTotal.Inc()
 		s.log.ErrorContext(ctx, "ext-authz: FGA unavailable (A2A mission gate)", "mission", caller.mission, "err", err)
