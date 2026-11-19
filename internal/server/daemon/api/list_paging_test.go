@@ -21,7 +21,7 @@ import (
 )
 
 // signedToken signs a position for a list of the service, as the daemon does.
-func signedToken(t *testing.T, keys *pagetoken.Keys, list string, position string, scope ...string) string {
+func signedToken(t *testing.T, keys *pagetoken.Keys, list, position string, scope ...string) string {
 	t.Helper()
 	page, err := pageOf(keys, list, 1, "", scope[0], scope[1:]...)
 	require.NoError(t, err)
