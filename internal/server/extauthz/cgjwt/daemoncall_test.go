@@ -57,7 +57,7 @@ func mintDaemonCall(t *testing.T, priv ed25519.PrivateKey, kid string, claims jw
 	t.Helper()
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	tok.Header["kid"] = kid
-	tok.Header["typ"] = modelcall.DaemonCallTokenType
+	tok.Header["typ"] = modelcall.DaemonCallJWTType
 	signed, err := tok.SignedString(priv)
 	if err != nil {
 		t.Fatal(err)

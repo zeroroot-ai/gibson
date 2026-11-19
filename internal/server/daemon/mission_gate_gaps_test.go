@@ -48,10 +48,12 @@ func TestMissionGate_AwaitOpenStopsWithTheContext(t *testing.T) {
 
 func TestInstallMissionGate_UsesTheDefaultLoggerWhenNoneIsGiven(t *testing.T) {
 	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
-	tap := InstallMissionGate("acme", eng, &gateRecorder{}, nil)
+	tap := InstallMissionGate(context.Background(), "acme", eng, &gateRecorder{}, nil)
 	require.NotNil(t, tap)
-	assert.NotNil(t, tap.logger)
-	assert.Equal(t, "acme", tap.tenant)
+	typed, ok := tap.(*missionGateTap)
+	require.True(t, ok)
+	assert.NotNil(t, typed.logger)
+	assert.Equal(t, "acme", typed.tenant)
 }
 
 func TestMissionGateOf_ReturnsTheTapOrAClosedNoOp(t *testing.T) {

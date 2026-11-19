@@ -287,7 +287,7 @@ func TestDaemonCall_AnInitiatorThatIsNotAnFGAUserIsRefused(t *testing.T) {
 	t.Parallel()
 	srv, priv, mock := dcServer(t)
 	claims := dcClaims("chat", modelcall.RouteResponses, modelTenant, "user:u1#member")
-	g := signDC(t, priv, modelcall.DaemonCallTokenType, claims)
+	g := signDC(t, priv, modelcall.DaemonCallJWTType, claims)
 	req := modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil)
 	resp, err := srv.Check(gw(t), req)
 	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
