@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.0](https://github.com/zeroroot-ai/gibson/compare/v0.164.0...v0.165.0) (2026-11-19)
+
+
+### Features
+
+* serve published missions to outside agents over A2A ([#1421](https://github.com/zeroroot-ai/gibson/issues/1421)) ([ac66295](https://github.com/zeroroot-ai/gibson/commit/ac6629522227f1441b39c79dc41b2fa5b20cb53b))
+
 ## [0.164.0](https://github.com/zeroroot-ai/gibson/compare/v0.163.5...v0.164.0) (2026-11-19)
 
 
