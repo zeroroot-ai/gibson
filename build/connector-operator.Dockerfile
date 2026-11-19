@@ -1,9 +1,9 @@
 # Multi-stage build for the gibson connector-operator (ADR-0114).
-# ghcr.io/zeroroot-ai/mirror/golang:1.27.3-alpine, the one builder every
+# ghcr.io/zeroroot-ai/mirror/golang:1.27.4-alpine, the one builder every
 # gibson image uses: the Go that go.mod names, kept equal by the org guard
 # (check-go-toolchain.sh, .github#22). GOTOOLCHAIN=local makes a mismatch
 # fail the build instead of downloading a toolchain.
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.27.3-alpine@sha256:f2c872bcee949b7be9c490efd02b48a8a2fbf947cdf533f1c58525ec9d8170fd AS build
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS build
 ARG GOTOOLCHAIN=local
 ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 WORKDIR /src

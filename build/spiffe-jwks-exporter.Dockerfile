@@ -3,7 +3,7 @@
 # (docker ecosystem, /build) bumps the digest. To move the Go version, bump
 # go.mod, add the tag to mirror-list.yaml, then bump every builder here: the
 # org guard (check-go-toolchain.sh, .github#22) keeps them equal.
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.27.3-alpine@sha256:f2c872bcee949b7be9c490efd02b48a8a2fbf947cdf533f1c58525ec9d8170fd AS build
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS build
 
 # git is required by the --mount=type=secret RUN layer below to configure
 # private-module credentials. Alpine Go images ship without it.
