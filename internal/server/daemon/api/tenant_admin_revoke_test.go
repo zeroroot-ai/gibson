@@ -308,3 +308,37 @@ func TestRevokeAgentIdentity_AFailedGrantReadRevokesNoAccount(t *testing.T) {
 		t.Errorf("code = %v, delete calls = %d", status.Code(err), len(fakeidp.deleteCalls))
 	}
 }
+
+// strictAuthorizer fails a delete batch as a whole when one tuple is not stored, as
+// OpenFGA does.
+type strictAuthorizer struct{ *recordingAuthorizer }
+
+func (s strictAuthorizer) Delete(ctx context.Context, t []authz.Tuple) error {
+	for _, tu := range t {
+		if !slices.Contains(s.stored, tu) {
+			return errors.New("cannot delete a tuple which does not exist: " + tu.Object)
+		}
+	}
+	return s.recordingAuthorizer.Delete(ctx, t)
+}
+
+// An orphan identity misses a tuple of its base set. One absent tuple must not fail
+// the whole batch, so the grants of the identity are still deleted.
+func TestRevokeAgentIdentity_AnAbsentTupleDoesNotFailTheBatch(t *testing.T) {
+	const principal = "agent_principal:orphan"
+	grant := authz.Tuple{User: principal, Relation: "granted_caller", Object: "published_mission:acme/recon"}
+	rec := &recordingAuthorizer{fakeAuthorizer: newFakeAuthorizer().allow("tenant:acme", "belongs_to", principal)}
+	rec.stored = []authz.Tuple{grant} // the belongs_to tuple is not stored
+	srv := newTestDaemonServer(t).WithIdPAdminClient(&fakeIDPClient{}).WithAuthorizer(strictAuthorizer{rec}).
+		WithPrincipalRevoker(&fakePrincipalRevoker{})
+
+	_, err := srv.RevokeAgentIdentity(ctxWithTenantAdmin(context.Background(), "acme", "user-admin"),
+		&tenantpb.RevokeAgentIdentityRequest{PrincipalId: principal})
+
+	if err != nil {
+		t.Fatalf("RevokeAgentIdentity: %v", err)
+	}
+	if !slices.Contains(rec.deleted, grant) {
+		t.Errorf("the grant was not deleted: %v", rec.deleted)
+	}
+}

@@ -170,12 +170,26 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 	}
 	// The identity can no longer call a published mission definition.
 	tuplesToDelete = append(tuplesToDelete, grantTuples...)
-	if derr := s.authorizer.Delete(ctx, tuplesToDelete); derr != nil {
+	// A delete batch fails as a whole when one tuple is absent (the write semantics
+	// of OpenFGA), and an orphan identity can miss its belongs_to or its owner tuple.
+	// Only the tuples that exist are deleted, and the absent ones are logged.
+	present, absent, rerr := existingTuples(ctx, s.authorizer, tuplesToDelete)
+	if rerr != nil {
+		s.logger.WarnContext(ctx, "RevokeAgentIdentity: FGA tuple read failed (IdP revocation succeeded)",
+			slog.String("tenant_id", tenantID), slog.String("principal_id", req.PrincipalId), slog.String("error", rerr.Error()))
+		present = nil
+	}
+	if len(absent) > 0 {
+		s.logger.InfoContext(ctx, "RevokeAgentIdentity: tuples already absent",
+			slog.String("principal_id", req.PrincipalId), slog.Int("count", len(absent)))
+	}
+	if derr := s.authorizer.Delete(ctx, present); derr != nil {
 		// Non-fatal: log but don't fail the RPC. The IdP revocation already
 		// happened; FGA cleanup can be retried manually.
 		s.logger.WarnContext(ctx, "RevokeAgentIdentity: FGA tuple cleanup failed (IdP revocation succeeded)",
 			slog.String("tenant_id", tenantID),
 			slog.String("principal_id", req.PrincipalId),
+			slog.Int("tuples_left", len(present)),
 			slog.String("error", derr.Error()),
 		)
 	}
@@ -237,4 +251,25 @@ func (s *DaemonServer) serviceAccountInTenantScope(ctx context.Context, tenantID
 		pageToken = resp.NextPageToken
 	}
 	return false, nil
+}
+
+// existingTuples splits tuples into the ones that are stored and the ones that are
+// absent, with ReadTuples. Each tuple is read by its full key.
+func existingTuples(ctx context.Context, az any, tuples []authz.Tuple) (present, absent []authz.Tuple, err error) {
+	reader, ok := az.(authz.TupleReader)
+	if !ok {
+		return nil, nil, errors.New("the authorizer cannot read stored tuples")
+	}
+	for _, t := range tuples {
+		got, rerr := reader.ReadTuples(ctx, t.User, t.Relation, t.Object)
+		if rerr != nil {
+			return nil, nil, fmt.Errorf("read %s %s %s: %w", t.User, t.Relation, t.Object, rerr)
+		}
+		if len(got) > 0 {
+			present = append(present, t)
+		} else {
+			absent = append(absent, t)
+		}
+	}
+	return present, absent, nil
 }
