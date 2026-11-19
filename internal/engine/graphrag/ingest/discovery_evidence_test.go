@@ -20,11 +20,10 @@ import (
 // fakeRecords is a brain.ToolCallRecord with a fixed set of calls. A call
 // appears after the given number of reads, so the test covers the wait.
 type fakeRecords struct {
-	mu        sync.Mutex
-	calls     map[string]brain.AgentToolCallSnapshot
-	appearsAt int
-	reads     int
-	tenants   []string
+	mu      sync.Mutex
+	calls   map[string]brain.AgentToolCallSnapshot
+	reads   int
+	tenants []string
 }
 
 func (f *fakeRecords) RecordedToolCalls(
@@ -40,7 +39,7 @@ func (f *fakeRecords) RecordedToolCalls(
 	var missing []string
 	for _, id := range ids {
 		c, ok := f.calls[id]
-		if !ok || f.reads <= f.appearsAt {
+		if !ok {
 			missing = append(missing, id)
 			continue
 		}
@@ -127,8 +126,7 @@ func TestProcess_ParserEvidenceMatchesTheOriginalAndTheDerivedID(t *testing.T) {
 func TestProcess_AddsOneTierOneItemOfTheParsedToolCall(t *testing.T) {
 	callID := uuid.NewString()
 	rec := &fakeRecords{
-		calls:     map[string]brain.AgentToolCallSnapshot{callID: {ToolCallID: callID, ToolName: "nmap", Result: "raw output"}},
-		appearsAt: 2, // the record shows up on the third read
+		calls: map[string]brain.AgentToolCallSnapshot{callID: {ToolCallID: callID, ToolName: "nmap", Result: "raw output"}},
 	}
 	d := &graphragpb.DiscoveryResult{
 		Findings:        []*graphragpb.Finding{{Title: "t1", Severity: "low"}, {Title: "t2", Severity: "low"}},
@@ -141,8 +139,8 @@ func TestProcess_AddsOneTierOneItemOfTheParsedToolCall(t *testing.T) {
 	if err != nil || res.HasErrors() {
 		t.Fatalf("err = %v, result errors = %v", err, res.Errors)
 	}
-	if rec.reads != 3 {
-		t.Errorf("reads = %d, want 3", rec.reads)
+	if rec.reads != 1 {
+		t.Errorf("reads = %d, want 1: the read does not wait", rec.reads)
 	}
 	if len(rec.tenants) == 0 || rec.tenants[0] != "acme" {
 		t.Errorf("the record was read for tenants %v, want acme", rec.tenants)
@@ -187,9 +185,7 @@ func TestProcess_AMissingRecordStillWritesTheFinding(t *testing.T) {
 	rec := &fakeRecords{calls: map[string]brain.AgentToolCallSnapshot{}}
 	d := &graphragpb.DiscoveryResult{Findings: []*graphragpb.Finding{{Title: "t", Severity: "low"}}}
 	var written []writtenFinding
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // the wait ends at once
-	res, err := evidenceProcessor(rec, &written).Process(ctx,
+	res, err := evidenceProcessor(rec, &written).Process(context.Background(),
 		ExecContext{MissionID: "m1", ToolExecutionID: "gone", TenantID: auth.MustNewTenantID("acme")}, d)
 	if err != nil {
 		t.Fatal(err)

@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -243,4 +244,22 @@ func TestIngestSkillLoad_FeedsTheTimeline(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("load not recorded: %+v", reg.For("acme").AgentSkillLoads())
+}
+
+// The sink returns after the engine folded the record. A finding that cites the
+// id of the call reads the record at once, so a record that is not there yet
+// would refuse a correct finding.
+func TestIngestToolCall_TheRecordIsReadableWhenTheSinkReturns(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	sink := ingestToolCall(reg)
+
+	for i := 0; i < 50; i++ {
+		id := fmt.Sprintf("call-%d", i)
+		sink(ctx, "acme", harness.ToolCallRecord{ToolCallID: id, MissionID: "m1", ToolName: "nmap"})
+		if _, missing := reg.For("acme").RecordedToolCalls("m1", []string{id}); len(missing) != 0 {
+			t.Fatalf("the record of %s is not readable when the sink returned", id)
+		}
+	}
 }

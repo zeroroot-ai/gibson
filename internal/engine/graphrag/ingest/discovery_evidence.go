@@ -6,7 +6,6 @@ package ingest
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -27,14 +26,6 @@ const maxParserEvidenceBytes = 1 << 20
 const (
 	ParserSourceKey = "source"
 	ParserSource    = "parser"
-)
-
-// recordRetries and recordRetryWait bound the wait for the record of the tool
-// call. The harness hands the record to the World, and the World folds it on
-// its next tick. The discovery goroutine can start before the fold.
-const (
-	recordRetries   = 10
-	recordRetryWait = 100 * time.Millisecond
 )
 
 // parserEvidence returns the tier 2 evidence that parsers attached to the
@@ -99,9 +90,13 @@ func (noToolCallRecord) RecordedToolCalls(context.Context, string, []string) ([]
 }
 
 // recordedToolEvidence returns the tier 1 item of the tool call whose output
-// was parsed. It returns nil when the discovery has no tool call, when the
-// source holds no record of the call, or when the call has no record after the
-// wait.
+// was parsed. It returns nil when the discovery has no tool call or when the
+// source holds no record of the call and names none missing. It returns an
+// error when the source names the call as missing.
+//
+// The read does not wait. The tool call sink of the daemon returns after the
+// engine folded the record, and the discovery starts after the sink returned.
+// A missing record is therefore a fault and not a race.
 func (p *discoveryProcessor) recordedToolEvidence(ctx context.Context, execCtx ExecContext) (*typespb.Evidence, error) {
 	if execCtx.ToolExecutionID == "" || execCtx.MissionID == "" {
 		return nil, nil
@@ -109,24 +104,15 @@ func (p *discoveryProcessor) recordedToolEvidence(ctx context.Context, execCtx E
 	// The record is read for the tenant of the discovery. The context of the
 	// goroutine that runs the processor holds no tenant.
 	ctx = auth.WithTenant(ctx, execCtx.TenantID)
-	for attempt := 0; ; attempt++ {
-		items, missing, err := brain.ReadRecordedEvidence(ctx, p.records, execCtx.MissionID, []string{execCtx.ToolExecutionID})
-		if err != nil {
-			return nil, fmt.Errorf("read the record of tool call %s: %w", execCtx.ToolExecutionID, err)
-		}
-		if len(items) > 0 {
-			return items[0], nil
-		}
-		if len(missing) == 0 {
-			return nil, nil // the source holds no record and names none missing
-		}
-		if attempt >= recordRetries {
-			return nil, fmt.Errorf("tool call %s has no record", execCtx.ToolExecutionID)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("wait for the record of tool call %s: %w", execCtx.ToolExecutionID, ctx.Err())
-		case <-time.After(recordRetryWait):
-		}
+	items, missing, err := brain.ReadRecordedEvidence(ctx, p.records, execCtx.MissionID, []string{execCtx.ToolExecutionID})
+	if err != nil {
+		return nil, fmt.Errorf("read the record of tool call %s: %w", execCtx.ToolExecutionID, err)
 	}
+	if len(items) > 0 {
+		return items[0], nil
+	}
+	if len(missing) == 0 {
+		return nil, nil // the source holds no record and names none missing
+	}
+	return nil, fmt.Errorf("tool call %s has no record", execCtx.ToolExecutionID)
 }

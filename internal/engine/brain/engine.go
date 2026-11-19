@@ -210,6 +210,42 @@ func (e *Engine) Submit(ev Event) {
 	}
 }
 
+// ackedEvent is an event in the intake queue whose submitter waits for its fold.
+// The tick unwraps it, applies the event and sends the result on done.
+type ackedEvent struct {
+	Event
+	done chan error
+}
+
+// SubmitAndWait enqueues an event and returns after the tick has appended it to
+// the durable log and folded it into the World. A reader of the World that
+// starts after SubmitAndWait returns sees the event. It is for a write that a
+// reader meets right after, for example the record of a tool call that a
+// finding cites.
+//
+// It returns an error when the engine stops before the fold, or when ctx ends.
+// The caller sets the bound of the wait with ctx. An event that was queued stays
+// queued when the wait ends, and the tick applies it later.
+func (e *Engine) SubmitAndWait(ctx context.Context, ev Event) error {
+	ack := &ackedEvent{Event: ev, done: make(chan error, 1)}
+	select {
+	case <-e.stopped:
+		e.logDropped(ev)
+		return fmt.Errorf("brain/engine: the engine is stopped, so %q is not recorded: %w", ev.Kind(), e.Err())
+	case <-ctx.Done():
+		return fmt.Errorf("brain/engine: queue %q: %w", ev.Kind(), ctx.Err())
+	case e.intake <- ack:
+	}
+	select {
+	case err := <-ack.done:
+		return err
+	case <-e.stopped:
+		return fmt.Errorf("brain/engine: the engine stopped before it applied %q: %w", ev.Kind(), e.Err())
+	case <-ctx.Done():
+		return fmt.Errorf("brain/engine: wait for the fold of %q: %w", ev.Kind(), ctx.Err())
+	}
+}
+
 func (e *Engine) logDropped(ev Event) {
 	slog.Warn("brain/engine: the engine is stopped, so the event is dropped",
 		"tenant", e.World.Tenant,
@@ -329,7 +365,15 @@ func (e *Engine) drainIntake() int {
 	for {
 		select {
 		case ev := <-e.intake:
-			if !e.apply(ev) {
+			ack, acked := ev.(*ackedEvent)
+			if acked {
+				ev = ack.Event
+			}
+			applied := e.apply(ev)
+			if acked {
+				ack.done <- e.Err()
+			}
+			if !applied {
 				return n
 			}
 			n++

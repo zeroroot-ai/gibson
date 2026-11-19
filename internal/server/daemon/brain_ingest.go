@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
@@ -411,12 +412,21 @@ func ingestSkillLoad(reg *brain.Registry) harness.SkillLoadSink {
 // tenant's brain World as an AgentToolCall entity — the flight recorder's
 // tool-I/O half, alongside ingestLLMCall's transcript half. Routes by the
 // call's own tenant, same as ingestLLMCall.
+//
+// The sink returns after the engine has folded the record. A tool call reply
+// carries the id of the record, and the agent can cite the id in a finding at
+// once. The reader of the finding must find the record, so the reply waits for
+// the fold. The wait has a bound. When it ends, the sink logs the error and the
+// tool call still succeeds, because the record is a side effect of the call.
 func ingestToolCall(reg *brain.Registry) harness.ToolCallSink {
-	return func(_ context.Context, tenant string, call harness.ToolCallRecord) {
+	return func(ctx context.Context, tenant string, call harness.ToolCallRecord) {
 		if reg == nil || call.ToolCallID == "" {
 			return
 		}
-		reg.For(tenant).Submit(brain.AgentToolCallObserved{
+		// A client that left must not cancel the record of a call that ran.
+		waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), toolCallFoldWait)
+		defer cancel()
+		err := reg.For(tenant).SubmitAndWait(waitCtx, brain.AgentToolCallObserved{
 			ToolCallID:         call.ToolCallID,
 			MissionID:          call.MissionID,
 			MissionRunID:       call.MissionRunID,
@@ -427,5 +437,14 @@ func ingestToolCall(reg *brain.Registry) harness.ToolCallSink {
 			Err:                call.Err,
 			RecordedAtUnixNano: call.RecordedAtUnixNano,
 		})
+		if err != nil {
+			slog.ErrorContext(ctx, "the record of a tool call is not in the World, so a finding cannot cite it yet",
+				"tenant", tenant, "tool_call_id", call.ToolCallID, "error", err)
+		}
 	}
 }
+
+// toolCallFoldWait bounds the wait of the tool call sink for the fold of the
+// record. A tick is 50 ms, so the wait ends far sooner unless the engine is
+// stuck.
+const toolCallFoldWait = 10 * time.Second
