@@ -150,8 +150,8 @@ type RegisterRequest struct {
 	// workspace_name is the human-readable workspace name. Required; it must
 	// yield a valid tenant slug.
 	WorkspaceName string `protobuf:"bytes,3,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
-	// tier is the canonical plan id. Required, and resolved against the same
-	// server-side plan gate the open rung uses.
+	// tier is an optional plan id. Gibson does not judge it. Step 2 of
+	// gibson#1531 deletes it.
 	Tier string `protobuf:"bytes,4,opt,name=tier,proto3" json:"tier,omitempty"`
 	// owner_first_name / owner_last_name populate the human-user profile.
 	// Optional.
@@ -320,7 +320,8 @@ type RequestEmailVerificationRequest struct {
 	// workspace_name is the human-readable workspace name. Parked on the
 	// verification row and read back at completion. Required.
 	WorkspaceName string `protobuf:"bytes,3,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
-	// tier is the canonical plan id ("team", "org", "enterprise"). Required.
+	// tier is an optional plan id. Gibson does not judge it. It goes to the
+	// external signup step. Step 2 of gibson#1531 deletes it.
 	Tier string `protobuf:"bytes,4,opt,name=tier,proto3" json:"tier,omitempty"`
 	// owner_first_name / owner_last_name populate the eventual human-user
 	// profile. Optional.
@@ -725,12 +726,9 @@ type SignupResponse struct {
 	// owner_user_id is the Zitadel id of the founding-owner human user this call
 	// created. Same tag and same meaning it has always had.
 	OwnerUserId string `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
-	// plan_id is the canonical plan the server-side gate resolved and provisioned
-	// against — the same value enqueued for the operator, not the raw
-	// verification-row tier string. Callers must never see an id the gate did not
-	// accept, so this is populated from the resolved plan rather than echoed from
-	// the request. Additive: field 4 is free and no reserved range covers it
-	// (gibson#1325).
+	// plan_id is the plan id of the verification row, the same value enqueued
+	// for the operator (gibson#1325). Empty when the caller gave none. Step 2 of
+	// gibson#1531 deletes it.
 	PlanId string `protobuf:"bytes,4,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 	// step_url is where the browser goes for the external signup step. Empty
 	// when no step is configured: the tenant does not wait.

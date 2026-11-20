@@ -82,7 +82,6 @@ func TestReconcile_AddsFinalizerOnFirstPass(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme Corp",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 	}
 	r, c := newFakeReconciler(t, tenant)
@@ -109,6 +108,31 @@ func TestReconcile_AddsFinalizerOnFirstPass(t *testing.T) {
 	}
 }
 
+// TestReconcile_NoTierWritesNoTierLabel pins that a Tenant with no spec.tier
+// gets a namespace with no tier label (gibson#1531).
+func TestReconcile_NoTierWritesNoTierLabel(t *testing.T) {
+	tenant := &gibsonv1alpha1.Tenant{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "acme",
+			Finalizers: []string{gibsonv1alpha1.TenantFinalizer},
+		},
+		Spec: gibsonv1alpha1.TenantSpec{DisplayName: "Acme", Owner: "owner@acme.com"},
+	}
+	r, c := newFakeReconciler(t, tenant)
+	if _, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "acme"},
+	}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	ns := &corev1.Namespace{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "tenant-acme"}, ns); err != nil {
+		t.Fatalf("namespace missing: %v", err)
+	}
+	if v, ok := ns.Labels["gibson.zeroroot.ai/tier"]; ok {
+		t.Errorf("a Tenant with no tier got the tier label %q", v)
+	}
+}
+
 func TestReconcile_ProvisionsNamespaceAndPolicy(t *testing.T) {
 	tenant := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{
@@ -118,7 +142,7 @@ func TestReconcile_ProvisionsNamespaceAndPolicy(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanEnterprise,
+			Tier:        "enterprise",
 		},
 	}
 	r, c := newFakeReconciler(t, tenant)
@@ -213,7 +237,6 @@ func TestReconcile_NetworkPolicy_NoBoltGrantOnDefaultDeny(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanEnterprise,
 		},
 	}
 	r, c := newFakeReconciler(t, tenant)
@@ -253,7 +276,6 @@ func TestReconcile_NetworkPolicy_EgressIsDNSOnly(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanEnterprise,
 		},
 	}
 	r, c := newFakeReconciler(t, tenant)
@@ -327,7 +349,6 @@ func TestReconcile_CorrelationID_FromAnnotation(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Corr Test",
 			Owner:       "owner@example.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 	}
 
@@ -380,7 +401,6 @@ func TestReconcile_CorrelationID_EmptyWhenMissing(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "No Corr",
 			Owner:       "owner@example.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 	}
 
@@ -431,7 +451,6 @@ func TestReconcile_DeletionRunsFinalizer(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 		Status: gibsonv1alpha1.TenantStatus{
 			Namespace: "tenant-acme",
@@ -525,7 +544,6 @@ func TestReconcile_157_DeletionRemovesFinalizerEvenWhenTeardownBlocked(t *testin
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Stuck",
 			Owner:       "owner@stuck.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 		Status: gibsonv1alpha1.TenantStatus{
 			Namespace: "tenant-stuck",
@@ -597,7 +615,6 @@ func TestReconcile_157_DeletionSkipsProvisionSaga(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Deleting",
 			Owner:       "owner@deleting.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 		Status: gibsonv1alpha1.TenantStatus{
 			Namespace: "tenant-deleting",

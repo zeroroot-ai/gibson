@@ -204,7 +204,6 @@ func TestRegister_ValidatesItsInput(t *testing.T) {
 		{"malformed email", func(r *tenantv1.RegisterRequest) { r.OwnerEmail = "not-an-address" }},
 		{"no workspace name", func(r *tenantv1.RegisterRequest) { r.WorkspaceName = "" }},
 		{"workspace name yields no slug", func(r *tenantv1.RegisterRequest) { r.WorkspaceName = "///" }},
-		{"no tier", func(r *tenantv1.RegisterRequest) { r.Tier = "" }},
 		{"no password", func(r *tenantv1.RegisterRequest) { r.Password = "" }},
 	}
 	for _, c := range cases {
@@ -222,18 +221,37 @@ func TestRegister_ValidatesItsInput(t *testing.T) {
 	}
 }
 
-// A plan no self-serve registration may have is refused at the door rather
-// than filling an administrator's queue with a decision they cannot make.
-func TestRegister_RefusesAPlanThatIsNotSelfServe(t *testing.T) {
-	h, _ := newApprovalHarness(t)
-	req := registerRequest()
-	req.Tier = "enterprise-deploy"
-
-	if _, err := h.srv.Register(context.Background(), req); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
-	}
-	if len(h.idp.createHumanReqs) != 0 {
-		t.Error("a refused plan must create no account")
+// A registration needs no plan, and gibson refuses no plan id. The plan id
+// that the person gave goes unchanged to the queue at approval
+// (gibson#1531, step 1).
+func TestRegister_PlanIsOptional(t *testing.T) {
+	for _, tier := range []string{"", "enterprise-deploy"} {
+		t.Run("tier="+tier, func(t *testing.T) {
+			h, _ := newApprovalHarness(t)
+			req := registerRequest()
+			req.Tier = tier
+			if _, err := h.srv.Register(context.Background(), req); err != nil {
+				t.Fatalf("Register(tier=%q): %v", tier, err)
+			}
+			pending, err := h.srv.AdminListPendingRegistrations(adminCtx("admin-1"),
+				&tenantv1.AdminListPendingRegistrationsRequest{})
+			if err != nil || len(pending.GetRegistrations()) == 0 {
+				t.Fatalf("the registration is not in the queue: %v", err)
+			}
+			regID := pending.GetRegistrations()[0].GetRegistrationId()
+			resp, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+				&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
+			if err != nil {
+				t.Fatalf("AdminApproveRegistration(tier=%q): %v", tier, err)
+			}
+			if resp.GetPlanId() != tier {
+				t.Errorf("plan_id = %q, want %q", resp.GetPlanId(), tier)
+			}
+			row, ok := h.queue.row(resp.GetTenantId())
+			if !ok || row.tier != tier || row.status != "pending" {
+				t.Errorf("queued row = %+v, want tier %q and status pending", row, tier)
+			}
+		})
 	}
 }
 
@@ -252,7 +270,7 @@ func TestAdminApproveRegistration_ActivatesTheOwnerAndProvisions(t *testing.T) {
 		t.Errorf("tenant_id = %q, want the slug of the workspace name", resp.GetTenantId())
 	}
 	if resp.GetPlanId() != "team" {
-		t.Errorf("plan_id = %q, want the plan the gate resolved", resp.GetPlanId())
+		t.Errorf("plan_id = %q, want the plan id of the registration", resp.GetPlanId())
 	}
 	if len(h.idp.reactivated) != 1 {
 		t.Fatalf("reactivations = %v, want the approved owner able to sign in", h.idp.reactivated)
@@ -645,23 +663,6 @@ func TestAdminApproveRegistration_CorruptRowIsInternal(t *testing.T) {
 	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
 		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}); status.Code(err) != codes.Internal {
 		t.Fatalf("code = %v, want Internal", status.Code(err))
-	}
-}
-
-// The plan gate runs again at approval time, against the row rather than the
-// request, so a tier that stopped being self-serve between registration and
-// decision is refused rather than provisioned.
-func TestAdminApproveRegistration_PlanGateRunsOnTheRow(t *testing.T) {
-	h, _ := newApprovalHarness(t)
-	regID := registerPending(t, h)
-	h.store.rows[regID].Tier = "enterprise-deploy"
-
-	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
-	}
-	if len(h.idp.reactivated) != 0 {
-		t.Error("a refused plan must not let the owner sign in")
 	}
 }
 

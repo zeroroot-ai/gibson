@@ -18,7 +18,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	rbacbackfill "github.com/zeroroot-ai/gibson/operators/tenant/internal/backfill/rbac"
-	tiermigrate "github.com/zeroroot-ai/gibson/operators/tenant/internal/backfill/tiermigrate"
 )
 
 // BackfillsRunnable is a manager.Runnable that runs every absorbed
@@ -47,7 +46,9 @@ func (r *BackfillsRunnable) NeedLeaderElection() bool { return true }
 //
 // The data-plane credentials backfill was deleted (gibson#583): the
 // TenantDataPlane controller runs the same Provision for every tenant on its
-// resync, so the backfill was a second path to the same change.
+// resync, so the backfill was a second path to the same change. The tier
+// migration was deleted (gibson#1531): no part of gibson reads or refuses a
+// tier, so a legacy tier needs no rewrite.
 func (r *BackfillsRunnable) Start(ctx context.Context) error {
 	if r.SkipBackfills || os.Getenv("SKIP_BACKFILLS") == "true" {
 		slog.Info("startup: SKIP_BACKFILLS set; skipping all backfills")
@@ -62,14 +63,6 @@ func (r *BackfillsRunnable) Start(ctx context.Context) error {
 		slog.Error("startup: rbac backfill failed; continuing operator startup", "err", err)
 		// Don't fail the manager — backfill failures should be visible
 		// via metrics/logs but should not block normal reconciliation.
-	}
-
-	slog.Info("startup: running tier migration")
-	if err := tiermigrate.Run(ctx, r.Client, tiermigrate.Options{
-		Workers: 8,
-		Audit:   r.Audit,
-	}); err != nil {
-		slog.Error("startup: tier migration failed; continuing operator startup", "err", err)
 	}
 	return nil
 }

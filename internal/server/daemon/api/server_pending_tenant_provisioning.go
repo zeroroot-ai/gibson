@@ -331,10 +331,9 @@ func (s *DaemonServer) EnqueueTenantProvisioning(ctx context.Context, req *daemo
 	if req.GetOwnerEmail() == "" {
 		return nil, status.Error(codes.InvalidArgument, "owner_email required")
 	}
+	// The tier is optional. An empty tier stays empty, and the Tenant gets no
+	// spec.tier. The field leaves the wire in step 2 of gibson#1531.
 	tier := req.GetTier()
-	if tier == "" {
-		tier = defaultProvisionTier
-	}
 	inserted, err := s.enqueuePendingTenantProvisioning(ctx, &daemonoperatorv1.PendingTenant{
 		TenantId:      req.GetTenantId(),
 		OwnerEmail:    req.GetOwnerEmail(),

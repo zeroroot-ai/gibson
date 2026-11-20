@@ -106,13 +106,6 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 		return nil, status.Error(codes.Unavailable, "identity provider not configured")
 	}
 
-	// The plan gate runs at approval time, where it decides provisioning. It
-	// runs here too, so a request for a plan no self-serve registration may
-	// have is refused at the door instead of filling an administrator's queue.
-	if _, err := s.resolveSignupPlan(req.GetTier()); err != nil {
-		return nil, err
-	}
-
 	// ---- create the owner account, then put it beyond use ----
 	// EmailVerified is false, and it is the honest value: nothing has proven
 	// this address. The approval rung's proof is the administrator, not the
@@ -198,9 +191,6 @@ func validateRegister(req *tenantv1.RegisterRequest) (string, error) {
 	}
 	if signupSlugify(req.GetWorkspaceName()) == "" {
 		return "", status.Error(codes.InvalidArgument, "workspace_name does not yield a valid tenant slug")
-	}
-	if strings.TrimSpace(req.GetTier()) == "" {
-		return "", status.Error(codes.InvalidArgument, "tier is required")
 	}
 	if req.GetPassword() == "" {
 		return "", status.Error(codes.InvalidArgument, "password is required")
@@ -336,14 +326,8 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 		return nil, status.Error(codes.Internal, "failed to approve the registration")
 	}
 
-	// The same server-side plan gate the open rung runs, from the same
-	// function.
-	plan, err := s.resolveSignupPlan(row.Tier)
-	if err != nil {
-		s.logger.WarnContext(ctx, "AdminApproveRegistration: plan gate refused the registration",
-			"registration_id", row.ID, "requested_tier", row.Tier, "error", err.Error())
-		return nil, err
-	}
+	// The plan id is optional and gibson does not judge it, as in Signup.
+	planID := strings.TrimSpace(row.Tier)
 
 	if err := s.idpAdminClient.ReactivateHumanUser(ctx, idp.HumanUserStateRequest{UserID: row.OwnerUserID}); err != nil {
 		s.logger.ErrorContext(ctx, "AdminApproveRegistration: reactivating the owner failed",
@@ -359,7 +343,7 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 		OwnerUserId:   row.OwnerUserID,
 		OwnerEmail:    row.Email,
 		WorkspaceName: row.WorkspaceName,
-		Tier:          plan.ID,
+		Tier:          planID,
 		AuditRecordId: recordID,
 	}, nil, true); err != nil {
 		s.logger.ErrorContext(ctx, "AdminApproveRegistration: enqueue pending tenant provisioning failed",
@@ -379,7 +363,7 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 	return &tenantv1.AdminApproveRegistrationResponse{
 		TenantId:    slug,
 		OwnerUserId: row.OwnerUserID,
-		PlanId:      plan.ID,
+		PlanId:      planID,
 	}, nil
 }
 

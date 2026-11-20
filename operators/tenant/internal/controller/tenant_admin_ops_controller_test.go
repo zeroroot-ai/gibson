@@ -75,6 +75,32 @@ func TestAdminDrain_Provision_CreatesTenantCRAndAcks(t *testing.T) {
 	}
 }
 
+// TestAdminDrain_Provision_NoTier pins that an admin provision op with no
+// tier creates a Tenant with no spec.tier (gibson#1531).
+func TestAdminDrain_Provision_NoTier(t *testing.T) {
+	scheme := setupScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	d := &stubAdminDaemon{ops: []provision.TenantAdminOp{{
+		OpID: "op-1", TenantID: "acme", OpType: "provision", DisplayName: "Acme Inc",
+		DisplayNameSet: true, OwnerEmail: "owner@acme.test", TierSet: true,
+	}}}
+
+	r := newAdminOpsRunnable(c, d)
+	if err := r.drain(context.Background()); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	var got gibsonv1alpha1.Tenant
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
+		t.Fatalf("expected Tenant CR created: %v", err)
+	}
+	if got.Spec.Tier != "" {
+		t.Errorf("tier: got %q, want empty", got.Spec.Tier)
+	}
+	if len(d.acked) != 1 || d.acked[0] != "op-1" {
+		t.Errorf("expected op-1 acked, got %v", d.acked)
+	}
+}
+
 func TestAdminDrain_Provision_Idempotent_ExistingCRNoOp(t *testing.T) {
 	scheme := setupScheme(t)
 	existing := &gibsonv1alpha1.Tenant{

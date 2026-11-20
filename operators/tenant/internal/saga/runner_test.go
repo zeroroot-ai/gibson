@@ -65,7 +65,6 @@ func newTestTenant() *gibsonv1alpha1.Tenant {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: name,
 			Owner:       "owner@example.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 	}
 }

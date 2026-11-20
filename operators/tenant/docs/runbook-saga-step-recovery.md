@@ -53,7 +53,7 @@ intervention before retrying:
 |---|---|---|
 | `SagaFailed` | Step returned a `clients.WrapPermanent` error (bug or transient infra issue now fixed) | Apply retry annotation (this runbook) |
 | `SlugCollision` | The tenant's slug already exists; another tenant holds the namespace | Rename or delete the colliding tenant first |
-| `InvalidSpec` | The Tenant CR's spec is structurally invalid (missing required field, unknown tier) | Fix the spec manually; the saga unblocks automatically |
+| `InvalidSpec` | The Tenant CR's spec is structurally invalid (missing required field) | Fix the spec manually; the saga unblocks automatically |
 
 > Setting the retry annotation on a `SlugCollision` or `InvalidSpec` tenant
 > is safe — the annotation is a no-op when the reason is not `SagaFailed`.

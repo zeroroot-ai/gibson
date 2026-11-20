@@ -133,21 +133,13 @@ spec:
                 type: object
               tier:
                 description: |-
-                  Tier sets the tenant's plan id. Drives daemon quota enforcement
-                  (concurrent_missions, concurrent_agents) and Stripe product binding.
-                  The enum is generated from plans.yaml; the migration Job at chart
-                  upgrade time rewrites legacy values per spec
-                  plans-and-quotas-simplification.
-                enum:
-                - team
-                - org
-                - enterprise
-                - enterprise-deploy
+                  Tier is the optional plan id of the tenant. Gibson does not read it and
+                  refuses no value. The field stays while the chart and the dashboard
+                  still write it. Step 2 of gibson#1531 deletes it.
                 type: string
             required:
             - displayName
             - owner
-            - tier
             type: object
           status:
             description: status defines the observed state of Tenant.

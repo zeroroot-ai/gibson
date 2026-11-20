@@ -84,8 +84,7 @@ type VaultTokenSource interface {
 //  3. Load OpenFGA model → FGAModelLoaded
 //  4. Ensure Vault transit engine + key (or skip if !enabled) →
 //     VaultTransitReady
-//  5. Plan sync (hash-based) → PlanSyncComplete
-//  6. Top-level Ready = AND(above)
+//  5. Top-level Ready = AND(above)
 //
 // Children (OIDCClient CRs) are owned via ownerReferences so K8s GC
 // handles cascade on delete.
@@ -277,8 +276,6 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		r.reconcileFGAModel,
 		// Step 5: Vault transit.
 		r.reconcileVaultTransit,
-		// Step 6: Plan sync.
-		r.reconcilePlanSync,
 		// Step 7: Master-key Secret.
 		r.reconcileMasterKey,
 		// Step 8: Postgres database ownership + grants.
@@ -655,33 +652,6 @@ func (r *PlatformBootstrapReconciler) reconcileVaultTransit(ctx context.Context,
 	return ctrl.Result{}, nil
 }
 
-// reconcilePlanSync hashes the plans ConfigMap and writes a status-side
-// hash anchor; the daemon reads plans directly from the source ConfigMap.
-func (r *PlatformBootstrapReconciler) reconcilePlanSync(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap, logger logr.Logger) (ctrl.Result, error) {
-	if pb.Spec.PlanSync == nil {
-		setBootstrapCond(pb, gibsonv1alpha1.ConditionPlanSyncComplete, metav1.ConditionTrue,
-			"PlanSyncDisabled", "spec.planSync not configured")
-		return ctrl.Result{}, nil
-	}
-	cm, err := r.readConfigMap(ctx, defaultChildNamespace, pb.Spec.PlanSync.PlansConfigMapRef)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			setBootstrapCond(pb, gibsonv1alpha1.ConditionPlanSyncComplete, metav1.ConditionFalse,
-				"WaitingForPlansConfigMap", err.Error())
-			return ctrl.Result{RequeueAfter: requeueMedium}, nil
-		}
-		return ctrl.Result{}, err
-	}
-	body := []byte(cm.Data[pb.Spec.PlanSync.PlansConfigMapRef.Key])
-	hash := sha256.Sum256(body)
-	hashHex := hex.EncodeToString(hash[:])
-	setBootstrapCond(pb, gibsonv1alpha1.ConditionPlanSyncComplete, metav1.ConditionTrue,
-		"PlanHash:"+hashHex,
-		fmt.Sprintf("plans ConfigMap %s/%s key %s hashed",
-			cm.Namespace, cm.Name, pb.Spec.PlanSync.PlansConfigMapRef.Key))
-	return ctrl.Result{}, nil
-}
-
 // reconcileDeletion runs the finalizer logic.
 func (r *PlatformBootstrapReconciler) reconcileDeletion(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(pb, platformBootstrapFinalizer) {
@@ -728,7 +698,6 @@ func (r *PlatformBootstrapReconciler) aggregateReady(pb *gibsonv1alpha1.Platform
 		gibsonv1alpha1.ConditionSAIdentityMapReady,
 		gibsonv1alpha1.ConditionFGAModelLoaded,
 		gibsonv1alpha1.ConditionVaultTransitReady,
-		gibsonv1alpha1.ConditionPlanSyncComplete,
 		gibsonv1alpha1.ConditionMasterKeyReady,
 		gibsonv1alpha1.ConditionUnsealKeyEscrowed,
 		gibsonv1alpha1.ConditionPostgresBundleReady,

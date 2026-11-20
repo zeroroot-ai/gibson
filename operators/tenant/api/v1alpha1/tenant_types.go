@@ -22,18 +22,9 @@ const (
 	TenantPhaseTerminated   TenantPhase = "Terminated"
 )
 
-// TenantTier represents the canonical plan id of a Tenant. The set of
-// constants below mirrors plans.yaml. The drift guard this comment used to
-// name does not exist -- there is no tier_drift_test.go anywhere in the tree --
-// so nothing fails CI when the two diverge (gibson#557).
+// TenantTier is the optional plan id of a Tenant. Gibson does not read it.
+// It leaves the API in step 2 of gibson#1531.
 type TenantTier string
-
-const (
-	TenantPlanTeam             TenantTier = "team"
-	TenantPlanOrg              TenantTier = "org"
-	TenantPlanEnterprise       TenantTier = "enterprise"
-	TenantPlanEnterpriseDeploy TenantTier = "enterprise-deploy"
-)
 
 // TenantDataPlaneResources carries per-tenant data-plane resource limits that
 // override the operator defaults. The Tenant reconciler copies the block onto
@@ -130,15 +121,11 @@ type TenantSpec struct {
 	// +required
 	Owner string `json:"owner"`
 
-	// Tier sets the tenant's plan id. Drives daemon quota enforcement
-	// (concurrent_missions, concurrent_agents) and Stripe product binding.
-	// The enum is generated from plans.yaml; the migration Job at chart
-	// upgrade time rewrites legacy values per spec
-	// plans-and-quotas-simplification.
-	//
-	// +kubebuilder:validation:Enum=team;org;enterprise;enterprise-deploy
-	// +required
-	Tier TenantTier `json:"tier"`
+	// Tier is the optional plan id of the tenant. Gibson does not read it and
+	// refuses no value. The field stays while the chart and the dashboard
+	// still write it. Step 2 of gibson#1531 deletes it.
+	// +optional
+	Tier TenantTier `json:"tier,omitempty"`
 
 	// Resources allows overriding per-tenant data-plane resource limits. When
 	// absent, operator Helm-chart defaults apply. See TenantDataPlaneResources.

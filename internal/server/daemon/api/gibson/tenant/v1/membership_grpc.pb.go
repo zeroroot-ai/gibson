@@ -170,7 +170,7 @@ type MembershipServiceClient interface {
 	// SetCatalogPublished writes or deletes the FGA tenant_published tuple for a
 	// component owned by the caller's tenant — the bring-your-own (BYO)
 	// connector path (gibson#683). Publishing makes the tenant's own connector
-	// available to enable within that tenant (org+ plans only); it never exposes
+	// available to enable within that tenant, on every tenant; it never exposes
 	// the component to other tenants. tenant_published ("this tenant owns/offers
 	// it") is distinct from tenant_enabled ("this tenant has it switched on").
 	SetCatalogPublished(ctx context.Context, in *SetCatalogPublishedRequest, opts ...grpc.CallOption) (*SetCatalogPublishedResponse, error)
@@ -511,7 +511,7 @@ type MembershipServiceServer interface {
 	// SetCatalogPublished writes or deletes the FGA tenant_published tuple for a
 	// component owned by the caller's tenant — the bring-your-own (BYO)
 	// connector path (gibson#683). Publishing makes the tenant's own connector
-	// available to enable within that tenant (org+ plans only); it never exposes
+	// available to enable within that tenant, on every tenant; it never exposes
 	// the component to other tenants. tenant_published ("this tenant owns/offers
 	// it") is distinct from tenant_enabled ("this tenant has it switched on").
 	SetCatalogPublished(context.Context, *SetCatalogPublishedRequest) (*SetCatalogPublishedResponse, error)

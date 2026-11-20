@@ -107,7 +107,7 @@ func TestReconcileDelete_ReportsTeardownToTheDaemon(t *testing.T) {
 	now := metav1.Now()
 	tenant := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "leaving", Finalizers: []string{gibsonv1alpha1.TenantFinalizer}, DeletionTimestamp: &now},
-		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Leaving", Owner: "owner@leaving.com", Tier: gibsonv1alpha1.TenantPlanTeam},
+		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Leaving", Owner: "owner@leaving.com"},
 	}
 	// The state the last provisioning report left behind.
 	tenant.Status.Phase = gibsonv1alpha1.TenantPhaseReady

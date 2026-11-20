@@ -100,9 +100,9 @@ func TestAdminProvisionTenant_RecordsOp_DefaultsTier(t *testing.T) {
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
-	// Empty tier defaults to "team"; op_id is a generated UUID (any value).
+	// An empty tier stays empty (gibson#1531). op_id is a generated UUID (any value).
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	resp, err := srv.AdminProvisionTenant(ctxWithTenantAdmin(context.Background(), "_system", "platform-owner-1"), &tenantv1.AdminProvisionTenantRequest{
@@ -142,7 +142,7 @@ func TestAdminProvisionTenant_PlainInviteErrorIsInternal(t *testing.T) {
 
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	_, err = srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
@@ -191,7 +191,7 @@ func TestAdminProvisionTenant_OwnerInviteFailureIsReturned(t *testing.T) {
 
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	_, err = srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
@@ -203,7 +203,7 @@ func TestAdminProvisionTenant_OwnerInviteFailureIsReturned(t *testing.T) {
 	// The retry: the op is already pending (0 rows), the owner is invited again.
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	inv.err = nil
 	resp, err := srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{

@@ -54,7 +54,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
-	"github.com/zeroroot-ai/gibson/internal/platform/plans"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -213,9 +212,6 @@ func validateRequestEmailVerification(req *tenantv1.RequestEmailVerificationRequ
 	}
 	if strings.TrimSpace(req.GetWorkspaceName()) == "" {
 		return "", status.Error(codes.InvalidArgument, "workspace_name is required")
-	}
-	if strings.TrimSpace(req.GetTier()) == "" {
-		return "", status.Error(codes.InvalidArgument, "tier is required")
 	}
 	if signupSlugify(req.GetWorkspaceName()) == "" {
 		return "", status.Error(codes.InvalidArgument, "workspace_name does not yield a valid tenant slug")
@@ -381,7 +377,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 
 	// ---- rate-limit gate ----
 	// Cheapest and most abusable check first: reject before touching the
-	// verification store, the identity provider or the plan set. Runs ahead
+	// verification store or the identity provider. Runs ahead
 	// of every other gate and every side effect below.
 	if err := s.checkSignupLimits(ctx, completeLimits(normalizeSignupClientIP(req.GetClientIp()))...); err != nil {
 		return nil, err
@@ -421,23 +417,13 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		return nil, status.Error(codes.Internal, "failed to complete signup")
 	}
 
-	// ---- plan gate ----
-	// SignupRequest carries no tier — it is read from the verification row,
-	// exactly so a caller cannot self-select a paid tier by putting one in the
-	// request. row.Tier reaches the
-	// operator through the pending-provisioning queue, where it sizes the
-	// per-tenant data plane and binds the Stripe product, so resolve it
-	// against the canonical plan set before creating any identity or
-	// provisioning state. See plan gate rationale in internal/platform/plans.
-	plan, err := s.resolveSignupPlan(row.Tier)
-	if err != nil {
-		s.logger.WarnContext(ctx, "Signup: plan gate refused request",
-			"attempt_id", req.GetAttemptId(),
-			"requested_tier", row.Tier,
-			"error", err.Error(),
-		)
-		return nil, err
-	}
+	// ---- the plan id ----
+	// The plan id is optional and gibson does not judge it. It comes from the
+	// verification row, so the caller of Signup cannot change it. It goes to
+	// the queue row, and the external signup step reads it from there
+	// (DescribeSignupStep). The component that runs the step decides what the
+	// plan id means. The field leaves the wire in step 2 of gibson#1531.
+	planID := strings.TrimSpace(row.Tier)
 
 	// ---- the workspace name is free ----
 	// The tenant id comes from the workspace name of the verification row.
@@ -532,7 +518,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 	// who proved the mailbox as its actor. The queue entry carries the record
 	// id, so the operator records of the new tenant name this owner
 	// (gibson#583). With no record, nothing is queued.
-	recordID, rerr := s.recordSignupRequest(ctx, result.UserID, slug, workspaceName, plan.ID)
+	recordID, rerr := s.recordSignupRequest(ctx, result.UserID, slug, workspaceName, planID)
 	if rerr != nil {
 		s.logger.ErrorContext(ctx, "Signup: durable audit write failed",
 			"attempt_id", req.GetAttemptId(), "tenant_id", slug, "error", rerr.Error())
@@ -544,9 +530,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		OwnerUserId:   result.UserID,
 		OwnerEmail:    row.Email,
 		WorkspaceName: workspaceName,
-		// Enqueue the RESOLVED canonical plan id, not the raw verification-row
-		// string, so nothing downstream sees an id the plan gate did not accept.
-		Tier:          plan.ID,
+		Tier:          planID,
 		AuditRecordId: recordID,
 	}, hold, true); eerr != nil {
 		s.logger.ErrorContext(ctx, "Signup: enqueue pending tenant provisioning failed",
@@ -584,11 +568,9 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 	return &tenantv1.SignupResponse{
 		TenantId:    slug,
 		OwnerUserId: result.UserID,
-		// The resolved canonical plan id — the same value enqueued above, so the
-		// id the caller bills on is the id the gate accepted and the operator
-		// provisions, by construction rather than by the caller re-deriving it
-		// (gibson#1325).
-		PlanId: plan.ID,
+		// The plan id of the verification row, the same value enqueued above
+		// (gibson#1325). Empty when the caller gave none.
+		PlanId: planID,
 		// Both are empty when no step is configured.
 		StepUrl:   stepURLFor(hold, s.signupStepURL),
 		StepToken: stepToken,
@@ -656,34 +638,6 @@ func stepURLFor(hold *signupStepHold, u string) string {
 		return ""
 	}
 	return u
-}
-
-// resolveSignupPlan is the server-side plan gate for self-serve signup. It
-// answers "may this request provision a tenant at this tier?" and returns the
-// canonical plan on success, or a ready-to-return gRPC status on refusal.
-//
-// Two rules, both fail-closed:
-//
-//  1. The tier MUST resolve to a canonical plan. An unknown, legacy, or
-//     mis-cased id is InvalidArgument — never coerced to a default plan.
-//
-//  2. The plan MUST be self-serve. The contact-sales on-prem plan has no
-//     Stripe product and no trial, so a self-serve signup can never
-//     legitimately land on it; requesting it is PermissionDenied and the
-//     caller is pointed at the administrator path (AdminProvisionTenant).
-func (s *DaemonServer) resolveSignupPlan(tier string) (plans.Plan, error) {
-	plan, ok := plans.Lookup(tier)
-	if !ok {
-		return plans.Plan{}, status.Errorf(codes.InvalidArgument,
-			"tier is not a known plan; valid self-serve plans are %s",
-			strings.Join(plans.SelfServeIDs(), ", "))
-	}
-	if !plan.SelfServe {
-		return plans.Plan{}, status.Errorf(codes.PermissionDenied,
-			"plan %q is not available through self-serve signup; contact sales to have an administrator provision it",
-			plan.ID)
-	}
-	return plan, nil
 }
 
 // auditActionSignupTenantRequested is the record of a self-serve signup that

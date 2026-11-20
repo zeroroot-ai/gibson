@@ -179,7 +179,6 @@ func (p *NamespaceProvisioner) ensureNamespace(ctx context.Context, t *gibsonv1a
 			Labels: map[string]string{
 				"gibson.zeroroot.ai/tenant":     t.Name,
 				"gibson.zeroroot.ai/managed-by": "tenant-operator",
-				"gibson.zeroroot.ai/tier":       string(t.Spec.Tier),
 				podSecurityEnforceLabel:         podSecurityRestricted,
 			},
 			Annotations: map[string]string{
@@ -189,6 +188,11 @@ func (p *NamespaceProvisioner) ensureNamespace(ctx context.Context, t *gibsonv1a
 				AnnotationOwnerTenantName:                t.Name,
 			},
 		},
+	}
+	// The tier label is written only for a Tenant that has a tier. Nothing
+	// selects on it. It leaves with spec.tier in step 2 of gibson#1531.
+	if t.Spec.Tier != "" {
+		ns.Labels["gibson.zeroroot.ai/tier"] = string(t.Spec.Tier)
 	}
 	existing := &corev1.Namespace{}
 	err := p.Client.Get(ctx, types.NamespacedName{Name: nsName}, existing)
