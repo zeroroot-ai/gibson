@@ -1906,6 +1906,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.IncidentReportService/GetIncidentReport":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.MembershipService/AcceptInvitation":
     unauthenticated: true
   "/gibson.tenant.v1.MembershipService/AddTeamMember":
