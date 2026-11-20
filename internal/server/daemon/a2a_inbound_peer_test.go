@@ -181,14 +181,14 @@ func TestPeerTLSConfig_EachListenerHasItsOwnMinimumVersion(t *testing.T) {
 	d := a2aListenerDaemon(t, func(d *daemonImpl) {
 		d.spiffeX509Source = pkiSource{svid: pki.svid(t, server), bundle: pki.bundle}
 	})
-	for name, min := range map[string]uint16{"gateway": tls.VersionTLS13, "inbound": tls.VersionTLS12} {
-		cfg, err := d.peerTLSConfig(name, peer, min)
+	for name, minVersion := range map[string]uint16{"gateway": tls.VersionTLS13, "inbound": tls.VersionTLS12} {
+		cfg, err := d.peerTLSConfig(name, peer, minVersion)
 		require.NoError(t, err)
-		assert.Equal(t, min, cfg.MinVersion, name)
+		assert.Equal(t, minVersion, cfg.MinVersion, name)
 	}
 
-	handshake := func(min uint16) error {
-		cfg, err := d.peerTLSConfig("test", peer, min)
+	handshake := func(minVersion uint16) error {
+		cfg, err := d.peerTLSConfig("test", peer, minVersion)
 		require.NoError(t, err)
 		lis, err := tls.Listen("tcp", "127.0.0.1:0", cfg)
 		require.NoError(t, err)
