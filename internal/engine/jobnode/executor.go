@@ -44,6 +44,10 @@ type ClosedJob struct {
 	// Inputs are the ids the spec started from (JobSpec.inputs), verbatim.
 	Inputs       []string
 	Deliverables []job.Deliverable
+	// Countermeasure is the id of the countermeasure that the fix applies, as
+	// the spec names it (CountermeasureContextKey). It is empty when the spec
+	// names none.
+	Countermeasure string
 }
 
 // CloseObserver is told once for each job the node closes as accomplished.
@@ -307,6 +311,7 @@ func closeWith(ctx context.Context, in Input, jobID string, verdict job.Verdict,
 		in.Closed.JobClosed(ctx, ClosedJob{
 			TenantID: in.TenantID, MissionRunID: in.MissionRunID, NodeID: in.NodeID,
 			JobID: jobID, Inputs: in.Spec.GetInputs(), Deliverables: result.Deliverables,
+			Countermeasure: countermeasureOf(in.Spec),
 		})
 	}
 	return Outcome{Result: result, Passes: pass, Report: report}, nil

@@ -110,7 +110,7 @@ func fixedByEvents(c jobnode.ClosedJob, findings func(tenant string) map[string]
 		props["ref"] = mrRef
 	}
 	mr := brain.EntityObserved{Label: labelMergeRequest, Key: mrKey, MissionID: c.MissionRunID, Props: props}
-	return append([]brain.Event{mr}, events...), skippedInputs
+	return withCountermeasure(c, mrKey, append([]brain.Event{mr}, events...)), skippedInputs
 }
 
 func firstNonEmpty(vs ...string) string {
