@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
+	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
@@ -47,6 +48,16 @@ var paramsByMission = map[string]map[string]string{
 		"pipelineId":    "8891",
 		"pipelineUrl":   "https://gitlab.com/examplebank/customer-portal/-/pipelines/8891",
 		"imageRef":      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
+	},
+	"security-test": {
+		"application": "reference-environment",
+	},
+	"closed-loop": {
+		"application":            "reference-environment",
+		"bank":                   "bank/red-blue",
+		"forgeConnector":         "gitea-refenv",
+		"manifestsProject":       "refadmin/platform",
+		"observabilityConnector": "prometheus-refenv",
 	},
 	"cluster-assessment": {
 		// kubeconfigParam rather than the literal: gosec's G101 matches an
@@ -704,5 +715,227 @@ func TestEntries_IsEveryMissionInOrder(t *testing.T) {
 			e.Version != want.Version || !slices.Equal(e.DeclaredParams, want.DeclaredParams) {
 			t.Errorf("entry %d = %+v, want %+v", i, e, want)
 		}
+	}
+}
+
+// ── security-test and closed-loop ───────────────────────────────────────────
+
+// redAgent is the name of the red agent. It is not in the component catalog yet
+// (gibson#1511). The catalog test does not check the name of an agent, so both
+// missions render, and a dispatch fails until the manifest exists.
+const redAgent = "red-agent"
+
+// mainPackPredicates returns the main pack of the embedded catalog.
+func mainPackPredicates(t *testing.T) ontology.DomainPack {
+	t.Helper()
+	pack, ok := ontology.EmbeddedCatalog().Get(ontology.MainDomainPackName)
+	if !ok {
+		t.Fatal("the embedded catalog must hold the main pack")
+	}
+	return pack
+}
+
+// TestRender_AttackMissionsAllowOnlyTheTechniquesOfThePack: a technique in the
+// allowlist is a predicate of the main pack, and a predicate of the main pack is
+// in the allowlist. The daemon refuses a proof for a technique that no enabled
+// pack binds, so a name that drifted would make the agent prove nothing.
+func TestRender_AttackMissionsAllowOnlyTheTechniquesOfThePack(t *testing.T) {
+	pack := mainPackPredicates(t)
+	for _, mission := range []string{"security-test", "closed-loop"} {
+		def, err := Render(context.Background(), mission, paramsFor(t, mission))
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mission, err)
+		}
+		got := def.GetConstraints().GetAllowedTechniques()
+		var want []string
+		for name := range pack.Predicates {
+			want = append(want, name)
+		}
+		sort.Strings(want)
+		sorted := append([]string(nil), got...)
+		sort.Strings(sorted)
+		if !slices.Equal(sorted, want) {
+			t.Errorf("%s: allowedTechniques = %v, want the predicates of the main pack %v", mission, sorted, want)
+		}
+		if !def.GetConstraints().GetRequireEvidence() {
+			t.Errorf("%s: a finding must hold evidence", mission)
+		}
+	}
+}
+
+// A destructive predicate is in the allowlist and goes to the approval queue.
+// The pack, not the mission, says which predicate is destructive (ADR-0132).
+func TestRender_AttackMissionsReachTheDestructivePredicateThroughTheQueue(t *testing.T) {
+	pack := mainPackPredicates(t)
+	var destructive []string
+	for name := range pack.Predicates {
+		if !slices.Contains(pack.NonDestructivePredicates, name) {
+			destructive = append(destructive, name)
+		}
+	}
+	if len(destructive) == 0 {
+		t.Fatal("the main pack has no destructive predicate; the queue is not exercised")
+	}
+	for _, mission := range []string{"security-test", "closed-loop"} {
+		def, err := Render(context.Background(), mission, paramsFor(t, mission))
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mission, err)
+		}
+		for _, name := range destructive {
+			if !slices.Contains(def.GetConstraints().GetAllowedTechniques(), name) {
+				t.Errorf("%s: the destructive predicate %q is not allowed", mission, name)
+			}
+		}
+		for id, n := range def.GetNodes() {
+			if n.GetType() != missionv1.NodeType_NODE_TYPE_AGENT || n.GetAgentConfig().GetAgentName() != redAgent {
+				continue
+			}
+			goal := n.GetAgentConfig().GetTask().GetGoal()
+			if !strings.Contains(goal, "request authorization") {
+				t.Errorf("%s: node %q does not tell the agent to request authorization: %q", mission, id, goal)
+			}
+		}
+	}
+}
+
+// The security test does not fix. It has no job node, no repository and no
+// tool node, so it cannot change the target or the code of the target.
+func TestRender_SecurityTestAttacksAndReportsAndNeverFixes(t *testing.T) {
+	def, err := Render(context.Background(), "security-test", paramsFor(t, "security-test"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	nodes := def.GetNodes()
+	for id, n := range nodes {
+		switch n.GetType() {
+		case missionv1.NodeType_NODE_TYPE_AGENT, missionv1.NodeType_NODE_TYPE_JOIN:
+		default:
+			t.Errorf("node %q has type %v; the security test has an agent and a join only", id, n.GetType())
+		}
+	}
+	if got := nodes["attack"].GetAgentConfig().GetAgentName(); got != redAgent {
+		t.Errorf("attack agent = %q, want %s", got, redAgent)
+	}
+	if got := def.GetExitPoints(); len(got) != 1 || got[0] != "report" {
+		t.Errorf("exitPoints = %v, want exactly [report]", got)
+	}
+	ctxMap := nodes["attack"].GetAgentConfig().GetTask().GetContext()
+	if got := ctxMap["fix"].GetStringValue(); got != "never" {
+		t.Errorf("task context fix = %q, want never", got)
+	}
+	if got := ctxMap["report.contents"].GetStringValue(); !strings.Contains(got, "replay") {
+		t.Errorf("the report must hold the replay of each proof: %q", got)
+	}
+}
+
+// A target outside the scope is refused. The scope is the targets that the
+// tenant registered. The mission names no host, takes none as a parameter, sets
+// no research node, and cannot bind against a target that has no URL.
+func TestRender_SecurityTestRefusesATargetOutsideTheScope(t *testing.T) {
+	// A caller cannot send a host or a target as a parameter.
+	for _, key := range []string{"target", "host", "url", "scope"} {
+		p := paramsFor(t, "security-test")
+		p[key] = "evil.example.com"
+		if _, err := Render(context.Background(), "security-test", p); err == nil {
+			t.Errorf("a %q parameter was accepted; a caller could name a target", key)
+		}
+	}
+
+	def, err := Render(context.Background(), "security-test", paramsFor(t, "security-test"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for id, n := range def.GetNodes() {
+		if n.GetResearch() {
+			t.Errorf("node %q is a research node, so its egress has no scope", id)
+		}
+	}
+
+	// A target that the tenant did not register has no URL, and the run does
+	// not bind.
+	unregistered := types.NewTarget("unregistered", "", types.TargetTypeCustom)
+	if _, err := targetbind.Bind(def, unregistered); err == nil {
+		t.Error("the mission bound against a target with no URL")
+	}
+
+	// A registered target binds, and the only host in the graph is that target.
+	tgt := types.NewTarget("reference-environment", "https://refenv.internal:8443", types.TargetTypeCustom)
+	bound, err := targetbind.Bind(def, tgt)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if left := targetbind.UnboundTarget(bound); len(left) > 0 {
+		t.Fatalf("placeholders survived binding: %v", left)
+	}
+	goal := bound.GetNodes()["attack"].GetAgentConfig().GetTask().GetGoal()
+	if !strings.Contains(goal, "https://refenv.internal:8443") {
+		t.Errorf("the goal does not name the bound target: %q", goal)
+	}
+	if got := bound.GetNodes()["attack"].GetAgentConfig().GetTask().GetContext()["scope.target"].GetStringValue(); got != "https://refenv.internal:8443" {
+		t.Errorf("scope.target = %q, want the bound target", got)
+	}
+}
+
+// The closed loop runs attack, fix and attack again, in that order, with one
+// completion.
+func TestRender_ClosedLoopAttacksFixesAndAttacksAgain(t *testing.T) {
+	def, err := Render(context.Background(), "closed-loop", paramsFor(t, "closed-loop"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	nodes := def.GetNodes()
+	for id, want := range map[string]missionv1.NodeType{
+		"attack":   missionv1.NodeType_NODE_TYPE_AGENT,
+		"fix":      missionv1.NodeType_NODE_TYPE_JOB,
+		"reattack": missionv1.NodeType_NODE_TYPE_AGENT,
+		"report":   missionv1.NodeType_NODE_TYPE_JOIN,
+	} {
+		n, ok := nodes[id]
+		if !ok {
+			t.Errorf("node %q is missing", id)
+			continue
+		}
+		if got := n.GetType(); got != want {
+			t.Errorf("node %q type = %v, want %v", id, got, want)
+		}
+	}
+
+	// The same agent attacks twice, so the second attack is the check that
+	// raised the finding, run again (ADR-0178).
+	for _, id := range []string{"attack", "reattack"} {
+		if got := nodes[id].GetAgentConfig().GetAgentName(); got != redAgent {
+			t.Errorf("node %q agent = %q, want %s", id, got, redAgent)
+		}
+	}
+	if got := nodes["attack"].GetAgentConfig().GetTask().GetGoal(); strings.Contains(got, "Run the attack of each finding again") {
+		t.Errorf("the first attack reads like the second one: %q", got)
+	}
+
+	// The order is the loop: the fix waits for the attack, and the second attack
+	// waits for the fix.
+	wantDeps := map[string][]string{"fix": {"attack"}, "reattack": {"fix"}, "report": {"reattack"}}
+	for id, want := range wantDeps {
+		if got := nodes[id].GetDependencies(); !slices.Equal(got, want) {
+			t.Errorf("node %q dependencies = %v, want %v", id, got, want)
+		}
+	}
+	if got := def.GetExitPoints(); len(got) != 1 || got[0] != "report" {
+		t.Errorf("exitPoints = %v, want exactly [report]", got)
+	}
+
+	// Only the fix node changes a repository, and it does it with a merge
+	// request. Neither attack node has a repository or a job.
+	spec := nodes["fix"].GetJobConfig().GetSpec()
+	if len(spec.GetRepositories()) != 1 || spec.GetRepositories()[0].GetDeliverable().String() != "DELIVERABLE_KIND_MERGE_REQUEST" {
+		t.Errorf("the fix job must work in one repository and deliver a merge request: %v", spec.GetRepositories())
+	}
+	goal := spec.GetGoal()
+	for _, want := range []string{"health signal", "revert", "prometheus-refenv"} {
+		if !strings.Contains(goal, want) {
+			t.Errorf("the fix goal does not say %q: %q", want, goal)
+		}
+	}
+	if !strings.Contains(nodes["reattack"].GetAgentConfig().GetTask().GetGoal(), "same predicate") {
+		t.Error("the second attack must use the same predicate")
 	}
 }

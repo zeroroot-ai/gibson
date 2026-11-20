@@ -1,6 +1,16 @@
 {
   "_comment": "Generated from internal/platform/missioncatalog/missions/*.cue in zeroroot-ai/gibson. Do not edit. The daemon refuses a parameter that this file does not list, and a request that omits one.",
   "missions": {
+    "closed-loop": {
+      "version": "1.0.0",
+      "params": [
+        "application",
+        "bank",
+        "forgeConnector",
+        "manifestsProject",
+        "observabilityConnector"
+      ]
+    },
     "cluster-assessment": {
       "version": "1.0.0",
       "params": [
@@ -20,6 +30,12 @@
         "pipelineUrl",
         "ref",
         "repositoryUrl"
+      ]
+    },
+    "security-test": {
+      "version": "1.0.0",
+      "params": [
+        "application"
       ]
     }
   }
