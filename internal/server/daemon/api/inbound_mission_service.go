@@ -214,7 +214,7 @@ func inboundEntryProto(e inboundmissionstore.Entry, staleReason string) *tenantv
 	return &tenantv1.InboundMissionEntry{
 		Agent: e.Agent, MissionDefinitionId: e.DefinitionID, TargetIds: e.TargetIDs,
 		PublishedBy: e.PublishedBy, CreatedAt: timestamppb.New(e.CreatedAt),
-		Stale: staleReason != "", StaleReason: staleReason, MaxActiveMissions: e.MaxActive,
+		Stale: staleReason != "", StaleReason: staleReason,
 	}
 }
 
@@ -246,13 +246,9 @@ func (s *InboundMissionService) deleteStaleGrants(ctx context.Context, object st
 	return nil
 }
 
-// publishTargets checks the limit and the target list of a publish request. It
-// returns the targets sorted.
+// publishTargets checks the target list of a publish request. It returns the
+// targets sorted.
 func publishTargets(rpc string, req *tenantv1.PublishInboundMissionRequest) ([]string, error) {
-	if req.GetMaxActiveMissions() < 1 {
-		return nil, status_grpc.Errorf(codes.InvalidArgument,
-			"%s: max_active_missions is required. Set the most missions that may run or wait at one time", rpc)
-	}
 	targets := slices.Clone(req.GetTargetIds())
 	if len(targets) == 0 || len(targets) > maxInboundTargets {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: give between 1 and %d targets", rpc, maxInboundTargets)
@@ -315,7 +311,7 @@ func (s *InboundMissionService) PublishInboundMission(
 	// the name, so a grant that an admin writes after another publish of the name is
 	// never deleted by a call that created nothing.
 	entry, err := s.store.Publish(ctx, tenant, inboundmissionstore.Entry{
-		Agent: req.GetAgent(), DefinitionID: def.ID, DefinitionHash: def.Hash, TargetIDs: targets, TargetHashes: hashes, MaxActive: req.GetMaxActiveMissions(),
+		Agent: req.GetAgent(), DefinitionID: def.ID, DefinitionHash: def.Hash, TargetIDs: targets, TargetHashes: hashes,
 		PublishedBy: publishedBy,
 	}, func(ctx context.Context) error {
 		// The owner tuple is written here, under the lock of the name, so an unpublish

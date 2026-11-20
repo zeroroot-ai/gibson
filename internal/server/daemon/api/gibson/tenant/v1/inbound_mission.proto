@@ -110,9 +110,9 @@ message InboundMissionEntry {
   bool stale = 6;
   // stale_reason says what changed. It is empty when stale is false.
   string stale_reason = 7;
-  // max_active_missions is the most missions of this publication that run or wait
-  // at one time.
-  int32 max_active_missions = 8;
+  // max_active_missions was a count limit. It is removed (gibson#1567).
+  reserved 8;
+  reserved "max_active_missions";
 }
 
 message PublishInboundMissionRequest {
@@ -121,10 +121,9 @@ message PublishInboundMissionRequest {
   string mission_definition_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 255 }];
   // target_ids are the IDs of targets of the tenant. At least one is required.
   repeated string target_ids = 3 [(buf.validate.field).repeated = { min_items: 1, max_items: 100 }];
-  // max_active_missions is the most missions of this publication that run or wait
-  // at one time. It is required and it has no default. A call with 0 or no value is
-  // refused. A message over the limit gets a rejected Task and starts no mission.
-  int32 max_active_missions = 4 [(buf.validate.field).int32 = { gte: 1, lte: 10000 }];
+  // max_active_missions was a count limit. It is removed (gibson#1567).
+  reserved 4;
+  reserved "max_active_missions";
 }
 
 message PublishInboundMissionResponse {

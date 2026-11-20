@@ -274,8 +274,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 	// Log mission management status
 	if f.config.MissionClient != nil {
 		logger.Debug("mission management enabled for harness",
-			slog.Int("max_child_missions", f.config.SpawnLimits.MaxChildMissions),
-			slog.Int("max_concurrent_missions", f.config.SpawnLimits.MaxConcurrentMissions),
 			slog.Int("max_mission_depth", f.config.SpawnLimits.MaxMissionDepth),
 		)
 	} else {

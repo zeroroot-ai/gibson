@@ -176,103 +176,34 @@ type MissionRecord struct {
 	Status          MissionStatus
 }
 
-// SpawnLimits configures mission creation limits to prevent runaway mission spawning.
-// These limits are enforced before any mission creation to ensure system stability
-// and prevent resource exhaustion from recursive or exponential mission creation patterns.
+// SpawnLimits configures the bound on mission spawning. It holds only the
+// depth bound, which stops a runaway agent from recursing without end. There
+// is no count limit on child missions or on running missions.
 type SpawnLimits struct {
-	// MaxChildMissions is the maximum number of child missions a single parent
-	// mission can spawn (default: 10).
-	// This prevents a single mission from overwhelming the system with children.
-	MaxChildMissions int
-
-	// MaxConcurrentMissions is the maximum number of missions that can be
-	// running concurrently system-wide (default: 50).
-	// This protects against resource exhaustion from too many parallel missions.
-	MaxConcurrentMissions int
-
 	// MaxMissionDepth is the maximum depth of nested mission chains (default: 3).
 	// Depth 0 = root mission, depth 1 = direct child, etc.
 	// This prevents infinite recursion in mission spawning patterns.
 	MaxMissionDepth int
 }
 
-// DefaultSpawnLimits returns sensible default values for spawn limits.
-// These defaults are designed to allow reasonable mission hierarchies while
-// preventing runaway spawning that could destabilize the system.
-//
-// Default values:
-//   - MaxChildMissions: 10 children per parent
-//   - MaxConcurrentMissions: 50 concurrent missions system-wide
-//   - MaxMissionDepth: 3 levels deep (root + 2 levels of children)
+// DefaultSpawnLimits returns the default spawn bound: 3 levels deep (root + 2
+// levels of children).
 func DefaultSpawnLimits() SpawnLimits {
 	return SpawnLimits{
-		MaxChildMissions:      10,
-		MaxConcurrentMissions: 50,
-		MaxMissionDepth:       3,
+		MaxMissionDepth: 3,
 	}
 }
 
-// CheckSpawnLimits verifies that spawning a new mission would not violate any
-// configured limits. It checks:
-//  1. Child mission count for the current parent
-//  2. Mission depth in the hierarchy
-//  3. System-wide concurrent running missions
-//
-// This function can be called by the harness implementation when creating missions.
-// It takes a MissionLister interface to query missions, the current missionID,
-// and the configured SpawnLimits.
-//
-// Returns nil if all limits are satisfied, or a descriptive error indicating
-// which limit was exceeded.
+// CheckSpawnLimits verifies that spawning a new child of missionID would not
+// exceed the mission depth bound. It returns nil when the child may spawn, or
+// an ErrMissionDepthLimitExceeded error.
 func CheckSpawnLimits(ctx context.Context, lister MissionLister, missionID types.ID, limits SpawnLimits) error {
-	// Check child mission count
-	// Query all missions that have this mission as their parent
-	children, err := lister.List(ctx, &MissionFilter{
-		ParentMissionID: &missionID,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list child missions: %w", err)
-	}
-
-	// Verify we haven't exceeded the maximum number of children per parent
-	if len(children) >= limits.MaxChildMissions {
-		return types.NewError(
-			ErrChildMissionLimitExceeded,
-			fmt.Sprintf("mission has reached maximum child limit (%d/%d)",
-				len(children), limits.MaxChildMissions),
-		)
-	}
-
-	// Check mission depth
-	// Get the current mission's depth and calculate what the new child's depth would be
-	currentDepth := GetMissionDepth(ctx, lister, missionID)
-	newChildDepth := currentDepth + 1
-
-	// Check if spawning a child would exceed the maximum depth
+	newChildDepth := GetMissionDepth(ctx, lister, missionID) + 1
 	if newChildDepth >= limits.MaxMissionDepth {
 		return types.NewError(
 			ErrMissionDepthLimitExceeded,
 			fmt.Sprintf("mission depth limit would be exceeded (new depth: %d, limit: %d)",
 				newChildDepth, limits.MaxMissionDepth),
-		)
-	}
-
-	// Check concurrent missions
-	// Query all missions currently in running state
-	runningStatus := MissionStatusWorking
-	running, err := lister.List(ctx, &MissionFilter{
-		Status: &runningStatus,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list running missions: %w", err)
-	}
-
-	// Verify we haven't exceeded the system-wide concurrent limit
-	if len(running) >= limits.MaxConcurrentMissions {
-		return types.NewError(
-			ErrConcurrentMissionLimitExceeded,
-			fmt.Sprintf("concurrent mission limit reached (%d/%d)",
-				len(running), limits.MaxConcurrentMissions),
 		)
 	}
 

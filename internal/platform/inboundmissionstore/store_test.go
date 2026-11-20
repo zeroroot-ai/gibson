@@ -101,13 +101,13 @@ var created = time.Date(2026, 11, 1, 10, 0, 0, 0, time.FixedZone("x", 3600))
 func rowOf(e Entry) []any {
 	targets := `["` + strings.Join(e.TargetIDs, `","`) + `"]`
 	hashes, _ := json.Marshal(e.TargetHashes)
-	return []any{e.Agent, "pub-1", e.DefinitionID, e.DefinitionHash, targets, string(hashes), e.MaxActive, e.PublishedBy, created}
+	return []any{e.Agent, "pub-1", e.DefinitionID, e.DefinitionHash, targets, string(hashes), e.PublishedBy, created}
 }
 
 func sample() Entry {
 	return Entry{
 		Agent: "recon", DefinitionID: "def-1", DefinitionHash: "h-def", TargetIDs: []string{"t1", "t2"},
-		TargetHashes: map[string]string{"t1": "h1", "t2": "h2"}, MaxActive: 3, PublishedBy: "user:ana",
+		TargetHashes: map[string]string{"t1": "h1", "t2": "h2"}, PublishedBy: "user:ana",
 	}
 }
 
@@ -133,9 +133,7 @@ func TestPublish(t *testing.T) {
 		{"no definition", Entry{Agent: "a", DefinitionHash: "h", TargetIDs: []string{"t"}}, &fakeDB{}, "needs an agent", nil},
 		{"no definition hash", Entry{Agent: "a", DefinitionID: "d", TargetIDs: []string{"t"}}, &fakeDB{}, "needs an agent", nil},
 		{"no target", Entry{Agent: "a", DefinitionID: "d", DefinitionHash: "h"}, &fakeDB{}, "needs an agent", nil},
-		{"no limit", Entry{Agent: "a", DefinitionID: "d", DefinitionHash: "h", TargetIDs: []string{"t"},
-			TargetHashes: map[string]string{"t": "x"}}, &fakeDB{}, "limit of at least one", nil},
-		{"no hash of a target", Entry{Agent: "a", DefinitionID: "d", DefinitionHash: "h", TargetIDs: []string{"t"}, MaxActive: 1},
+		{"no hash of a target", Entry{Agent: "a", DefinitionID: "d", DefinitionHash: "h", TargetIDs: []string{"t"}},
 			&fakeDB{}, "needs the hash of target t", nil},
 		{"no conn", e, &fakeDB{forErr: errBoom}, "boom", errBoom},
 		{"insert fails", e, &fakeDB{exec: func(sql string) (int64, error) {
@@ -150,10 +148,10 @@ func TestPublish(t *testing.T) {
 		{"the agent holds another definition", otherDef, &fakeDB{exec: okExec, queryRow: stored}, "recon", ErrConflict},
 		{"the agent holds other targets", otherTargets, &fakeDB{exec: okExec, queryRow: stored}, "recon", ErrConflict},
 		{"the stored targets are not JSON", e, &fakeDB{exec: okExec, queryRow: func(string) datapool.Row {
-			return fakeRow{values: []any{"recon", "pub-1", "def-1", "h", "not json", "{}", int32(1), "", created}}
+			return fakeRow{values: []any{"recon", "pub-1", "def-1", "h", "not json", "{}", "", created}}
 		}}, "decode the targets", nil},
 		{"the stored hashes are not JSON", e, &fakeDB{exec: okExec, queryRow: func(string) datapool.Row {
-			return fakeRow{values: []any{"recon", "pub-1", "def-1", "h", `["t1"]`, "nope", int32(1), "", created}}
+			return fakeRow{values: []any{"recon", "pub-1", "def-1", "h", `["t1"]`, "nope", "", created}}
 		}}, "decode the target hashes", nil},
 	}
 	for _, tt := range tests {
@@ -183,7 +181,6 @@ func TestPublish_ANewPinReplacesTheOldPin(t *testing.T) {
 	want := sample()
 	want.DefinitionHash = "h-def-2"
 	want.TargetHashes = map[string]string{"t1": "h1", "t2": "h2-new"}
-	want.MaxActive = 5
 	db := &fakeDB{exec: okExec, queryRow: func(sql string) datapool.Row {
 		assert.Contains(t, sql, "FOR UPDATE", "the row is locked while the pin changes")
 		return fakeRow{values: rowOf(stored)}
@@ -194,7 +191,6 @@ func TestPublish_ANewPinReplacesTheOldPin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "h-def-2", got.DefinitionHash)
 	assert.Equal(t, "h2-new", got.TargetHashes["t2"])
-	assert.Equal(t, int32(5), got.MaxActive)
 	assert.Contains(t, strings.Join(db.seen, "\n"), "UPDATE inbound_missions SET definition_hash")
 
 	failing := &fakeDB{queryRow: func(string) datapool.Row { return fakeRow{values: rowOf(stored)} },
@@ -327,158 +323,38 @@ func TestListPage_Failures(t *testing.T) {
 	}
 }
 
-// scriptedTx answers the statements of Reserve.
-type scriptedTx struct {
-	*fakeDB
-	limit    int
-	limitErr error
-	open     [][]any // rows of (slot, mission id, lapsed) that are open
-	count    int
-	execErr  map[string]error
-	openErr  error
-	scanErr  error
-	closed   []string
-	inserted []any
-	countErr error
-	rowsErr  error
-	countSQL string
-}
+// Reserve writes the task row from the row of the publication in one statement.
+// There is no count, so a publication with many open tasks takes one more.
+func TestReserve_RecordsTheTaskWithNoCount(t *testing.T) {
+	db := &fakeDB{exec: okExec}
 
-func newScriptedTx(t *testing.T) *scriptedTx {
-	t.Helper()
-	x := &scriptedTx{limit: 2, execErr: map[string]error{}}
-	x.fakeDB = &fakeDB{
-		queryRow: func(sql string) datapool.Row {
-			if strings.Contains(sql, "FOR UPDATE") {
-				if x.limitErr != nil {
-					return fakeRow{err: x.limitErr}
-				}
-				return fakeRow{values: []any{x.limit, "pub-1"}}
-			}
-			x.countSQL = sql
-			if x.countErr != nil {
-				return fakeRow{err: x.countErr}
-			}
-			return fakeRow{values: []any{x.count}}
-		},
-		query: func(string) (datapool.Rows, error) {
-			if x.openErr != nil {
-				return nil, x.openErr
-			}
-			return &fakeRows{rows: x.open, scanErr: x.scanErr, err: x.rowsErr}, nil
-		},
-		exec: func(sql string) (int64, error) {
-			for k, err := range x.execErr {
-				if strings.Contains(sql, k) {
-					return 0, err
-				}
-			}
-			switch {
-			case strings.HasPrefix(sql, "UPDATE inbound_tasks SET finished_at"):
-				x.closed = append(x.closed, sql)
-			case strings.HasPrefix(sql, "INSERT INTO inbound_tasks"):
-				x.inserted = append(x.inserted, sql)
-			}
-			return 1, nil
-		},
-	}
-	return x
-}
-
-func (x *scriptedTx) reserve(known func(string) (bool, bool)) (string, error) {
-	return newStore(x.fakeDB).Reserve(context.Background(), "acme", "recon", "agent_principal:9", "m-new", known, time.Minute)
-}
-
-func never(string) (exists, terminal bool) { return true, false }
-
-func TestReserve_TakesAPlaceWhileTheLimitAllows(t *testing.T) {
-	x := newScriptedTx(t)
-	x.count = 1
-
-	slot, err := x.reserve(never)
+	slot, err := newStore(db).Reserve(context.Background(), "acme", "recon", "agent_principal:9", "m-new")
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, slot)
-	assert.Len(t, x.inserted, 1)
-	assert.Equal(t, 1, x.released)
-	assert.Contains(t, x.seen[0], "FOR UPDATE", "the row of the publication is locked first")
-	assert.Contains(t, x.countSQL, "publication_id", "the count is by publication and not by agent name")
-}
-
-func TestReserve_RefusesAtTheLimitAndInsertsNothing(t *testing.T) {
-	x := newScriptedTx(t)
-	x.count = 2
-
-	slot, err := x.reserve(never)
-
-	require.ErrorIs(t, err, ErrLimit)
-	assert.Empty(t, slot)
-	assert.Empty(t, x.inserted)
-}
-
-// A mission that has ended gives its place back, and so does a mission that the
-// World does not know after the grace time. A mission that the World does not know
-// yet, inside the grace time, keeps its place.
-func TestReserve_ClosesTheTasksOfMissionsThatEndedOrAreLost(t *testing.T) {
-	x := newScriptedTx(t)
-	x.open = [][]any{{"slot-a", "m-a", false}, {"slot-b", "m-b", false}, {"slot-c", "m-c", true}, {"slot-d", "m-d", false}}
-	x.count = 1
-	known := func(id string) (bool, bool) {
-		switch id {
-		case "m-a":
-			return true, true // ended
-		case "m-b":
-			return true, false // running
-		case "m-c":
-			return false, false // lost, past the grace time
-		}
-		return false, false // not folded yet, inside the grace time
-	}
-
-	_, err := x.reserve(known)
-
-	require.NoError(t, err)
-	assert.Len(t, x.closed, 2, "the ended mission and the lost mission")
+	assert.Equal(t, 1, db.released)
+	require.Len(t, db.seen, 1, "one statement and no count")
+	assert.Contains(t, db.seen[0], "INSERT INTO inbound_tasks")
+	assert.Contains(t, db.seen[0], "FROM inbound_missions WHERE agent = $2", "the task names the live publication")
+	assert.NotContains(t, db.seen[0], "count(")
 }
 
 func TestReserve_Failures(t *testing.T) {
-	tests := []struct {
-		name   string
-		setup  func(x *scriptedTx)
-		wantIs error
-		want   string
-	}{
-		{"the agent is not published", func(x *scriptedTx) { x.limitErr = datapool.ErrNoRows }, ErrNotFound, ""},
-		{"the lock fails", func(x *scriptedTx) { x.limitErr = errBoom }, errBoom, "lock the publication"},
-		{"the read of open tasks fails", func(x *scriptedTx) { x.openErr = errBoom }, errBoom, "read the open tasks"},
-		{"a scan fails", func(x *scriptedTx) { x.open = [][]any{{"s", "m", false}}; x.scanErr = errBoom }, errBoom, "scan an open task"},
-		{"the rows fail", func(x *scriptedTx) { x.rowsErr = errBoom }, errBoom, "read the open tasks"},
-		{"the close fails", func(x *scriptedTx) {
-			x.open = [][]any{{"s", "m", false}}
-			x.execErr["UPDATE inbound_tasks SET finished_at"] = errBoom
-		}, errBoom, "close a task"},
-		{"the count fails", func(x *scriptedTx) { x.countErr = errBoom }, errBoom, "count"},
-		{"the insert fails", func(x *scriptedTx) { x.execErr["INSERT INTO inbound_tasks"] = errBoom }, errBoom, "insert"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			x := newScriptedTx(t)
-			tt.setup(x)
-			_, err := x.reserve(func(string) (bool, bool) { return true, true })
-			require.ErrorIs(t, err, tt.wantIs)
-			if tt.want != "" {
-				assert.Contains(t, err.Error(), tt.want)
-			}
-		})
-	}
-	_, err := newStore(&fakeDB{forErr: errBoom}).Reserve(context.Background(), "acme", "recon", "o", "m", never, time.Minute)
+	_, err := newStore(&fakeDB{exec: func(string) (int64, error) { return 0, nil }}).
+		Reserve(context.Background(), "acme", "recon", "o", "m")
+	require.ErrorIs(t, err, ErrNotFound, "no row of the publication means the agent is not published")
+
+	_, err = newStore(&fakeDB{exec: func(string) (int64, error) { return 0, errBoom }}).
+		Reserve(context.Background(), "acme", "recon", "o", "m")
+	require.ErrorIs(t, err, errBoom)
+
+	_, err = newStore(&fakeDB{forErr: errBoom}).Reserve(context.Background(), "acme", "recon", "o", "m")
 	require.ErrorIs(t, err, errBoom)
 }
 
-func TestReleaseFinishOwner(t *testing.T) {
+func TestReleaseOwner(t *testing.T) {
 	ok := &fakeDB{exec: okExec, queryRow: func(string) datapool.Row { return fakeRow{values: []any{"agent_principal:9", "recon"}} }}
 	require.NoError(t, newStore(ok).Release(context.Background(), "acme", "slot"))
-	require.NoError(t, newStore(ok).Finish(context.Background(), "acme", "m-1"))
 	owner, agent, err := newStore(ok).Owner(context.Background(), "acme", "m-1")
 	require.NoError(t, err)
 	assert.Equal(t, "agent_principal:9", owner)
@@ -492,13 +368,11 @@ func TestReleaseFinishOwner(t *testing.T) {
 	bad := &fakeDB{exec: func(string) (int64, error) { return 0, errBoom },
 		queryRow: func(string) datapool.Row { return fakeRow{err: errBoom} }}
 	require.ErrorIs(t, newStore(bad).Release(context.Background(), "acme", "s"), errBoom)
-	require.ErrorIs(t, newStore(bad).Finish(context.Background(), "acme", "m"), errBoom)
 	_, _, err = newStore(bad).Owner(context.Background(), "acme", "m")
 	require.ErrorIs(t, err, errBoom)
 
 	gone := &fakeDB{forErr: errBoom}
 	require.ErrorIs(t, newStore(gone).Release(context.Background(), "acme", "s"), errBoom)
-	require.ErrorIs(t, newStore(gone).Finish(context.Background(), "acme", "m"), errBoom)
 	_, _, err = newStore(gone).Owner(context.Background(), "acme", "m")
 	require.ErrorIs(t, err, errBoom)
 }

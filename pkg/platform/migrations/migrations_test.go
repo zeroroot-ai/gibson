@@ -13,7 +13,7 @@ import (
 
 func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	t.Parallel()
-	// 22: 009 is session_context (component session-context store,
+	// 23: 009 is session_context (component session-context store,
 	// gibson#1184), 010 is banks (banks of always-on coding agents, ADR-0119,
 	// gibson#1708), 011 is jobs (the job queue, gibson#1710), 012 drops
 	// provider_config_meta, the default-provider pointer that shadowed
@@ -24,14 +24,15 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	// stored context window of the saved default model (gibson#1193), 017
 	// lets a finding have no mission (gibson#1378), 018 is the evidence of a
 	// finding (gibson#1380), 019 is the Agent Skill tables (gibson#1370), 020 is the outside agent table and 021 adds its CA
-	// bundle column (gibson#1403), and 022 is the mission definitions published for
-	// inbound A2A calls (gibson#1408).
+	// bundle column (gibson#1403), 022 is the mission definitions published for
+	// inbound A2A calls (gibson#1408), and 023 drops the count limit of those
+	// publications (gibson#1567).
 	upCount, downCount := countSQL(t, Tenant, tenantDir)
-	if upCount != 22 {
-		t.Errorf("tenant: expected 22 up.sql files, got %d", upCount)
+	if upCount != 23 {
+		t.Errorf("tenant: expected 23 up.sql files, got %d", upCount)
 	}
-	if downCount != 22 {
-		t.Errorf("tenant: expected 22 down.sql files, got %d", downCount)
+	if downCount != 23 {
+		t.Errorf("tenant: expected 23 down.sql files, got %d", downCount)
 	}
 }
 
@@ -112,8 +113,8 @@ func TestTenantMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TenantMaxVersion: %v", err)
 	}
-	if v != 22 {
-		t.Errorf("TenantMaxVersion: got %d, want 22", v)
+	if v != 23 {
+		t.Errorf("TenantMaxVersion: got %d, want 23", v)
 	}
 }
 

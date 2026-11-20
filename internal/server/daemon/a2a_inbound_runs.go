@@ -67,32 +67,6 @@ type inboundRuns struct {
 	stop func(ctx context.Context, missionID string) error
 }
 
-// inboundReservationGrace is how long a reserved place may wait for its mission to
-// appear in the World. A reservation whose mission never appeared, for example after
-// a crash between the reservation and the start, gives its place back after this time.
-const inboundReservationGrace = 10 * time.Minute
-
-// missionKnown returns the function that tells the store whether a mission exists
-// and whether it has ended. The World is rebuilt from the Timeline when the daemon
-// starts, so a mission that ended while no daemon watched is terminal in it. The
-// Redis record of a mission holds no end state (the status is World derived,
-// ADR-0163). The daemon runs one replica by design (gibson.replicas is 1 in charts),
-// so its World holds every mission of the tenant.
-func (r *inboundRuns) missionKnown(tenant string) func(missionID string) (exists, terminal bool) {
-	return func(missionID string) (exists, terminal bool) {
-		eng, ok := api.TenantEngine(r.registry, tenant)
-		if !ok {
-			return false, false
-		}
-		for _, m := range eng.Missions() {
-			if m.ID == missionID {
-				return true, m.Status.IsTerminal()
-			}
-		}
-		return false, false
-	}
-}
-
 // missionFindingReader reads the findings of one mission with all of their
 // evidence, in the one read function that the Finding evidence epic added.
 type missionFindingReader interface {
@@ -270,20 +244,15 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		Subject: c.Subject, Issuer: auth.IssuerCapabilityGrant, CredentialType: auth.CredentialCapabilityGrant,
 		Tenant: tenant,
 	})
-	// One place of the publication is reserved before the mission record is written,
-	// and the row of the task takes the ID that the mission record will take. A
-	// running mission therefore always has its row and its place. The store counts
-	// in the database under a lock, so parallel messages and more than one replica
-	// cannot go over the limit.
+	// The task row is written before the mission record, and it takes the ID that
+	// the mission record will take. A running mission therefore always has its row.
 	missionID := types.NewID().String()
-	slot, err := r.published.Reserve(ctx, c.Tenant, req.Agent, c.Subject, missionID, r.missionKnown(c.Tenant), inboundReservationGrace)
+	slot, err := r.published.Reserve(ctx, c.Tenant, req.Agent, c.Subject, missionID)
 	switch {
-	case errors.Is(err, inboundmissionstore.ErrLimit):
-		return a2aserver.RejectedTask(fmt.Sprintf("the agent already has its most active missions (%d). Wait for one to end", pub.MaxActive)), nil
 	case errors.Is(err, inboundmissionstore.ErrNotFound):
 		return a2aserver.RejectedTask(a2aserver.ReasonAgentNotAvailable), nil
 	case err != nil:
-		return nil, fmt.Errorf("reserve a place for agent %s: %w", req.Agent, err)
+		return nil, fmt.Errorf("record the task for agent %s: %w", req.Agent, err)
 	}
 	started, err := r.starter.StartMission(ctx, api.RunMissionData{
 		MissionDefinitionID: pub.DefinitionID,
@@ -299,7 +268,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		CreatedBy:  inboundPrincipal(c.Subject),
 	})
 	if err != nil {
-		// The client may be gone, and the place must still be given back.
+		// The client may be gone, and the task row must still be deleted.
 		rerr := r.published.Release(context.WithoutCancel(ctx), c.Tenant, slot)
 		// A tenant that is suspended, and a pin that does not match, are refusals
 		// of policy. The Task is rejected, as for any other refusal of a well
@@ -314,7 +283,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	}
 	if started != missionID {
 		// The record has an ID that the row does not name. The mission ends, and the
-		// place goes back.
+		// task row is deleted.
 		serr := r.stop(context.WithoutCancel(ctx), started)
 		rerr := r.published.Release(context.WithoutCancel(ctx), c.Tenant, slot)
 		return nil, fmt.Errorf("the mission %s has an ID other than %s: %w", started, missionID, errors.Join(serr, rerr))
@@ -345,11 +314,6 @@ func (r *inboundRuns) ownedMission(ctx context.Context, c a2aserver.InboundCalle
 	if eng, ok := api.TenantEngine(r.registry, c.Tenant); ok {
 		for _, m := range eng.Missions() {
 			if m.ID == id {
-				if m.Status.IsTerminal() {
-					// The place goes back at once, without waiting for the next
-					// reservation to see the end.
-					_ = r.published.Finish(context.WithoutCancel(ctx), c.Tenant, id)
-				}
 				return m, nil
 			}
 		}
