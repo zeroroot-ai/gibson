@@ -59,7 +59,7 @@ func TestCountermeasureEvents(t *testing.T) {
 func TestFixedByEvents_CountermeasureEdgeFollowsTheTaxonomy(t *testing.T) {
 	closed := closedJob([]string{"f-1"}, mrDeliverable)
 	closed.Countermeasure = "D3-FA"
-	evs, _ := fixedByEvents(closed, worldWith(map[string]string{"f-1": "s"}))
+	evs, _ := fixedByEvents(closed, worldWith(map[string]string{"f-1": "s"}), testNow)
 	got := entities(t, evs)
 	wantLen := 2
 	if countermeasureAdmitted() {

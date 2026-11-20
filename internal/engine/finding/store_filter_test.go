@@ -38,7 +38,7 @@ func TestFindingFilter_Matches(t *testing.T) {
 		{"same category", &FindingFilter{Category: ptr(CategoryPrivilegeEscalation)}, true},
 		{"other category", &FindingFilter{Category: ptr(FindingCategory("other"))}, false},
 		{"same status", &FindingFilter{Status: ptr(StatusOpen)}, true},
-		{"other status", &FindingFilter{Status: ptr(StatusResolved)}, false},
+		{"other status", &FindingFilter{Status: ptr(StatusFixed)}, false},
 		{"risk at the minimum", &FindingFilter{MinRisk: ptr(5.0)}, true},
 		{"risk under the minimum", &FindingFilter{MinRisk: ptr(5.1)}, false},
 		{"risk at the maximum", &FindingFilter{MaxRisk: ptr(5.0)}, true},

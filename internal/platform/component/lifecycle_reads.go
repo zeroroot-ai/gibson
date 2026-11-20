@@ -102,12 +102,7 @@ const applicationFindingsCypher = `
 MATCH (app:Application {key: $application})
 MATCH (f:Finding)-[:AFFECTS]->(place)
 WHERE ($statuses = [] OR f.status IN $statuses)
-  AND (
-    EXISTS { (app)-[:HAS_DEPLOYMENT]->(:Deployment)-[:RUNS]->(:Image)-[:CONTAINS]->(place) }
-    OR EXISTS { (app)-[:HAS_REPOSITORY]->(:Repository)<-[:BUILT_FROM]-(:Image)-[:CONTAINS]->(place) }
-    OR EXISTS { (app)-[:HAS_REPOSITORY]->(place) }
-    OR EXISTS { (app)-[:HAS_DEPLOYMENT]->(:Deployment)-[:EXPOSES]->(:Host)-[:RUNS_SERVICE]->(place) }
-  )
+  AND (` + applicationReachesPlace + `)
 WITH app, f, place
 OPTIONAL MATCH (f)-[:INSTANCE_OF]->(v:Vulnerability)
 OPTIONAL MATCH (app)-[:HAS_DEPLOYMENT]->(dep:Deployment)-[:RUNS]->(img:Image)-[:CONTAINS]->(place)

@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -652,6 +653,14 @@ func (s *graphServer) GetFindings(
 	}, nil
 }
 
+// The keys of the lifecycle fields in the properties of a graph finding.
+const (
+	findingPropStatus       = "status"
+	findingPropPriority     = "priority"
+	findingPropPriorityRule = "priority_rule"
+	findingPropConfidence   = "confidence"
+)
+
 // findingProperties lists the string properties of a stored finding for the
 // dashboard: the verified submitter, the agent, and each string in its metadata.
 func findingProperties(f finding.EnhancedFinding) map[string]string {
@@ -660,6 +669,18 @@ func findingProperties(f finding.EnhancedFinding) map[string]string {
 		if str, ok := v.(string); ok {
 			props[k] = str
 		}
+	}
+	// The lifecycle fields come from the findings table. They are the keys that
+	// the dashboard reads until the SDK type has typed fields (dashboard#389).
+	if f.Status != "" {
+		props[findingPropStatus] = string(f.Status)
+	}
+	if f.Priority != "" {
+		props[findingPropPriority] = string(f.Priority)
+		props[findingPropPriorityRule] = f.PriorityRule
+	}
+	if f.Confidence > 0 {
+		props[findingPropConfidence] = strconv.FormatFloat(f.Confidence, 'f', -1, 64)
 	}
 	if f.AgentName != "" {
 		props["agent_name"] = f.AgentName

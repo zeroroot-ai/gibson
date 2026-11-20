@@ -19,21 +19,27 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorldService_ListMissions_FullMethodName     = "/gibson.world.v1.WorldService/ListMissions"
-	WorldService_ListHosts_FullMethodName        = "/gibson.world.v1.WorldService/ListHosts"
-	WorldService_ListFindings_FullMethodName     = "/gibson.world.v1.WorldService/ListFindings"
-	WorldService_ListLlmCalls_FullMethodName     = "/gibson.world.v1.WorldService/ListLlmCalls"
-	WorldService_GetLlmCall_FullMethodName       = "/gibson.world.v1.WorldService/GetLlmCall"
-	WorldService_GetTimeline_FullMethodName      = "/gibson.world.v1.WorldService/GetTimeline"
-	WorldService_GetFrameAt_FullMethodName       = "/gibson.world.v1.WorldService/GetFrameAt"
-	WorldService_ListReviewQueue_FullMethodName  = "/gibson.world.v1.WorldService/ListReviewQueue"
-	WorldService_SubmitLabel_FullMethodName      = "/gibson.world.v1.WorldService/SubmitLabel"
-	WorldService_ListLabels_FullMethodName       = "/gibson.world.v1.WorldService/ListLabels"
-	WorldService_GetCalibration_FullMethodName   = "/gibson.world.v1.WorldService/GetCalibration"
-	WorldService_GetReputation_FullMethodName    = "/gibson.world.v1.WorldService/GetReputation"
-	WorldService_ListOpenBets_FullMethodName     = "/gibson.world.v1.WorldService/ListOpenBets"
-	WorldService_ListProofReviews_FullMethodName = "/gibson.world.v1.WorldService/ListProofReviews"
-	WorldService_SettleBetByHITL_FullMethodName  = "/gibson.world.v1.WorldService/SettleBetByHITL"
+	WorldService_ListMissions_FullMethodName        = "/gibson.world.v1.WorldService/ListMissions"
+	WorldService_ListHosts_FullMethodName           = "/gibson.world.v1.WorldService/ListHosts"
+	WorldService_ListFindings_FullMethodName        = "/gibson.world.v1.WorldService/ListFindings"
+	WorldService_ListLlmCalls_FullMethodName        = "/gibson.world.v1.WorldService/ListLlmCalls"
+	WorldService_GetLlmCall_FullMethodName          = "/gibson.world.v1.WorldService/GetLlmCall"
+	WorldService_GetTimeline_FullMethodName         = "/gibson.world.v1.WorldService/GetTimeline"
+	WorldService_GetFrameAt_FullMethodName          = "/gibson.world.v1.WorldService/GetFrameAt"
+	WorldService_ListReviewQueue_FullMethodName     = "/gibson.world.v1.WorldService/ListReviewQueue"
+	WorldService_SubmitLabel_FullMethodName         = "/gibson.world.v1.WorldService/SubmitLabel"
+	WorldService_ListLabels_FullMethodName          = "/gibson.world.v1.WorldService/ListLabels"
+	WorldService_GetCalibration_FullMethodName      = "/gibson.world.v1.WorldService/GetCalibration"
+	WorldService_GetReputation_FullMethodName       = "/gibson.world.v1.WorldService/GetReputation"
+	WorldService_ListOpenBets_FullMethodName        = "/gibson.world.v1.WorldService/ListOpenBets"
+	WorldService_ListProofReviews_FullMethodName    = "/gibson.world.v1.WorldService/ListProofReviews"
+	WorldService_SettleBetByHITL_FullMethodName     = "/gibson.world.v1.WorldService/SettleBetByHITL"
+	WorldService_GetExposure_FullMethodName         = "/gibson.world.v1.WorldService/GetExposure"
+	WorldService_GetExposureTrend_FullMethodName    = "/gibson.world.v1.WorldService/GetExposureTrend"
+	WorldService_GetRevertRate_FullMethodName       = "/gibson.world.v1.WorldService/GetRevertRate"
+	WorldService_ListOpenFindings_FullMethodName    = "/gibson.world.v1.WorldService/ListOpenFindings"
+	WorldService_ListActionsByGrant_FullMethodName  = "/gibson.world.v1.WorldService/ListActionsByGrant"
+	WorldService_ListWaitingOnPerson_FullMethodName = "/gibson.world.v1.WorldService/ListWaitingOnPerson"
 )
 
 // WorldServiceClient is the client API for WorldService service.
@@ -120,6 +126,28 @@ type WorldServiceClient interface {
 	// this is gated at writer, not bare member — dashboard#97's settle action,
 	// not every tenant member's review queue.
 	SettleBetByHITL(ctx context.Context, in *SettleBetByHITLRequest, opts ...grpc.CallOption) (*SettleBetByHITLResponse, error)
+	// GetExposure returns the exposure window of one finding: the time from its
+	// first evidence to its `verified` event, or to now for a finding that is not
+	// verified. It splits the window into agent time and wait time (gibson#1467).
+	GetExposure(ctx context.Context, in *GetExposureRequest, opts ...grpc.CallOption) (*GetExposureResponse, error)
+	// GetExposureTrend returns the median exposure window of the findings that
+	// were verified in a period, next to the median of the period before it
+	// (gibson#1467).
+	GetExposureTrend(ctx context.Context, in *GetExposureTrendRequest, opts ...grpc.CallOption) (*GetExposureTrendResponse, error)
+	// GetRevertRate returns the share of merged fixes that an agent reverted in a
+	// period, next to the share of the period before it (gibson#1468).
+	GetRevertRate(ctx context.Context, in *GetRevertRateRequest, opts ...grpc.CallOption) (*GetRevertRateResponse, error)
+	// ListOpenFindings returns the findings that are not `verified`. The order is
+	// the priority (P1 to P4), then the belief of the target. A finding with no
+	// priority ranks by its severity (gibson#1498).
+	ListOpenFindings(ctx context.Context, in *ListOpenFindingsRequest, opts ...grpc.CallOption) (*ListOpenFindingsResponse, error)
+	// ListActionsByGrant returns the connector calls of the agents in a time
+	// range, grouped by the grant that allowed each one and by the person who gave
+	// the grant. A refused call shows the grant that it lacked (gibson#1499).
+	ListActionsByGrant(ctx context.Context, in *ListActionsByGrantRequest, opts ...grpc.CallOption) (*ListActionsByGrantResponse, error)
+	// ListWaitingOnPerson returns each item that waits on a person, with the wait
+	// time so far (gibson#1500).
+	ListWaitingOnPerson(ctx context.Context, in *ListWaitingOnPersonRequest, opts ...grpc.CallOption) (*ListWaitingOnPersonResponse, error)
 }
 
 type worldServiceClient struct {
@@ -280,6 +308,66 @@ func (c *worldServiceClient) SettleBetByHITL(ctx context.Context, in *SettleBetB
 	return out, nil
 }
 
+func (c *worldServiceClient) GetExposure(ctx context.Context, in *GetExposureRequest, opts ...grpc.CallOption) (*GetExposureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetExposureResponse)
+	err := c.cc.Invoke(ctx, WorldService_GetExposure_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldServiceClient) GetExposureTrend(ctx context.Context, in *GetExposureTrendRequest, opts ...grpc.CallOption) (*GetExposureTrendResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetExposureTrendResponse)
+	err := c.cc.Invoke(ctx, WorldService_GetExposureTrend_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldServiceClient) GetRevertRate(ctx context.Context, in *GetRevertRateRequest, opts ...grpc.CallOption) (*GetRevertRateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRevertRateResponse)
+	err := c.cc.Invoke(ctx, WorldService_GetRevertRate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldServiceClient) ListOpenFindings(ctx context.Context, in *ListOpenFindingsRequest, opts ...grpc.CallOption) (*ListOpenFindingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListOpenFindingsResponse)
+	err := c.cc.Invoke(ctx, WorldService_ListOpenFindings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldServiceClient) ListActionsByGrant(ctx context.Context, in *ListActionsByGrantRequest, opts ...grpc.CallOption) (*ListActionsByGrantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListActionsByGrantResponse)
+	err := c.cc.Invoke(ctx, WorldService_ListActionsByGrant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldServiceClient) ListWaitingOnPerson(ctx context.Context, in *ListWaitingOnPersonRequest, opts ...grpc.CallOption) (*ListWaitingOnPersonResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWaitingOnPersonResponse)
+	err := c.cc.Invoke(ctx, WorldService_ListWaitingOnPerson_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorldServiceServer is the server API for WorldService service.
 // All implementations must embed UnimplementedWorldServiceServer
 // for forward compatibility.
@@ -364,6 +452,28 @@ type WorldServiceServer interface {
 	// this is gated at writer, not bare member — dashboard#97's settle action,
 	// not every tenant member's review queue.
 	SettleBetByHITL(context.Context, *SettleBetByHITLRequest) (*SettleBetByHITLResponse, error)
+	// GetExposure returns the exposure window of one finding: the time from its
+	// first evidence to its `verified` event, or to now for a finding that is not
+	// verified. It splits the window into agent time and wait time (gibson#1467).
+	GetExposure(context.Context, *GetExposureRequest) (*GetExposureResponse, error)
+	// GetExposureTrend returns the median exposure window of the findings that
+	// were verified in a period, next to the median of the period before it
+	// (gibson#1467).
+	GetExposureTrend(context.Context, *GetExposureTrendRequest) (*GetExposureTrendResponse, error)
+	// GetRevertRate returns the share of merged fixes that an agent reverted in a
+	// period, next to the share of the period before it (gibson#1468).
+	GetRevertRate(context.Context, *GetRevertRateRequest) (*GetRevertRateResponse, error)
+	// ListOpenFindings returns the findings that are not `verified`. The order is
+	// the priority (P1 to P4), then the belief of the target. A finding with no
+	// priority ranks by its severity (gibson#1498).
+	ListOpenFindings(context.Context, *ListOpenFindingsRequest) (*ListOpenFindingsResponse, error)
+	// ListActionsByGrant returns the connector calls of the agents in a time
+	// range, grouped by the grant that allowed each one and by the person who gave
+	// the grant. A refused call shows the grant that it lacked (gibson#1499).
+	ListActionsByGrant(context.Context, *ListActionsByGrantRequest) (*ListActionsByGrantResponse, error)
+	// ListWaitingOnPerson returns each item that waits on a person, with the wait
+	// time so far (gibson#1500).
+	ListWaitingOnPerson(context.Context, *ListWaitingOnPersonRequest) (*ListWaitingOnPersonResponse, error)
 	mustEmbedUnimplementedWorldServiceServer()
 }
 
@@ -418,6 +528,24 @@ func (UnimplementedWorldServiceServer) ListProofReviews(context.Context, *ListPr
 }
 func (UnimplementedWorldServiceServer) SettleBetByHITL(context.Context, *SettleBetByHITLRequest) (*SettleBetByHITLResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SettleBetByHITL not implemented")
+}
+func (UnimplementedWorldServiceServer) GetExposure(context.Context, *GetExposureRequest) (*GetExposureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetExposure not implemented")
+}
+func (UnimplementedWorldServiceServer) GetExposureTrend(context.Context, *GetExposureTrendRequest) (*GetExposureTrendResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetExposureTrend not implemented")
+}
+func (UnimplementedWorldServiceServer) GetRevertRate(context.Context, *GetRevertRateRequest) (*GetRevertRateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRevertRate not implemented")
+}
+func (UnimplementedWorldServiceServer) ListOpenFindings(context.Context, *ListOpenFindingsRequest) (*ListOpenFindingsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListOpenFindings not implemented")
+}
+func (UnimplementedWorldServiceServer) ListActionsByGrant(context.Context, *ListActionsByGrantRequest) (*ListActionsByGrantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListActionsByGrant not implemented")
+}
+func (UnimplementedWorldServiceServer) ListWaitingOnPerson(context.Context, *ListWaitingOnPersonRequest) (*ListWaitingOnPersonResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListWaitingOnPerson not implemented")
 }
 func (UnimplementedWorldServiceServer) mustEmbedUnimplementedWorldServiceServer() {}
 func (UnimplementedWorldServiceServer) testEmbeddedByValue()                      {}
@@ -710,6 +838,114 @@ func _WorldService_SettleBetByHITL_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldService_GetExposure_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetExposureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).GetExposure(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_GetExposure_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).GetExposure(ctx, req.(*GetExposureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldService_GetExposureTrend_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetExposureTrendRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).GetExposureTrend(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_GetExposureTrend_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).GetExposureTrend(ctx, req.(*GetExposureTrendRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldService_GetRevertRate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRevertRateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).GetRevertRate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_GetRevertRate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).GetRevertRate(ctx, req.(*GetRevertRateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldService_ListOpenFindings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListOpenFindingsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).ListOpenFindings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_ListOpenFindings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).ListOpenFindings(ctx, req.(*ListOpenFindingsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldService_ListActionsByGrant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListActionsByGrantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).ListActionsByGrant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_ListActionsByGrant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).ListActionsByGrant(ctx, req.(*ListActionsByGrantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldService_ListWaitingOnPerson_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWaitingOnPersonRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).ListWaitingOnPerson(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_ListWaitingOnPerson_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).ListWaitingOnPerson(ctx, req.(*ListWaitingOnPersonRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorldService_ServiceDesc is the grpc.ServiceDesc for WorldService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -776,6 +1012,30 @@ var WorldService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SettleBetByHITL",
 			Handler:    _WorldService_SettleBetByHITL_Handler,
+		},
+		{
+			MethodName: "GetExposure",
+			Handler:    _WorldService_GetExposure_Handler,
+		},
+		{
+			MethodName: "GetExposureTrend",
+			Handler:    _WorldService_GetExposureTrend_Handler,
+		},
+		{
+			MethodName: "GetRevertRate",
+			Handler:    _WorldService_GetRevertRate_Handler,
+		},
+		{
+			MethodName: "ListOpenFindings",
+			Handler:    _WorldService_ListOpenFindings_Handler,
+		},
+		{
+			MethodName: "ListActionsByGrant",
+			Handler:    _WorldService_ListActionsByGrant_Handler,
+		},
+		{
+			MethodName: "ListWaitingOnPerson",
+			Handler:    _WorldService_ListWaitingOnPerson_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

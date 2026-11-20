@@ -100,6 +100,21 @@ func init() {
 	registerEvent("finding.raised", func() Event { return &FindingRaised{} })
 	registerEvent("finding.status_changed", func() Event { return &FindingStatusChanged{} })
 
+	// fixloop.go and mergegate.go
+	registerEvent("deploy.observed", func() Event { return &DeployObserved{} })
+	registerEvent("health.observed", func() Event { return &HealthObserved{} })
+	registerEvent("health.unavailable", func() Event { return &HealthUnavailable{} })
+	registerEvent("fix.reverted", func() Event { return &FixReverted{} })
+	registerEvent("check.rerun", func() Event { return &CheckRerun{} })
+	registerEvent("merge_request.queued", func() Event { return &MergeRequestQueued{} })
+	registerEvent("merge_request.granted", func() Event { return &MergeGranted{} })
+
+	// priority.go
+	registerEvent("finding.prioritized", func() Event { return &FindingPrioritized{} })
+
+	// mergerequest.go
+	registerEvent("merge_request.observed", func() Event { return &MergeRequestObserved{} })
+
 	// rescan.go
 	registerEvent("scan.reconciled", func() Event { return &ScanReconciled{} })
 

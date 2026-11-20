@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+
+	"github.com/mlange-42/ark/ecs"
 )
 
 // worldSnapshotData is the JSON-serializable content of a WorldSnapshot.
@@ -18,10 +20,12 @@ type worldSnapshotData struct {
 	// restore would count a second time.
 	CountedTokenCalls map[string][]string `json:"counted_token_calls,omitempty"`
 
-	Hosts        []HostSnapshot        `json:"hosts"`
-	Missions     []MissionSnapshot     `json:"missions"`
-	Work         []WorkSnapshot        `json:"work"`
-	Findings     []FindingSnapshot     `json:"findings"`
+	Hosts    []HostSnapshot    `json:"hosts"`
+	Missions []MissionSnapshot `json:"missions"`
+	Work     []WorkSnapshot    `json:"work"`
+	Findings []FindingSnapshot `json:"findings"`
+	// MergeSlots is the merge queue of the fix loop (gibson#1466).
+	MergeSlots   []MergeSlot           `json:"merge_slots,omitempty"`
 	Labels       []LabelSnapshot       `json:"labels"`
 	Domains      []DomainSnapshot      `json:"domains"`
 	Subdomains   []SubdomainSnapshot   `json:"subdomains"`
@@ -118,6 +122,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		Missions:           w.MissionSnapshot(),
 		Work:               w.WorkSnapshot(),
 		Findings:           w.FindingSnapshot(),
+		MergeSlots:         w.MergeSlots(),
 		Labels:             w.LabelSnapshot(),
 		Domains:            w.DomainSnapshot(),
 		Subdomains:         w.SubdomainSnapshot(),
@@ -302,7 +307,12 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Status:          f.Status,
 			VulnerabilityID: f.VulnerabilityID,
 		})
+		// FindingRaised carries only some of the fields. The rest come back
+		// from the snapshot, or a restore would lose the scan provenance, the
+		// priority and the state of the fix loop.
+		restoreFindingFields(w, f)
 	}
+	w.mergeSlots = append([]MergeSlot(nil), data.MergeSlots...)
 
 	// Replay labels.
 	for _, l := range data.Labels {
@@ -628,4 +638,23 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	w.nextCompletedSeq = data.NextCompletedSeq
 
 	return w, nil
+}
+
+// restoreFindingFields copies the fields of a snapshot of a Finding that
+// FindingRaised does not carry onto the Finding of the same ID.
+func restoreFindingFields(w *World, s FindingSnapshot) {
+	q := ecs.NewFilter1[Finding](w.ecs).Query()
+	for q.Next() {
+		f := q.Get()
+		if f.ID != s.ID {
+			continue
+		}
+		f.ScanScope, f.LastScan = s.ScanScope, s.LastScan
+		f.MergeRequest, f.MergeRequestState = s.MergeRequest, s.MergeRequestState
+		f.Priority, f.PriorityRule, f.PriorityReason = s.Priority, s.PriorityRule, s.PriorityReason
+		f.FixFacts = s.FixFacts
+		f.SubmittedBy, f.AgentName, f.EnrolledBy = s.SubmittedBy, s.AgentName, s.EnrolledBy
+		q.Close()
+		return
+	}
 }

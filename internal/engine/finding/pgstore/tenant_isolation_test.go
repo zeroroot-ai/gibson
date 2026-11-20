@@ -43,6 +43,7 @@ func TestPerTenantFindingIDOR_CrossTenantGetReturnsNotFound(t *testing.T) {
 	ctx := context.Background()
 	mission := types.NewID()
 	f := finding.NewEnhancedFinding(agent.NewFinding("secret finding", "d", agent.SeverityHigh), mission, "recon")
+	f.Check = finding.Check{Kind: finding.CheckScan}
 	require.NoError(t, s.Store(ctx, "tenant-a", f))
 
 	got, err := s.Get(ctx, "tenant-a", f.ID)

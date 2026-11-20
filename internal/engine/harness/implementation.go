@@ -1732,6 +1732,8 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 			MissionID:    h.missionCtx.ID.String(),
 			MissionRunID: h.missionCtx.MissionRunID,
 			AgentName:    h.missionCtx.CurrentAgent,
+			CheckRef:     h.missionCtx.ID.String(),
+			At:           time.Now().UTC(),
 		})
 	}
 

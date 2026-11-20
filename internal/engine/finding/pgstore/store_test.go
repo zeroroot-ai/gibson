@@ -6,6 +6,7 @@ package pgstore
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -92,6 +93,40 @@ func (d *fakeDB) Exec(_ context.Context, sql string, args ...any) (int64, error)
 	switch {
 	case contains(sql, "DELETE FROM finding_evidence"):
 		delete(d.evidence, args[0].(string))
+		return 1, nil
+	case contains(sql, "UPDATE findings") && contains(sql, "'{priority}'"):
+		id := args[0].(string)
+		row, ok := d.rows[id]
+		if !ok {
+			return 0, nil
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(row.document, &doc); err != nil {
+			return 0, err
+		}
+		if doc["priority"] == args[1].(string) && doc["priority_rule"] == args[2].(string) {
+			return 0, nil
+		}
+		doc["priority"], doc["priority_rule"] = args[1].(string), args[2].(string)
+		row.document, _ = json.Marshal(doc)
+		d.rows[id] = row
+		return 1, nil
+	case contains(sql, "UPDATE findings"):
+		id := args[0].(string)
+		row, ok := d.rows[id]
+		if !ok {
+			return 0, nil
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(row.document, &doc); err != nil {
+			return 0, err
+		}
+		if doc["status"] == args[1].(string) {
+			return 0, nil
+		}
+		doc["status"] = args[1].(string)
+		row.document, _ = json.Marshal(doc)
+		d.rows[id] = row
 		return 1, nil
 	case contains(sql, "INSERT INTO finding_evidence"):
 		id := args[0].(string)
@@ -217,6 +252,7 @@ func newTestStore(db *fakeDB) *Store { return &Store{conns: db} }
 
 func newFinding(missionID types.ID, title string, sev agent.FindingSeverity, created time.Time) finding.EnhancedFinding {
 	f := finding.NewEnhancedFinding(agent.NewFinding(title, "description of "+title, sev), missionID, "recon")
+	f.Check = finding.Check{Kind: finding.CheckScan}
 	f.CreatedAt = created
 	return f
 }
@@ -538,4 +574,85 @@ func TestStore_GetWithEvidenceOfAFindingWithNoEvidence(t *testing.T) {
 func TestStore_GetWithEvidenceNotFound(t *testing.T) {
 	_, err := newTestStore(newFakeDB()).GetWithEvidence(context.Background(), "acme", types.NewID())
 	require.ErrorIs(t, err, finding.ErrNotFound)
+}
+
+func TestSetStatus_UpdatesTheDocument(t *testing.T) {
+	db := newFakeDB()
+	s := &Store{conns: db}
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	require.NoError(t, s.Store(ctx, "acme", f))
+
+	changed, err := s.SetStatus(ctx, "acme", f.ID, finding.StatusFixed)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	got, err := s.Get(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	assert.Equal(t, finding.StatusFixed, got.Status)
+
+	changed, err = s.SetStatus(ctx, "acme", f.ID, finding.StatusFixed)
+	require.NoError(t, err)
+	assert.False(t, changed, "the same status is not a change")
+}
+
+func TestSetStatus_RefusesAStatusOutsideTheFour(t *testing.T) {
+	s := &Store{conns: newFakeDB()}
+	_, err := s.SetStatus(context.Background(), "acme", types.NewID(), finding.FindingStatus("resolved"))
+	require.Error(t, err)
+}
+
+// A finding with no check fails the write and leaves no row (gibson#1457).
+func TestStore_RefusesAFindingWithNoCheck(t *testing.T) {
+	db := newFakeDB()
+	s := &Store{conns: db}
+	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	f.Check = finding.Check{}
+
+	err := s.Store(context.Background(), "acme", f)
+	require.ErrorIs(t, err, finding.ErrNoCheck)
+	assert.Empty(t, db.rows)
+
+	f.Check = finding.Check{Kind: finding.CheckPredicate} // a predicate needs its type
+	require.ErrorIs(t, s.Store(context.Background(), "acme", f), finding.ErrNoCheck)
+}
+
+// A priority outside P1 to P4 fails the write (gibson#1522).
+func TestStore_RefusesAPriorityOutsideP1ToP4(t *testing.T) {
+	db := newFakeDB()
+	s := &Store{conns: db}
+	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	f.Priority = finding.Priority("P9")
+
+	require.ErrorIs(t, s.Store(context.Background(), "acme", f), finding.ErrInvalidPriority)
+	assert.Empty(t, db.rows)
+
+	f.Priority = finding.PriorityP2
+	require.NoError(t, s.Store(context.Background(), "acme", f))
+}
+
+func TestSetPriority_WritesPriorityAndRule(t *testing.T) {
+	db := newFakeDB()
+	s := &Store{conns: db}
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	require.NoError(t, s.Store(ctx, "acme", f))
+
+	changed, err := s.SetPriority(ctx, "acme", f.ID, finding.PriorityP1, "kev-exposed")
+	require.NoError(t, err)
+	assert.True(t, changed)
+	got, err := s.Get(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	assert.Equal(t, finding.PriorityP1, got.Priority)
+	assert.Equal(t, "kev-exposed", got.PriorityRule)
+
+	changed, err = s.SetPriority(ctx, "acme", f.ID, finding.PriorityP1, "kev-exposed")
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	_, err = s.SetPriority(ctx, "acme", f.ID, finding.Priority("P5"), "x")
+	require.ErrorIs(t, err, finding.ErrInvalidPriority)
 }

@@ -17,6 +17,7 @@ package brain
 
 import (
 	"sort"
+	"time"
 
 	"github.com/mlange-42/ark/ecs"
 
@@ -62,14 +63,20 @@ type Surprise struct {
 // World is a single tenant's in-memory ECS world (ADR-0101: one World per tenant,
 // never shared). Only the reducer mutates it.
 type World struct {
-	Tenant      string
-	ecs         *ecs.World
-	hosts       *ecs.Map1[Host]
-	surprises   *ecs.Map1[Surprise]
-	work        *ecs.Map1[WorkItem]
-	decisions   *ecs.Map1[DecisionRecord]
-	missions    *ecs.Map1[Mission]
-	findings    *ecs.Map1[Finding]
+	Tenant    string
+	ecs       *ecs.World
+	hosts     *ecs.Map1[Host]
+	surprises *ecs.Map1[Surprise]
+	work      *ecs.Map1[WorkItem]
+	decisions *ecs.Map1[DecisionRecord]
+	missions  *ecs.Map1[Mission]
+	findings  *ecs.Map1[Finding]
+	// mergeSlots is the merge queue of the fix loop (mergegate.go). Not
+	// ECS-backed: it is an ordered list, like agentSkillLoads.
+	mergeSlots []MergeSlot
+	// clock is the time that a System puts on the events it emits. Reduce never
+	// reads it. A test replaces it.
+	clock       func() time.Time
 	labels      *ecs.Map1[Label]
 	domains     *ecs.Map1[Domain]
 	subdomains  *ecs.Map1[Subdomain]
@@ -250,6 +257,7 @@ func NewWorld(tenant string) *World {
 	w := ecs.NewWorld()
 	return &World{
 		Tenant:             tenant,
+		clock:              time.Now,
 		ecs:                w,
 		hosts:              ecs.NewMap1[Host](w),
 		surprises:          ecs.NewMap1[Surprise](w),
@@ -282,6 +290,10 @@ func NewWorld(tenant string) *World {
 		missionRewinds:     make(map[string]MissionRewind),
 	}
 }
+
+// Now is the time that a System puts on the events it emits. A Reducer never
+// calls it: the time of a fact travels on its event, so a replay is the same.
+func (w *World) Now() time.Time { return w.clock().UTC() }
 
 // HostSnapshot is a stable, comparable view of a Host for assertions/inspection.
 type HostSnapshot struct {
@@ -514,6 +526,24 @@ func Reduce(w *World, ev Event) {
 		applyFindingStatusChanged(w, e)
 	case ScanReconciled:
 		applyScanReconciled(w, e)
+	case FindingPrioritized:
+		applyFindingPrioritized(w, e)
+	case DeployObserved:
+		applyDeployObserved(w, e)
+	case HealthObserved:
+		applyHealthObserved(w, e)
+	case HealthUnavailable:
+		applyHealthUnavailable(w, e)
+	case FixReverted:
+		applyFixReverted(w, e)
+	case CheckRerun:
+		applyCheckRerun(w, e)
+	case MergeRequestQueued:
+		applyMergeRequestQueued(w, e)
+	case MergeGranted:
+		applyMergeGranted(w, e)
+	case MergeRequestObserved:
+		applyMergeRequestObserved(w, e)
 	case VoIPlanRequested:
 		applyVoIPlanRequested(w, e)
 	case VoIPlanned:

@@ -3,7 +3,11 @@
 
 package brain
 
-import "github.com/mlange-42/ark/ecs"
+import (
+	"github.com/mlange-42/ark/ecs"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+)
 
 // rescan.go reconciles what a scan did NOT see (gibson#1686).
 //
@@ -86,11 +90,14 @@ func applyScanReconciled(w *World, e ScanReconciled) {
 // RescanReconciliationSystem moves the Findings a completed scan did not see.
 //
 // For each terminal, not-yet-reconciled scan mission it emits ScanReconciled,
-// and — only when the scan actually completed — one FindingStatusChanged per
-// Finding in its scope whose status is `fixed`:
+// and — only when the scan actually completed — one CheckRerun per Finding in
+// its scope whose status is `fixed`:
 //
-//	seen again by this scan  → open      (the fix did not hold)
-//	not seen by this scan    → verified  (the fix held)
+//	seen again by this scan  → a rerun that found the flaw
+//	not seen by this scan    → a rerun that found nothing
+//
+// The rerun alone sets no status. VerificationSystem turns it into `open` or
+// `verified`, and only for evidence that is newer than the deploy of the fix.
 //
 // Nothing else moves. An `open` Finding the scan did not see stays `open`: a
 // scan not seeing something it never fixed is not evidence, and silently
@@ -116,6 +123,7 @@ func RescanReconciliationSystem(w *World) []Event {
 	}
 
 	findings := w.FindingSnapshot()
+	now := w.Now() // the scan finished before this System ran, so the evidence is no older
 
 	// One ScanReconciled per scan, plus at most one status change per Finding
 	// in its scope.
@@ -133,12 +141,12 @@ func RescanReconciliationSystem(w *World) []Event {
 			if f.Status != FindingStatusFixed {
 				continue // only a fix is waiting on a rescan's verdict
 			}
-			status := FindingStatusVerified
-			if f.LastScan == m.RunID {
-				status = FindingStatusOpen // the scan saw it again
-			}
-			out = append(out, FindingStatusChanged{
-				ID: f.ID, Status: status, MissionID: m.ID,
+			// The scan is a rerun of the check. It does not set a status. The
+			// VerificationSystem does, once the deploy and the health signal
+			// are known (gibson#1464).
+			out = append(out, CheckRerun{
+				ID: f.ID, CheckKind: string(finding.CheckScan), Found: f.LastScan == m.RunID,
+				EvidenceAt: now, MissionID: m.ID,
 			})
 		}
 	}

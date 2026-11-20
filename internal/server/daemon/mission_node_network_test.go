@@ -135,7 +135,7 @@ func TestDispatchJob_AgentVerifierTaskCarriesTheNetworkScopeOfTheNode(t *testing
 		jobs.onSend = func(id string) { jobs.appendEvent(id, job.EventState, job.StateWaiting, "", 0) }
 		b := newBrainExecutor(nil, testObsLogger().Slog())
 		b.jobs = func() (job.Store, error) { return jobs, nil }
-		b.jobClosed = &jobGraphLink{submit: func(string, brain.Event) {}, findings: func(string) map[string]string { return nil }, logger: testObsLogger().Slog()}
+		b.jobClosed = &jobGraphLink{submit: func(string, brain.Event) {}, findings: func(string) map[string]findingRef { return nil }, logger: testObsLogger().Slog()}
 		h := &verifierHarness{agentOut: map[string]any{"pass": true, "score": 0.95, "report": "green"}}
 		bind := &missionBinding{ctx: context.Background(), tenant: "acme", harness: h}
 		if _, err := b.dispatchJob(bind, brain.DispatchRequest{

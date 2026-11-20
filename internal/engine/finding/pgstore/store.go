@@ -215,6 +215,12 @@ func newEvidenceRows(items []*typespb.Evidence) ([]evidenceRow, error) {
 // The document of the finding does not hold the evidence. The evidence is in
 // the finding_evidence table only.
 func (s *Store) Store(ctx context.Context, tenantID string, f finding.EnhancedFinding) error {
+	if err := f.Check.Validate(); err != nil {
+		return fmt.Errorf("finding store: finding %s: %w", f.ID, err)
+	}
+	if err := f.Priority.Validate(); err != nil {
+		return fmt.Errorf("finding store: finding %s: %w", f.ID, err)
+	}
 	evidence, err := newEvidenceRows(f.Evidence)
 	if err != nil {
 		return err
@@ -249,6 +255,73 @@ func (s *Store) Store(ctx context.Context, tenantID string, f finding.EnhancedFi
 		return fmt.Errorf("finding store: store finding %s: %w", row.id, err)
 	}
 	return nil
+}
+
+// setStatusSQL writes the status into the document of the finding. The
+// WHERE clause skips a row that already holds the status, so a repeated write
+// changes nothing.
+const setStatusSQL = `
+UPDATE findings
+SET document = jsonb_set(document, '{status}', to_jsonb($2::text)), updated_at = now()
+WHERE id = $1 AND document->>'status' IS DISTINCT FROM $2::text`
+
+// SetStatus writes one of the four statuses into the document of the finding.
+// It reports whether the row changed. A finding that the table does not hold,
+// or that already holds the status, is not an error and gives false. A status
+// outside the four fails before any write.
+func (s *Store) SetStatus(
+	ctx context.Context, tenantID string, id types.ID, status finding.FindingStatus,
+) (bool, error) {
+	if err := id.Validate(); err != nil {
+		return false, fmt.Errorf("finding store: finding ID: %w", err)
+	}
+	if !status.IsValid() {
+		return false, fmt.Errorf("finding store: %q is not a finding status", status)
+	}
+	c, err := s.conns.For(ctx, tenantID)
+	if err != nil {
+		return false, fmt.Errorf("finding store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	n, err := c.SQL().Exec(ctx, setStatusSQL, id.String(), string(status))
+	if err != nil {
+		return false, fmt.Errorf("finding store: set status of finding %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
+// setPrioritySQL writes the priority and its rule into the document of the
+// finding. A row that already holds both is left alone.
+const setPrioritySQL = `
+UPDATE findings
+SET document = jsonb_set(jsonb_set(document, '{priority}', to_jsonb($2::text)),
+	'{priority_rule}', to_jsonb($3::text)),
+	updated_at = now()
+WHERE id = $1 AND (document->>'priority' IS DISTINCT FROM $2::text
+	OR coalesce(document->>'priority_rule', '') IS DISTINCT FROM $3::text)`
+
+// SetPriority writes the priority and the rule that gave it into the document
+// of the finding. It reports whether the row changed. A priority outside P1 to
+// P4, and the empty priority, fail before any write.
+func (s *Store) SetPriority(
+	ctx context.Context, tenantID string, id types.ID, priority finding.Priority, rule string,
+) (bool, error) {
+	if err := id.Validate(); err != nil {
+		return false, fmt.Errorf("finding store: finding ID: %w", err)
+	}
+	if !priority.IsValid() {
+		return false, fmt.Errorf("finding store: %w: %q", finding.ErrInvalidPriority, string(priority))
+	}
+	c, err := s.conns.For(ctx, tenantID)
+	if err != nil {
+		return false, fmt.Errorf("finding store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	n, err := c.SQL().Exec(ctx, setPrioritySQL, id.String(), string(priority), rule)
+	if err != nil {
+		return false, fmt.Errorf("finding store: set priority of finding %s: %w", id, err)
+	}
+	return n > 0, nil
 }
 
 // Get returns the finding with the ID, or finding.ErrNotFound. The result has

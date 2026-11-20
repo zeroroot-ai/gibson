@@ -363,6 +363,7 @@ MERGE (f:Finding {brain_id: $id})
   SET f.title = $title, f.description = $description, f.severity = $severity,
       f.scope = $scope, f.address = $address, f.status = $status,
       f.vulnerability_id = $vulnerability_id,
+      f.priority = $priority, f.priority_rule = $priority_rule, f.priority_reason = $priority_reason,
       f.submitted_by = $submitted_by, f.agent_name = $agent_name, f.enrolled_by = $enrolled_by,
       f.updated_at = timestamp()
 WITH f
@@ -929,6 +930,10 @@ func findingUpsertParams(f brain.FindingSnapshot) map[string]any {
 		"address":          f.Address,
 		"status":           status,
 		"vulnerability_id": f.VulnerabilityID,
+		// The typed priority (gibson#1522). Empty means no triage pass has decided.
+		"priority":        f.Priority,
+		"priority_rule":   f.PriorityRule,
+		"priority_reason": f.PriorityReason,
 		// The verified submitter (gibson#208): who raised the finding, under
 		// which registered name, and who enrolled that agent.
 		"submitted_by": f.SubmittedBy,

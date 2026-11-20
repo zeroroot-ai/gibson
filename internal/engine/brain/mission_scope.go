@@ -216,6 +216,24 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		return e.MissionID != "" && e.MissionID == missionID
 	case FindingStatusChanged:
 		return e.MissionID != "" && e.MissionID == missionID
+	case DeployObserved:
+		return e.MissionID != "" && e.MissionID == missionID
+	case HealthObserved:
+		return e.MissionID != "" && e.MissionID == missionID
+	case HealthUnavailable:
+		return e.MissionID != "" && e.MissionID == missionID
+	case FixReverted:
+		return e.MissionID != "" && e.MissionID == missionID
+	case CheckRerun:
+		return e.MissionID != "" && e.MissionID == missionID
+	case MergeRequestQueued:
+		return e.MissionID != "" && e.MissionID == missionID
+	case MergeGranted:
+		return e.MissionID != "" && e.MissionID == missionID
+	case FindingPrioritized:
+		return e.MissionID != "" && e.MissionID == missionID
+	case MergeRequestObserved:
+		return e.MissionID != "" && e.MissionID == missionID
 	case ScanReconciled:
 		// The reconciliation verdict belongs to the scan that reached it.
 		return e.MissionID == missionID

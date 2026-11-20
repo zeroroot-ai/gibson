@@ -40,6 +40,8 @@ type worldServer struct {
 	// signers sign the page tokens of the list RPCs, one for each RPC
 	// (world_service_paging.go).
 	signers map[string]*pagetoken.Signer
+	// blue holds the stores of the blue team reads (world_service_blueteam.go).
+	blue blueTeamSources
 }
 
 // NewWorldServer constructs the WorldService backed by the per-tenant brain registry.

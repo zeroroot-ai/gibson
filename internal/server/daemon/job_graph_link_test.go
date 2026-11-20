@@ -15,14 +15,23 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 )
 
+// testNow is the time that the tests pass to fixedByEvents.
+var testNow = time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+
 const testMRURL = "https://forge.example/g/r/-/merge_requests/7"
 
 func closedJob(inputs []string, ds ...job.Deliverable) jobnode.ClosedJob {
 	return jobnode.ClosedJob{TenantID: "acme", MissionRunID: "run-1", JobID: "job-1", Inputs: inputs, Deliverables: ds}
 }
 
-func worldWith(findings map[string]string) func(string) map[string]string {
-	return func(string) map[string]string { return findings }
+// worldWith builds a World view in which every finding is open and has the
+// scope that the map gives.
+func worldWith(findings map[string]string) func(string) map[string]findingRef {
+	refs := make(map[string]findingRef, len(findings))
+	for id, scope := range findings {
+		refs[id] = findingRef{scope: scope, status: brain.FindingStatusOpen}
+	}
+	return func(string) map[string]findingRef { return refs }
 }
 
 var mrDeliverable = job.Deliverable{Kind: "merge_request", Ref: "!7", URL: testMRURL}
@@ -31,6 +40,9 @@ func entities(t *testing.T, evs []brain.Event) []brain.EntityObserved {
 	t.Helper()
 	out := make([]brain.EntityObserved, 0, len(evs))
 	for _, ev := range evs {
+		if _, ok := ev.(brain.FindingStatusChanged); ok {
+			continue // the status changes have their own test
+		}
 		e, ok := ev.(brain.EntityObserved)
 		if !ok {
 			t.Fatalf("event %T is not an EntityObserved", ev)
@@ -42,7 +54,7 @@ func entities(t *testing.T, evs []brain.Event) []brain.EntityObserved {
 
 func TestFixedByEvents_MergeRequestLinksEachFinding(t *testing.T) {
 	evs, skipped := fixedByEvents(closedJob([]string{"f-1", "f-2"}, mrDeliverable),
-		worldWith(map[string]string{"f-1": "scope-a", "f-2": "scope-a"}))
+		worldWith(map[string]string{"f-1": "scope-a", "f-2": "scope-a"}), testNow)
 	got := entities(t, evs)
 	if skipped != 0 || len(got) != 3 {
 		t.Fatalf("events = %d skipped = %d, want 3 and 0", len(got), skipped)
@@ -70,7 +82,7 @@ func TestFixedByEvents_MergeRequestLinksEachFinding(t *testing.T) {
 // taken from anywhere else writes a second node.
 func TestFixedByEvents_FindingKeyIsTheWorldID(t *testing.T) {
 	evs, _ := fixedByEvents(closedJob([]string{"world-id-9"}, mrDeliverable),
-		worldWith(map[string]string{"world-id-9": "s"}))
+		worldWith(map[string]string{"world-id-9": "s"}), testNow)
 	got := entities(t, evs)
 	if len(got) != 2 || got[1].Key != "world-id-9" {
 		t.Fatalf("events = %+v", got)
@@ -81,7 +93,7 @@ func TestFixedByEvents_FindingKeyIsTheWorldID(t *testing.T) {
 // creates a missing edge target, so it would invent a phantom :Finding.
 func TestFixedByEvents_PhantomFindingGuard_NonFindingInputEmitsNoFinding(t *testing.T) {
 	evs, skipped := fixedByEvents(closedJob([]string{"f-1", "plan-1", "plan-1"}, mrDeliverable),
-		worldWith(map[string]string{"f-1": "s"}))
+		worldWith(map[string]string{"f-1": "s"}), testNow)
 	got := entities(t, evs)
 	if skipped != 1 {
 		t.Errorf("skipped = %d, want 1 (the duplicate is not a second skip)", skipped)
@@ -97,7 +109,7 @@ func TestFixedByEvents_PhantomFindingGuard_NonFindingInputEmitsNoFinding(t *test
 }
 
 func TestFixedByEvents_NoFindingInputEmitsNothing(t *testing.T) {
-	evs, skipped := fixedByEvents(closedJob([]string{"plan-1"}, mrDeliverable), worldWith(nil))
+	evs, skipped := fixedByEvents(closedJob([]string{"plan-1"}, mrDeliverable), worldWith(nil), testNow)
 	if len(evs) != 0 || skipped != 1 {
 		t.Errorf("events = %v skipped = %d: a merge request nobody is fixed by must not be written", evs, skipped)
 	}
@@ -107,7 +119,7 @@ func TestFixedByEvents_OtherDeliverablesEmitNothing(t *testing.T) {
 	for _, d := range []job.Deliverable{
 		{Kind: "push_branch", Ref: "fix"}, {Kind: "none"}, {Kind: "merge_request"},
 	} {
-		evs, _ := fixedByEvents(closedJob([]string{"f-1"}, d), worldWith(map[string]string{"f-1": "s"}))
+		evs, _ := fixedByEvents(closedJob([]string{"f-1"}, d), worldWith(map[string]string{"f-1": "s"}), testNow)
 		if len(evs) != 0 {
 			t.Errorf("%+v emitted %v", d, evs)
 		}
@@ -123,7 +135,7 @@ func TestJobGraphLink_SubmitsToTheClosingTenant(t *testing.T) {
 		logger:   testObsLogger().Slog(),
 	}
 	l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
-	if n != 2 || tenants[0] != "acme" || tenants[1] != "acme" {
+	if n != 3 || tenants[0] != "acme" || tenants[2] != "acme" {
 		t.Errorf("submits = %d to %v", n, tenants)
 	}
 }
@@ -140,9 +152,9 @@ func TestJobGraphLink_LogsTheInputsItLeftOut(t *testing.T) {
 	}
 	// Two inputs, one finding and one plan.
 	l.JobClosed(context.Background(), closedJob([]string{"f-1", "plan-1"}, mrDeliverable))
-	// The merge request plus the one finding, and nothing for the plan.
-	if submitted != 2 {
-		t.Errorf("submitted %d events, want 2 (the merge request and one finding)", submitted)
+	// The merge request, the one finding and its status change, and nothing for the plan.
+	if submitted != 3 {
+		t.Errorf("submitted %d events, want 3 (the merge request, one finding and its status change)", submitted)
 	}
 }
 
@@ -274,5 +286,29 @@ func TestOpenFindingsResolver_DoesNotCrossTenants(t *testing.T) {
 
 	if _, err := openFindingsResolver(reg).OpenFindings(ctx, "other", "run-1"); err == nil {
 		t.Fatal("another tenant's World does not know this run, so it must refuse")
+	}
+}
+
+// A merge request deliverable moves each open finding to fixing and records the
+// merge request on it (gibson#1505). A finding in another status does not move.
+func TestFixedByEvents_OpenFindingBecomesFixing(t *testing.T) {
+	known := func(string) map[string]findingRef {
+		return map[string]findingRef{
+			"f-open":  {scope: "s", status: brain.FindingStatusOpen},
+			"f-fixed": {scope: "s", status: brain.FindingStatusFixed},
+		}
+	}
+	evs, _ := fixedByEvents(closedJob([]string{"f-open", "f-fixed"}, mrDeliverable), known, testNow)
+	var changes []brain.FindingStatusChanged
+	for _, ev := range evs {
+		if c, ok := ev.(brain.FindingStatusChanged); ok {
+			changes = append(changes, c)
+		}
+	}
+	want := brain.FindingStatusChanged{
+		ID: "f-open", Status: brain.FindingStatusFixing, MissionID: "run-1", MergeRequest: testMRURL, At: testNow,
+	}
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("status changes = %+v, want only %+v", changes, want)
 	}
 }

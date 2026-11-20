@@ -6,6 +6,7 @@ option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gi
 
 import "gibson/auth/v1/options.proto";
 import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
 
 // WorldService is the daemon-mediated read path into the ECS brain (epic
 // ecs-brain, gibson#752). The daemon resolves the caller's tenant server-side
@@ -201,6 +202,76 @@ service WorldService {
   rpc SettleBetByHITL(SettleBetByHITLRequest) returns (SettleBetByHITLResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "writer",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetExposure returns the exposure window of one finding: the time from its
+  // first evidence to its `verified` event, or to now for a finding that is not
+  // verified. It splits the window into agent time and wait time (gibson#1467).
+  rpc GetExposure(GetExposureRequest) returns (GetExposureResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetExposureTrend returns the median exposure window of the findings that
+  // were verified in a period, next to the median of the period before it
+  // (gibson#1467).
+  rpc GetExposureTrend(GetExposureTrendRequest) returns (GetExposureTrendResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetRevertRate returns the share of merged fixes that an agent reverted in a
+  // period, next to the share of the period before it (gibson#1468).
+  rpc GetRevertRate(GetRevertRateRequest) returns (GetRevertRateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListOpenFindings returns the findings that are not `verified`. The order is
+  // the priority (P1 to P4), then the belief of the target. A finding with no
+  // priority ranks by its severity (gibson#1498).
+  rpc ListOpenFindings(ListOpenFindingsRequest) returns (ListOpenFindingsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListActionsByGrant returns the connector calls of the agents in a time
+  // range, grouped by the grant that allowed each one and by the person who gave
+  // the grant. A refused call shows the grant that it lacked (gibson#1499).
+  rpc ListActionsByGrant(ListActionsByGrantRequest) returns (ListActionsByGrantResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListWaitingOnPerson returns each item that waits on a person, with the wait
+  // time so far (gibson#1500).
+  rpc ListWaitingOnPerson(ListWaitingOnPersonRequest) returns (ListWaitingOnPersonResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
       allowed_identities: 3  // USER | SERVICE
@@ -706,4 +777,139 @@ message GetReputationResponse {
   // has_record is false when nothing is recorded for this key yet: "no
   // data", never a bare zero value.
   bool has_record = 4;
+}
+
+// ---------------------------------------------------------------------------
+// The blue team console (gibson#1467, #1468, #1498, #1499, #1500)
+// ---------------------------------------------------------------------------
+
+message GetExposureRequest {
+  string finding_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 256 }];
+}
+message GetExposureResponse {
+  // found is false when the Timeline holds no event for the finding.
+  bool found = 1;
+  string finding_id = 2;
+  google.protobuf.Timestamp start = 3;
+  // end is the time of the `verified` event, or the time of the read.
+  google.protobuf.Timestamp end = 4;
+  bool verified = 5;
+  int64 total_seconds = 6;
+  // wait_seconds is the time in which the fix waits on a person or on a tool of
+  // the buyer. agent_seconds is the rest.
+  int64 wait_seconds = 7;
+  int64 agent_seconds = 8;
+}
+
+message GetExposureTrendRequest {
+  // period_seconds is the length of one period. Zero means 7 days.
+  int64 period_seconds = 1 [(buf.validate.field).int64 = { gte: 0, lte: 31536000 }];
+}
+message GetExposureTrendResponse {
+  int64 period_seconds = 1;
+  // count is the number of findings verified in the period.
+  int32 count = 2;
+  int64 median_seconds = 3;
+  int64 median_agent_seconds = 4;
+  int64 median_wait_seconds = 5;
+  int32 previous_count = 6;
+  int64 previous_median_seconds = 7;
+}
+
+message GetRevertRateRequest {
+  // period_seconds is the length of one period. Zero means 7 days.
+  int64 period_seconds = 1 [(buf.validate.field).int64 = { gte: 0, lte: 31536000 }];
+}
+message RevertPeriod {
+  int32 merged = 1;
+  int32 reverted = 2;
+  // rate is reverted divided by merged. It is 0 when nothing merged.
+  double rate = 3;
+}
+message GetRevertRateResponse {
+  int64 period_seconds = 1;
+  RevertPeriod current = 2;
+  RevertPeriod previous = 3;
+}
+
+// FindingPlace is the Application or the Host that a finding touches.
+message FindingPlace {
+  string label = 1;
+  string key = 2;
+}
+
+// OpenFindingView is a finding that is not `verified`.
+message OpenFindingView {
+  string id = 1;
+  string title = 2;
+  string scope_id = 3;
+  string address = 4;
+  string severity = 5;
+  // status is open, fixing or fixed.
+  string status = 6;
+  // priority is P1 to P4. It is empty until the triage agent sets one.
+  string priority = 7;
+  string priority_rule = 8;
+  // confidence is the confidence of the check that raised the finding, from 0
+  // to 1. It is 0 when the store holds no record of the finding.
+  double confidence = 9;
+  // merge_request is the key of the merge request of the fix. It is empty for
+  // a finding with no fix. merge_request_url is the same value when it is a URL.
+  string merge_request = 10;
+  string merge_request_url = 11;
+  repeated FindingPlace places = 12;
+  // target_belief is the belief of the target, from 0 to 1.
+  double target_belief = 13;
+  string check_kind = 14;
+}
+
+message ListOpenFindingsRequest {
+  // page_size is the most findings one page returns. Zero means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+message ListOpenFindingsResponse {
+  repeated OpenFindingView findings = 1;
+  string next_page_token = 2;
+}
+
+message ListActionsByGrantRequest {
+  // from and to are the time range. A zero from means 24 hours before to. A
+  // zero to means now.
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+}
+message ActionGroup {
+  // grant_object and grant_relation name the grant that allowed the action. For
+  // a refused action they name the grant that it lacked.
+  string grant_object = 1;
+  string grant_relation = 2;
+  // grantor is the person who gave the grant. It is empty when the audit record
+  // holds no grant for the action, and for a refused action.
+  string grantor = 3;
+  bool refused = 4;
+  int32 count = 5;
+  google.protobuf.Timestamp first = 6;
+  google.protobuf.Timestamp last = 7;
+  repeated string agents = 8;
+  repeated string tools = 9;
+}
+message ListActionsByGrantResponse {
+  repeated ActionGroup groups = 1;
+  // truncated is true when the range holds more audit records than one read
+  // returns.
+  bool truncated = 2;
+}
+
+message ListWaitingOnPersonRequest {}
+message WaitingItem {
+  // kind is destructive_action, merge_refused, next_scan or no_health_signal.
+  string kind = 1;
+  // id is the id of the finding, or of the hypothesis for a destructive action.
+  string id = 2;
+  google.protobuf.Timestamp since = 3;
+  int64 waited_seconds = 4;
+}
+message ListWaitingOnPersonResponse {
+  repeated WaitingItem items = 1;
 }

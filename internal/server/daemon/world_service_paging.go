@@ -27,7 +27,7 @@ import (
 // so a token of one RPC never opens another.
 var worldPagedRPCs = []string{
 	"GetTimeline", "ListFindings", "ListHosts", "ListLabels",
-	"ListLlmCalls", "ListMissions", "ListOpenBets", "ListReviewQueue",
+	"ListLlmCalls", "ListMissions", "ListOpenBets", "ListOpenFindings", "ListReviewQueue",
 }
 
 // worldSigners derives the signer of each paged RPC from the page token keys.

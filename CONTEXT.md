@@ -181,6 +181,15 @@ Repository, a `Service` on a `Host`) with one status: `open`, `fixing`, `fixed`,
 `verified`. Status lives here and only here. Exists today; this sharpens it.
 _Avoid_: alert, result, detection, vulnerability
 
+**Place of a finding**:
+The one thing a fix touches: the `Application` that a Finding reaches, or the `Host` that it
+affects when no Application reaches it. A Finding names its place by a place label and a
+place key. One read function answers it (`FindingPlaces` in `internal/platform/component`).
+The health signal, the one-at-a-time rule and the exposure window all read it from there.
+The issues of the Fix loop epic say "service" for this. The glossary name is the place.
+_Avoid_: service (a `Service` is a listening process on a `Port`), target (a registered
+`Target` is the thing a Mission assesses), scope, asset
+
 **Merge request**:
 One proposed change to a Repository, opened by an agent or a person, that fixes one or
 more Findings. Its merge is an event in the Timeline.
