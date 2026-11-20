@@ -17,9 +17,6 @@ import (
 	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
 
-// TestUpsertTenantQuota_SendsConcurrentMissions guards tenant-operator#287:
-// the gRPC client previously dropped ConcurrentMissions, sending Go's zero
-// value (0 == unlimited) for every tenant regardless of plan.
 // captureZitadelOrgServer records the SetTenantZitadelOrgRequest it received.
 type captureZitadelOrgServer struct {
 	operatorv1.UnimplementedDaemonOperatorServiceServer

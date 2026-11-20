@@ -34,10 +34,6 @@ func operatorCalls() []operatorCall {
 		{"SetTenantZitadelOrg", "set-tenant-zitadel-org", func(c *EntitlementsGRPCClient) error {
 			return c.SetTenantZitadelOrg(ctx, "acme", "org-1")
 		}},
-		{"ListFeatureTuples", "list-feature-tuples", func(c *EntitlementsGRPCClient) error {
-			_, err := c.ListFeatureTuples(ctx, "acme")
-			return err
-		}},
 		{"WriteAccessTuples", "write-tuples", func(c *EntitlementsGRPCClient) error {
 			return c.WriteAccessTuples(ctx, []string{"user:a#viewer@doc:1"}, nil, "test")
 		}},
@@ -123,16 +119,6 @@ type operatorFixture struct {
 	err error
 }
 
-func (f *operatorFixture) ListFeatureTuples(
-	ctx context.Context, _ *operatorv1.ListFeatureTuplesRequest,
-) (*operatorv1.ListFeatureTuplesResponse, error) {
-	rel := []string{"f1", "f2"}
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		rel = append(rel, md.Get("authorization")...)
-	}
-	return &operatorv1.ListFeatureTuplesResponse{Relations: rel}, f.err
-}
-
 func (f *operatorFixture) WriteAccessTuples(
 	_ context.Context, req *operatorv1.WriteAccessTuplesRequest,
 ) (*operatorv1.WriteAccessTuplesResponse, error) {
@@ -194,12 +180,16 @@ func (f *operatorFixture) GetTenantOutsideAgents(
 }
 
 func (f *operatorFixture) GetOutsideAgentCredential(
-	_ context.Context, req *operatorv1.GetOutsideAgentCredentialRequest,
+	ctx context.Context, req *operatorv1.GetOutsideAgentCredentialRequest,
 ) (*operatorv1.GetOutsideAgentCredentialResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	data := map[string][]byte{"Authorization": []byte(req.GetName())}
+	// The fixture returns the bearer token it got, so a test can read it.
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		data["Bearer"] = []byte(strings.Join(md.Get("authorization"), ","))
+	}
 	return &operatorv1.GetOutsideAgentCredentialResponse{Secret: &operatorv1.SecretData{Data: data}}, nil
 }
 
@@ -207,10 +197,6 @@ func TestEntitlementsGRPC_ReturnsWhatTheDaemonSends(t *testing.T) {
 	ctx := context.Background()
 	c := bufconnClient(t, &operatorFixture{})
 
-	rel, err := c.ListFeatureTuples(ctx, "acme")
-	if err != nil || !reflect.DeepEqual(rel, []string{"f1", "f2"}) {
-		t.Errorf("ListFeatureTuples = %v, %v", rel, err)
-	}
 	if err := c.WriteAccessTuples(ctx, []string{"user:a#viewer@doc:1", "malformed"}, nil, "why"); err != nil {
 		t.Errorf("WriteAccessTuples: %v", err)
 	}
@@ -325,12 +311,12 @@ func (staticTokens) FetchToken(_ context.Context, audience string) (string, erro
 func TestEntitlementsGRPC_SendsTheBearerTokenOfTheAudience(t *testing.T) {
 	c := bufconnClient(t, &operatorFixture{})
 	c.tokens = staticTokens{}
-	rel, err := c.ListFeatureTuples(context.Background(), "acme")
+	data, err := c.OutsideAgentCredential(context.Background(), "acme", "scout")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"f1", "f2", "Bearer token-for-gibson-daemon"}; !reflect.DeepEqual(rel, want) {
-		t.Fatalf("relations = %v, want %v", rel, want)
+	if got, want := string(data["Bearer"]), "Bearer token-for-gibson-daemon"; got != want {
+		t.Fatalf("bearer = %q, want %q", got, want)
 	}
 }
 

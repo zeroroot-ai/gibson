@@ -54,7 +54,7 @@ reaches the stores of that tenant only. [`docs/data-plane.md`](docs/data-plane.m
 describes the mechanism.
 
 Some data is shared by design. The platform Postgres database holds platform
-records, for example the quota of each tenant. OpenFGA holds the access tuples of all
+records, for example the status of each tenant. OpenFGA holds the access tuples of all
 tenants in one store.
 
 Two RPC groups read or change more than one tenant by design. Each one needs a
@@ -62,7 +62,7 @@ role on the object `system_tenant:_system`, and no tenant role gives it.
 
 | RPC group | Role | Who holds the role | What it does |
 |---|---|---|---|
-| `gibson.daemon.operator.v1.DaemonOperatorService` | `platform_operator` | Platform service accounts, for example the tenant operator | Tenant provisioning, tenant status, quotas, access tuples, connector grants, audit events |
+| `gibson.daemon.operator.v1.DaemonOperatorService` | `platform_operator` | Platform service accounts, for example the tenant operator | Tenant provisioning, tenant status, access tuples, connector grants, audit events |
 | `gibson.tenant.v1.AdminTenantService` | `platform_owner` | The one Platform owner of the install, a person | Approve or reject a registration. Provision, update or delete a tenant. Read the billing state of a tenant |
 
 This list comes from the authz registry. The full list is each row with the

@@ -83,7 +83,7 @@ type operatorMethodDecision struct {
 //     bug and its inverse ("just allow the operator everything").
 //
 //  2. A RECONCILIATION test pins the operator-allowed set to exactly the
-//     operator's actual call set (the 9 RPCs it dials). It fails on BOTH a
+//     operator's actual call set (the RPCs it dials). It fails on BOTH a
 //     missing grant (the recurring bug) and a surplus grant (an over-grant),
 //     enforcing least privilege.
 //
@@ -95,14 +95,10 @@ type operatorMethodDecision struct {
 // alongside the service), which are exactly what the bypass matches against the
 // inbound info.FullMethod.
 var operatorMethodPolicy = map[string]operatorMethodDecision{
-	// --- operator-allowed: the 9 RPCs the tenant-operator actually calls ---
+	// --- operator-allowed: the RPCs the tenant-operator actually calls ---
 	daemonoperatorv1.DaemonOperatorService_WriteAccessTuples_FullMethodName: {
 		allowed: true,
 		reason:  "operator writes the founding-owner + role FGA tuples during provisioning",
-	},
-	daemonoperatorv1.DaemonOperatorService_ListFeatureTuples_FullMethodName: {
-		allowed: true,
-		reason:  "operator reads feature tuples while reconciling tenant entitlements",
 	},
 	daemonoperatorv1.DaemonOperatorService_SeedCatalogTenantEnabled_FullMethodName: {
 		allowed: true,
@@ -174,10 +170,6 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 	},
 
 	// --- operator-denied: least privilege, no caller wired ---
-	daemonoperatorv1.DaemonOperatorService_UpsertTenantQuota_FullMethodName: {
-		allowed: false,
-		reason:  "no current caller; re-add when wired",
-	},
 	daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName: {
 		allowed: false,
 		reason:  "the connector-operator's finalizer RPC (connectorOperatorMethodPolicy); the tenant-operator never calls it",

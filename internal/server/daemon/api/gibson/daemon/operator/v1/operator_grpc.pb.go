@@ -21,8 +21,6 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	DaemonOperatorService_WriteAccessTuples_FullMethodName             = "/gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples"
-	DaemonOperatorService_UpsertTenantQuota_FullMethodName             = "/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota"
-	DaemonOperatorService_ListFeatureTuples_FullMethodName             = "/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples"
 	DaemonOperatorService_SeedCatalogTenantEnabled_FullMethodName      = "/gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled"
 	DaemonOperatorService_EmitAuditEvent_FullMethodName                = "/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent"
 	DaemonOperatorService_SetTenantZitadelOrg_FullMethodName           = "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg"
@@ -66,11 +64,6 @@ type DaemonOperatorServiceClient interface {
 	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
 	// an authenticated caller.
 	WriteAccessTuples(ctx context.Context, in *WriteAccessTuplesRequest, opts ...grpc.CallOption) (*WriteAccessTuplesResponse, error)
-	// UpsertTenantQuota writes the tenant's runtime quota record to Postgres.
-	// Called by the operator's reconcile loop after resolving the plan.
-	UpsertTenantQuota(ctx context.Context, in *UpsertTenantQuotaRequest, opts ...grpc.CallOption) (*UpsertTenantQuotaResponse, error)
-	// ListFeatureTuples enumerates the tenant feature tuples currently set.
-	ListFeatureTuples(ctx context.Context, in *ListFeatureTuplesRequest, opts ...grpc.CallOption) (*ListFeatureTuplesResponse, error)
 	// SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
 	SeedCatalogTenantEnabled(ctx context.Context, in *SeedCatalogTenantEnabledRequest, opts ...grpc.CallOption) (*SeedCatalogTenantEnabledResponse, error)
 	// EmitAuditEvent writes the audit record of a change that an operator
@@ -260,26 +253,6 @@ func (c *daemonOperatorServiceClient) WriteAccessTuples(ctx context.Context, in 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WriteAccessTuplesResponse)
 	err := c.cc.Invoke(ctx, DaemonOperatorService_WriteAccessTuples_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonOperatorServiceClient) UpsertTenantQuota(ctx context.Context, in *UpsertTenantQuotaRequest, opts ...grpc.CallOption) (*UpsertTenantQuotaResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpsertTenantQuotaResponse)
-	err := c.cc.Invoke(ctx, DaemonOperatorService_UpsertTenantQuota_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonOperatorServiceClient) ListFeatureTuples(ctx context.Context, in *ListFeatureTuplesRequest, opts ...grpc.CallOption) (*ListFeatureTuplesResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListFeatureTuplesResponse)
-	err := c.cc.Invoke(ctx, DaemonOperatorService_ListFeatureTuples_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -543,11 +516,6 @@ type DaemonOperatorServiceServer interface {
 	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
 	// an authenticated caller.
 	WriteAccessTuples(context.Context, *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error)
-	// UpsertTenantQuota writes the tenant's runtime quota record to Postgres.
-	// Called by the operator's reconcile loop after resolving the plan.
-	UpsertTenantQuota(context.Context, *UpsertTenantQuotaRequest) (*UpsertTenantQuotaResponse, error)
-	// ListFeatureTuples enumerates the tenant feature tuples currently set.
-	ListFeatureTuples(context.Context, *ListFeatureTuplesRequest) (*ListFeatureTuplesResponse, error)
 	// SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
 	SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error)
 	// EmitAuditEvent writes the audit record of a change that an operator
@@ -736,12 +704,6 @@ type UnimplementedDaemonOperatorServiceServer struct{}
 func (UnimplementedDaemonOperatorServiceServer) WriteAccessTuples(context.Context, *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method WriteAccessTuples not implemented")
 }
-func (UnimplementedDaemonOperatorServiceServer) UpsertTenantQuota(context.Context, *UpsertTenantQuotaRequest) (*UpsertTenantQuotaResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpsertTenantQuota not implemented")
-}
-func (UnimplementedDaemonOperatorServiceServer) ListFeatureTuples(context.Context, *ListFeatureTuplesRequest) (*ListFeatureTuplesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListFeatureTuples not implemented")
-}
 func (UnimplementedDaemonOperatorServiceServer) SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SeedCatalogTenantEnabled not implemented")
 }
@@ -849,42 +811,6 @@ func _DaemonOperatorService_WriteAccessTuples_Handler(srv interface{}, ctx conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonOperatorServiceServer).WriteAccessTuples(ctx, req.(*WriteAccessTuplesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonOperatorService_UpsertTenantQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpsertTenantQuotaRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonOperatorServiceServer).UpsertTenantQuota(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonOperatorService_UpsertTenantQuota_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonOperatorServiceServer).UpsertTenantQuota(ctx, req.(*UpsertTenantQuotaRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonOperatorService_ListFeatureTuples_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListFeatureTuplesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonOperatorServiceServer).ListFeatureTuples(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonOperatorService_ListFeatureTuples_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonOperatorServiceServer).ListFeatureTuples(ctx, req.(*ListFeatureTuplesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1331,14 +1257,6 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "WriteAccessTuples",
 			Handler:    _DaemonOperatorService_WriteAccessTuples_Handler,
-		},
-		{
-			MethodName: "UpsertTenantQuota",
-			Handler:    _DaemonOperatorService_UpsertTenantQuota_Handler,
-		},
-		{
-			MethodName: "ListFeatureTuples",
-			Handler:    _DaemonOperatorService_ListFeatureTuples_Handler,
 		},
 		{
 			MethodName: "SeedCatalogTenantEnabled",

@@ -53,9 +53,8 @@ const (
 	CapabilityQdrantAdmin ClientCapability = "qdrant-admin"
 
 	// CapabilityDaemonGRPC: Connect-RPC client to the gibson daemon's
-	// PlatformOperatorService. Used by the entitlements steps to write
-	// tenant_quotas / FGA tuples / catalog seed via daemon gRPC, with
-	// no dashboard hop.
+	// DaemonOperatorService. Used by the entitlements steps to write
+	// FGA tuples and the catalog seed via daemon gRPC, with no dashboard hop.
 	CapabilityDaemonGRPC ClientCapability = "daemon-grpc"
 
 	// CapabilitySMTP: SMTP mailer used by TenantMember invitation flow.

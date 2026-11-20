@@ -153,20 +153,6 @@ func (c *EntitlementsGRPCClient) SetTenantZitadelOrg(ctx context.Context, tenant
 	return translateGRPCError("set-tenant-zitadel-org", err)
 }
 
-func (c *EntitlementsGRPCClient) ListFeatureTuples(ctx context.Context, tenantID string) ([]string, error) {
-	authedCtx, err := c.authCtx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.client.ListFeatureTuples(authedCtx, &operatorv1.ListFeatureTuplesRequest{
-		TenantId: tenantID,
-	})
-	if err := translateGRPCError("list-feature-tuples", err); err != nil {
-		return nil, err
-	}
-	return resp.GetRelations(), nil
-}
-
 func (c *EntitlementsGRPCClient) WriteAccessTuples(ctx context.Context, add, del []string, reason string) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {

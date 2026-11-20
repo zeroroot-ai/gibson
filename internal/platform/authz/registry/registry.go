@@ -839,15 +839,6 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples": {
-		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
-		Relation:          "platform_operator",
-		ObjectType:        "system_tenant",
-		ObjectDeriver:     "system_tenant",
-		AllowedIdentities: IdentityUser | IdentityService,
-		Unauthenticated:   false,
-		Self:              false,
-	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps": {
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
@@ -930,15 +921,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact": {
-		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
-		Relation:          "platform_operator",
-		ObjectType:        "system_tenant",
-		ObjectDeriver:     "system_tenant",
-		AllowedIdentities: IdentityUser | IdentityService,
-		Unauthenticated:   false,
-		Self:              false,
-	},
-	"/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota": {
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
