@@ -66,7 +66,13 @@ func (d *daemonImpl) registerConnectorAuth(ctx context.Context, srv *grpc.Server
 	// reads it) and the pre-auth OAuth callback (reads it). One store, keyed by
 	// state, TTL-bounded (ADR-0114).
 	connectorPending := connectorauth.NewPendingStore(connectorauth.DefaultPendingTTL, time.Now)
+	// A tenant OAuth client (gibson#1538) is in the tenant connector table.
+	var tenantConnectors admin.TenantConnectors
+	if d.platformDB != nil {
+		tenantConnectors = tenantconnector.NewStore(d.platformDB)
+	}
 	connAuthSrv, caErr := admin.NewConnectorAuthAdminServer(admin.ConnectorAuthAdminConfig{
+		Connectors:      tenantConnectors,
 		Secrets:         d.secretsService,
 		Prover:          connectorRefresher,
 		Status:          d.connectorTokenStatus,
