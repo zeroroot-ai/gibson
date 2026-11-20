@@ -890,13 +890,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// transient error — the enforcer itself downgrades to no team
 		// check when the resolver returns nil.
 		// Spec: llm-user-attribution-governance (Requirement 3).
-		var teamResolver budget.TeamMembershipResolver
-		if d.authorizer != nil {
-			teamResolver = newBudgetTeamResolver(d.authorizer, d.logger.Slog())
-		}
-		// The budget enforcer applies only the budgets that a tenant admin
-		// sets. A tenant with no budget has no ceiling.
-		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil)
+		budgetEnforcer := newDaemonBudgetEnforcer(d.stateClient.Client(), d.authorizer, d.logger.Slog())
 		daemonSvc.WithBudgetEnforcer(budgetEnforcer)
 		d.budgetEnforcer = budgetEnforcer
 		d.logger.Info(ctx, "budget enforcer wired into DaemonServer (spec: llm-user-attribution-governance)")

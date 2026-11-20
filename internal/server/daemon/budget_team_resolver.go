@@ -8,9 +8,18 @@ import (
 	"log/slog"
 	"strings"
 
+	goredis "github.com/redis/go-redis/v9"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 )
+
+// newDaemonBudgetEnforcer builds the budget enforcer of the daemon. It reads
+// the team budgets of a caller through FGA. The only ceilings are the budgets
+// that a tenant admin sets, so a tenant with no budget has no ceiling.
+func newDaemonBudgetEnforcer(rdb goredis.UniversalClient, authorizer authz.Authorizer, logger *slog.Logger) budget.Enforcer {
+	return budget.NewEnforcer(rdb, logger, newBudgetTeamResolver(authorizer, logger), nil)
+}
 
 // newBudgetTeamResolver builds the budget enforcer's team-membership lookup on
 // top of FGA. `team#member@user` tuples are the source of truth.
