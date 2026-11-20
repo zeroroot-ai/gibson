@@ -13,29 +13,38 @@ import (
 // The approval mark of a connector tool (gibson#1474, ADR-0180).
 //
 // A response action is a tool call through a connector, for example "isolate a
-// host" or "disable an account". The manifest of the connector says which tools
-// need the approval of a person before the call. The daemon reads the mark at
-// tool dispatch. The agent never selects it, and neither does the MCP server
-// of the connector: the party that the gate controls must not choose the gate.
+// host" or "disable an account". A response action waits for a person only
+// when it destroys data (owner decision of 2026-11-20, ADR-0180). Revoke a
+// session, disable an account and isolate a host carry no approval mark: the
+// grant is enough. The manifest of the connector marks each tool that destroys
+// data. The daemon reads the mark at tool dispatch. The agent never selects
+// it, and neither does the MCP server of the connector: the party that the
+// gate controls must not choose the gate.
 //
 // The manifest holds one entry for each tool that it names:
 //
 //	responseActions: true
 //	tools:
-//	  isolate_host:
+//	  delete_device:
 //	    approval: required
+//	    blastRadius: one device and its data
+//	  isolate_host:
+//	    approval: none
 //	    undo: release_host
-//	    blastRadius: one host
 //	  release_host:
 //	    approval: none
 //	  revoke_session:
+//	    approval: none
+//	  disable_account:
 //	    approval: none
 //
 // The rule for a tool that the manifest does not name depends on
 // responseActions:
 //
 //   - responseActions is true: the tool needs approval. A new tool of the MCP
-//     server stays behind the gate until a manifest names it (fail closed).
+//     server waits for a person until a manifest names it (fail closed). This
+//     is the deliberate default: the platform cannot know if a new tool
+//     destroys data.
 //   - responseActions is false or absent: the tool needs only the grant. These
 //     are the connectors that read. They state no tool, and the platform has
 //     no list of the tools of a vendor to check against.

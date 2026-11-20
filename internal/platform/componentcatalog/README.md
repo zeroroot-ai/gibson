@@ -13,31 +13,35 @@ A new or changed connector thus needs a `gibson` release (owner decision of 2026
 
 ## Approval for a response action
 
-A response action is a tool call through a connector, for example "isolate a host" or "disable an account". A person must approve some of these calls before they run (gibson#1474, ADR-0180, ADR-0132). The manifest marks them by tool name.
+A response action is a tool call through a connector, for example "isolate a host" or "disable an account". A response action waits for a person only when it destroys data (owner decision of 2026-11-20, ADR-0180, ADR-0132, gibson#1474). Revoke a session, disable an account and isolate a host carry no approval mark: the grant is enough. The manifest marks each tool that destroys data by its name.
 
 ```yaml
 spec:
   responseActions: true
   tools:
-    isolate_host:
+    delete_device:
       approval: required
+      blastRadius: one device and its data
+    isolate_host:
+      approval: none
       undo: release_host
-      blastRadius: one host
     release_host:
       approval: none
     revoke_session:
       approval: none
+    disable_account:
+      approval: none
 ```
 
 - `approval: required` sends each call of the tool to the approval queue. `approval: none` needs only the grant (`can_execute`).
-- The mark is a per-catalog decision. It is not derived from "has an undo". The owner decision is that a session revoke needs no approval, so the manifest states `approval: none` for it.
+- The mark is a per-catalog decision. It is not derived from "has an undo". The owner decision is that a tool that destroys data needs approval, and that revoke a session, disable an account and isolate a host do not. The manifest states `approval: none` for each of those three acts.
 - `undo` names the tool of the same connector that undoes this tool. The approver sees `reversible` only when the manifest names one. With no `undo`, the approver sees `irreversible`.
 - `blastRadius` is a short text for the approver. The daemon adds the arguments of the call to it.
 - Only the manifest sets the mark. An agent cannot set it, and the annotations of the MCP server do not change it.
 
 **The rule for a tool that the manifest does not name.**
 
-- A connector with `responseActions: true` marks it. A new tool of the MCP server stays behind the approval until a manifest names it. The loader needs at least one `required` tool for such a connector.
+- A connector with `responseActions: true` marks it. A new tool of the MCP server waits for a person until a manifest names it. This fail-closed rule is the deliberate default: the platform cannot know if a new tool of the vendor destroys data. The loader needs at least one `required` tool for such a connector.
 - A connector without `responseActions` needs only the grant for it. This is the choice for the connectors that only read. The platform has no list of the tools of a vendor, and a mark on every tool would make each read wait for a person. The cost is real: a vendor can add a write tool to a read-only server. Two measures limit it. The grant still applies. A reviewer who adds a connector that can write must set `responseActions: true`. A tool of a read-only connector that is dangerous can also be named with `approval: required`, and `approval: none` is then not allowed there.
 
 **What happens at tool dispatch.** `metatool.Handler.Call` is the one path for an `mcp:` id. The harness (`invoke_tool`) and the `CallTool` RPC both use it. The order is: mission policy, grant, approval, dispatch.
