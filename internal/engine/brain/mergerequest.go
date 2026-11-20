@@ -3,7 +3,11 @@
 
 package brain
 
-import "github.com/mlange-42/ark/ecs"
+import (
+	"time"
+
+	"github.com/mlange-42/ark/ecs"
+)
 
 // mergerequest.go moves a Finding from `fixing` to `fixed` or back to `open`
 // (gibson#1505).
@@ -21,6 +25,11 @@ import "github.com/mlange-42/ark/ecs"
 const (
 	MergeRequestMerged = "merged"
 	MergeRequestClosed = "closed"
+	// MergeRequestRefused is a merge that the Git host refused, for example
+	// because of a branch protection rule. The merge request stays open and the
+	// fix waits on a person. It moves no Finding. The exposure window counts the
+	// time until the next report as wait time.
+	MergeRequestRefused = "refused"
 )
 
 // MergeRequestObserved records the state of one merge request as the Git host
@@ -30,6 +39,9 @@ type MergeRequestObserved struct {
 	Key       string
 	State     string
 	MissionID string
+	// At is the time of the report. The exposure window and the revert rate
+	// read it.
+	At time.Time
 }
 
 // Kind identifies the merge_request.observed brain event.
@@ -40,7 +52,10 @@ func (MergeRequestObserved) Kind() string { return "merge_request.observed" }
 // changes nothing.
 func applyMergeRequestObserved(w *World, e MergeRequestObserved) {
 	if e.Key == "" || (e.State != MergeRequestMerged && e.State != MergeRequestClosed) {
-		return
+		return // a refusal has no state to store. The Timeline holds it.
+	}
+	if e.State == MergeRequestClosed {
+		releaseMergeSlot(w, e.Key)
 	}
 	q := ecs.NewFilter1[Finding](w.ecs).Query()
 	for q.Next() {

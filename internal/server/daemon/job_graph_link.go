@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
@@ -55,7 +56,7 @@ func newJobGraphLink(reg *brain.Registry, logger *slog.Logger) *jobGraphLink {
 
 // JobClosed submits the events for one accomplished close.
 func (l *jobGraphLink) JobClosed(_ context.Context, c jobnode.ClosedJob) {
-	events, skipped := fixedByEvents(c, l.findings)
+	events, skipped := fixedByEvents(c, l.findings, time.Now().UTC())
 	if skipped > 0 {
 		l.logger.Info("job inputs that are not findings were left out of the FIXED_BY link",
 			"job_id", c.JobID, "skipped", skipped)
@@ -72,7 +73,7 @@ func (l *jobGraphLink) JobClosed(_ context.Context, c jobnode.ClosedJob) {
 // findings in the tenant World and counts the rest as skipped. The projector
 // creates a missing edge target, so an input that names a plan and carries the
 // Finding label would become a phantom :Finding node. Nothing is guessed.
-func fixedByEvents(c jobnode.ClosedJob, findings func(tenant string) map[string]findingRef) (events []brain.Event, skippedInputs int) {
+func fixedByEvents(c jobnode.ClosedJob, findings func(tenant string) map[string]findingRef, now time.Time) (events []brain.Event, skippedInputs int) {
 	var mrKey, mrURL, mrRef string
 	for _, d := range c.Deliverables {
 		if d.Kind != mergeRequestDeliverable {
@@ -110,7 +111,7 @@ func fixedByEvents(c jobnode.ClosedJob, findings func(tenant string) map[string]
 		})
 		if ref.status == brain.FindingStatusOpen {
 			fixing = append(fixing, brain.FindingStatusChanged{
-				ID: id, Status: brain.FindingStatusFixing, MissionID: c.MissionRunID, MergeRequest: mrKey,
+				ID: id, Status: brain.FindingStatusFixing, MissionID: c.MissionRunID, MergeRequest: mrKey, At: now,
 			})
 		}
 	}

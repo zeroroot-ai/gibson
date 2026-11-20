@@ -67,9 +67,6 @@ func NewFindingRecordProjector(
 
 // project runs one pass over every tenant World.
 func (p *FindingRecordProjector) project(ctx context.Context) {
-	if p.reg == nil || p.setter == nil {
-		return
-	}
 	for _, tenant := range p.reg.Tenants() {
 		for _, f := range p.reg.For(tenant).Findings() {
 			p.projectOne(ctx, tenant, f)

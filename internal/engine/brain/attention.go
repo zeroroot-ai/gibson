@@ -6,6 +6,7 @@ package brain
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/mlange-42/ark/ecs"
 
@@ -88,12 +89,48 @@ type Finding struct {
 	PriorityRule   string
 	PriorityReason string
 
+	// FixFacts are the facts of the fix loop (gibson#1457, #1460, #1464).
+	FixFacts
+
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208). See FindingRaised.
 	SubmittedBy string
 	AgentName   string
 	EnrolledBy  string
 }
+
+// FixFacts are what the fix loop records about one Finding. Each time comes
+// from an event, never from the clock during Reduce, so a replay gives the same
+// World.
+type FixFacts struct {
+	// CheckKind and CheckRef name the check that raised the Finding (ADR-0178):
+	// predicate, scan or tool. Empty means that the producer recorded none. An
+	// empty kind counts as the weakest check, so any check can verify it.
+	CheckKind string
+	CheckRef  string
+	// FirstSeenAt is when the check first saw the flaw. RaisedAt is when Gibson
+	// read it. For a Finding from a tool of the buyer the two differ.
+	FirstSeenAt time.Time
+	RaisedAt    time.Time
+	// DeployedAt and DeploymentKey record the deploy of the merged fix. They are
+	// zero for a fix that is not deployed.
+	DeployedAt    time.Time
+	DeploymentKey string
+	// Health is what the health signal said after the deploy: empty, held or
+	// failed.
+	Health string
+	// RerunKind, RerunFound and RerunAt are the latest rerun of a check on the
+	// Finding. RerunAt is the time of the evidence.
+	RerunKind  string
+	RerunFound bool
+	RerunAt    time.Time
+}
+
+// Health values of FixFacts.
+const (
+	HealthHeld   = "held"
+	HealthFailed = "failed"
+)
 
 // Finding statuses (gibson#1656). FindingStatusOpen is the default for a raised
 // Finding; the others are set by FindingStatusChanged.
@@ -147,6 +184,15 @@ type FindingRaised struct {
 	SubmittedBy string
 	AgentName   string
 	EnrolledBy  string
+
+	// CheckKind and CheckRef name the check that raised the Finding (ADR-0178).
+	CheckKind string
+	CheckRef  string
+	// At is when Gibson read the evidence. FirstSeenAt is when the check first
+	// saw the flaw, when that is earlier. A producer sets both. Reduce never
+	// reads the clock.
+	At          time.Time
+	FirstSeenAt time.Time
 }
 
 func (FindingRaised) Kind() string { return "finding.raised" }
@@ -165,6 +211,9 @@ func applyFindingRaised(w *World, e FindingRaised) {
 		// only the rescan provenance moves. That is what makes "this scan saw
 		// it again" expressible at all — without it, the second scan of an
 		// unchanged Application would be indistinguishable from no scan.
+		if f.RaisedAt.IsZero() {
+			f.RaisedAt = e.At
+		}
 		if scan != "" {
 			f.LastScan = scan
 			if f.ScanScope == "" {
@@ -182,8 +231,21 @@ func applyFindingRaised(w *World, e FindingRaised) {
 		ID: e.ID, Title: e.Title, Description: e.Description, ScopeID: e.ScopeID,
 		Address: e.Address, Severity: e.Severity, Status: status, VulnerabilityID: e.VulnerabilityID,
 		ScanScope: scope, LastScan: scan,
+		FixFacts: FixFacts{
+			CheckKind: e.CheckKind, CheckRef: e.CheckRef,
+			RaisedAt: e.At, FirstSeenAt: firstSeen(e),
+		},
 		SubmittedBy: e.SubmittedBy, AgentName: e.AgentName, EnrolledBy: e.EnrolledBy,
 	})
+}
+
+// firstSeen is the time a check first saw the flaw. A producer that has no
+// earlier time gives none, and the time of the read stands.
+func firstSeen(e FindingRaised) time.Time {
+	if !e.FirstSeenAt.IsZero() {
+		return e.FirstSeenAt
+	}
+	return e.At
 }
 
 // scanProvenance resolves the rescan scope and the scan id for a Finding raised
@@ -214,6 +276,8 @@ type FindingStatusChanged struct {
 	// (gibson#1505). When it is set, the Finding records it and forgets the
 	// state of any earlier merge request.
 	MergeRequest string
+	// At is the time of the change. A reader of the Timeline uses it.
+	At time.Time
 }
 
 // Kind identifies the finding.status_changed brain event.
@@ -234,6 +298,9 @@ func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 			if e.MergeRequest != "" {
 				f.MergeRequest = e.MergeRequest
 				f.MergeRequestState = ""
+			}
+			if e.Status == FindingStatusOpen {
+				resetFix(f)
 			}
 			q.Close()
 			return
@@ -262,6 +329,8 @@ type FindingSnapshot struct {
 	Priority       string
 	PriorityRule   string
 	PriorityReason string
+	// FixFacts: see Finding.
+	FixFacts
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208). See FindingRaised.
 	SubmittedBy string
@@ -303,6 +372,9 @@ func SurpriseFindingSystem(w *World) []Event {
 			Address:     h.Address,
 			Severity:    "medium",
 			MissionID:   h.MissionID, // inherit the source host's mission attribution
+			CheckKind:   string(finding.CheckScan),
+			CheckRef:    h.MissionID,
+			At:          w.Now(),
 		})
 	}
 	return out
@@ -320,9 +392,21 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 			ScanScope: f.ScanScope, LastScan: f.LastScan,
 			MergeRequest: f.MergeRequest, MergeRequestState: f.MergeRequestState,
 			Priority: f.Priority, PriorityRule: f.PriorityRule, PriorityReason: f.PriorityReason,
+			FixFacts:    f.FixFacts,
 			SubmittedBy: f.SubmittedBy, AgentName: f.AgentName, EnrolledBy: f.EnrolledBy,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// resetFix forgets the fix of a Finding that is open again. The next fix starts
+// from nothing: a new merge request, a new deploy and a new health signal.
+func resetFix(f *Finding) {
+	f.MergeRequest = ""
+	f.MergeRequestState = ""
+	f.DeployedAt = time.Time{}
+	f.DeploymentKey = ""
+	f.Health = ""
+	f.RerunKind, f.RerunFound, f.RerunAt = "", false, time.Time{}
 }

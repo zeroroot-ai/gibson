@@ -9,9 +9,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 )
@@ -495,6 +497,11 @@ func findingRaisedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult, add
 			MissionRunID:    execCtx.missionRun(),
 			Status:          brain.FindingStatusOpen,
 			VulnerabilityID: firstVulnerabilityID(f.GetCveIds()),
+			// A tool that reports a discovery is a scan of the target. The mission
+			// run is the scan (ADR-0178).
+			CheckKind: string(finding.CheckScan),
+			CheckRef:  execCtx.MissionID,
+			At:        time.Now().UTC(),
 		})
 	}
 	return events, skipped
