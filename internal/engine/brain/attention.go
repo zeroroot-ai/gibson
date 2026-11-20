@@ -137,6 +137,9 @@ type FixFacts struct {
 	// are zero until a failed health signal asks for a revert.
 	RevertRequestedAt  time.Time
 	RevertMergeRequest string
+	// FixClaim names the fix job that works on the Finding now: the mission
+	// run and the node of the job. Empty means that no job holds it.
+	FixClaim string
 }
 
 // Health values of FixFacts.
@@ -426,4 +429,5 @@ func resetFix(f *Finding) {
 	f.RerunKind, f.RerunFound, f.RerunAt = "", false, time.Time{}
 	f.FixMissionID = ""
 	f.RevertRequestedAt, f.RevertMergeRequest = time.Time{}, ""
+	f.FixClaim = ""
 }

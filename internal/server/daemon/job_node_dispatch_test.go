@@ -103,6 +103,7 @@ func TestDispatchJob_RunsTheLoopOverTheStore(t *testing.T) {
 	b := newBrainExecutor(nil, testObsLogger().Slog())
 	b.jobs = func() (job.Store, error) { return jobs, nil }
 	b.jobClosed = &jobGraphLink{submit: func(string, brain.Event) {}, findings: func(string) map[string]findingRef { return nil }, logger: testObsLogger().Slog()}
+	b.jobClaims = testFixClaims(t)
 	h := &verifierHarness{toolOut: `{"pass": true, "score": 0.95, "report": "green"}`}
 	bind := &missionBinding{ctx: context.Background(), tenant: "acme", harness: h}
 

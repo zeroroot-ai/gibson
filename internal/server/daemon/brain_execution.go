@@ -107,6 +107,8 @@ type brainExecutor struct {
 	// the run's target (gibson#497). A mission definition cannot name finding
 	// ids, because the run is what produces them.
 	jobFindings jobnode.FindingsResolver
+	// jobClaims holds the findings of a fix job while it runs (gibson#1454).
+	jobClaims jobnode.FixClaims
 	// models sends the model call of the Decider to the model gateway
 	// (gibson#1392). The gateway trace is the one source of the llm_call.observed
 	// and token.used events of that call, so the executor emits neither.

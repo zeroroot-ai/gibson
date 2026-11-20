@@ -169,10 +169,79 @@ func openFindingsResolver(reg *brain.Registry) jobnode.FindingsResolver {
 
 		var ids []string
 		for _, f := range w.Findings() {
-			if f.ScopeID == scope && f.Status == brain.FindingStatusOpen {
+			// A Finding that another fix job holds is not open work.
+			if f.ScopeID == scope && f.Status == brain.FindingStatusOpen && f.FixClaim == "" {
 				ids = append(ids, f.ID)
 			}
 		}
 		return ids, nil
 	})
+}
+
+// fixClaims implements jobnode.FixClaims over the tenant World. The World
+// decides: the first claim of a Finding wins, and a replay gives the same
+// holder (brain.FixClaimed).
+type fixClaims struct {
+	engine func(tenant string) *brain.Engine
+	now    func() time.Time
+}
+
+var _ jobnode.FixClaims = fixClaims{}
+
+func newFixClaims(reg *brain.Registry) fixClaims {
+	return fixClaims{
+		engine: func(tenant string) *brain.Engine { return reg.For(tenant) },
+		now:    func() time.Time { return time.Now().UTC() },
+	}
+}
+
+// findingInputs returns the inputs that are Findings of the World. An input
+// that names a plan or a log is no Finding and takes no claim.
+func findingInputs(eng *brain.Engine, inputs []string) []string {
+	known := map[string]bool{}
+	for _, f := range eng.Findings() {
+		known[f.ID] = true
+	}
+	var out []string
+	for _, id := range inputs {
+		if known[id] {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// Claim implements jobnode.FixClaims.
+func (c fixClaims) Claim(ctx context.Context, tenantID, claim, missionRunID string, inputs []string) error {
+	eng := c.engine(tenantID)
+	ids := findingInputs(eng, inputs)
+	for _, id := range ids {
+		ev := brain.FixClaimed{ID: id, Claim: claim, MissionID: missionRunID, At: c.now()}
+		if err := eng.SubmitAndWait(ctx, ev); err != nil {
+			c.Release(ctx, tenantID, claim, missionRunID, ids)
+			return fmt.Errorf("claim finding %s: %w", id, err)
+		}
+	}
+	var held []string
+	eng.ReadWorld(func(w *brain.World) {
+		for _, id := range ids {
+			if holder := w.FixClaimOf(id); holder != claim {
+				held = append(held, id+" (held by "+holder+")")
+			}
+		}
+	})
+	if len(held) > 0 {
+		c.Release(ctx, tenantID, claim, missionRunID, ids)
+		return fmt.Errorf("findings %v: %w", held, jobnode.ErrFindingClaimed)
+	}
+	return nil
+}
+
+// Release implements jobnode.FixClaims. The World ends a claim only for its
+// holder, so a release of a claim that another job holds changes nothing.
+func (c fixClaims) Release(_ context.Context, tenantID, claim, missionRunID string, inputs []string) {
+	eng := c.engine(tenantID)
+	for _, id := range findingInputs(eng, inputs) {
+		eng.Submit(brain.FixClaimReleased{ID: id, Claim: claim, MissionID: missionRunID, At: c.now()})
+	}
 }

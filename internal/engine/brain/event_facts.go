@@ -64,6 +64,14 @@ func EventSubject(ev Event) (findingID, mergeRequest string) {
 		return e.ID, ""
 	case *FindingPrioritized:
 		return e.ID, ""
+	case FixClaimed:
+		return e.ID, ""
+	case *FixClaimed:
+		return e.ID, ""
+	case FixClaimReleased:
+		return e.ID, ""
+	case *FixClaimReleased:
+		return e.ID, ""
 	case HealthObserved:
 		return "", e.MergeRequest
 	case *HealthObserved:

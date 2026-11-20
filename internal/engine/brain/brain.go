@@ -536,6 +536,10 @@ func Reduce(w *World, ev Event) {
 		applyHealthUnavailable(w, e)
 	case RevertRequested:
 		applyRevertRequested(w, e)
+	case FixClaimed:
+		applyFixClaimed(w, e)
+	case FixClaimReleased:
+		applyFixClaimReleased(w, e)
 	case FixReverted:
 		applyFixReverted(w, e)
 	case CheckRerun:

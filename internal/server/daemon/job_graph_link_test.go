@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -311,4 +312,48 @@ func TestFixedByEvents_OpenFindingBecomesFixing(t *testing.T) {
 	if len(changes) != 1 || changes[0] != want {
 		t.Fatalf("status changes = %+v, want only %+v", changes, want)
 	}
+}
+
+// One fix job at a time works on one Finding (gibson#1454). A second job for
+// a claimed Finding is refused. After the first job releases its claim, the
+// next job can claim it. An input that is no Finding takes no claim.
+func TestFixClaims_OneJobAtATimeForOneFinding(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	if err := eng.SubmitAndWait(ctx, brain.FindingRaised{ID: "f-1", At: testNow}); err != nil {
+		t.Fatal(err)
+	}
+	c := newFixClaims(reg)
+	if err := c.Claim(ctx, "acme", "run-1/fix", "run-1", []string{"f-1", "the build log"}); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if err := c.Claim(ctx, "acme", "run-2/fix", "run-2", []string{"f-1"}); !errors.Is(err, jobnode.ErrFindingClaimed) {
+		t.Fatalf("second claim: err = %v, want ErrFindingClaimed", err)
+	}
+	holder := func() string {
+		var h string
+		eng.ReadWorld(func(w *brain.World) { h = w.FixClaimOf("f-1") })
+		return h
+	}
+	c.Release(ctx, "acme", "run-1/fix", "run-1", []string{"f-1"})
+	deadline := time.Now().Add(2 * time.Second)
+	for holder() != "" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if h := holder(); h != "" {
+		t.Fatalf("holder after the release = %q, want none", h)
+	}
+	if err := c.Claim(ctx, "acme", "run-2/fix", "run-2", []string{"f-1"}); err != nil {
+		t.Fatalf("claim after the release: %v", err)
+	}
+}
+
+// testFixClaims is a claim store over a fresh World of its own.
+func testFixClaims(t *testing.T) fixClaims {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return newFixClaims(brain.NewRegistry(ctx, braintest.StoreFactory()))
 }

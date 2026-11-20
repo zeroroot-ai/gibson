@@ -6,6 +6,7 @@ package jobnode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -152,6 +153,56 @@ func input(ops JobOps, v Verifier, s *jobpb.JobSpec) Input {
 		Opener: job.Principal{Kind: job.PrincipalService, ID: "mission:run-1"},
 		Ops:    ops, Verifier: v, PollInterval: time.Millisecond,
 		Closed: &recordingObserver{},
+		Claims: &recordingClaims{},
+	}
+}
+
+// recordingClaims records the claims of a job. refuse makes each claim fail.
+type recordingClaims struct {
+	claimed  []string
+	released []string
+	refuse   bool
+}
+
+func (c *recordingClaims) Claim(_ context.Context, _, claim, _ string, _ []string) error {
+	if c.refuse {
+		return fmt.Errorf("finding f-1: %w", ErrFindingClaimed)
+	}
+	c.claimed = append(c.claimed, claim)
+	return nil
+}
+
+func (c *recordingClaims) Release(_ context.Context, _, claim, _ string, _ []string) {
+	c.released = append(c.released, claim)
+}
+
+// A job for a finding that another job holds opens no job (gibson#1454).
+func TestRun_AClaimedFindingOpensNoJob(t *testing.T) {
+	ops := &scriptedJobs{onTurn: func(int) []*job.Event { return waiting() }}
+	in := input(ops, &scriptedVerifier{}, spec(1, ""))
+	in.Claims = &recordingClaims{refuse: true}
+	if _, err := Run(context.Background(), in); !errors.Is(err, ErrFindingClaimed) {
+		t.Fatalf("err = %v, want ErrFindingClaimed", err)
+	}
+	if len(ops.opened) != 0 {
+		t.Fatalf("opened %d jobs, want none", len(ops.opened))
+	}
+}
+
+// A job that ends with no merge request releases its claim.
+func TestRun_AJobWithNoMergeRequestReleasesItsClaim(t *testing.T) {
+	ops := &scriptedJobs{onTurn: func(int) []*job.Event { return waiting() }}
+	in := input(ops, &scriptedVerifier{}, spec(1, ""))
+	claims := &recordingClaims{}
+	in.Claims = claims
+	if _, err := Run(context.Background(), in); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(claims.claimed) != 1 || claims.claimed[0] != "run-1/fix" {
+		t.Fatalf("claims = %v", claims.claimed)
+	}
+	if len(claims.released) != 1 || claims.released[0] != "run-1/fix" {
+		t.Fatalf("releases = %v, want the claim of the job", claims.released)
 	}
 }
 
