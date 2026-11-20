@@ -10,7 +10,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
-	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 )
 
 // The owner of a self-serve tenant is born inside the tenant org
@@ -20,7 +19,6 @@ import (
 // is removed when the owner cannot be made.
 
 func TestSignup_MakesTheTenantOrgBeforeTheOwner(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "")
 	h := newSignupHarness(t)
 	h.idp.createOrgFn = func(_ context.Context, name string) (string, error) {
 		if len(h.idp.createHumanReqs) != 0 {
@@ -51,7 +49,6 @@ func TestSignup_MakesTheTenantOrgBeforeTheOwner(t *testing.T) {
 }
 
 func TestSignup_TakenOrgNameRefusesTheWorkspaceNameAndMakesNoOwner(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "")
 	h := newSignupHarness(t)
 	h.idp.createOrgFn = func(_ context.Context, _ string) (string, error) {
 		return "", idp.ErrAlreadyExists
@@ -68,7 +65,6 @@ func TestSignup_TakenOrgNameRefusesTheWorkspaceNameAndMakesNoOwner(t *testing.T)
 }
 
 func TestSignup_RemovesTheOrgWhenTheOwnerCannotBeMade(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "")
 	h := newSignupHarness(t)
 	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 		return idp.CreateHumanUserResult{}, errors.New("boom")
@@ -125,7 +121,6 @@ func TestRegister_RemovesTheOrgWhenTheOwnerCannotBeMade(t *testing.T) {
 }
 
 func TestSignup_RemovesTheOwnerAndTheOrgWhenTheQueueRefuses(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "")
 	h := newSignupHarness(t)
 	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 		return idp.CreateHumanUserResult{UserID: "user-owner"}, nil
@@ -158,7 +153,6 @@ func TestAdminRejectRegistration_RemovesTheWorkspaceOrg(t *testing.T) {
 }
 
 func TestSignup_OrgCreateFailuresMapToCodes(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "")
 	for _, tc := range []struct {
 		name string
 		err  error
@@ -183,7 +177,6 @@ func TestSignup_OrgCreateFailuresMapToCodes(t *testing.T) {
 }
 
 func TestSignup_AFailedOrgCleanupStillFailsTheSignup(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "")
 	h := newSignupHarness(t)
 	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 		return idp.CreateHumanUserResult{}, errors.New("boom")

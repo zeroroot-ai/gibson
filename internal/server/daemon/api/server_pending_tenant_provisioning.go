@@ -29,9 +29,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
-	"github.com/zeroroot-ai/gibson/internal/platform/plans"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
-	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 )
 
@@ -174,11 +172,6 @@ func workspaceNameTaken(msg string) error {
 // external signup step is in status 'waiting_step' or 'step_failed', so the
 // operator does not see it until ConnectionPointService.CompleteSignupStep
 // reports the step done (ADR-0060, D54).
-//
-// When the deployment enforces entitlements (GIBSON_ENTITLEMENTS_REQUIRED=true)
-// a pending row whose tier does not resolve to a canonical plan is withheld:
-// an unrecognised tier cannot be priced, so it fails closed. Withheld rows stay
-// in the queue and are logged.
 func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *daemonoperatorv1.ListPendingTenantProvisioningRequest) (*daemonoperatorv1.ListPendingTenantProvisioningResponse, error) {
 	db := s.entitlementsDB()
 	if db == nil {
@@ -202,9 +195,7 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *d
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
 	// The page is the rows after the last row of the previous page, oldest
-	// first. One more row than the page tells whether a next page exists. A
-	// row that the plan withholds still counts as a row of its page, so the
-	// next token moves past it.
+	// first. One more row than the page tells whether a next page exists.
 	size := pagetoken.Size(req.GetPageSize())
 	const cols = `
 		SELECT tenant_id, owner_user_id, owner_email, workspace_name, tier, audit_record_id, created_at
@@ -223,8 +214,6 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *d
 		return nil, status.Errorf(codes.Internal, "query pending_tenant_provisioning: %v", err)
 	}
 	defer func() { _ = rows.Close() }()
-
-	enforce := entitlements.Required()
 
 	out := &daemonoperatorv1.ListPendingTenantProvisioningResponse{}
 	scanned := 0
@@ -245,36 +234,12 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *d
 		}
 		scanned++
 		lastKey = [2]string{timeKey(created), p.GetTenantId()}
-		if reason, withhold := withholdPendingTenant(p.GetTier(), enforce); withhold {
-			s.logger.Warn("pending tenant withheld from provisioning drain",
-				"tenant_id", p.GetTenantId(),
-				"tier", p.GetTier(),
-				"reason", reason,
-			)
-			continue
-		}
 		out.Pending = append(out.Pending, &p)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, status.Errorf(codes.Internal, "iterate pending rows: %v", err)
 	}
 	return out, nil
-}
-
-// withholdPendingTenant decides whether one queued tenant may be handed to the
-// operator, returning a human-readable reason when it may not.
-//
-// It is a pure function so the decision table is unit-testable without a
-// database. enforce is entitlements.Required() at the call site.
-func withholdPendingTenant(tier string, enforce bool) (reason string, withhold bool) {
-	if !enforce {
-		// Self-hosted / OSS: no entitlements to enforce (ADR-0074).
-		return "", false
-	}
-	if _, ok := plans.Lookup(tier); !ok {
-		return "tier does not resolve to a canonical plan", true
-	}
-	return "", false
 }
 
 // AckTenantProvisioned marks a pending record done after the operator has

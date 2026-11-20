@@ -23,7 +23,7 @@ var ErrAmbiguousTargets = fmt.Errorf("%w: the message holds more than one target
 // refusal and never means all targets. A message that is well formed and that the
 // policy refuses gets a Task in the state rejected, and no mission starts: a target
 // outside the publication, a definition or a target that changed or was deleted, a
-// publication over its limit, a tenant that is suspended, a tenant over its quota,
+// publication over its limit, a tenant that is suspended,
 // and an agent that is not published.
 
 // TargetsOf reads the target list of an inbound message (epic gibson#1367). It

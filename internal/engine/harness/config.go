@@ -276,22 +276,6 @@ type HarnessConfig struct {
 	// closure over componentcatalog.LookupAgent.
 	// Optional.
 	AgentDispatchMode func(name string) (mode string, listed bool)
-
-	// QuotaCounter maintains the per-tenant concurrent_agents Redis
-	// counter via idle→busy / busy→idle transition callbacks driven by
-	// per-agent inFlightTasks bookkeeping inside DefaultAgentHarness.
-	// Optional; nil disables per-agent quota counting entirely.
-	// Spec plans-and-quotas-simplification.
-	QuotaCounter QuotaCounter
-}
-
-// QuotaCounter is the narrow interface DefaultAgentHarness uses to
-// maintain the concurrent_agents Redis counter. *component.QuotaManager
-// satisfies it; the types are deliberately decoupled to avoid the
-// harness package taking a hard dep on the daemon's component package.
-type QuotaCounter interface {
-	IncrementAgentCount(ctx context.Context) error
-	DecrementAgentCount(ctx context.Context) error
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.

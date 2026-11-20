@@ -21,9 +21,9 @@ func TestRegistry_LogStartupState_EmitsSeamTable(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	reg := new(seam.Registry)
-	reg.Register("entitlements", "ENTITLEMENTS_ENDPOINT", "billing/entitlements-svc")
+	reg.Register("signup", "SIGNUP_SELF_SERVE", "saas/signup-svc")
 
-	t.Setenv("ENTITLEMENTS_ENDPOINT", "")
+	t.Setenv("SIGNUP_SELF_SERVE", "")
 	reg.LogStartupState(context.Background(), logger)
 
 	line := buf.String()

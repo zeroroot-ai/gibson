@@ -133,12 +133,6 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 
 		// A submitted finding gets a graph node with the ID of its Postgres row.
 		FindingSink: ingestHarnessFinding(d.brainRegistry),
-
-		// QuotaCounter maintains the per-tenant concurrent_agents Redis
-		// counter on agent idle→busy / busy→idle transitions inside
-		// DelegateToAgent. nil-safe in dev (no quota manager wired).
-		// Spec plans-and-quotas-simplification.
-		QuotaCounter: d.quotaManager,
 	}
 	// Queue-dispatched agents call back through HarnessCallbackService; their
 	// harness must be findable by (mission, agent), as a direct-gRPC agent's is

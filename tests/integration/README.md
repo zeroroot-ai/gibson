@@ -171,7 +171,7 @@ These issues are in Phase 2 store implementations that are still in progress. Th
 
 ## Critical-path contract
 
-QUALITY-BARS §4 Tier 3 names five critical paths that must each keep a present,
+Four critical paths must each keep a present,
 green integration test. They are pinned in [`tests/criticalpath/manifest.go`](../criticalpath/manifest.go):
 
 | Critical path | Covered by |
@@ -180,7 +180,6 @@ green integration test. They are pinned in [`tests/criticalpath/manifest.go`](..
 | per-tenant isolation (predicate-leak guard) | `TestPerTenantMissionIsolation_*`, `TestPerTenantFindingIDOR_*` |
 | tenant-provision saga (idempotency + rollback) | `operators/tenant/.../saga/flows` `Test*Idempotent*`, `TestEnrollmentRevocationSteps_*` |
 | mission-run (engine drive + restart resume) | `internal/engine/brain` `TestWireExecutor_DrivesGoalMissionEndToEnd`, `TestCrashResume_GoalMissionDeciderReEngages`, `internal/infra/datapool` `TestHydrate_InFlightWorkFailedOnRestart` |
-| entitlements / billing-bypass | `internal/server/daemon/api` `TestClassifyRelationAction`, `TestGetCheckpoint_OperatorBypassesRedaction` |
 
 `tests/criticalpath/manifest_test.go` is a **pure-unit guard** (no Docker): it
 fails CI if any pinned test is deleted or renamed. Run it with

@@ -255,7 +255,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		forks:                   f.config.Forks,
 		agentCallbackEndpoint:   f.config.AgentCallbackEndpoint,
 		agentDispatchMode:       agentDispatchModeOrDefault(f.config.AgentDispatchMode),
-		quotaCounter:            f.config.QuotaCounter,
 		// Per-node slot overrides: lifted from MissionContext so every
 		// ResolveSlot call within this agent execution sees the node's
 		// declared llm_slots bindings. Child harnesses created by

@@ -31,7 +31,6 @@ import (
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
-	_ "github.com/zeroroot-ai/gibson/pkg/billing/entitlements/v1"
 )
 
 // protoRoots are the proto roots of the module, from the repo root. Each
@@ -39,7 +38,6 @@ import (
 // its path from its root, as the Makefile compiles it.
 var protoRoots = []string{
 	"internal/server/daemon/api",
-	"pkg/billing/entitlements/v1",
 }
 
 // skippedDirs hold no tracked proto file: tool output, worktrees and
@@ -115,11 +113,7 @@ func trackedProtoPaths(t *testing.T) []string {
 // TestImportPath: a file under a root gets its path from that root. A file
 // under no root is refused, so the walk cannot skip it.
 func TestImportPath(t *testing.T) {
-	got, ok := ImportPath(protoRoots, "pkg/billing/entitlements/v1/entitlements.proto")
-	if !ok || got != "entitlements.proto" {
-		t.Fatalf("entitlements: got %q, %v", got, ok)
-	}
-	got, ok = ImportPath(protoRoots, "internal/server/daemon/api/gibson/tenant/v1/tenant.proto")
+	got, ok := ImportPath(protoRoots, "internal/server/daemon/api/gibson/tenant/v1/tenant.proto")
 	if !ok || got != "gibson/tenant/v1/tenant.proto" {
 		t.Fatalf("tenant: got %q, %v", got, ok)
 	}

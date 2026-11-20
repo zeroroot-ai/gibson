@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // server_quota_test.go — tests for the GetTenantQuota and
-// GetTenantQuotaUsage handlers post spec plans-and-quotas-simplification.
+// GetTenantQuotaUsage handlers.
 package api
 
 import (
@@ -79,37 +79,15 @@ func TestGetTenantQuotaUsage_MissingTenantInContext_InvalidArgument(t *testing.T
 	requireGRPCStatus(t, err, codes.InvalidArgument)
 }
 
-func TestGetTenantQuotaUsage_NilQuotaManager_Unavailable(t *testing.T) {
+// The daemon keeps no quota counter, so the usage RPC reports zero.
+func TestGetTenantQuotaUsage_ReportsZero(t *testing.T) {
 	srv := newQuotaTestServer()
-	srv.quotaManager = nil
-	_, err := srv.GetTenantQuotaUsage(tenantAndSubjectCtx("acme", "u1"), &tenantv1.GetTenantQuotaUsageRequest{})
-	requireGRPCStatus(t, err, codes.Unavailable)
-}
-
-type fakeQuotaUsageReader struct {
-	missions, agents int64
-}
-
-func (f *fakeQuotaUsageReader) ReadActiveCounters(_ context.Context, _ string) (int64, int64, error) {
-	return f.missions, f.agents, nil
-}
-func (f *fakeQuotaUsageReader) CheckMissionQuota(_ context.Context) error     { return nil }
-func (f *fakeQuotaUsageReader) CheckAgentQuota(_ context.Context) error       { return nil }
-func (f *fakeQuotaUsageReader) IncrementMissionCount(_ context.Context) error { return nil }
-func (f *fakeQuotaUsageReader) InvalidateCache(_ string)                      {}
-
-func TestGetTenantQuotaUsage_ReturnsCounterValues(t *testing.T) {
-	srv := newQuotaTestServer()
-	srv.quotaManager = &fakeQuotaUsageReader{missions: 4, agents: 9}
 	resp, err := srv.GetTenantQuotaUsage(tenantAndSubjectCtx("acme", "u1"), &tenantv1.GetTenantQuotaUsageRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.GetMissionsActive() != 4 {
-		t.Errorf("missions: got %d, want 4", resp.GetMissionsActive())
-	}
-	if resp.GetAgentsActive() != 9 {
-		t.Errorf("agents: got %d, want 9", resp.GetAgentsActive())
+	if resp.GetMissionsActive() != 0 || resp.GetAgentsActive() != 0 {
+		t.Errorf("usage = %d missions, %d agents, want zero", resp.GetMissionsActive(), resp.GetAgentsActive())
 	}
 }
 

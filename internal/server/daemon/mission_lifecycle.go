@@ -58,7 +58,6 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.infrastructure,
 			d.infrastructure.otelStack,
 			d.missionAuthzStore, // Required (one-code-path slice deploy#195); set during Redis init phase
-			d.quotaManager,      // Spec plans-and-quotas-simplification: may be nil in dev
 			d.brainRegistry,     // ECS brain engine (gibson#851)
 			d.brainExecutor,     // concrete Dispatcher + DeciderLLM bindings (gibson#851)
 			d.graphWriter,       // sole writer of the knowledge graph (ADR-0112, gibson#551)

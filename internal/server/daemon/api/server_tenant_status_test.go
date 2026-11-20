@@ -3,14 +3,12 @@
 
 // server_tenant_status_test.go — tests for the operator-reported tenant status
 // read-back handlers (E9, gibson#948, dashboard#813).
-// S5 (billing#3): SetTenantBillingActive invalidates the entitlements cache.
 package api
 
 import (
 	"context"
 	"database/sql"
 	"errors"
-	"sync/atomic"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -20,21 +18,6 @@ import (
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
-
-// fakeInvalidatingQuotaManager satisfies MissionQuotaChecker and records
-// InvalidateCache calls so tests can assert the tenant was invalidated.
-type fakeInvalidatingQuotaManager struct {
-	invalidated atomic.Int64 // count of InvalidateCache calls
-	lastTenant  atomic.Value // last tenant string passed to InvalidateCache
-}
-
-func (f *fakeInvalidatingQuotaManager) CheckMissionQuota(_ context.Context) error     { return nil }
-func (f *fakeInvalidatingQuotaManager) CheckAgentQuota(_ context.Context) error       { return nil }
-func (f *fakeInvalidatingQuotaManager) IncrementMissionCount(_ context.Context) error { return nil }
-func (f *fakeInvalidatingQuotaManager) InvalidateCache(tenantID string) {
-	f.lastTenant.Store(tenantID)
-	f.invalidated.Add(1)
-}
 
 var errBoom = errors.New("boom")
 

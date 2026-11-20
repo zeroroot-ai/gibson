@@ -719,7 +719,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	d.grpcServer = srv
 
 	// Create and register daemon service.
-	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
 	d.daemonServer = daemonSvc
 	// The list RPCs take their page token signers from the one key source.
@@ -795,13 +794,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// (ADR-0119). Read lazily: the data-plane pool is built after this wiring.
 	daemonSvc.WithLiveMemberLookup(newBankMemberLiveness(d))
 	// platformDB is always non-nil after Start() (gibson#246): initPlatformPostgres
-	// is fatal on failure, so the entitlements RPCs always have a real pool.
+	// is fatal on failure, so the platform RPCs always have a real pool.
 	daemonSvc.WithPlatformDB(d.platformDB)
-	d.logger.Info(ctx, "dashboard Postgres pool wired into DaemonServer for entitlements RPCs")
-	if d.quotaManager != nil {
-		daemonSvc.WithQuotaManager(d.quotaManager)
-		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
-	}
 
 	if d.targetStore != nil {
 		daemonSvc.WithTargetService(target.NewService(d.targetStore))
@@ -900,11 +894,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if d.authorizer != nil {
 			teamResolver = newBudgetTeamResolver(d.authorizer, d.logger.Slog())
 		}
-		// The budget enforcer consumes tenant-default ceilings through the
-		// entitlements seam (ADR-0089): explicit admin budgets win, else the
-		// provider supplies the tenant default. OSS = config/unlimited. A nil
-		// provider is resolved to UnlimitedProvider inside NewEnforcer.
-		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil, d.entitlementsProvider)
+		// The budget enforcer applies only the budgets that a tenant admin
+		// sets. A tenant with no budget has no ceiling.
+		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil)
 		daemonSvc.WithBudgetEnforcer(budgetEnforcer)
 		d.budgetEnforcer = budgetEnforcer
 		d.logger.Info(ctx, "budget enforcer wired into DaemonServer (spec: llm-user-attribution-governance)")
@@ -1590,12 +1582,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// so a daemon with no data plane still serves everything else.
 	if d.pool != nil && d.authorizer != nil {
 		bankSvc, bankErr := NewBankServer(BankServerConfig{
-			Store:        bank.NewPostgresStore(d.pool),
-			Authorizer:   d.authorizer,
-			Entitlements: d.entitlementsProvider,
-			Logger:       d.logger.Slog(),
-			Control:      d.memberControl,
-			Feed:         d.liveAgents,
+			Store:      bank.NewPostgresStore(d.pool),
+			Authorizer: d.authorizer,
+			Logger:     d.logger.Slog(),
+			Control:    d.memberControl,
+			Feed:       d.liveAgents,
 		})
 		if bankErr != nil {
 			d.logger.Warn(ctx, "BankService not registered", slog.String("error", bankErr.Error()))
@@ -1892,13 +1883,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				d.logger.Info(ctx, "CapabilityGrantService wired into ComponentService as the mission:delegate/mission:originate capability checker")
 			} else {
 				d.logger.Warn(ctx, "CapabilityGrantService unavailable; ComponentService capability-gated RPCs (DelegateToAgent) will deny every call")
-			}
-
-			// Wire the quota manager so RegisterComponent enforces per-tenant
-			// agent quotas before the agent is admitted to the registry.
-			if d.quotaManager != nil {
-				compSvc.WithQuotaManager(d.quotaManager)
-				d.logger.Info(ctx, "quota manager wired into ComponentService for agent quota enforcement")
 			}
 
 			// Wire the finding reader so an off-cluster component can read back the

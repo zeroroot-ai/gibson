@@ -4,17 +4,7 @@
 // Package gibsond is the gibson daemon bootstrap, exported so both the OSS
 // entrypoint (cmd/gibson) and hosted builds can drive the same daemon startup.
 //
-// The entitlements seam (ADR-0089/0054/gibson#1026/gibson#1028) is now a
-// runtime gRPC selection (Option B): when ENTITLEMENTS_ENDPOINT is set the
-// daemon calls the closed billing service's EntitlementsService over SPIFFE
-// mTLS; when unset it falls back to the OSS config-driven default. No
-// compile-time injection or Register call is needed — just set the env var in
-// the hosted Helm chart.
-//
 //	os.Exit(gibsond.Run(ctx, os.Args[1:], os.Stdout, os.Stderr))
-//
-// OSS gibson never sets ENTITLEMENTS_ENDPOINT, so Run starts the daemon with
-// the config-driven Entitlements default and zero plan/Stripe knowledge.
 package gibsond
 
 import (
@@ -79,8 +69,7 @@ var dumpFGAModelJSON = authz.ModelJSON
 // Run is the gibson daemon entry point. It loads config, wires the SPIRE JWT
 // source, constructs the daemon, and runs it until ctx is cancelled, returning
 // a process exit code. Callers (OSS cmd/gibson or a hosted build) handle signal
-// wiring and os.Exit. Register any closed providers (e.g. the Stripe-backed
-// Entitlements provider) BEFORE calling Run.
+// wiring and os.Exit.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return run(ctx, args, stdout, stderr, defaultDaemonFactory, defaultVaultJWTSourceFactory)
 }

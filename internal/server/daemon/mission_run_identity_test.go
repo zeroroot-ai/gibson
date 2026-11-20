@@ -5,7 +5,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -303,24 +302,15 @@ func TestCleanupOfRun1_LeavesRun2Alone(t *testing.T) {
 	}
 }
 
-// countingQuota counts the open runs of a tenant.
-type countingQuota struct{ open int }
-
-func (q *countingQuota) IncrementMissionCount(context.Context) error { q.open++; return nil }
-func (q *countingQuota) DecrementMissionCount(context.Context) error { q.open--; return nil }
-
 // The accounting of run 1 runs while run 2 of the same record is active. Run 1
-// decrements its own slot once. It must not decrement the slot of run 2, and
-// it must not release the child reservation that the record holds for run 2
+// must not release the child reservation that the record holds for run 2
 // (gibson#1228).
 func TestEndRunAccounting_Run1LeavesRun2Alone(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	conn, cleanup := newMiniredisConn(t)
 	defer cleanup()
-	quota := &countingQuota{}
 	mm := helperMM()
-	mm.quotaCounter = quota
 	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
 	tenant := auth.MustNewTenantID("acme")
 
@@ -335,44 +325,19 @@ func TestEndRunAccounting_Run1LeavesRun2Alone(t *testing.T) {
 	id := rec.ID.String()
 	run1, run2 := activeRunOfRecord(rec, tenant), activeRunOfRecord(rec, tenant)
 	mm.setActive(tenant, id, run1)
-	_ = quota.IncrementMissionCount(ctx) // run 1 started
-	mm.setActive(tenant, id, run2)       // run 2 took the entry while run 1 cleans up
-	_ = quota.IncrementMissionCount(ctx) // run 2 started
+	mm.setActive(tenant, id, run2) // run 2 took the entry while run 1 cleans up
 
 	mm.endRunAccounting(ctx, conn, run1)
-	if quota.open != 1 {
-		t.Fatalf("open runs = %d after the cleanup of run 1, want 1 (the quota of run 2)", quota.open)
-	}
 	held, err := ledger.Reserved(ctx, parent.ID)
 	if err != nil || held.CostUSDCents == nil {
 		t.Fatalf("the cleanup of run 1 released the reservation of run 2: %+v, %v", held, err)
 	}
 
 	mm.endRunAccounting(ctx, conn, run2)
-	if quota.open != 0 {
-		t.Fatalf("open runs = %d after both runs ended, want 0", quota.open)
-	}
 	held, err = ledger.Reserved(ctx, parent.ID)
 	if err != nil || held.CostUSDCents != nil {
 		t.Fatalf("the reservation was not released when the last run ended: %+v, %v", held, err)
 	}
-}
-
-// failingQuota fails every decrement.
-type failingQuota struct{}
-
-func (failingQuota) IncrementMissionCount(context.Context) error { return nil }
-func (failingQuota) DecrementMissionCount(context.Context) error { return errors.New("redis down") }
-
-// A failed decrement is logged and never stops the cleanup of the run.
-func TestEndRunAccounting_DecrementFailureIsNotFatal(t *testing.T) {
-	conn, cleanup := newMiniredisConn(t)
-	defer cleanup()
-	mm := helperMM()
-	mm.quotaCounter = failingQuota{}
-	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
-	run := activeRunOfRecord(&mission.Mission{ID: types.NewID()}, auth.MustNewTenantID("acme"))
-	mm.endRunAccounting(context.Background(), conn, run) // must not panic
 }
 
 // claimingLedger lets a claim of run 2 try to start inside the release of run 1.

@@ -38,11 +38,9 @@ on:
       - 'internal/engine/harness/**'
       - 'internal/platform/componentcatalog/**'
       - 'internal/server/daemon/**'
-      # The daemon's schema and the entitlements reader: a migration that
-      # lags a reader failed every ceiling check on main and no run
-      # measured it until the next run (gibson#13, #174).
+      # The daemon's schema: a migration that lags a reader failed on main
+      # and no run measured it until the next run (gibson#13, #174).
       - 'pkg/platform/migrations/**'
-      - 'pkg/billing/entitlements/**'
       - 'internal/platform/bank/**'
       - 'internal/platform/job/**'
       - 'internal/engine/bank/**'

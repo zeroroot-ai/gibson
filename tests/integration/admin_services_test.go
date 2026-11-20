@@ -96,7 +96,7 @@ func (a *allowAdminAuthorizer) ListUsers(_ context.Context, _, _, _ string) ([]s
 
 // TestGetTenantQuota_NilStore_ReturnsZeroLimits verifies that GetTenantQuota
 // succeeds with zero quota values when platformDB is not configured.
-// Zero values mean "unlimited" (existing convention per server_quota.go).
+// The daemon enforces none of these values.
 //
 // This exercises the nil-platformDB path specifically, so it wires an
 // allowAdminAuthorizer that passes requireTenantAdmin's FGA check for the

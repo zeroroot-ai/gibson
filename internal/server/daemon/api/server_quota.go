@@ -3,14 +3,12 @@
 
 // Package api — server_quota.go
 //
-// Quota RPC handlers, post spec plans-and-quotas-simplification:
-//   - GetTenantQuota:      reads the tenant_quotas Postgres row (limits).
-//   - GetTenantQuotaUsage: reads the Redis :active counters (live usage).
-//
-// The legacy SetTenantQuota RPC + Redis quota:config JSON store + memory
-// enforcement (CheckMemoryQuota / quota:memory:used_mb) are deleted; the
-// only writer for tenant quotas is the operator's UpsertTenantQuota RPC,
-// which writes Postgres directly.
+// Quota RPC handlers. The daemon enforces no plan quota and keeps no quota
+// counter. These two RPCs stay until the dashboard stops the calls, and
+// gibson#1530 deletes them with the tenant_quotas table.
+//   - GetTenantQuota:      reports the stored tenant_quotas row. No code
+//     enforces it.
+//   - GetTenantQuotaUsage: reports zero, because no counter exists.
 package api
 
 import (
@@ -31,9 +29,8 @@ import (
 // GetTenantQuota — limits (Postgres)
 // ---------------------------------------------------------------------------
 
-// GetTenantQuota retrieves the configured quota limits for a tenant.
-// Returns zero values for any quota not explicitly set; 0 = unlimited
-// (existing convention, applied by callers that interpret the response).
+// GetTenantQuota reports the stored tenant_quotas row of a tenant. The daemon
+// enforces none of these values.
 //
 // gibsoncheck:allow tenant-from-request — guarded by requireTenantAdmin(ctx, tenantID) below,
 // which FGA-Checks the caller's subject against the supplied tenant, so a foreign tenant id
@@ -107,47 +104,15 @@ func readTenantQuotasRow(ctx context.Context, db *sql.DB, tenantID string) (*ten
 }
 
 // ---------------------------------------------------------------------------
-// GetTenantQuotaUsage — live counters (Redis)
+// GetTenantQuotaUsage
 // ---------------------------------------------------------------------------
 
-// quotaUsageReader is the narrow interface GetTenantQuotaUsage uses to read
-// the live :active counters. *component.QuotaManager.ReadActiveCounters
-// satisfies it; nil disables the RPC.
-type quotaUsageReader interface {
-	ReadActiveCounters(ctx context.Context, tenant string) (missions, agents int64, err error)
-}
-
-// GetTenantQuotaUsage returns the live counter values (current usage)
-// for the two enforced quotas. Cheap (single MGET-equivalent through the
-// tenant-scoped store); intended for the dashboard's in-app quota UX.
-//
-// Spec plans-and-quotas-simplification R9.B.
-func (s *DaemonServer) GetTenantQuotaUsage(ctx context.Context, req *tenantv1.GetTenantQuotaUsageRequest) (*tenantv1.GetTenantQuotaUsageResponse, error) {
-	// Scope is the authenticated caller's tenant; req.tenant_id is not read.
-	// The interceptor's `relation: "member"` annotation is evaluated against an
-	// object derived from the CALLER's identity (object_deriver:
-	// tenant_from_identity), so it never validates a body tenant id. Reading the
-	// live counters for another tenant therefore has to be ruled out here, by
-	// taking the tenant from the context — the same shape as the sibling
-	// GetTenantQuota, which admin-gates the value it was given.
-	tenantID := auth.TenantStringFromContext(ctx)
-	if tenantID == "" {
+// GetTenantQuotaUsage reports zero for each counter. The daemon counts no
+// missions and no agents for a plan, so there is no usage to report. The RPC
+// stays until gibson#1530 deletes it.
+func (s *DaemonServer) GetTenantQuotaUsage(ctx context.Context, _ *tenantv1.GetTenantQuotaUsageRequest) (*tenantv1.GetTenantQuotaUsageResponse, error) {
+	if auth.TenantStringFromContext(ctx) == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
-
-	reader, ok := s.quotaManager.(quotaUsageReader)
-	if !ok || reader == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "quota usage reader not configured")
-	}
-	missions, agents, err := reader.ReadActiveCounters(ctx, tenantID)
-	if err != nil {
-		s.logger.WarnContext(ctx, "GetTenantQuotaUsage: read failed (returning zeros)",
-			slog.String("tenant_id", tenantID),
-			slog.String("error", err.Error()),
-		)
-	}
-	return &tenantv1.GetTenantQuotaUsageResponse{
-		MissionsActive: missions,
-		AgentsActive:   agents,
-	}, nil
+	return &tenantv1.GetTenantQuotaUsageResponse{}, nil
 }

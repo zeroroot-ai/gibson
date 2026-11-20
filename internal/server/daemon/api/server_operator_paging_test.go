@@ -17,7 +17,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
-	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 )
 
 // addRow queues one pending tenant, with a created_at after every earlier row.
@@ -54,7 +53,6 @@ func pendingIDs(resp *daemonoperatorv1.ListPendingTenantProvisioningResponse) []
 // pending once: a row that arrives is on a later page, and a row that leaves
 // moves no other row.
 func TestListPendingTenantProvisioning_WalkWithChangesBetweenPages(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "")
 	srv := newPendingServer()
 	q := withPendingQueue(t, srv)
 	for i := 1; i <= 5; i++ {
@@ -96,7 +94,6 @@ func TestListPendingTenantProvisioning_WalkWithChangesBetweenPages(t *testing.T)
 
 // A page of exactly the page size at the end of the list has no next token.
 func TestListPendingTenantProvisioning_LastPageHasNoToken(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "")
 	srv := newPendingServer()
 	q := withPendingQueue(t, srv)
 	q.addRow("t1", "pending")
@@ -107,34 +104,6 @@ func TestListPendingTenantProvisioning_LastPageHasNoToken(t *testing.T) {
 	}
 	if len(resp.GetPending()) != 2 || resp.GetNextPageToken() != "" {
 		t.Fatalf("got %v token %q, want 2 rows and no token", pendingIDs(resp), resp.GetNextPageToken())
-	}
-}
-
-// A withheld row counts as a row of its page, so the next token moves past it.
-func TestListPendingTenantProvisioning_WithheldRowDoesNotStallThePage(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "true")
-	srv := newPendingServer()
-	q := withPendingQueue(t, srv)
-	q.addRow("t1", "pending")
-	q.mu.Lock()
-	q.rows[0].tier = "no-such-tier"
-	q.mu.Unlock()
-	q.addRow("t2", "pending")
-	q.addRow("t3", "pending")
-	ctx := context.Background()
-	p1, err := srv.ListPendingTenantProvisioning(ctx, &daemonoperatorv1.ListPendingTenantProvisioningRequest{PageSize: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(p1.GetPending()) != 0 || p1.GetNextPageToken() == "" {
-		t.Fatalf("page 1 = %v token %q, want no row and a token", pendingIDs(p1), p1.GetNextPageToken())
-	}
-	p2, err := srv.ListPendingTenantProvisioning(ctx, &daemonoperatorv1.ListPendingTenantProvisioningRequest{PageSize: 1, PageToken: p1.GetNextPageToken()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(pendingIDs(p2), ","); got != "t2" {
-		t.Fatalf("page 2 = %s, want t2", got)
 	}
 }
 

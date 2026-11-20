@@ -66,8 +66,7 @@ func TestForTarget_SharesMissionState(t *testing.T) {
 	}
 	if scoped.AgentHarness != AgentHarness(h) {
 		t.Fatal("the view must delegate to the harness it came from, not to a copy " +
-			"of it: a copy duplicates inFlightTasksMu while sharing the map it " +
-			"guards, and the agent-concurrency quota then races")
+			"of it: a copy splits the mission budget and the callback registrations")
 	}
 	if view.Mission().ID != h.Mission().ID {
 		t.Error("the view must carry the same mission; a different one would file " +

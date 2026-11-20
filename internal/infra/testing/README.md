@@ -25,35 +25,6 @@ func TestWithRedis(t *testing.T) {
 }
 ```
 
-### Testing Tenant Isolation
-
-```go
-func TestTenantIsolation(t *testing.T) {
-    client := setupTestRedisClient(t)
-    defer client.Close()
-
-    store := NewTenantScopedStore(client, cfg)
-
-    // Create contexts with different tenants
-    ctx1 := testutil.WithTenant(context.Background(), "tenant-1")
-    ctx2 := testutil.WithTenant(context.Background(), "tenant-2")
-
-    // Store data in tenant-1
-    err := store.Set(ctx1, "key", "value-1", 0)
-    require.NoError(t, err)
-
-    // Store data in tenant-2
-    err = store.Set(ctx2, "key", "value-2", 0)
-    require.NoError(t, err)
-
-    // Verify isolation
-    val1, _ := store.Get(ctx1, "key")
-    val2, _ := store.Get(ctx2, "key")
-    assert.Equal(t, "value-1", val1)
-    assert.Equal(t, "value-2", val2)
-}
-```
-
 ### With Context Cancellation
 
 ```go
@@ -89,7 +60,7 @@ Constant for the default test tenant ID: `"test-tenant"`
 
 Use tenant context helpers in tests that:
 
-- Interact with Redis via `StateClient` or `TenantScopedStore`
+- Interact with Redis via `StateClient`
 - Perform Neo4j operations that use tenant filtering
 - Call functions that extract tenant from context
 - Test tenant isolation behavior

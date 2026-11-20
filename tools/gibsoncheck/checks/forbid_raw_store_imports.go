@@ -81,14 +81,14 @@ var allowedStorePackages = []string{
 	// Transitional allowlist — Phase D migration in progress.
 	// These packages are targeted for refactor/deletion; remove entries here
 	// once the corresponding packages are cleaned up.
-	"/internal/engine/state",                 // Phase D/4.7: TenantScopedStore pending deletion
+	"/internal/engine/state",                 // StateClient wraps the raw Redis client
 	"/internal/infra/database",               // Phase D/4.2: DAO refactor in progress
 	"/internal/platform/authz",               // Phase E/5.2: cross-tenant code relocation
 	"/internal/platform/audit",               // Phase E/5.2: audit stream on shared Redis
 	"/internal/engine/finding",               // Phase D/4.2: finding store _conn.go uses raw redis via Conn
 	"/internal/engine/graphrag",              // Phase D/4.4: Neo4j session via Conn
 	"/internal/engine/memory",                // Phase D/4.3: mission memory via Conn
-	"/internal/platform/component",           // Phase E/5.2: component quota counters (shared Redis)
+	"/internal/platform/component",           // Phase E/5.2: component registry and access stores (shared Redis)
 	"/internal/platform/budget",              // Phase D/4.x: budget enforcer pending Conn-bound refactor
 	"/internal/platform/manifest",            // Phase D/4.x: manifest invalidator pending refactor
 	"/internal/engine/mission",               // Phase D/4.1,4.5: Conn-bound wrappers still import raw redis

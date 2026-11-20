@@ -26,7 +26,7 @@ import (
 //     tenant IDs to logical DB indices.
 //   - internal/server/daemon/   — the event-stream Redis files and a few
 //     specific daemon-internal coordinator keys.
-//   - internal/platform/component/ — component-quota counters keyed by component
+//   - internal/platform/component/ — component records keyed by component
 //     name, not tenant ID.
 //   - internal/platform/audit/     — audit stream keys.
 //

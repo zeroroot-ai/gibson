@@ -31,7 +31,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/bank"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
-	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 	bankpb "github.com/zeroroot-ai/sdk/api/gen/gibson/bank/v1"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -41,12 +40,11 @@ import (
 type bankServer struct {
 	bankpb.UnimplementedBankServiceServer
 
-	store        bank.Store
-	authorizer   authz.Authorizer
-	entitlements entitlements.Provider
-	logger       *slog.Logger
-	control      *harness.MemberControl
-	feed         SignInFeed
+	store      bank.Store
+	authorizer authz.Authorizer
+	logger     *slog.Logger
+	control    *harness.MemberControl
+	feed       SignInFeed
 }
 
 // BankServerConfig is the constructor input. Store and Authorizer are
@@ -54,10 +52,9 @@ type bankServer struct {
 // authorizer a created bank would carry no ownership tuple, so nobody could
 // ever manage it and everybody could read it.
 type BankServerConfig struct {
-	Store        bank.Store
-	Authorizer   authz.Authorizer
-	Entitlements entitlements.Provider
-	Logger       *slog.Logger
+	Store      bank.Store
+	Authorizer authz.Authorizer
+	Logger     *slog.Logger
 	// Control is the in-memory queue the sign-in relay enqueues on and the
 	// member's inbox delivers from (gibson#1715). Required.
 	Control *harness.MemberControl
@@ -85,12 +82,11 @@ func NewBankServer(cfg BankServerConfig) (bankpb.BankServiceServer, error) {
 		cfg.Logger = slog.Default()
 	}
 	return &bankServer{
-		store:        cfg.Store,
-		authorizer:   cfg.Authorizer,
-		entitlements: entitlements.Resolve(cfg.Entitlements),
-		logger:       cfg.Logger.With("component", "bank_service"),
-		control:      cfg.Control,
-		feed:         cfg.Feed,
+		store:      cfg.Store,
+		authorizer: cfg.Authorizer,
+		logger:     cfg.Logger.With("component", "bank_service"),
+		control:    cfg.Control,
+		feed:       cfg.Feed,
 	}, nil
 }
 
@@ -153,9 +149,6 @@ func (s *bankServer) CreateBank(ctx context.Context, req *bankpb.CreateBankReque
 		if entry, ok := componentcatalog.LookupAgent(in.AgentName); ok {
 			in.MaxJobsInFlight = entry.MaxJobsInFlight
 		}
-	}
-	if err := s.checkMemberCap(ctx, tenant, in.DesiredCount); err != nil {
-		return nil, err
 	}
 
 	created, err := s.store.Create(ctx, tenant, in)
@@ -234,11 +227,6 @@ func (s *bankServer) UpdateBank(ctx context.Context, req *bankpb.UpdateBankReque
 	if req.SpillPolicy != nil {
 		p := spillPolicyFromProto(req.GetSpillPolicy())
 		in.SpillPolicy = &p
-	}
-	if in.DesiredCount != nil {
-		if err := s.checkMemberCap(ctx, tenant, *in.DesiredCount); err != nil {
-			return nil, err
-		}
 	}
 	updated, err := s.store.Update(ctx, tenant, req.GetId(), in)
 	if err != nil {
@@ -332,29 +320,6 @@ func (s *bankServer) authorize(ctx context.Context, relation, bankID string) err
 		// NotFound, not PermissionDenied: a caller with no right on a bank must
 		// not learn that the bank exists.
 		return status.Error(codes.NotFound, "no such bank")
-	}
-	return nil
-}
-
-// fgaUserFromIdentity maps a caller identity to the FGA user string. A
-// component authenticates with a capability grant and its subject is already
-// the typed principal ref the model accepts (ADR-0045); the model rejects the
-// `user:` type for those, so it is used unchanged.
-// checkMemberCap refuses a desired count above the tenant's agent ceiling.
-//
-// The ceiling is entitlements.Limits.ConcurrentAgents, the seam that already
-// answers "how many agents may this tenant run at once". A bank of N members
-// holds N agents, so a second knob for the same question would be a second
-// authority that drifts from the first.
-func (s *bankServer) checkMemberCap(ctx context.Context, tenant string, desired int32) error {
-	limits, err := s.entitlements.Limits(ctx, tenant)
-	if err != nil {
-		return status.Errorf(codes.PermissionDenied, "entitlements unavailable: %v", err)
-	}
-	if limits.ConcurrentAgents > 0 && int(desired) > limits.ConcurrentAgents {
-		return status.Errorf(codes.ResourceExhausted,
-			"desired_count %d is above this tenant's ceiling of %d concurrent agents",
-			desired, limits.ConcurrentAgents)
 	}
 	return nil
 }
