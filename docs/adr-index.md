@@ -51,7 +51,7 @@ Do not edit the tables by hand.
 | ADR-0056 | gibson is the one Go repo for the platform backend and the first-party plugins |
 | ADR-0058 | The SDK is the component-development surface only |
 | ADR-0059 | The tenant brings the embedding provider |
-| ADR-0060 | Billing is one private component with three connection points |
+| ADR-0060 | Billing is one private component with two connection points |
 | ADR-0061 | Connector auth is a platform capability (was 0064 until 2026-10-05) |
 | ADR-0063 | Mission origination requires a parent mission |
 | ADR-0064 | One light brand across the marketing site and the console |
