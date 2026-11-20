@@ -96,7 +96,7 @@ func runTenantFromContext(pass *analysis.Pass) (any, error) {
 					return true
 				}
 				// The receiver must be an identifier shaped like a request
-				// value, so `s.GetTenantQuota` on a server receiver and
+				// value, so `s.GetTenantId` on a server receiver and
 				// `tenant.String()` on a resolved tenant stay quiet.
 				x, ok := sel.X.(*ast.Ident)
 				if !ok {

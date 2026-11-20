@@ -67,7 +67,7 @@ func (c *StateClient) JSONSet(ctx context.Context, key, path string, value any) 
 //
 //	var user User
 //	err := client.JSONGet(ctx, "user:1", "$", &user)
-//	if state.IsNotFound(err) {
+//	if errors.Is(err, state.ErrNotFound) {
 //	    // Handle missing key
 //	}
 func (c *StateClient) JSONGet(ctx context.Context, key, path string, dest any) error {

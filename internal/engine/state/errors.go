@@ -30,24 +30,6 @@ var (
 	ErrAlreadyExists = errors.New("resource already exists")
 )
 
-// IsNotFound checks if an error indicates a not-found condition.
-// This helper function unwraps error chains and checks for ErrNotFound
-// or redis.Nil errors.
-//
-// Example:
-//
-//	val, err := client.Get(ctx, "nonexistent")
-//	if state.IsNotFound(err) {
-//	    // Handle missing key
-//	    return nil
-//	}
-func IsNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, ErrNotFound)
-}
-
 // ModuleError represents an error related to a specific Redis module.
 // It provides additional context about which module is missing or misconfigured.
 type ModuleError struct {

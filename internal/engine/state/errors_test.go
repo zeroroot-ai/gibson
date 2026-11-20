@@ -10,42 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIsNotFound(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "nil error",
-			err:      nil,
-			expected: false,
-		},
-		{
-			name:     "ErrNotFound",
-			err:      ErrNotFound,
-			expected: true,
-		},
-		{
-			name:     "wrapped ErrNotFound",
-			err:      errors.Join(ErrNotFound, errors.New("context")),
-			expected: true,
-		},
-		{
-			name:     "different error",
-			err:      ErrConnectionFailed,
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsNotFound(tt.err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestModuleError(t *testing.T) {
 	underlyingErr := errors.New("module load failed")
 	modErr := NewModuleError("search", underlyingErr)

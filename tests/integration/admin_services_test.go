@@ -7,7 +7,6 @@
 //   - Phase H (Spec 2 tasks 20+25)
 //
 // Tests cover:
-//   - GetTenantQuota happy path and cross-tenant denial
 //   - GetUserProfile / UpdateUserProfile happy paths
 //   - UpdateUserProfile immutable-field rejection
 //   - AuthorizeID rejects non-Envoy SVID at handshake (verified at daemon level)
@@ -88,41 +87,6 @@ func (a *allowAdminAuthorizer) ListObjects(_ context.Context, _, _, _ string) ([
 
 func (a *allowAdminAuthorizer) ListUsers(_ context.Context, _, _, _ string) ([]string, error) {
 	return nil, nil
-}
-
-// ---------------------------------------------------------------------------
-// GetTenantQuota tests
-// ---------------------------------------------------------------------------
-
-// TestGetTenantQuota_NilStore_ReturnsZeroLimits verifies that GetTenantQuota
-// succeeds with zero quota values when platformDB is not configured.
-// The daemon enforces none of these values.
-//
-// This exercises the nil-platformDB path specifically, so it wires an
-// allowAdminAuthorizer that passes requireTenantAdmin's FGA check for the
-// caller — requireTenantAdmin fails closed (codes.Unavailable) when
-// s.authorizer is nil, and this test isn't the one meant to cover that gate
-// (see TestGetTenantQuota_MissingAuthorizer_FailsClosed for that).
-func TestGetTenantQuota_NilStore_ReturnsZeroLimits(t *testing.T) {
-	srv := newServerForTest().WithAuthorizer(&allowAdminAuthorizer{user: "user:user-123", object: "tenant:acme"})
-	ctx := userCtx("acme", "user-123")
-	resp, err := srv.GetTenantQuota(ctx, &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
-	assert.NoError(t, err, "nil platformDB should not return an error — zero limits mean unlimited")
-	assert.NotNil(t, resp)
-}
-
-// TestGetTenantQuota_MissingAuthorizer_FailsClosed verifies that
-// requireTenantAdmin fails closed (codes.Unavailable) rather than allowing
-// the request through when no Authorizer is wired. FGA is a hard startup
-// dependency in every shipped configuration (one-code-path epic, deploy#195),
-// so an unwired authorizer here means a misconfigured test harness or a
-// DaemonServer built outside normal daemon bootstrap — never something to
-// silently allow (see server_audit.go's requireTenantAdmin doc comment).
-func TestGetTenantQuota_MissingAuthorizer_FailsClosed(t *testing.T) {
-	srv := newServerForTest()
-	ctx := userCtx("acme", "user-123")
-	_, err := srv.GetTenantQuota(ctx, &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
-	assert.Equal(t, codes.Unavailable, grpcCode(err))
 }
 
 // ---------------------------------------------------------------------------

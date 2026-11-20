@@ -55,7 +55,7 @@ func HandlerAccessorRenamedParam(ctx context.Context, listReq *Request) error {
 }
 
 // serverStub stands in for a service receiver so the analyzer's receiver
-// filter is exercised: s.GetTenantQuota is not a request-body read.
+// filter is exercised: s.GetTenantId is not a request-body read.
 type serverStub struct{}
 
 func (s *serverStub) GetTenantId() string { return "" }

@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 // Package gibson.tenant.v1 defines TenantService — the slimmed core
-// tenant-management surface covering onboarding, quota, audit events,
+// tenant-management surface covering onboarding, audit events,
 // findings export, and mission drafts.
 //
 // The following surfaces have been extracted into focused services in this
@@ -29,7 +29,7 @@ import "gibson/types/v1/types.proto";
 import "buf/validate/validate.proto";
 
 // TenantService provides the core tenant-management operations: onboarding
-// state, quota, audit events, findings export, and mission drafts.
+// state, audit events, findings export, and mission drafts.
 service TenantService {
   // ---------------------------------------------------------------------------
   // Onboarding
@@ -48,31 +48,6 @@ service TenantService {
   rpc UpdateOnboardingState(UpdateOnboardingStateRequest) returns (UpdateOnboardingStateResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "writer"
-      object_type: "tenant"
-      object_deriver: "tenant_from_identity"
-      allowed_identities: 3  // USER | SERVICE
-    };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Quota / usage
-  // ---------------------------------------------------------------------------
-
-  // GetTenantQuota retrieves the configured resource quotas (limits) for a
-  // tenant. Returns zero values for any quota not explicitly set.
-  rpc GetTenantQuota(GetTenantQuotaRequest) returns (GetTenantQuotaResponse) {
-    option (gibson.auth.v1.authz) = {
-      relation: "admin"
-      object_type: "tenant"
-      object_deriver: "tenant_from_identity"
-      allowed_identities: 3  // USER | SERVICE
-    };
-  }
-  // GetTenantQuotaUsage returns the live counter values (current usage) from
-  // Redis. Cheap (single MGET); does not consult Postgres.
-  rpc GetTenantQuotaUsage(GetTenantQuotaUsageRequest) returns (GetTenantQuotaUsageResponse) {
-    option (gibson.auth.v1.authz) = {
-      relation: "member"
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
@@ -211,41 +186,6 @@ message UpdateOnboardingStateRequest {
 
 // UpdateOnboardingStateResponse confirms the update was applied.
 message UpdateOnboardingStateResponse {}
-
-// ---------------------------------------------------------------------------
-// Quota — request/response messages
-// ---------------------------------------------------------------------------
-
-// GetTenantQuotaRequest requests the quota configuration (limits) for a tenant.
-message GetTenantQuotaRequest {
-  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
-}
-
-// GetTenantQuotaResponse carries the tenant quota limits.
-message GetTenantQuotaResponse {
-  int32 concurrent_missions = 12;
-  int32 concurrent_agents = 3;
-  string updated_at = 7;
-  string plan_id = 13;
-
-  // Field tags reserved against accidental reuse from the legacy schema.
-  reserved 1, 2, 4, 5, 6, 8, 9, 10, 11;
-  reserved "quota", "seats", "storage_gb", "retention_days",
-           "sandbox_launches_per_month", "current_seats",
-           "current_concurrent_agents", "current_storage_gb",
-           "current_sandbox_launches_this_month";
-}
-
-// GetTenantQuotaUsageRequest requests the live counter snapshot.
-message GetTenantQuotaUsageRequest {
-  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
-}
-
-// GetTenantQuotaUsageResponse carries the live counter values.
-message GetTenantQuotaUsageResponse {
-  int64 missions_active = 1;
-  int64 agents_active = 2;
-}
 
 // ---------------------------------------------------------------------------
 // Audit events — request/response messages

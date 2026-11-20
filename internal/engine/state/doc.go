@@ -71,5 +71,5 @@
 //   - ErrModuleNotAvailable: Required Redis module missing
 //   - ErrConnectionFailed: Redis connection failed
 //
-// Use IsNotFound() to check for not-found errors consistently.
+// Use errors.Is(err, ErrNotFound) to check for a not-found error.
 package state

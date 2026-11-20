@@ -2263,20 +2263,6 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
-  "/gibson.tenant.v1.TenantService/GetTenantQuota":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.tenant.v1.TenantService/GetTenantQuotaUsage":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
   "/gibson.tenant.v1.TenantService/ListAuditEvents":
     relation: "admin"
     object_type: "tenant"

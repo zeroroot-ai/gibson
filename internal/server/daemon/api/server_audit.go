@@ -249,7 +249,7 @@ func auditTargetObject(resource, resourceID string) string {
 // `authorizer not configured` returns across internal/server/daemon/api and
 // internal/server/admin) already denies in that case; this was the one
 // exception that allowed through instead, silently turning every RPC gated
-// by requireTenantAdmin — ListAuditEvents, GetTenantQuota, SetBudget,
+// by requireTenantAdmin — ListAuditEvents, SetBudget,
 // ListBudgets (team/user scope), SetTenantBudgetDefaults, and the four
 // mission-draft RPCs — into a no-op gate whenever it ran unwired.
 func (s *DaemonServer) requireTenantAdmin(ctx context.Context, tenantID string) error {
