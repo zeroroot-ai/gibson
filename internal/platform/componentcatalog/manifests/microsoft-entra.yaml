@@ -20,5 +20,6 @@ spec:
   endpoint: https://mcp.svc.cloud.microsoft/enterprise
   transport: streamable-http
   auth: oauth
-  oauthScope: api://e8c77dc2-69b3-43f4-bc51-3213c9d915b4/.default
+  oauthClient: tenant
+  oauthScope: api://e8c77dc2-69b3-43f4-bc51-3213c9d915b4/.default offline_access
   defaultInstanceUrl: https://mcp.svc.cloud.microsoft/enterprise

@@ -19,5 +19,6 @@ spec:
   endpoint: https://sentinel.microsoft.com/mcp/data-exploration
   transport: streamable-http
   auth: oauth
-  oauthScope: 4500ebfb-89b6-4b14-a480-7f749797bfcd/.default
+  oauthClient: tenant
+  oauthScope: 4500ebfb-89b6-4b14-a480-7f749797bfcd/.default offline_access
   defaultInstanceUrl: https://sentinel.microsoft.com/mcp/data-exploration
