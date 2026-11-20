@@ -189,10 +189,42 @@ type ConnectorInstanceSpec struct {
 	// connector as environment variables, each resolved from the tenant's
 	// secret store. The bearer credential a connector presents (Auth "secret"
 	// or "oauth") is NOT listed here: the daemon stores it under the
-	// connector's own name and writes the credential Secret (ADR-0061).
-	// Environment injection from this list is not wired yet.
+	// connector's own name and writes the credential Secret (ADR-0061). The
+	// catalog entry states the list, and the operator copies it from the
+	// daemon (gibson#1536).
 	// +optional
 	Credentials []CredentialRef `json:"credentials,omitempty"`
+
+	// CredentialHeader is the name of the header that carries the credential
+	// of a Remote connector. Empty means Authorization (gibson#1535). The
+	// daemon builds the value in the format of the catalog entry.
+	// +kubebuilder:validation:Pattern=`^[A-Za-z][A-Za-z0-9-]{0,63}$`
+	// +optional
+	CredentialHeader string `json:"credentialHeader,omitempty"`
+
+	// Env holds plain environment variables of a Hosted connector. A
+	// credential is never here: the catalog loader refuses a name that looks
+	// like one, and Credentials names the secret instead (gibson#1536).
+	// +optional
+	Env map[string]string `json:"env,omitempty"`
+
+	// Args are the arguments of the server process of a Hosted connector.
+	// +optional
+	Args []string `json:"args,omitempty"`
+
+	// Port is the port that the server of a Hosted connector listens on. Zero
+	// means the default of the operator.
+	// +kubebuilder:validation:Minimum=1024
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port int32 `json:"port,omitempty"`
+
+	// ImagePullSecret is the name of the secret in the secret store of the
+	// tenant that holds the Docker config JSON for the registry of Image. The
+	// daemon reads it and the operator writes a pull Secret from it, so the
+	// manifest holds no registry credential (gibson#1536).
+	// +optional
+	ImagePullSecret string `json:"imagePullSecret,omitempty"`
 }
 
 // ConnectorInstancePhase is the scalar lifecycle phase.

@@ -1166,3 +1166,86 @@ func TestDesiredToolHive_HostedCredentialsReachThePodEnv(t *testing.T) {
 		t.Error("no declared credentials must mean no secrets block")
 	}
 }
+
+// A Remote connector sends its credential in the header that the catalog entry
+// names (gibson#1535).
+func TestDesiredToolHive_RemoteCredentialHeader(t *testing.T) {
+	r := &ConnectorInstanceReconciler{ProxyAuth: testProxyAuth}
+	for name, tc := range map[string]struct{ header, want string }{
+		"default": {"", "Authorization"},
+		"tenable": {"X-ApiKeys", "X-ApiKeys"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ci := remoteInstance("tenable", "tenant-acme")
+			ci.Spec.Auth = connectorv1alpha1.ConnectorAuthSecret
+			ci.Spec.CredentialHeader = tc.header
+			th, err := r.desiredToolHive(ci)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hdrs, found, _ := unstructured.NestedSlice(th.Object, "spec", "headerForward", "addHeadersFromSecret")
+			if !found || len(hdrs) != 1 {
+				t.Fatalf("headers = %v", hdrs)
+			}
+			h := hdrs[0].(map[string]interface{})
+			if h["headerName"] != tc.want {
+				t.Errorf("headerName = %v, want %s", h["headerName"], tc.want)
+			}
+			ref := h["valueSecretRef"].(map[string]interface{})
+			if ref["name"] != credentialSecretName("tenable") || ref["key"] != "authorization" {
+				t.Errorf("valueSecretRef = %v", ref)
+			}
+		})
+	}
+}
+
+// A Hosted connector gets its plain variables, arguments, port and pull
+// secret from the ConnectorInstance (gibson#1536).
+func TestDesiredToolHive_HostedConfiguration(t *testing.T) {
+	r := &ConnectorInstanceReconciler{ProxyAuth: testProxyAuth}
+	ci := hostedInstance("aap", "tenant-acme")
+	ci.Spec.Env = map[string]string{"B_VAR": "2", "A_VAR": "1"}
+	ci.Spec.Args = []string{"--read-only", "--flag"}
+	ci.Spec.Port = 3000
+	ci.Spec.ImagePullSecret = "registry-login"
+
+	th, err := r.desiredToolHive(ci)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, _, _ := unstructured.NestedSlice(th.Object, "spec", "env")
+	if len(env) != 2 || env[0].(map[string]interface{})["name"] != "A_VAR" || env[1].(map[string]interface{})["value"] != "2" {
+		t.Errorf("env = %v, want the variables sorted by name", env)
+	}
+	args, _, _ := unstructured.NestedSlice(th.Object, "spec", "args")
+	if len(args) != 2 || args[0] != "--read-only" {
+		t.Errorf("args = %v", args)
+	}
+	if port, _, _ := unstructured.NestedInt64(th.Object, "spec", "mcpPort"); port != 3000 {
+		t.Errorf("mcpPort = %d, want 3000", port)
+	}
+	if proxy, _, _ := unstructured.NestedInt64(th.Object, "spec", "proxyPort"); proxy != int64(proxyPort) {
+		t.Errorf("proxyPort = %d, want the proxy port", proxy)
+	}
+	pulls, _, _ := unstructured.NestedSlice(th.Object, "spec", "podTemplateSpec", "spec", "imagePullSecrets")
+	if len(pulls) != 1 || pulls[0].(map[string]interface{})["name"] != "aap-connector-pull" {
+		t.Errorf("imagePullSecrets = %v", pulls)
+	}
+
+	// With none of the five, the spec holds none of them.
+	bare, err := r.desiredToolHive(hostedInstance("bare", "tenant-acme"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"env", "args", "secrets"} {
+		if _, found, _ := unstructured.NestedSlice(bare.Object, "spec", f); found {
+			t.Errorf("a bare connector has spec.%s", f)
+		}
+	}
+	if port, _, _ := unstructured.NestedInt64(bare.Object, "spec", "mcpPort"); port != int64(proxyPort) {
+		t.Errorf("default mcpPort = %d", port)
+	}
+	if _, found, _ := unstructured.NestedSlice(bare.Object, "spec", "podTemplateSpec", "spec", "imagePullSecrets"); found {
+		t.Error("a bare connector has imagePullSecrets")
+	}
+}

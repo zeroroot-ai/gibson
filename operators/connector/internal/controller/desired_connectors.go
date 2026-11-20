@@ -163,7 +163,8 @@ func (r *DesiredConnectorsRunnable) converge(ctx context.Context) error {
 			report.Phase = string(connectorv1alpha1.ConnectorInstancePhaseFailed)
 			report.LastError = ensureErr.Error()
 		} else {
-			if cerr := r.syncCredential(ctx, d.GetTenantId(), ci); cerr != nil {
+			cerr := r.syncCredential(ctx, d.GetTenantId(), ci)
+			if cerr != nil {
 				// The error names the Secret, never a value.
 				logger.Error(cerr, "connector credential failed", "tenant", d.GetTenantId(), "connector", d.GetConnectorId())
 			}
@@ -172,6 +173,10 @@ func (r *DesiredConnectorsRunnable) converge(ctx context.Context) error {
 				report.Phase = string(connectorv1alpha1.ConnectorInstancePhasePending)
 			}
 			report.LastError = ci.Status.LastError
+			if report.LastError == "" && cerr != nil {
+				// The error names the Secret, never a value.
+				report.LastError = cerr.Error()
+			}
 		}
 		if rerr := r.Daemon.ReportConnectorStatus(ctx, report); rerr != nil {
 			logger.Error(rerr, "report connector status failed", "tenant", d.GetTenantId(), "connector", d.GetConnectorId())
@@ -211,21 +216,34 @@ func (r *DesiredConnectorsRunnable) adopt(ctx context.Context, ci *connectorv1al
 // desiredSpec is the ConnectorInstance spec of a desired connector. It is the
 // spec that componentcatalog.ConnectorEntry.BuildConnectorInstance writes.
 func desiredSpec(d *daemonoperatorv1.DesiredConnector) connectorv1alpha1.ConnectorInstanceSpec {
-	return connectorv1alpha1.ConnectorInstanceSpec{
-		Connector:   d.GetConnectorId(),
-		Shape:       connectorv1alpha1.ConnectorShape(d.GetShape()),
-		Image:       d.GetImage(),
-		Endpoint:    d.GetEndpoint(),
-		Transport:   connectorv1alpha1.ConnectorTransport(d.GetTransport()),
-		Runtime:     connectorv1alpha1.ConnectorRuntimePod,
-		EgressAllow: d.GetEgressAllow(),
-		Auth:        connectorv1alpha1.ConnectorAuthKind(d.GetAuth()),
+	spec := connectorv1alpha1.ConnectorInstanceSpec{
+		Connector:        d.GetConnectorId(),
+		Shape:            connectorv1alpha1.ConnectorShape(d.GetShape()),
+		Image:            d.GetImage(),
+		Endpoint:         d.GetEndpoint(),
+		Transport:        connectorv1alpha1.ConnectorTransport(d.GetTransport()),
+		Runtime:          connectorv1alpha1.ConnectorRuntimePod,
+		EgressAllow:      d.GetEgressAllow(),
+		Auth:             connectorv1alpha1.ConnectorAuthKind(d.GetAuth()),
+		CredentialHeader: d.GetCredentialHeader(),
+		Args:             d.GetArgs(),
+		Port:             d.GetPort(),
+		ImagePullSecret:  d.GetImagePullSecret(),
 	}
+	if len(d.GetEnv()) > 0 {
+		spec.Env = d.GetEnv()
+	}
+	for _, c := range d.GetCredentials() {
+		spec.Credentials = append(spec.Credentials, connectorv1alpha1.CredentialRef{
+			Key: c.GetKey(), Property: c.GetProperty(), TargetEnv: c.GetTargetEnv(),
+		})
+	}
+	return spec
 }
 
-// ensure makes the ConnectorInstance of one desired connector, or brings the
-// fields of the catalog entry up to date on the one that exists. The fields
-// that the catalog does not set (the credential refs) stay as they are.
+// ensure makes the ConnectorInstance of one desired connector, or brings it up
+// to date with the catalog entry. The catalog entry states every field of the
+// spec, so no field of a ConnectorInstance of this loop is kept by hand.
 func (r *DesiredConnectorsRunnable) ensure(
 	ctx context.Context, d *daemonoperatorv1.DesiredConnector,
 ) (*connectorv1alpha1.ConnectorInstance, error) {
@@ -260,7 +278,6 @@ func (r *DesiredConnectorsRunnable) ensure(
 		return nil, fmt.Errorf("ConnectorInstance %s/%s exists and is not managed by %s",
 			ns, ci.Name, connectorOperatorManagedBy)
 	}
-	want.Credentials = ci.Spec.Credentials
 	if !reflect.DeepEqual(ci.Spec, want) {
 		ci.Spec = want
 		ev := audit.ObjectEvent(audit.ActionConnectorApply, ci, map[string]string{"connector": ci.Name, "op": "update"})
@@ -307,8 +324,18 @@ func (r *DesiredConnectorsRunnable) prune(
 func needsCredential(ci *connectorv1alpha1.ConnectorInstance) bool {
 	return ci.Spec.Auth == connectorv1alpha1.ConnectorAuthOAuth ||
 		ci.Spec.Auth == connectorv1alpha1.ConnectorAuthSecret ||
-		len(ci.Spec.Credentials) > 0
+		len(ci.Spec.Credentials) > 0 ||
+		ci.Spec.ImagePullSecret != ""
 }
+
+// dockerConfigKey is the key of the Docker config JSON in the data of a pull
+// Secret. The daemon returns the pull secret of a connector under this key
+// (gibson#1536).
+const dockerConfigKey = corev1.DockerConfigJsonKey
+
+// pullSecretName is the Kubernetes Secret that holds the registry login of
+// one connector.
+func pullSecretName(connector string) string { return connector + "-connector-pull" }
 
 // syncCredential writes the connector-cred Secret of one ConnectorInstance
 // from the daemon (gibson#663), or deletes it when the daemon says that the
@@ -327,9 +354,28 @@ func (r *DesiredConnectorsRunnable) syncCredential(
 			Key: ref.Key, Property: ref.Property, TargetEnv: ref.EnvName(),
 		})
 	}
+	if ci.Spec.ImagePullSecret != "" {
+		req.Credentials = append(req.Credentials, &daemonoperatorv1.ConnectorCredentialRef{
+			Key: ci.Spec.ImagePullSecret, TargetEnv: dockerConfigKey,
+		})
+	}
 	resp, err := r.Daemon.ConnectorCredential(ctx, req)
 	if err != nil {
 		return fmt.Errorf("read the credential of %s/%s: %w", ci.Namespace, ci.Name, err)
+	}
+	// The registry login goes to its own Secret. It never enters the
+	// credential Secret, which ToolHive reads for the pod environment.
+	if pull, ok := resp.GetData()[dockerConfigKey]; ok {
+		if err := r.syncPullSecret(ctx, ci, pull); err != nil {
+			return err
+		}
+		data := make(map[string][]byte, len(resp.GetData()))
+		for k, v := range resp.GetData() {
+			if k != dockerConfigKey {
+				data[k] = v
+			}
+		}
+		resp = &daemonoperatorv1.GetConnectorCredentialResponse{Data: data, Withdraw: resp.GetWithdraw()}
 	}
 	name := credentialSecretName(ci.Name)
 	var live corev1.Secret
@@ -380,6 +426,48 @@ func (r *DesiredConnectorsRunnable) syncCredential(
 		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, sec, func() error {
 			sec.Type = corev1.SecretTypeOpaque
 			sec.Data = resp.GetData()
+			sec.OwnerReferences = []metav1.OwnerReference{owner}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("apply Secret %s/%s: %w", ci.Namespace, name, err)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("the audited write of Secret %s/%s: %w", ci.Namespace, name, err)
+	}
+	return nil
+}
+
+// syncPullSecret writes the pull Secret of a connector from the Docker config
+// JSON that the daemon read from the secret store of the tenant. The Secret
+// has an ownerReference to the ConnectorInstance, so Kubernetes deletes it
+// with the connector. The record names the Secret and never a value.
+func (r *DesiredConnectorsRunnable) syncPullSecret(
+	ctx context.Context, ci *connectorv1alpha1.ConnectorInstance, config []byte,
+) error {
+	name := pullSecretName(ci.Name)
+	owner := metav1.OwnerReference{
+		APIVersion: connectorv1alpha1.GroupVersion.String(),
+		Kind:       "ConnectorInstance",
+		Name:       ci.Name,
+		UID:        ci.UID,
+	}
+	var live corev1.Secret
+	getErr := r.Client.Get(ctx, client.ObjectKey{Namespace: ci.Namespace, Name: name}, &live)
+	if getErr != nil && !apierrors.IsNotFound(getErr) {
+		return fmt.Errorf("read Secret %s/%s: %w", ci.Namespace, name, getErr)
+	}
+	if getErr == nil && reflect.DeepEqual(live.Data, map[string][]byte{dockerConfigKey: config}) &&
+		reflect.DeepEqual(live.OwnerReferences, []metav1.OwnerReference{owner}) {
+		return nil
+	}
+	ev := audit.ObjectEvent(audit.ActionConnectorCredentialWrite, ci,
+		map[string]string{"connector": ci.Name, "secret": name, "keys": dockerConfigKey})
+	if err := r.Audit.Change(ctx, ev, func() error {
+		sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ci.Namespace}}
+		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, sec, func() error {
+			sec.Type = corev1.SecretTypeDockerConfigJson
+			sec.Data = map[string][]byte{dockerConfigKey: config}
 			sec.OwnerReferences = []metav1.OwnerReference{owner}
 			return nil
 		}); err != nil {

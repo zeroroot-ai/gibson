@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
@@ -259,12 +260,14 @@ func TestDesiredConnectors_RefusesAForeignInstance(t *testing.T) {
 	}
 }
 
-// A change of the catalog entry reaches the ConnectorInstance, and the
-// credential refs stay.
-func TestDesiredConnectors_UpdatesTheSpecAndKeepsCredentials(t *testing.T) {
+// A change of the catalog entry reaches the ConnectorInstance, credential refs
+// included. The catalog entry is the one source of the spec (gibson#1536).
+func TestDesiredConnectors_UpdatesTheSpecAndTheCredentials(t *testing.T) {
 	existing := managedCI("tenant-acme", "gitlab", connectorOperatorManagedBy)
-	existing.Spec.Credentials = []connectorv1alpha1.CredentialRef{{Key: "gitlab-token"}}
-	d := &fakeDesiredDaemon{desired: []*daemonoperatorv1.DesiredConnector{gitlabWish("acme")}}
+	existing.Spec.Credentials = []connectorv1alpha1.CredentialRef{{Key: "old-secret"}}
+	wish := gitlabWish("acme")
+	wish.Credentials = []*daemonoperatorv1.ConnectorCredentialRef{{Key: "gitlab-token"}}
+	d := &fakeDesiredDaemon{desired: []*daemonoperatorv1.DesiredConnector{wish}}
 	r, c := desiredLoop(t, d, existing)
 	if err := r.converge(context.Background()); err != nil {
 		t.Fatalf("converge: %v", err)
@@ -273,8 +276,8 @@ func TestDesiredConnectors_UpdatesTheSpecAndKeepsCredentials(t *testing.T) {
 	if ci.Spec.Endpoint != "https://gitlab.com/api/v4/mcp" {
 		t.Errorf("endpoint = %q, want the catalog value", ci.Spec.Endpoint)
 	}
-	if len(ci.Spec.Credentials) != 1 {
-		t.Errorf("credentials = %v, want them kept", ci.Spec.Credentials)
+	if len(ci.Spec.Credentials) != 1 || ci.Spec.Credentials[0].Key != "gitlab-token" {
+		t.Errorf("credentials = %v, want the refs of the catalog", ci.Spec.Credentials)
 	}
 }
 
@@ -343,10 +346,10 @@ func TestDesiredConnectors_WritesTheCredentialSecret(t *testing.T) {
 // The declared credential refs go to the daemon with their env names, and a
 // connector with no auth and no ref asks for nothing.
 func TestDesiredConnectors_CredentialRequestAndNoAuth(t *testing.T) {
-	existing := managedCI("tenant-acme", "gitlab", connectorOperatorManagedBy)
-	existing.Spec.Credentials = []connectorv1alpha1.CredentialRef{{Key: "gitlab-pat", Property: "token", TargetEnv: "GITLAB_PAT"}}
-	d := &fakeDesiredDaemon{desired: []*daemonoperatorv1.DesiredConnector{gitlabWish("acme")}}
-	r, _ := desiredLoop(t, d, existing)
+	wish := gitlabWish("acme")
+	wish.Credentials = []*daemonoperatorv1.ConnectorCredentialRef{{Key: "gitlab-pat", Property: "token", TargetEnv: "GITLAB_PAT"}}
+	d := &fakeDesiredDaemon{desired: []*daemonoperatorv1.DesiredConnector{wish}}
+	r, _ := desiredLoop(t, d)
 	if err := r.converge(context.Background()); err != nil {
 		t.Fatalf("converge: %v", err)
 	}
@@ -383,5 +386,85 @@ func TestDesiredConnectors_CredentialErrorKeepsTheSecret(t *testing.T) {
 	}
 	if sec, ok := credSecret(t, c, "tenant-acme", "gitlab"); !ok || string(sec.Data["authorization"]) != "Bearer t1" {
 		t.Error("a failed read changed the Secret")
+	}
+}
+
+// The five kinds of Hosted configuration reach the ConnectorInstance
+// (gibson#1536).
+func TestDesiredConnectors_HostedConfigurationReachesTheSpec(t *testing.T) {
+	wish := &daemonoperatorv1.DesiredConnector{
+		TenantId: "acme", ConnectorId: "crowdstrike-falcon", Shape: "Hosted", Image: "quay.io/x@sha256:ab",
+		Transport: "stdio", Auth: "none", EgressAllow: []string{"api.crowdstrike.com:443"},
+		Credentials: []*daemonoperatorv1.ConnectorCredentialRef{
+			{Key: "crowdstrike-falcon-client-id", TargetEnv: "FALCON_CLIENT_ID"},
+		},
+		Env: map[string]string{"FALCON_BASE_URL": "https://api.crowdstrike.com"}, Args: []string{"--read-only"},
+		Port: 3000, ImagePullSecret: "registry-login", CredentialHeader: "X-ApiKeys",
+	}
+	d := &fakeDesiredDaemon{desired: []*daemonoperatorv1.DesiredConnector{wish}}
+	r, c := desiredLoop(t, d)
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	ci, ok := getCI(t, c, "tenant-acme", "crowdstrike-falcon")
+	if !ok {
+		t.Fatal("no ConnectorInstance")
+	}
+	sp := ci.Spec
+	if len(sp.Credentials) != 1 || sp.Credentials[0].EnvName() != "FALCON_CLIENT_ID" ||
+		sp.Env["FALCON_BASE_URL"] == "" || len(sp.Args) != 1 || sp.Port != 3000 ||
+		sp.ImagePullSecret != "registry-login" || sp.CredentialHeader != "X-ApiKeys" {
+		t.Errorf("spec = %+v", sp)
+	}
+}
+
+// The registry login goes to its own Secret, never to the credential Secret
+// that ToolHive reads for the pod environment.
+func TestDesiredConnectors_WritesThePullSecret(t *testing.T) {
+	wish := &daemonoperatorv1.DesiredConnector{
+		TenantId: "acme", ConnectorId: "aap", Shape: "Hosted", Image: "registry.example/x@sha256:ab",
+		Transport: "streamable-http", Auth: "none", ImagePullSecret: "registry-login",
+	}
+	d := &fakeDesiredDaemon{
+		desired: []*daemonoperatorv1.DesiredConnector{wish},
+		cred: &daemonoperatorv1.GetConnectorCredentialResponse{Data: map[string][]byte{
+			dockerConfigKey: []byte(`{"auths":{}}`), "API_VALUE": []byte("v"),
+		}},
+	}
+	r, c := desiredLoop(t, d)
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	if len(d.credReqs) != 1 || len(d.credReqs[0].GetCredentials()) != 1 ||
+		d.credReqs[0].GetCredentials()[0].GetKey() != "registry-login" {
+		t.Fatalf("the request did not ask for the pull secret: %v", d.credReqs)
+	}
+	pull := &corev1.Secret{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "tenant-acme", Name: "aap-connector-pull"}, pull); err != nil {
+		t.Fatalf("no pull Secret: %v", err)
+	}
+	if pull.Type != corev1.SecretTypeDockerConfigJson || string(pull.Data[dockerConfigKey]) != `{"auths":{}}` {
+		t.Errorf("pull Secret = %v %v", pull.Type, pull.Data)
+	}
+	sec, ok := credSecret(t, c, "tenant-acme", "aap")
+	if !ok {
+		t.Fatal("no credential Secret")
+	}
+	if _, leaked := sec.Data[dockerConfigKey]; leaked || string(sec.Data["API_VALUE"]) != "v" {
+		t.Errorf("credential Secret = %v", sec.Data)
+	}
+}
+
+// A credential that cannot be read shows in the status of the connector.
+func TestDesiredConnectors_CredentialErrorReachesTheReport(t *testing.T) {
+	wish := gitlabWish("acme")
+	wish.Credentials = []*daemonoperatorv1.ConnectorCredentialRef{{Key: "missing", TargetEnv: "X"}}
+	d := &fakeDesiredDaemon{desired: []*daemonoperatorv1.DesiredConnector{wish}, credErr: errors.New("secret \"missing\" not found")}
+	r, _ := desiredLoop(t, d)
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	if got := d.lastReport(t); !strings.Contains(got.GetLastError(), "missing") {
+		t.Errorf("report = %v, want the error that names the secret", got)
 	}
 }
