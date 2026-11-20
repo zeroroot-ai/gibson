@@ -237,3 +237,57 @@ func TestTargetHash_Golden(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "043ac3433b605c3b8a2a052bc69824b57b09201b314794ad17d73a9c51750767", got)
 }
+
+// A definition fans out when it has a for_each node. A run against more than one
+// target needs one, so the source reports it.
+func TestInboundMissionSource_DefinitionReportsAForEachNode(t *testing.T) {
+	f := newInboundSourceFixture(t)
+	plain, err := f.source.Definition(f.ctx, "recon-def")
+	require.NoError(t, err)
+	assert.False(t, plain.FansOut, "a definition with no for_each node does not fan out")
+
+	conn, err := f.source.pool.For(f.ctx, auth.MustNewTenantID("acme"))
+	require.NoError(t, err)
+	require.NoError(t, mission.NewConnBoundMissionStore(conn.Redis).CreateDefinition(f.ctx, &missionpb.MissionDefinition{
+		Id: "def-fan", Name: "fan-def",
+		Nodes: map[string]*missionpb.MissionNode{
+			"each": {
+				Id: "each", Type: missionpb.NodeType_NODE_TYPE_FOR_EACH,
+				Config: &missionpb.MissionNode_ForEachConfig{ForEachConfig: &missionpb.ForEachNodeConfig{
+					Template: inboundAgentNode("scan", "recon"),
+				}},
+			},
+		},
+	}))
+
+	fan, err := f.source.Definition(f.ctx, "fan-def")
+	require.NoError(t, err)
+	assert.True(t, fan.FansOut)
+	// The agent node of a for_each is its template. A definition of this shape is the
+	// only one that takes more than one target, so its agent must be named, or the
+	// definition could never be published.
+	assert.Equal(t, []string{"recon"}, fan.Agents, "the agent of the for_each template is named")
+}
+
+// A parallel sub-node with no ID is a fault of the definition. The source says so with
+// a typed error, so the publish answers InvalidArgument and not Internal.
+func TestInboundMissionSource_ADefinitionWithAFaultIsTyped(t *testing.T) {
+	f := newInboundSourceFixture(t)
+	conn, err := f.source.pool.For(f.ctx, auth.MustNewTenantID("acme"))
+	require.NoError(t, err)
+	require.NoError(t, mission.NewConnBoundMissionStore(conn.Redis).CreateDefinition(f.ctx, &missionpb.MissionDefinition{
+		Id: "def-bad", Name: "bad-def",
+		Nodes: map[string]*missionpb.MissionNode{
+			"par": {
+				Id: "par", Type: missionpb.NodeType_NODE_TYPE_PARALLEL,
+				Config: &missionpb.MissionNode_ParallelConfig{ParallelConfig: &missionpb.ParallelNodeConfig{
+					SubNodes: []*missionpb.MissionNode{{Name: "no id"}},
+				}},
+			},
+		},
+	}))
+
+	_, err = f.source.Definition(f.ctx, "bad-def")
+
+	require.ErrorIs(t, err, api.ErrInboundDefinitionInvalid)
+}

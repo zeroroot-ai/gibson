@@ -67,6 +67,7 @@ import (
 	agentidentityv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"github.com/zeroroot-ai/sdk/capabilitygrant"
 )
@@ -77,6 +78,9 @@ const (
 	inboundAgent = "e2e-inbound-recon"
 	// inboundUnpublished is an agent that no definition is published for.
 	inboundUnpublished = "e2e-inbound-unpublished"
+	// inboundFanAgent is the agent of a definition with a for_each node, published with
+	// two approved targets.
+	inboundFanAgent    = "e2e-inbound-fan"
 	inboundTimeout     = 6 * time.Minute
 	inboundFindingText = "INBOUND-TYPED-EVIDENCE"
 )
@@ -145,14 +149,15 @@ func (c *inboundClient) token(ctx context.Context, path string) string {
 	return md[capabilitygrant.MetadataHeaderCapabilityGrant]
 }
 
-// call sends one HTTP request to the Edge and returns the status and the body.
-// A client with no signer sends no grant. extra holds more headers.
-func (c *inboundClient) call(
-	ctx context.Context, t *testing.T, method, path string, body []byte, extra map[string]string,
-) (int, []byte) {
-	t.Helper()
+// send sends one HTTP request to the Edge and returns the status, the body and the
+// transport error. A client with no signer sends no grant. extra holds more headers.
+func (c *inboundClient) send(
+	ctx context.Context, method, path string, body []byte, extra map[string]string,
+) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.edge.origin.String()+path, bytes.NewReader(body))
-	require.NoError(t, err)
+	if err != nil {
+		return 0, nil, fmt.Errorf("build the request: %w", err)
+	}
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -163,11 +168,26 @@ func (c *inboundClient) call(
 		req.Header.Set(k, v)
 	}
 	resp, err := c.edge.httpClient().Do(req)
-	require.NoError(t, err, "%s %s", method, path)
+	if err != nil {
+		return 0, nil, fmt.Errorf("%s %s: %w", method, path, err)
+	}
 	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, fmt.Errorf("read the answer of %s %s: %w", method, path, err)
+	}
+	return resp.StatusCode, out, nil
+}
+
+// call is send for a test step that cannot go on without an answer. A transport error
+// fails the test.
+func (c *inboundClient) call(
+	ctx context.Context, t *testing.T, method, path string, body []byte, extra map[string]string,
+) (int, []byte) {
+	t.Helper()
+	status, out, err := c.send(ctx, method, path, body, extra)
 	require.NoError(t, err)
-	return resp.StatusCode, out
+	return status, out
 }
 
 // rpc sends one JSON-RPC call to the A2A endpoint of the agent.
@@ -315,9 +335,15 @@ func (f *inboundFixture) grant(t *testing.T, principalID string) {
 // taskState polls GetTask until the Task has the state, and returns the answer.
 func (f *inboundFixture) waitState(t *testing.T, c *inboundClient, id, want string) rpcResult {
 	t.Helper()
+	return f.waitStateOf(t, c, inboundAgent, id, want)
+}
+
+// waitStateOf is waitState for the Task of another agent.
+func (f *inboundFixture) waitStateOf(t *testing.T, c *inboundClient, agent, id, want string) rpcResult {
+	t.Helper()
 	var last rpcResult
 	helpers.Eventually(t, inboundTimeout, "the Task "+id+" reaches "+want, func() (bool, string) {
-		status, body := c.rpc(f.ctx, t, inboundAgent, "GetTask", `{"id":"`+id+`"}`, nil)
+		status, body := c.rpc(f.ctx, t, agent, "GetTask", `{"id":"`+id+`"}`, nil)
 		if status != http.StatusOK {
 			return false, fmt.Sprintf("HTTP %d: %s", status, body)
 		}
@@ -328,6 +354,42 @@ func (f *inboundFixture) waitState(t *testing.T, c *inboundClient, id, want stri
 		return last.Result.Task.Status.State == want, last.Result.Task.Status.State
 	})
 	return last
+}
+
+// nextWork waits for the next work item of the held agent. A Task that ends before
+// the agent gets work fails the test at once, with the state and the message of the
+// Task. Without this, a mission that failed before it started reads as a timeout of
+// six minutes with no reason.
+func (f *inboundFixture) nextWork(t *testing.T, c *inboundClient, taskID string) *helpers.HeldWork {
+	t.Helper()
+	deadline := time.After(inboundTimeout)
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case w := <-f.agent.Works():
+			return w
+		case <-deadline:
+			t.Fatalf("the agent %s got no work item within %s: the mission never dispatched it", inboundAgent, inboundTimeout)
+		case <-tick.C:
+			// A transport error of one poll is not a failure of the test. The loop tries
+			// again, and the deadline bounds it.
+			getTask := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"GetTask","params":{"id":%q}}`, taskID)
+			status, body, err := c.send(f.ctx, http.MethodPost, "/a2a/inbound/"+inboundAgent, []byte(getTask), nil)
+			if err != nil || status != http.StatusOK {
+				continue
+			}
+			r := decodeTaskRPC(t, body)
+			if r.Result.Task == nil {
+				continue
+			}
+			switch r.Result.Task.Status.State {
+			case "TASK_STATE_FAILED", "TASK_STATE_REJECTED", "TASK_STATE_CANCELED", "TASK_STATE_COMPLETED":
+				t.Fatalf("the Task %s ended with %s before the agent got work: %s",
+					taskID, r.Result.Task.Status.State, body)
+			}
+		}
+	}
 }
 
 // primaryTarget reads the primary target of a mission from the daemon.
@@ -402,8 +464,11 @@ func TestA2AInbound(t *testing.T) {
 	caller, callerID := f.provision(t, "inbound-e2e-caller", ceiling)
 	f.grant(t, callerID)
 	noGrant, _ := f.provision(t, "inbound-e2e-nogrant", ceiling)
-	noCeiling, noCeilingID := f.provision(t, "inbound-e2e-noceiling", nil)
-	f.grant(t, noCeilingID)
+	// An identity with no ceiling is never granted. The grant API refuses an identity
+	// that is not a caller identity, and the capabilities of an identity with no
+	// ceiling come from its relations. ext-authz checks the ceiling before the daemon
+	// reads any grant, so the 403 below is the ceiling check alone.
+	noCeiling, _ := f.provision(t, "inbound-e2e-noceiling", nil)
 	revoked, revokedID := f.provision(t, "inbound-e2e-revoked", ceiling)
 	f.grant(t, revokedID)
 
@@ -434,13 +499,13 @@ func TestA2AInbound(t *testing.T) {
 
 	t.Run("a message starts a mission, and the Task holds the findings", func(t *testing.T) {
 		// The text names a target and a range. The daemon never reads a target from text.
-		id, state := f.startFromMessage(t, caller, sendParams("scan "+f.targets[2]+" and 203.0.113.0/24"))
+		id, state := f.startFromMessage(t, caller, sendParams("scan "+f.targets[2]+" and 203.0.113.0/24", f.targets[0]))
 		require.Equal(t, "TASK_STATE_SUBMITTED", state)
 
-		work := f.agent.Next(t, inboundTimeout)
+		work := f.nextWork(t, caller, id)
 		require.Equal(t, id, work.MissionID, "the agent got work of the mission that the message started")
 		require.Equal(t, f.targets[0], f.primaryTarget(t, id),
-			"a target in the text changes nothing: the mission has the published targets")
+			"a target in the text changes nothing: the mission has the target of the data part")
 		f.waitState(t, caller, id, "TASK_STATE_WORKING") // the World holds the run
 
 		_, err := submitFinding(ctx, f.comp, work.WorkID, evidenceFinding{
@@ -482,7 +547,7 @@ func TestA2AInbound(t *testing.T) {
 	t.Run("a data part narrows the targets, and nothing else does", func(t *testing.T) {
 		id, state := f.startFromMessage(t, caller, sendParams("scan the middle target", f.targets[1]))
 		require.Equal(t, "TASK_STATE_SUBMITTED", state)
-		work := f.agent.Next(t, inboundTimeout)
+		work := f.nextWork(t, caller, id)
 		require.Equal(t, id, work.MissionID)
 		require.Equal(t, f.targets[1], f.primaryTarget(t, id), "the mission has exactly the target of the data part")
 		work.Complete()
@@ -505,14 +570,91 @@ func TestA2AInbound(t *testing.T) {
 		}
 	})
 
+	t.Run("a message with no data part to a definition with no for_each is rejected", func(t *testing.T) {
+		// The definition has three published targets and no for_each node. One run takes
+		// one target, so a message must name it. The Task says so, and no mission starts.
+		status, body := caller.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan everything"), nil)
+		require.Equal(t, http.StatusOK, status, "body: %s", body)
+		r := decodeRPC(t, body)
+		require.Nil(t, r.Error, "body: %s", body)
+		require.NotNil(t, r.Result.Task, "body: %s", body)
+		require.Equal(t, rejectedState, r.Result.Task.Status.State)
+		require.Contains(t, string(body), "no for_each node")
+	})
+
+	t.Run("a definition with a for_each node runs on each approved target", func(t *testing.T) {
+		// The agent node of the definition is the template of a for_each. A message with no
+		// data part runs the mission on both approved targets: the agent gets one work item
+		// for each target, and the Task completes when both end.
+		fanAgent := helpers.StartHeldAgent(ctx, t, f.comp, membership, inboundFanAgent)
+		def := &missionpb.MissionDefinition{
+			Name: helpers.RunName(t, "a2a-inbound-fan"), Description: "a for_each over the approved targets",
+			Nodes: map[string]*missionpb.MissionNode{
+				"each": {
+					Id: "each", Name: "Each", Type: missionpb.NodeType_NODE_TYPE_FOR_EACH,
+					Config: &missionpb.MissionNode_ForEachConfig{ForEachConfig: &missionpb.ForEachNodeConfig{
+						Source: missionpb.ForEachNodeConfig_SOURCE_TARGET_SET,
+						Template: &missionpb.MissionNode{
+							Id: "scan", Name: "Scan", Type: missionpb.NodeType_NODE_TYPE_AGENT,
+							Config: &missionpb.MissionNode_AgentConfig{
+								AgentConfig: &missionpb.AgentNodeConfig{AgentName: inboundFanAgent},
+							},
+						},
+					}},
+				},
+			},
+			EntryPoints: []string{"each"},
+		}
+		created, cerr := clients.Daemon.CreateMissionDefinition(ctx, &daemonpb.CreateMissionDefinitionRequest{Definition: def})
+		require.NoError(t, cerr, "CreateMissionDefinition")
+		_, perr := f.inbound.PublishInboundMission(ctx, &tenantv1.PublishInboundMissionRequest{
+			Agent: inboundFanAgent, MissionDefinitionId: created.GetMissionDefinitionId(),
+			TargetIds: f.targets[:2], MaxActiveMissions: 2,
+		})
+		require.NoError(t, perr, "a definition with its agent in a for_each template can be published")
+		t.Cleanup(func() {
+			c, cancel := context.WithTimeout(auth.ContextWithTenantString(context.Background(), inboundTenant), 30*time.Second)
+			defer cancel()
+			_, _ = f.inbound.UnpublishInboundMission(c, &tenantv1.UnpublishInboundMissionRequest{Agent: inboundFanAgent})
+		})
+		fanCaller, fanCallerID := f.provision(t, "inbound-e2e-fan", ceiling)
+		_, gerr := f.inbound.GrantInboundCaller(ctx, &tenantv1.GrantInboundCallerRequest{
+			Agent: inboundFanAgent, IdentityId: fanCallerID,
+		})
+		require.NoError(t, gerr, "GrantInboundCaller(fan)")
+
+		var id string
+		helpers.Eventually(t, time.Minute, "the fan caller starts a mission", func() (bool, string) {
+			status, body := fanCaller.rpc(ctx, t, inboundFanAgent, "SendMessage", sendParams("scan both"), nil)
+			r := decodeRPC(t, body)
+			if status != http.StatusOK || r.Result.Task == nil {
+				return false, string(body)
+			}
+			id = r.Result.Task.ID
+			return true, ""
+		})
+		// The for_each runs one instance at a time by default, so the second work item
+		// comes after the first ends. Each item is completed as it arrives.
+		for n := 1; n <= 2; n++ {
+			select {
+			case w := <-fanAgent.Works():
+				require.Equal(t, id, w.MissionID, "work item %d is of the mission that the message started", n)
+				w.Complete()
+			case <-time.After(inboundTimeout):
+				t.Fatalf("the agent %s got %d of 2 work items: the mission did not run on each target", inboundFanAgent, n-1)
+			}
+		}
+		f.waitStateOf(t, fanCaller, inboundFanAgent, id, "TASK_STATE_COMPLETED")
+	})
+
 	t.Run("an agent with no published definition is refused", func(t *testing.T) {
 		status, body := caller.rpc(ctx, t, inboundUnpublished, "SendMessage", sendParams("scan"), nil)
 		requireRejected(t, status, body, "an agent that is not published")
 	})
 
 	t.Run("a Task cancel ends the mission and only the mission of the caller", func(t *testing.T) {
-		id, _ := f.startFromMessage(t, caller, sendParams("scan until canceled"))
-		work := f.agent.Next(t, inboundTimeout)
+		id, _ := f.startFromMessage(t, caller, sendParams("scan until canceled", f.targets[0]))
+		work := f.nextWork(t, caller, id)
 		require.Equal(t, id, work.MissionID)
 		f.waitState(t, caller, id, "TASK_STATE_WORKING")
 
@@ -553,7 +695,7 @@ func TestA2AInbound(t *testing.T) {
 		f.grant(t, keeperID)
 		var id string
 		helpers.Eventually(t, time.Minute, "the keeper starts a mission", func() (bool, string) {
-			status, body := keeper.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"), nil)
+			status, body := keeper.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan", f.targets[0]), nil)
 			r := decodeRPC(t, body)
 			if status != http.StatusOK || r.Result.Task == nil {
 				return false, string(body)
@@ -561,7 +703,7 @@ func TestA2AInbound(t *testing.T) {
 			id = r.Result.Task.ID
 			return true, ""
 		})
-		work := f.agent.Next(t, inboundTimeout)
+		work := f.nextWork(t, keeper, id)
 		work.Complete()
 		f.waitState(t, keeper, id, "TASK_STATE_COMPLETED")
 

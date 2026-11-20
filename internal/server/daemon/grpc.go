@@ -635,6 +635,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		}
 		tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source,
 			authorizePeersOrTrainers(tlsconfig.AuthorizeOneOf(allowed...), d.trainerTrustDomain()))
+		// go-spiffe checks the peer in VerifyPeerCertificate, which a Go server does not
+		// call on a resumed session. Each connection does a full handshake.
+		tlsCfg.SessionTicketsDisabled = true
 		d.logger.Info(ctx, "SPIFFE mTLS pinned to allow-list",
 			"envoy_id", envoyID,
 			"additional_peer_ids", d.config.Auth.SPIFFE.AllowedPeerIDs,
