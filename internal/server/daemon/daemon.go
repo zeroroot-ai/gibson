@@ -26,6 +26,7 @@ import (
 	bankengine "github.com/zeroroot-ai/gibson/internal/engine/bank"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/fixloop"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
@@ -1113,6 +1114,21 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		pgstore.New(func() datapool.Pool { return d.pool }),
 		0, // default interval
 		d.logger.WithComponent("finding-record-projector").Slog(),
+	).Run(ctx)
+
+	// The fix loop reads the merge, the deploy and the health signal from the
+	// tools of the tenant. The daemon reads them and no agent states them.
+	connectors := fixloop.NewConnectorReader(d.connectorMCPClient())
+	go NewFixLoopRunner(
+		d.brainRegistry,
+		fixloop.NewWatcher(
+			connectors, connectors,
+			applicationPlacer{querier: func() any { return d.graphragQuerier }},
+			nil, // the default policy until the constraints carry the hold time
+			d.logger.WithComponent("fix-loop").Slog(),
+		),
+		0, // default interval
+		d.logger.WithComponent("fix-loop").Slog(),
 	).Run(ctx)
 
 	// Initialize Redis stores (mission/run stores have been migrated to the

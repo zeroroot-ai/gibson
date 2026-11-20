@@ -1,0 +1,139 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
+package fixloop
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
+)
+
+// The tools that a connector of the tenant serves for the fix loop. A manifest
+// of a Git host, a deploy tool or an observability tool states the tool that
+// it serves. Each tool takes the arguments below and returns a JSON object.
+const (
+	// ToolMergeRequestState takes {merge_request} and returns {state,
+	// pipeline_green, reason, at}.
+	ToolMergeRequestState = "merge_request_state"
+	// ToolDeploymentState takes {merge_request} and returns {deployed,
+	// deployment, application, at, restart: {needed, started, ended}}.
+	ToolDeploymentState = "deployment_state"
+	// ToolHealthSignal takes {application, since, hold_seconds} and returns
+	// {known, done, held, at}.
+	ToolHealthSignal = "health_signal"
+	// ToolRevertMergeRequest takes {merge_request}. It opens a revert merge
+	// request and merges it.
+	ToolRevertMergeRequest = "revert_merge_request"
+)
+
+// ErrNoConnector means that the tenant has no connector that serves the tool.
+var ErrNoConnector = errors.New("fixloop: the tenant has no connector that serves the tool")
+
+// ConnectorCaller is the one MCP client of the daemon. component.ConnectorMCP
+// satisfies it.
+type ConnectorCaller interface {
+	ListConnectorTools(ctx context.Context, tenant string) ([]catalog.ToolEntry, error)
+	CallConnectorTool(ctx context.Context, tenant, connector, tool string, args map[string]any) (any, error)
+}
+
+// ConnectorReader reads the facts of the fix loop through the connectors of
+// the tenant. It implements Reader and Reverter.
+type ConnectorReader struct{ c ConnectorCaller }
+
+var (
+	_ Reader   = (*ConnectorReader)(nil)
+	_ Reverter = (*ConnectorReader)(nil)
+)
+
+// NewConnectorReader builds the reader over the MCP client of the daemon.
+func NewConnectorReader(c ConnectorCaller) *ConnectorReader { return &ConnectorReader{c: c} }
+
+func (r *ConnectorReader) call(ctx context.Context, tenant, tool string, args map[string]any) (map[string]any, error) {
+	tools, err := r.c.ListConnectorTools(ctx, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("list connector tools: %w", err)
+	}
+	var names []string
+	for _, t := range tools {
+		if t.Tool == tool && t.Connector != "" {
+			names = append(names, t.Connector)
+		}
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrNoConnector, tool)
+	}
+	sort.Strings(names)
+	res, err := r.c.CallConnectorTool(ctx, tenant, names[0], tool, args)
+	if err != nil {
+		return nil, fmt.Errorf("call %s: %w", tool, err)
+	}
+	m, ok := res.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("call %s: the result is %T, not an object", tool, res)
+	}
+	return m, nil
+}
+
+// MergeRequest implements Reader.
+func (r *ConnectorReader) MergeRequest(ctx context.Context, tenant, key string) (MergeFact, error) {
+	m, err := r.call(ctx, tenant, ToolMergeRequestState, map[string]any{"merge_request": key})
+	if err != nil {
+		return MergeFact{}, err
+	}
+	f := MergeFact{State: str(m, "state"), PipelineGreen: boolean(m, "pipeline_green"), Reason: str(m, "reason"), At: when(m, "at")}
+	switch f.State {
+	case MROpen, MRMerged, MRClosed, MRRefused:
+		return f, nil
+	}
+	return MergeFact{}, fmt.Errorf("merge request state %q is not known", f.State)
+}
+
+// Deploy implements Reader.
+func (r *ConnectorReader) Deploy(ctx context.Context, tenant, mergeRequest string) (DeployFact, error) {
+	m, err := r.call(ctx, tenant, ToolDeploymentState, map[string]any{"merge_request": mergeRequest})
+	if err != nil {
+		return DeployFact{}, err
+	}
+	d := DeployFact{
+		Deployed: boolean(m, "deployed"), DeploymentKey: str(m, "deployment"),
+		ApplicationKey: str(m, "application"), At: when(m, "at"),
+	}
+	if rm, ok := m["restart"].(map[string]any); ok {
+		d.Restart = RestartFact{Needed: boolean(rm, "needed"), Started: when(rm, "started"), Ended: when(rm, "ended")}
+	}
+	return d, nil
+}
+
+// Health implements Reader.
+func (r *ConnectorReader) Health(ctx context.Context, tenant, application string, since time.Time, hold time.Duration) (HealthFact, error) {
+	m, err := r.call(ctx, tenant, ToolHealthSignal, map[string]any{
+		"application": application, "since": since.UTC().Format(time.RFC3339), "hold_seconds": int64(hold / time.Second),
+	})
+	if err != nil {
+		return HealthFact{}, err
+	}
+	return HealthFact{Known: boolean(m, "known"), Done: boolean(m, "done"), Held: boolean(m, "held"), At: when(m, "at")}, nil
+}
+
+// Revert implements Reverter.
+func (r *ConnectorReader) Revert(ctx context.Context, tenant, mergeRequest string) error {
+	_, err := r.call(ctx, tenant, ToolRevertMergeRequest, map[string]any{"merge_request": mergeRequest})
+	return err
+}
+
+func str(m map[string]any, k string) string { s, _ := m[k].(string); return s }
+
+func boolean(m map[string]any, k string) bool { b, _ := m[k].(bool); return b }
+
+func when(m map[string]any, k string) time.Time {
+	t, err := time.Parse(time.RFC3339, str(m, k))
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
+}
