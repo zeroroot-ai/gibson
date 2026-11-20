@@ -633,18 +633,16 @@ func TestA2AInbound(t *testing.T) {
 			id = r.Result.Task.ID
 			return true, ""
 		})
-		works := make([]*helpers.HeldWork, 0, 2)
-		for range 2 {
+		// The for_each runs one instance at a time by default, so the second work item
+		// comes after the first ends. Each item is completed as it arrives.
+		for n := 1; n <= 2; n++ {
 			select {
 			case w := <-fanAgent.Works():
-				require.Equal(t, id, w.MissionID)
-				works = append(works, w)
+				require.Equal(t, id, w.MissionID, "work item %d is of the mission that the message started", n)
+				w.Complete()
 			case <-time.After(inboundTimeout):
-				t.Fatalf("the agent %s got %d of 2 work items: the mission did not run on each target", inboundFanAgent, len(works))
+				t.Fatalf("the agent %s got %d of 2 work items: the mission did not run on each target", inboundFanAgent, n-1)
 			}
-		}
-		for _, w := range works {
-			w.Complete()
 		}
 		f.waitStateOf(t, fanCaller, inboundFanAgent, id, "TASK_STATE_COMPLETED")
 	})
