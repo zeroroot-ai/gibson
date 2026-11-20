@@ -28,12 +28,7 @@ func TestTechniqueType_String(t *testing.T) {
 		tt       TechniqueType
 		expected string
 	}{
-		{"prompt_injection", TechniquePromptInjection, "prompt_injection"},
-		{"jailbreak", TechniqueJailbreak, "jailbreak"},
-		{"extraction", TechniqueExtraction, "extraction"},
 		{"dos", TechniqueDoS, "dos"},
-		{"poisoning", TechniquePoisoning, "poisoning"},
-		{"evasion", TechniqueEvasion, "evasion"},
 		{"reconnaissance", TechniqueReconnaissance, "reconnaissance"},
 		{"initial_access", TechniqueInitialAccess, "initial_access"},
 		{"credential_access", TechniqueCredentialAccess, "credential_access"},
@@ -51,23 +46,18 @@ func TestTechniqueType_String(t *testing.T) {
 }
 
 // TestAllTechniqueTypes tests that AllTechniqueTypes returns exactly the
-// eleven seed values — this is the seed coreCategories() in
+// six seed values — this is the seed coreCategories() in
 // internal/engine/taxonomy/technique.go builds GlobalTechniques from.
 func TestAllTechniqueTypes(t *testing.T) {
 	all := AllTechniqueTypes()
 
-	const expected = 11
+	const expected = 6
 	if len(all) != expected {
 		t.Errorf("AllTechniqueTypes() returned %d types, want %d", len(all), expected)
 	}
 
 	want := map[TechniqueType]bool{
-		TechniquePromptInjection:     true,
-		TechniqueJailbreak:           true,
-		TechniqueExtraction:          true,
 		TechniqueDoS:                 true,
-		TechniquePoisoning:           true,
-		TechniqueEvasion:             true,
 		TechniqueReconnaissance:      true,
 		TechniqueInitialAccess:       true,
 		TechniqueCredentialAccess:    true,

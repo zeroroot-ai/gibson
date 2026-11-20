@@ -131,7 +131,6 @@ func wantMainPack() DomainPack {
 			"credential_disclosure_detected":   `evidence.exists(e, regexMatch(evidenceText(e), "(?i)(api[_-]?key|password|secret)\\s*[:=]\\s*\\S+"))`,
 			"node_token_readable":              `evidence.exists(e, regexMatch(evidenceText(e), r'/var/lib/kubelet/pods/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/volumes/kubernetes\.io~projected/') && regexMatch(evidenceText(e), r'eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'))`,
 			"privileged_container_detected":    `evidence.exists(e, regexMatch(evidenceText(e), r'(?m)^CapEff:\s*0*[0-9a-f]?f{9,}\s*$'))`,
-			"prompt_injection_marker_present":  `markerPresent(evidence, "SYSTEM_PROMPT_LEAKED")`,
 			"rbac_write_access_proven":         `evidence.exists(e, httpStatus(e) == 201 && regexMatch(evidenceText(e), r'\\?"kind\\?"\s*:\s*\\?"ConfigMap\\?"') && regexMatch(evidenceText(e), r'\\?"name\\?"\s*:\s*\\?"gibson-proof-[a-z0-9]+\\?"'))`,
 			"unauthenticated_endpoint_exposed": `evidence.exists(e, httpStatus(e) == 200)`,
 		},
@@ -143,7 +142,6 @@ func wantMainPack() DomainPack {
 			"credential_disclosure_detected":   "credential_access",
 			"node_token_readable":              "credential_access",
 			"privileged_container_detected":    "privilege_escalation",
-			"prompt_injection_marker_present":  "prompt_injection",
 			"rbac_write_access_proven":         "privilege_escalation",
 			"unauthenticated_endpoint_exposed": "initial_access",
 		},
@@ -172,7 +170,6 @@ func wantMainPack() DomainPack {
 			"credential_disclosure_detected",
 			"node_token_readable",
 			"privileged_container_detected",
-			"prompt_injection_marker_present",
 			"unauthenticated_endpoint_exposed",
 		},
 	}
