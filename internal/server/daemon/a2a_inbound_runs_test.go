@@ -1217,3 +1217,17 @@ func TestInboundRuns_ADefinitionWithNoForEachTakesOneTarget(t *testing.T) {
 	assert.Equal(t, a2a.TaskStateSubmitted, one.Status.State)
 	assert.Len(t, starter.started, 1)
 }
+
+// A definition with a fault of its own gives a rejected Task at message time, and not an
+// internal error.
+func TestInboundRuns_ADefinitionWithAFaultGivesARejectedTask(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	r.source.(*fakePinSource).defErr = fmt.Errorf("%w: sub-node missing id", api.ErrInboundDefinitionInvalid)
+
+	task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("scan")))
+
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateRejected, task.Status.State)
+	assert.Empty(t, starter.started)
+}

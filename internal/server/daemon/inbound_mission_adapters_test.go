@@ -263,4 +263,31 @@ func TestInboundMissionSource_DefinitionReportsAForEachNode(t *testing.T) {
 	fan, err := f.source.Definition(f.ctx, "fan-def")
 	require.NoError(t, err)
 	assert.True(t, fan.FansOut)
+	// The agent node of a for_each is its template. A definition of this shape is the
+	// only one that takes more than one target, so its agent must be named, or the
+	// definition could never be published.
+	assert.Equal(t, []string{"recon"}, fan.Agents, "the agent of the for_each template is named")
+}
+
+// A parallel sub-node with no ID is a fault of the definition. The source says so with
+// a typed error, so the publish answers InvalidArgument and not Internal.
+func TestInboundMissionSource_ADefinitionWithAFaultIsTyped(t *testing.T) {
+	f := newInboundSourceFixture(t)
+	conn, err := f.source.pool.For(f.ctx, auth.MustNewTenantID("acme"))
+	require.NoError(t, err)
+	require.NoError(t, mission.NewConnBoundMissionStore(conn.Redis).CreateDefinition(f.ctx, &missionpb.MissionDefinition{
+		Id: "def-bad", Name: "bad-def",
+		Nodes: map[string]*missionpb.MissionNode{
+			"par": {
+				Id: "par", Type: missionpb.NodeType_NODE_TYPE_PARALLEL,
+				Config: &missionpb.MissionNode_ParallelConfig{ParallelConfig: &missionpb.ParallelNodeConfig{
+					SubNodes: []*missionpb.MissionNode{{Name: "no id"}},
+				}},
+			},
+		},
+	}))
+
+	_, err = f.source.Definition(f.ctx, "bad-def")
+
+	require.ErrorIs(t, err, api.ErrInboundDefinitionInvalid)
 }

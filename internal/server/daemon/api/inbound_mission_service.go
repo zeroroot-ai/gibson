@@ -27,6 +27,10 @@ var (
 	// ErrInboundDefinitionNotFound marks a mission definition that the tenant
 	// does not have.
 	ErrInboundDefinitionNotFound = errors.New("the mission definition does not exist")
+	// ErrInboundDefinitionInvalid marks a definition that has a fault of its own, for
+	// example a parallel sub-node with no ID. It is the fault of the definition and
+	// not of the daemon.
+	ErrInboundDefinitionInvalid = errors.New("the mission definition is not valid")
 	// ErrInboundTargetNotFound marks a target that the tenant does not have.
 	ErrInboundTargetNotFound = errors.New("the target does not exist")
 )
@@ -66,29 +70,31 @@ type InboundMissionSource interface {
 // An error is a failure to read, and it is not a mismatch.
 func InboundStaleReason(
 	ctx context.Context, source InboundMissionSource, e inboundmissionstore.Entry, targetIDs []string,
-) (string, error) {
+) (string, InboundDefinition, error) {
 	def, err := source.Definition(ctx, e.DefinitionID)
 	switch {
 	case errors.Is(err, ErrInboundDefinitionNotFound):
-		return "the mission definition was deleted", nil
+		return "the mission definition was deleted", InboundDefinition{}, nil
+	case errors.Is(err, ErrInboundDefinitionInvalid):
+		return "the mission definition is not valid", InboundDefinition{}, nil
 	case err != nil:
-		return "", fmt.Errorf("read the definition: %w", err)
+		return "", InboundDefinition{}, fmt.Errorf("read the definition: %w", err)
 	case def.ID != e.DefinitionID || def.Hash != e.DefinitionHash:
-		return "the mission definition changed after it was published", nil
+		return "the mission definition changed after it was published", def, nil
 	}
 	hashes, err := source.TargetHashes(ctx, targetIDs)
 	switch {
 	case errors.Is(err, ErrInboundTargetNotFound):
-		return "an approved target was deleted", nil
+		return "an approved target was deleted", def, nil
 	case err != nil:
-		return "", fmt.Errorf("read the targets: %w", err)
+		return "", InboundDefinition{}, fmt.Errorf("read the targets: %w", err)
 	}
 	for _, id := range targetIDs {
 		if hashes[id] != e.TargetHashes[id] {
-			return "an approved target changed after it was published", nil
+			return "an approved target changed after it was published", def, nil
 		}
 	}
-	return "", nil
+	return "", def, nil
 }
 
 // InboundIdentities reads the Capability Grant record of an agent identity.
@@ -281,6 +287,8 @@ func (s *InboundMissionService) PublishInboundMission(
 	switch {
 	case errors.Is(err, ErrInboundDefinitionNotFound):
 		return nil, status_grpc.Error(codes.NotFound, rpc+": "+err.Error())
+	case errors.Is(err, ErrInboundDefinitionInvalid):
+		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
 	case err != nil:
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: read the definition: %v", rpc, err))
 	case def.ID == "" || def.Hash == "":
@@ -351,7 +359,7 @@ func (s *InboundMissionService) ListInboundMissions(
 		Entries: make([]*tenantv1.InboundMissionEntry, 0, len(entries)), NextPageToken: next,
 	}
 	for _, e := range entries {
-		reason, rerr := InboundStaleReason(ctx, s.source, e, e.TargetIDs)
+		reason, _, rerr := InboundStaleReason(ctx, s.source, e, e.TargetIDs)
 		if rerr != nil {
 			return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: check %s: %v", rpc, e.Agent, rerr))
 		}

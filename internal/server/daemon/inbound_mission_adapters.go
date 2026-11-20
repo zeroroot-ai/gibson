@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"google.golang.org/grpc"
 
@@ -123,19 +125,25 @@ func (s *inboundMissionSource) Definition(ctx context.Context, definitionID stri
 	}
 	flat, err := flattenParallel(def)
 	if err != nil {
-		return api.InboundDefinition{}, fmt.Errorf("read the nodes of the definition: %w", err)
+		// A sub-node with no ID is a fault of the definition, not of the daemon.
+		return api.InboundDefinition{}, fmt.Errorf("%w: %w", api.ErrInboundDefinitionInvalid, err)
 	}
 	out := api.InboundDefinition{ID: def.GetId(), Hash: hash}
+	names := map[string]struct{}{}
 	for _, node := range flat {
 		if node.GetType() == missionpb.NodeType_NODE_TYPE_FOR_EACH {
 			out.FansOut = true
+			// The agent node of a for_each is its template, and the template is not
+			// in the flat set.
+			if name := node.GetForEachConfig().GetTemplate().GetAgentConfig().GetAgentName(); name != "" {
+				names[name] = struct{}{}
+			}
 		}
-	}
-	for _, node := range def.GetNodes() {
 		if name := node.GetAgentConfig().GetAgentName(); name != "" {
-			out.Agents = append(out.Agents, name)
+			names[name] = struct{}{}
 		}
 	}
+	out.Agents = slices.Sorted(maps.Keys(names))
 	return out, nil
 }
 

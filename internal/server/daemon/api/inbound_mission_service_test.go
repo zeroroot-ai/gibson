@@ -965,3 +965,14 @@ func TestPublishInboundMission_TheOwnerTupleIsPartOfThePublish(t *testing.T) {
 	_, stored := f.store.entries["recon"]
 	assert.False(t, stored, "the failed owner write leaves no record")
 }
+
+// A definition with a fault of its own is an invalid argument to the publish, and not
+// an internal error.
+func TestPublishInboundMission_ADefinitionWithAFaultIsInvalidArgument(t *testing.T) {
+	f := newInboundFixture(t)
+	f.source.defErr = fmt.Errorf("%w: sub-node missing id", ErrInboundDefinitionInvalid)
+
+	_, err := f.svc.PublishInboundMission(f.ctx, pub("recon", "def-1", goodTarget))
+
+	assert.Equal(t, codes.InvalidArgument, code(err))
+}
