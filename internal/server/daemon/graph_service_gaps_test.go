@@ -100,3 +100,15 @@ func TestFindingProperties_ListsTheStringsAndTheVerifiedActors(t *testing.T) {
 	}, findingProperties(f))
 	assert.Empty(t, findingProperties(finding.EnhancedFinding{}))
 }
+
+func TestFindingProperties_CarriesTheLifecycleFieldsOfTheRecord(t *testing.T) {
+	f := finding.EnhancedFinding{
+		Finding:      agent.Finding{Confidence: 0.75},
+		Status:       finding.FindingStatus("fixing"),
+		Priority:     finding.PriorityP2,
+		PriorityRule: "kev",
+	}
+	assert.Equal(t, map[string]string{
+		"status": "fixing", "priority": "P2", "priority_rule": "kev", "confidence": "0.75",
+	}, findingProperties(f))
+}

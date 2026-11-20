@@ -1701,7 +1701,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), brain.BeliefSystem)
 		wireBrainRegistry(ctx, d.brainRegistry, d.tenantBeliefs, beliefSchemaRegistry)
 	}
-	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog(), pageKeys))
+	worldpb.RegisterWorldServiceServer(srv, d.blueTeamWorldServer(
+		NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog(), pageKeys)))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
 
 	// Register gibson.tenant.v1.DomainPackService — the per-tenant Domain

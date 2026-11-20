@@ -1,0 +1,219 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
+)
+
+var blueT0 = time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+
+func blueAt(h int) time.Time { return blueT0.Add(time.Duration(h) * time.Hour) }
+
+func newBlueServer(t *testing.T, now time.Time) (*worldServer, *brain.Registry) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
+	srv.blue.now = func() time.Time { return now }
+	return srv, reg
+}
+
+func submit(t *testing.T, reg *brain.Registry, tenant string, evs ...brain.Event) {
+	t.Helper()
+	for _, ev := range evs {
+		require.NoError(t, reg.For(tenant).SubmitAndWait(context.Background(), ev))
+	}
+}
+
+func TestListOpenFindings_RanksAndLeavesOutVerified(t *testing.T) {
+	srv, reg := newBlueServer(t, blueAt(10))
+	srv.blue.places = func(_ context.Context, tenant, id string) ([]component.Place, error) {
+		require.Equal(t, "acme", tenant)
+		return []component.Place{{Label: component.PlaceApplication, Key: "app-" + id}}, nil
+	}
+	srv.blue.confidence = func(_ context.Context, _, id string) (float64, bool, error) { return 0.9, id == "p1", nil }
+	submit(t, reg, "acme",
+		brain.FindingRaised{ID: "p2", Title: "b", ScopeID: "s", Severity: "critical", Address: "h"},
+		brain.FindingRaised{ID: "p1", Title: "a", ScopeID: "s", Severity: "low", Address: "h"},
+		brain.FindingRaised{ID: "done", Title: "c", ScopeID: "s", Severity: "high", Address: "h"},
+		brain.FindingPrioritized{ID: "p2", Priority: "P2", Rule: "r2"},
+		brain.FindingPrioritized{ID: "p1", Priority: "P1", Rule: "r1"},
+		brain.FindingStatusChanged{ID: "p1", Status: brain.FindingStatusFixing, MergeRequest: "https://git.example/mr/1", At: blueAt(1)},
+		brain.FindingStatusChanged{ID: "done", Status: brain.FindingStatusVerified, At: blueAt(1)},
+	)
+	// Another tenant has a finding that this caller must not see.
+	submit(t, reg, "other", brain.FindingRaised{ID: "foreign", Title: "x", ScopeID: "s", Severity: "critical"})
+
+	resp, err := srv.ListOpenFindings(worldTenantCtx("acme"), &worldpb.ListOpenFindingsRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetFindings(), 2)
+	first, second := resp.Findings[0], resp.Findings[1]
+	require.Equal(t, "p1", first.Id)
+	require.Equal(t, "p2", second.Id)
+	require.Equal(t, "P1", first.Priority)
+	require.Equal(t, "r1", first.PriorityRule)
+	require.Equal(t, "fixing", first.Status)
+	require.Equal(t, "https://git.example/mr/1", first.MergeRequestUrl)
+	require.InDelta(t, 0.9, first.Confidence, 1e-9)
+	require.Zero(t, second.Confidence, "no row, so no confidence")
+	require.Len(t, first.Places, 1)
+	require.Equal(t, "app-p1", first.Places[0].Key)
+}
+
+func TestListOpenFindings_Pages(t *testing.T) {
+	srv, reg := newBlueServer(t, blueAt(10))
+	for _, id := range []string{"a", "b", "c"} {
+		submit(t, reg, "acme", brain.FindingRaised{ID: id, Title: id, ScopeID: "s", Severity: "high", Address: "h"})
+	}
+	ctx := worldTenantCtx("acme")
+	var seen []string
+	token := ""
+	for range 5 {
+		resp, err := srv.ListOpenFindings(ctx, &worldpb.ListOpenFindingsRequest{PageSize: 2, PageToken: token})
+		require.NoError(t, err)
+		for _, f := range resp.Findings {
+			seen = append(seen, f.Id)
+		}
+		if token = resp.NextPageToken; token == "" {
+			break
+		}
+	}
+	require.ElementsMatch(t, []string{"a", "b", "c"}, seen)
+}
+
+func exposureRig(t *testing.T) (*worldServer, context.Context) {
+	t.Helper()
+	srv, reg := newBlueServer(t, blueAt(10))
+	submit(t, reg, "acme",
+		brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high", At: blueAt(0)},
+		brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", At: blueAt(1)},
+		brain.MergeRequestObserved{Key: "mr-1", State: brain.MergeRequestMerged, At: blueAt(2)},
+		brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusVerified, At: blueAt(4)},
+	)
+	return srv, worldTenantCtx("acme")
+}
+
+func TestGetExposure(t *testing.T) {
+	srv, ctx := exposureRig(t)
+	one, err := srv.GetExposure(ctx, &worldpb.GetExposureRequest{FindingId: "f1"})
+	require.NoError(t, err)
+	require.True(t, one.Found)
+	require.True(t, one.Verified)
+	require.EqualValues(t, 4*3600, one.TotalSeconds)
+	require.EqualValues(t, one.TotalSeconds, one.WaitSeconds+one.AgentSeconds)
+
+	missing, err := srv.GetExposure(ctx, &worldpb.GetExposureRequest{FindingId: "nope"})
+	require.NoError(t, err)
+	require.False(t, missing.Found)
+}
+
+func TestGetExposure_NoTenant(t *testing.T) {
+	srv, _ := exposureRig(t)
+	_, err := srv.GetExposure(context.Background(), &worldpb.GetExposureRequest{FindingId: "f1"})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
+func TestGetExposureTrend(t *testing.T) {
+	srv, ctx := exposureRig(t)
+	trend, err := srv.GetExposureTrend(ctx, &worldpb.GetExposureTrendRequest{})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, trend.Count)
+	require.EqualValues(t, 4*3600, trend.MedianSeconds)
+
+	// Another tenant sees none of it.
+	other, err := srv.GetExposureTrend(worldTenantCtx("other"), &worldpb.GetExposureTrendRequest{})
+	require.NoError(t, err)
+	require.Zero(t, other.Count)
+}
+
+func TestGetExposureTrend_NoTenant(t *testing.T) {
+	srv, _ := exposureRig(t)
+	_, err := srv.GetExposureTrend(context.Background(), &worldpb.GetExposureTrendRequest{})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
+func TestGetRevertRate(t *testing.T) {
+	srv, ctx := exposureRig(t)
+	rate, err := srv.GetRevertRate(ctx, &worldpb.GetRevertRateRequest{})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, rate.Current.Merged)
+	require.Zero(t, rate.Current.Reverted)
+}
+
+func TestListWaitingOnPerson(t *testing.T) {
+	srv, reg := newBlueServer(t, blueAt(6))
+	submit(t, reg, "acme",
+		brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"},
+		brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", At: blueAt(1)},
+		brain.MergeRequestObserved{Key: "mr-1", State: brain.MergeRequestRefused, At: blueAt(2)},
+	)
+	resp, err := srv.ListWaitingOnPerson(worldTenantCtx("acme"), &worldpb.ListWaitingOnPersonRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	require.Equal(t, "merge_refused", resp.Items[0].Kind)
+	require.EqualValues(t, 4*3600, resp.Items[0].WaitedSeconds)
+}
+
+func TestListActionsByGrant(t *testing.T) {
+	srv, _ := newBlueServer(t, blueAt(10))
+
+	// No source wired is Unavailable and never an empty answer.
+	_, err := srv.ListActionsByGrant(worldTenantCtx("acme"), &worldpb.ListActionsByGrantRequest{})
+	require.Equal(t, codes.Unavailable, status.Code(err))
+
+	md := func(m map[string]any) json.RawMessage { b, _ := json.Marshal(m); return b }
+	srv.blue.actions = func(_ context.Context, tenant string, from, to time.Time) ([]audit.PgEntry, []audit.PgEntry, bool, error) {
+		require.Equal(t, "acme", tenant)
+		require.True(t, to.Equal(blueAt(5)))
+		require.True(t, from.Equal(blueAt(1)))
+		return []audit.PgEntry{
+				{Action: "connector.tool.call", ActorID: "agent:a1", TargetID: "gitlab", CreatedAt: blueAt(2),
+					Metadata: md(map[string]any{"result": "success", "details": map[string]string{"tool": "merge"}})},
+				{Action: "connector.tool.call", ActorID: "agent:a2", TargetID: "gitlab", CreatedAt: blueAt(3),
+					Metadata: md(map[string]any{"result": "failure", "details": map[string]string{"error": "unauthorized"}})},
+			}, []audit.PgEntry{
+				{Action: "agent_grant_added", ActorID: "user:ann", TargetID: "agent:a1", CreatedAt: blueAt(0),
+					Metadata: md(map[string]any{"object": authz.ConnectorComponentObject("gitlab"), "relation": "can_execute"})},
+			}, false, nil
+	}
+	resp, err := srv.ListActionsByGrant(worldTenantCtx("acme"), &worldpb.ListActionsByGrantRequest{
+		From: timestamppb.New(blueAt(1)), To: timestamppb.New(blueAt(5)),
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Groups, 2)
+	require.Equal(t, "user:ann", resp.Groups[0].Grantor)
+	require.False(t, resp.Groups[0].Refused)
+	require.True(t, resp.Groups[1].Refused)
+	require.Equal(t, authz.ConnectorComponentObject("gitlab"), resp.Groups[1].GrantObject)
+}
+
+func TestBlueTeamReadsRefuseACallerWithNoTenant(t *testing.T) {
+	srv, _ := newBlueServer(t, blueAt(10))
+	ctx := context.Background()
+	_, err := srv.ListOpenFindings(ctx, &worldpb.ListOpenFindingsRequest{})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	_, err = srv.GetRevertRate(ctx, &worldpb.GetRevertRateRequest{})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	_, err = srv.ListWaitingOnPerson(ctx, &worldpb.ListWaitingOnPersonRequest{})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	_, err = srv.ListActionsByGrant(ctx, &worldpb.ListActionsByGrantRequest{})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+}

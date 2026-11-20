@@ -2528,6 +2528,20 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.world.v1.WorldService/GetExposure":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.world.v1.WorldService/GetExposureTrend":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.world.v1.WorldService/GetFrameAt":
     relation: "member"
     object_type: "tenant"
@@ -2549,7 +2563,21 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.world.v1.WorldService/GetRevertRate":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.world.v1.WorldService/GetTimeline":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.world.v1.WorldService/ListActionsByGrant":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -2598,6 +2626,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.world.v1.WorldService/ListOpenFindings":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.world.v1.WorldService/ListProofReviews":
     relation: "member"
     object_type: "tenant"
@@ -2606,6 +2641,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.world.v1.WorldService/ListReviewQueue":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.world.v1.WorldService/ListWaitingOnPerson":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
