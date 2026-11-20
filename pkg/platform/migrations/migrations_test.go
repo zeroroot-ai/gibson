@@ -37,27 +37,27 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 
 func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	t.Parallel()
-	// 25: 020 is bootstrap-token-consumption, 021 is signup-verification
+	// 49: 020 is bootstrap-token-consumption, 021 is signup-verification
 	// (gibson#1228, merged), 022 is audit_log hash chain, 023 indexes
 	// capability_grant_agents(tenant_id, principal_ref) for the mission:delegate
 	// / mission:originate capability check (gibson#1186 slice C), 024 adds the
 	// admin-approval registration rung's state (ADR-0074, gibson#22), 025 adds
-	// tenant_quotas.concurrent_connectors, which the entitlements reader
-	// selects (gibson#13), 026 adds component_install.principal_ref, the FGA
-	// user a component registered as, which the secret-binding admin RPCs
-	// address (gibson#154), 027 makes tenant_zitadel_orgs.zitadel_org_id
+	// tenant_quotas.concurrent_connectors (gibson#13), 026 adds
+	// component_install.principal_ref, the FGA user a component registered
+	// as, which the secret-binding admin RPCs address (gibson#154), 027 makes tenant_zitadel_orgs.zitadel_org_id
 	// unique so ext-authz's org->tenant lookup is unambiguous (ADR-0093
 	// decision 4, hosted#195), 028 drops connector_sandbox and
-	// webhook_idempotency, which no Go code read (gibson#506), and 041 drops
-	// the three component_install columns the plugin manifest fed (sdk#129).
+	// webhook_idempotency, which no Go code read (gibson#506), 041 drops
+	// the three component_install columns the plugin manifest fed (sdk#129),
+	// and 049 drops tenant_quotas, which no code reads (gibson#1530).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 48 {
-		t.Errorf("platform: expected 48 up.sql files, got %d", upCount)
+	if upCount != 49 {
+		t.Errorf("platform: expected 49 up.sql files, got %d", upCount)
 	}
-	if downCount != 48 {
-		t.Errorf("platform: expected 48 down.sql files, got %d", downCount)
+	if downCount != 49 {
+		t.Errorf("platform: expected 49 down.sql files, got %d", downCount)
 	}
 }
 
@@ -122,7 +122,7 @@ func TestTenantMaxVersion(t *testing.T) {
 //
 //	001 — tenant_secrets_broker_config
 //	002 — plugin_install
-//	003 — tenant_quotas_simplify
+//	003 — tenant_quotas_simplify (dropped by 049)
 //	004 — tenant_id_text (UUID → TEXT, gibson#99)
 //	...
 //	011 — component_install (ADR-0046)
@@ -142,13 +142,15 @@ func TestTenantMaxVersion(t *testing.T) {
 //	      capability check, gibson#1186 slice C)
 //	024 — signup_admin_approval (the ADR-0074 approval registration rung: a
 //	      deactivated owner account plus an attributable decision, gibson#22)
-//	025 — add_concurrent_connectors_to_tenant_quotas (the entitlements reader's
-//	      ceiling, gibson#13)
+//	025 — add_concurrent_connectors_to_tenant_quotas (gibson#13; table dropped
+//	      by 049)
 //	026 — component_install_principal_ref (the FGA user a component registered
 //	      as, which the secret-binding admin RPCs address, gibson#154)
 //	027 — tenant_zitadel_orgs_org_unique (one Zitadel org maps to at most one
 //	      tenant, so ext-authz's org->tenant lookup is unambiguous, ADR-0093
 //	      decision 4, hosted#195)
+//	...
+//	049 — drop_tenant_quotas (no code reads the plan quotas, gibson#1530)
 //
 // The sequence must stay CONTIGUOUS. golang-migrate records a single integer
 // version, and `up` only ever moves forward from it — so a migration that lands
@@ -162,8 +164,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 48 {
-		t.Errorf("PlatformMaxVersion: got %d, want 48", v)
+	if v != 49 {
+		t.Errorf("PlatformMaxVersion: got %d, want 49", v)
 	}
 }
 

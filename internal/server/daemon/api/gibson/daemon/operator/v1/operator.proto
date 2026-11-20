@@ -21,29 +21,14 @@ service DaemonOperatorService {
   // ---------------------------------------------------------------------------
   // Entitlements — operator RPCs called by the tenant-operator reconciler
   // ---------------------------------------------------------------------------
+  //
+  // gibson#1530 removed the RPCs UpsertTenantQuota and ListFeatureTuples and
+  // their messages. Protobuf cannot reserve an RPC name, so do not use these
+  // names again.
 
   // WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
   // an authenticated caller.
   rpc WriteAccessTuples(WriteAccessTuplesRequest) returns (WriteAccessTuplesResponse) {
-    option (gibson.auth.v1.authz) = {
-      relation: "platform_operator",
-      object_type: "system_tenant",
-      object_deriver: "system_tenant",
-      allowed_identities: 3  // USER | SERVICE
-    };
-  }
-  // UpsertTenantQuota writes the tenant's runtime quota record to Postgres.
-  // Called by the operator's reconcile loop after resolving the plan.
-  rpc UpsertTenantQuota(UpsertTenantQuotaRequest) returns (UpsertTenantQuotaResponse) {
-    option (gibson.auth.v1.authz) = {
-      relation: "platform_operator",
-      object_type: "system_tenant",
-      object_deriver: "system_tenant",
-      allowed_identities: 3  // USER | SERVICE
-    };
-  }
-  // ListFeatureTuples enumerates the tenant feature tuples currently set.
-  rpc ListFeatureTuples(ListFeatureTuplesRequest) returns (ListFeatureTuplesResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "platform_operator",
       object_type: "system_tenant",
@@ -463,46 +448,6 @@ message WriteAccessTuplesRequest {
 message WriteAccessTuplesResponse {
   int32 added = 1;
   int32 deleted = 2;
-}
-
-// UpsertTenantQuotaRequest writes the quota record of the tenant. The daemon
-// stores the record and enforces none of its values.
-message UpsertTenantQuotaRequest {
-  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
-  // concurrent_missions is the cap on missions in non-terminal execution
-  // state at any moment. 0 = unlimited.
-  int32 concurrent_missions = 7;
-  // concurrent_agents is the cap on agents bound to in-flight mission
-  // tasks at any moment (idle agents do NOT count). 0 = unlimited.
-  int32 concurrent_agents = 3;
-  // plan_id is the canonical plan identifier for this tenant
-  // ("team", "org", "enterprise", "enterprise-deploy").
-  // Written to the tenant_quotas.plan_id column.
-  string plan_id = 8 [(buf.validate.field).string = { max_len: 1024 }];
-  // concurrent_connectors is the cap on hosted MCP connector instances a
-  // tenant may have running at any moment. 0 = unlimited. Per ADR-0065
-  // facet 3 (plan-tier connector-instance budget).
-  int32 concurrent_connectors = 9;
-  // Field tags 2 (seats), 4 (storage_gb), 5 (retention_days), 6
-  // (sandbox_launches_per_month) are reserved against accidental reuse;
-  // they were the legacy unenforced quotas dropped by the spec.
-  reserved 2, 4, 5, 6;
-  reserved "seats", "storage_gb", "retention_days", "sandbox_launches_per_month";
-}
-
-// UpsertTenantQuotaResponse confirms the upsert.
-message UpsertTenantQuotaResponse {
-  string updated_at = 1;
-}
-
-// ListFeatureTuplesRequest queries the feature tuples for a tenant.
-message ListFeatureTuplesRequest {
-  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
-}
-
-// ListFeatureTuplesResponse returns the set of has_* feature tuples present.
-message ListFeatureTuplesResponse {
-  repeated string relations = 1;
 }
 
 // SeedCatalogTenantEnabledRequest triggers seeding of tenant_enabled tuples.

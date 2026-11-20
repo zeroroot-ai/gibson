@@ -70,8 +70,8 @@ func HashInvitationToken(token string) string {
 	return platformtoken.Hash(token)
 }
 
-// ensureTable lazily creates tenant_invitations (mirrors ensureTenantQuotasTable
-// for stamped legacy DBs; migration 007 is authoritative).
+// ensureTable lazily creates tenant_invitations for stamped legacy DBs.
+// Migration 007 is authoritative.
 func (s *InvitationStore) ensureTable(ctx context.Context) error {
 	const q = `
 		CREATE TABLE IF NOT EXISTS tenant_invitations (

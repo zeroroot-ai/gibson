@@ -93,9 +93,9 @@ func isPgUniqueViolation(err error) bool {
 }
 
 // ensureTenantZitadelOrgsTable creates tenant_zitadel_orgs (and its
-// org-uniqueness index) if they do not yet exist. Mirrors
-// ensureTenantQuotasTable: migrations 006 and 027 are authoritative, but this
-// keeps the RPC working on a freshly-pointed DB before migrations run.
+// org-uniqueness index) if they do not yet exist. Migrations 006 and 027 are
+// authoritative, but this keeps the RPC working on a freshly-pointed DB before
+// migrations run.
 func ensureTenantZitadelOrgsTable(ctx context.Context, db *sql.DB) error {
 	const create = `
 		CREATE TABLE IF NOT EXISTS tenant_zitadel_orgs (

@@ -136,20 +136,17 @@ func TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheConnectorRPCs(t *te
 // reconciliation: the operator-allowed set must equal EXACTLY the set of RPCs
 // the tenant-operator actually dials. It fails on BOTH a missing grant (the
 // recurring provisioning-breaking bug) and a surplus grant (a standing
-// over-grant such as the UpsertTenantQuota one removed here).
+// over-grant of an RPC that the operator never calls).
 //
 // operatorActualCallSet is a curated, human-maintained list. When the operator
 // starts (or stops) calling an RPC, update this list AND the allowed/denied
 // classification in operatorMethodPolicy together — this test is the tripwire
 // that forces both edits.
 func TestOperatorMethodPolicy_AllowedSetEqualsActualCallSet(t *testing.T) {
-	// The 18 DaemonOperatorService RPCs the tenant-operator (operators/tenant)
-	// actually calls over the SPIFFE direct-dial path. UpsertTenantQuota is
-	// deliberately ABSENT: no caller is wired, so granting it would be an
-	// over-grant (least privilege).
+	// The 17 DaemonOperatorService RPCs the tenant-operator (operators/tenant)
+	// actually calls over the SPIFFE direct-dial path.
 	operatorActualCallSet := []string{
 		daemonoperatorv1.DaemonOperatorService_WriteAccessTuples_FullMethodName,
-		daemonoperatorv1.DaemonOperatorService_ListFeatureTuples_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_SeedCatalogTenantEnabled_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_SetTenantZitadelOrg_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_ListPendingTenantProvisioning_FullMethodName,
@@ -190,10 +187,10 @@ func allowedMethod() string {
 	return daemonoperatorv1.DaemonOperatorService_WriteAccessTuples_FullMethodName
 }
 
-// deniedMethod returns one operator-DENIED DaemonOperatorService FQN (no caller
-// wired), for use in the bypass tests below.
+// deniedMethod returns one operator-DENIED DaemonOperatorService FQN (an RPC of
+// the connector-operator), for use in the bypass tests below.
 func deniedMethod() string {
-	return daemonoperatorv1.DaemonOperatorService_UpsertTenantQuota_FullMethodName
+	return daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName
 }
 
 // TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced asserts the policed

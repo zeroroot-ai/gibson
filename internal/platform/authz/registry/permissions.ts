@@ -910,16 +910,6 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
-  "/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples": {
-    method: "/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples",
-    service: "gibson.daemon.operator.v1.DaemonOperatorService",
-    relation: "platform_operator",
-    objectType: "system_tenant",
-    objectDeriver: "system_tenant",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
-    unauthenticated: false,
-    self: false,
-  },
   "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps": {
     method: "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps",
     service: "gibson.daemon.operator.v1.DaemonOperatorService",
@@ -1012,16 +1002,6 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact": {
     method: "/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact",
-    service: "gibson.daemon.operator.v1.DaemonOperatorService",
-    relation: "platform_operator",
-    objectType: "system_tenant",
-    objectDeriver: "system_tenant",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
-    unauthenticated: false,
-    self: false,
-  },
-  "/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota": {
-    method: "/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota",
     service: "gibson.daemon.operator.v1.DaemonOperatorService",
     relation: "platform_operator",
     objectType: "system_tenant",

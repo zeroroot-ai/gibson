@@ -6,8 +6,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -17,10 +15,10 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// entitlementsDB returns the *sql.DB used for tenant_quotas writes. The
-// daemon wires this via WithPlatformDB; nil means the daemon booted without
-// a dashboard Postgres connection (dev/kind clusters can still run the rest
-// of the RPCs, but UpsertTenantQuota returns Unavailable).
+// entitlementsDB returns the platform *sql.DB of the operator RPCs. The
+// daemon wires it via WithPlatformDB. A nil value means that the daemon
+// started without a platform Postgres connection, and the RPCs that need it
+// return Unavailable.
 func (s *DaemonServer) entitlementsDB() *sql.DB {
 	return s.platformDB
 }
@@ -82,61 +80,6 @@ func (s *DaemonServer) WriteAccessTuples(ctx context.Context, req *daemonoperato
 	s.logger.Info("entitlements: WriteAccessTuples",
 		"added", len(adds), "deleted", len(dels), "reason", req.GetReason())
 	return &daemonoperatorv1.WriteAccessTuplesResponse{Added: int32(len(adds)), Deleted: int32(len(dels))}, nil
-}
-
-// UpsertTenantQuota writes the per-tenant quota row. Creates the table on
-// first use so deployments without a pre-run migration step still converge.
-//
-// gibsoncheck:allow tenant-from-request — DaemonOperatorService: gated at ext-authz on
-// relation platform_operator / object_deriver system_tenant, plus the SPIFFE peer allowlist.
-// Cross-tenant is the intended semantic (the operator writes quotas for every tenant).
-func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *daemonoperatorv1.UpsertTenantQuotaRequest) (*daemonoperatorv1.UpsertTenantQuotaResponse, error) {
-	db := s.entitlementsDB()
-	if db == nil {
-		return nil, status.Error(codes.Unavailable, "dashboard Postgres not configured")
-	}
-	if req.GetTenantId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "tenant_id required")
-	}
-	if err := ensureTenantQuotasTable(ctx, db); err != nil {
-		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
-	}
-
-	const q = `
-		INSERT INTO tenant_quotas (tenant_id, concurrent_missions, concurrent_agents, concurrent_connectors, plan_id, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
-		ON CONFLICT (tenant_id) DO UPDATE SET
-			concurrent_missions = EXCLUDED.concurrent_missions,
-			concurrent_agents = EXCLUDED.concurrent_agents,
-			concurrent_connectors = EXCLUDED.concurrent_connectors,
-			plan_id = EXCLUDED.plan_id,
-			updated_at = NOW()
-		RETURNING updated_at
-	`
-	var updatedAt time.Time
-	if err := db.QueryRowContext(ctx, q,
-		req.GetTenantId(),
-		req.GetConcurrentMissions(),
-		req.GetConcurrentAgents(),
-		req.GetConcurrentConnectors(),
-		req.GetPlanId(),
-	).Scan(&updatedAt); err != nil {
-		return nil, status.Errorf(codes.Internal, "upsert: %v", err)
-	}
-	return &daemonoperatorv1.UpsertTenantQuotaResponse{UpdatedAt: updatedAt.UTC().Format(time.RFC3339Nano)}, nil
-}
-
-// ListFeatureTuples returns an empty relation list. Spec
-// plans-and-quotas-simplification removed every has_* relation from the
-// FGA model; operator code that still calls this method gets a no-op.
-//
-// gibsoncheck:allow tenant-from-request — DaemonOperatorService: platform_operator on
-// system_tenant at ext-authz, plus the SPIFFE peer allowlist.
-func (s *DaemonServer) ListFeatureTuples(ctx context.Context, req *daemonoperatorv1.ListFeatureTuplesRequest) (*daemonoperatorv1.ListFeatureTuplesResponse, error) {
-	if req.GetTenantId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "tenant_id required")
-	}
-	return &daemonoperatorv1.ListFeatureTuplesResponse{Relations: nil}, nil
 }
 
 // SeedCatalogTenantEnabled writes tenant_enabled tuples for every catalog
@@ -253,57 +196,4 @@ func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *daemonoperatorv1
 		return nil, status.Error(codes.Unavailable, "the audit record could not be written; try again")
 	}
 	return &daemonoperatorv1.EmitAuditEventResponse{}, nil
-}
-
-// ensureTenantQuotasTable is an idempotent CREATE TABLE IF NOT EXISTS for
-// deployments that haven't run the migration file
-// (pkg/platform/migrations/postgres/platform/003_tenant_quotas_simplify.up.sql)
-// yet. The
-// migration is still the authoritative source in schema-managed environments.
-func ensureTenantQuotasTable(ctx context.Context, db *sql.DB) error {
-	const create = `
-		CREATE TABLE IF NOT EXISTS tenant_quotas (
-			tenant_id TEXT PRIMARY KEY,
-			concurrent_missions INT NOT NULL DEFAULT 0,
-			concurrent_agents INT NOT NULL DEFAULT 0,
-			concurrent_connectors INT NOT NULL DEFAULT 0,
-			plan_id TEXT NOT NULL DEFAULT '',
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)
-	`
-	if _, err := db.ExecContext(ctx, create); err != nil {
-		return fmt.Errorf("create tenant_quotas: %w", err)
-	}
-	// Forward-compat: ALTER TABLE ... ADD COLUMN IF NOT EXISTS catches
-	// upgrades where the legacy schema already exists. Spec
-	// plans-and-quotas-simplification.
-	const ensure = `
-		ALTER TABLE tenant_quotas
-			ADD COLUMN IF NOT EXISTS concurrent_missions INT NOT NULL DEFAULT 0
-	`
-	if _, err := db.ExecContext(ctx, ensure); err != nil {
-		return fmt.Errorf("alter tenant_quotas (concurrent_missions): %w", err)
-	}
-	// plan_id was added when the daemon began stamping the canonical plan
-	// onto the quota row (so the billing page shows the plan name, not
-	// "No plan assigned"). ADD COLUMN IF NOT EXISTS keeps pre-existing
-	// tables forward-compatible.
-	const ensurePlan = `
-		ALTER TABLE tenant_quotas
-			ADD COLUMN IF NOT EXISTS plan_id TEXT NOT NULL DEFAULT ''
-	`
-	if _, err := db.ExecContext(ctx, ensurePlan); err != nil {
-		return fmt.Errorf("alter tenant_quotas (plan_id): %w", err)
-	}
-	// concurrent_connectors is the plan-tier hosted-connector instance budget
-	// (ADR-0065). ADD COLUMN IF NOT EXISTS keeps pre-existing tables
-	// forward-compatible.
-	const ensureConnectors = `
-		ALTER TABLE tenant_quotas
-			ADD COLUMN IF NOT EXISTS concurrent_connectors INT NOT NULL DEFAULT 0
-	`
-	if _, err := db.ExecContext(ctx, ensureConnectors); err != nil {
-		return fmt.Errorf("alter tenant_quotas (concurrent_connectors): %w", err)
-	}
-	return nil
 }
