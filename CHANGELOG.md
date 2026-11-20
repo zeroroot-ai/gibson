@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.165.1](https://github.com/zeroroot-ai/gibson/compare/v0.165.0...v0.165.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **rework:** fix the six causes of the first A2A inbound exit test runs ([#1524](https://github.com/zeroroot-ai/gibson/issues/1524)) ([33d51c6](https://github.com/zeroroot-ai/gibson/commit/33d51c63396b2c1c4eb528da57dfb696af037366))
+* **rework:** fix the three causes of the first exit test runs of the AAIF epics ([#1504](https://github.com/zeroroot-ai/gibson/issues/1504)) ([6a0288e](https://github.com/zeroroot-ai/gibson/commit/6a0288e2514ae9e91f86126e0e19f1cb14150518))
+
 ## [0.165.0](https://github.com/zeroroot-ai/gibson/compare/v0.164.0...v0.165.0) (2026-11-19)
 
 
