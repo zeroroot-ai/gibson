@@ -145,6 +145,8 @@ func (c *DaemonClient) SetTenantZitadelOrg(ctx context.Context, tenantID, zitade
 	return translateGRPCError("set-tenant-zitadel-org", err)
 }
 
+// WriteAccessTuples adds and deletes FGA tuples through the daemon. Each
+// tuple has the form "user#relation@object".
 func (c *DaemonClient) WriteAccessTuples(ctx context.Context, add, del []string, reason string) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
@@ -158,6 +160,8 @@ func (c *DaemonClient) WriteAccessTuples(ctx context.Context, add, del []string,
 	return translateGRPCError("write-tuples", err)
 }
 
+// SeedCatalogTenantEnabled asks the daemon to enable each platform catalog
+// item for the tenant.
 func (c *DaemonClient) SeedCatalogTenantEnabled(ctx context.Context, tenantID string) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
