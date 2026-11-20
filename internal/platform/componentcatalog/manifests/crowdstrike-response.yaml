@@ -1,0 +1,47 @@
+# CrowdStrike Falcon response connector. Zero Root builds the MCP server in zeroroot-ai/connectors
+# (crowdstrike/, release v0.1.0), because the vendor publishes no server with these tools.
+# The image is public, signed and scanned, and the catalog pins it by digest.
+# Source of the environment: crowdstrike/README.md of zeroroot-ai/connectors at v0.1.0.
+# The server speaks streamable HTTP on :8080 at /mcp.
+id: crowdstrike-response
+kind: connector
+displayName: CrowdStrike Falcon response
+description: >-
+  Contains a Falcon host and lifts the containment. The vendor server
+  falcon-mcp has no tool that contains a host.
+spec:
+  vendor: crowdstrike
+  class: edr
+  shape: Hosted
+  image: ghcr.io/zeroroot-ai/connectors-crowdstrike@sha256:8e86c461328c03a050c615ba0bd676f2b949120ecbe4af911d3921763b7268de
+  transport: streamable-http
+  port: 8080
+  auth: none
+  # Each credential is the name of a secret in the secret store of the
+  # tenant. The operator puts the value in the pod. No value is in this file.
+  credentials:
+    - secret: crowdstrike-response-client-id
+      env: FALCON_CLIENT_ID
+    - secret: crowdstrike-response-client-secret
+      env: FALCON_CLIENT_SECRET
+  # The tenant gives the API base URL of its Falcon cloud, for example
+  # https://api.crowdstrike.com (US-1).
+  # The egress allow-list of the pod holds the host of the value.
+  variables:
+    - name: api_url
+      env: FALCON_BASE_URL
+      kind: endpoint
+      patterns:
+        - https://api.crowdstrike.com
+        - https://*.crowdstrike.com
+  # Each tool is a response action. Revoke a session, disable an account and
+  # isolate a host need no person (ADR-0180): only a tool that destroys data
+  # waits for one. A new tool of the server waits until this list names it.
+  responseActions: true
+  tools:
+    contain_host:
+      approval: none
+      undo: lift_containment
+    lift_containment:
+      approval: none
+      undo: contain_host

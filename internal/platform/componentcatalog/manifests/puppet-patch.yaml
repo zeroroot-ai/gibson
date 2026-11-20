@@ -1,0 +1,49 @@
+# Puppet Enterprise patch connector. Zero Root builds the MCP server in zeroroot-ai/connectors
+# (puppet/, release v0.1.0), because the vendor publishes no server with these tools.
+# The image is public, signed and scanned, and the catalog pins it by digest.
+# Source of the environment: puppet/README.md of zeroroot-ai/connectors at v0.1.0.
+# The server speaks streamable HTTP on :8080 at /mcp.
+id: puppet-patch
+kind: connector
+displayName: Puppet Enterprise patch
+description: >-
+  Starts a patch job and a rollback job on one Puppet Enterprise node, and
+  reads the job.
+spec:
+  vendor: puppet
+  class: patch
+  shape: Hosted
+  image: ghcr.io/zeroroot-ai/connectors-puppet@sha256:a321b6e3f7871fd30baab4cf38991b4b79cbb5695c0bdce2d4d0890ae1272b6f
+  transport: streamable-http
+  port: 8080
+  auth: none
+  # Each credential is the name of a secret in the secret store of the
+  # tenant. The operator puts the value in the pod. No value is in this file.
+  credentials:
+    - secret: puppet-patch-token
+      env: PUPPET_TOKEN
+    - secret: puppet-patch-task
+      env: PUPPET_PATCH_TASK
+    - secret: puppet-patch-rollback-task
+      env: PUPPET_ROLLBACK_TASK
+  # The tenant gives the orchestrator URL, for example
+  # https://pe.example.com:8143. The secrets name the patch task and the
+  # rollback task. A private CA of Puppet is not supported yet.
+  # The egress allow-list of the pod holds the host of the value.
+  variables:
+    - name: orchestrator_url
+      env: PUPPET_ORCHESTRATOR_URL
+      kind: endpoint
+  # Each tool is a response action. Revoke a session, disable an account and
+  # isolate a host need no person (ADR-0180): only a tool that destroys data
+  # waits for one. A new tool of the server waits until this list names it.
+  responseActions: true
+  tools:
+    start_patch_job:
+      approval: none
+      undo: start_rollback_job
+    start_rollback_job:
+      approval: none
+      undo: start_patch_job
+    get_job:
+      approval: none

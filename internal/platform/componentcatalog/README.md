@@ -41,7 +41,7 @@ spec:
 
 **The rule for a tool that the manifest does not name.**
 
-- A connector with `responseActions: true` marks it. A new tool of the MCP server waits for a person until a manifest names it. This fail-closed rule is the deliberate default: the platform cannot know if a new tool of the vendor destroys data. The loader needs at least one `required` tool for such a connector.
+- A connector with `responseActions: true` marks it. A new tool of the MCP server waits for a person until a manifest names it. This fail-closed rule is the deliberate default: the platform cannot know if a new tool of the vendor destroys data. Such a connector can mark no named tool `required`, because a containment destroys no data.
 - A connector without `responseActions` needs only the grant for it. This is the choice for the connectors that only read. The platform has no list of the tools of a vendor, and a mark on every tool would make each read wait for a person. The cost is real: a vendor can add a write tool to a read-only server. Two measures limit it. The grant still applies. A reviewer who adds a connector that can write must set `responseActions: true`. A tool of a read-only connector that is dangerous can also be named with `approval: required`, and `approval: none` is then not allowed there.
 
 **What happens at tool dispatch.** `metatool.Handler.Call` is the one path for an `mcp:` id. The harness (`invoke_tool`) and the `CallTool` RPC both use it. The order is: mission policy, grant, approval, dispatch.

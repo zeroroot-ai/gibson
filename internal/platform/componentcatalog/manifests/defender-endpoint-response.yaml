@@ -1,0 +1,51 @@
+# Microsoft Defender for Endpoint response connector. Zero Root builds the MCP server in zeroroot-ai/connectors
+# (defender-endpoint/, release v0.1.0), because the vendor publishes no server with these tools.
+# The image is public, signed and scanned, and the catalog pins it by digest.
+# Source of the environment: defender-endpoint/README.md of zeroroot-ai/connectors at v0.1.0.
+# The server speaks streamable HTTP on :8080 at /mcp.
+id: defender-endpoint-response
+kind: connector
+displayName: Microsoft Defender for Endpoint response
+description: >-
+  Isolates a Defender device and releases it. The vendor tools of Microsoft
+  only read.
+egressAllow:
+  - login.microsoftonline.com:443
+spec:
+  vendor: microsoft
+  class: edr
+  shape: Hosted
+  image: ghcr.io/zeroroot-ai/connectors-defender-endpoint@sha256:87e8bed6356316b2780b26c25e6940768a2665ab41f2f27023af9eef9d007bde
+  transport: streamable-http
+  port: 8080
+  auth: none
+  # Each credential is the name of a secret in the secret store of the
+  # tenant. The operator puts the value in the pod. No value is in this file.
+  credentials:
+    - secret: defender-endpoint-response-tenant-id
+      env: DEFENDER_TENANT_ID
+    - secret: defender-endpoint-response-client-id
+      env: DEFENDER_CLIENT_ID
+    - secret: defender-endpoint-response-client-secret
+      env: DEFENDER_CLIENT_SECRET
+  # The tenant gives the API URL, for example
+  # https://api.security.microsoft.com or a regional host.
+  # The egress allow-list of the pod holds the host of the value.
+  variables:
+    - name: api_url
+      env: DEFENDER_API_URL
+      kind: endpoint
+      patterns:
+        - https://api.security.microsoft.com
+        - https://*.api.security.microsoft.com
+  # Each tool is a response action. Revoke a session, disable an account and
+  # isolate a host need no person (ADR-0180): only a tool that destroys data
+  # waits for one. A new tool of the server waits until this list names it.
+  responseActions: true
+  tools:
+    isolate_device:
+      approval: none
+      undo: release_device
+    release_device:
+      approval: none
+      undo: isolate_device

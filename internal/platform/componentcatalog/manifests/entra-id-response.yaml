@@ -1,0 +1,44 @@
+# Microsoft Entra ID response connector. Zero Root builds the MCP server in zeroroot-ai/connectors
+# (entra-id/, release v0.1.0), because the vendor publishes no server with these tools.
+# The image is public, signed and scanned, and the catalog pins it by digest.
+# Source of the environment: entra-id/README.md of zeroroot-ai/connectors at v0.1.0.
+# The server speaks streamable HTTP on :8080 at /mcp.
+id: entra-id-response
+kind: connector
+displayName: Microsoft Entra ID response
+description: >-
+  Revokes the sign-in sessions of a user, and disables and enables an
+  account, through Microsoft Graph.
+egressAllow:
+  - graph.microsoft.com:443
+  - login.microsoftonline.com:443
+spec:
+  vendor: microsoft
+  class: identity
+  shape: Hosted
+  image: ghcr.io/zeroroot-ai/connectors-entra-id@sha256:649970bd5b42411999cd93efbd5fe58e67b0ffb0180231ec081023a179e2ac69
+  transport: streamable-http
+  port: 8080
+  auth: none
+  # Each credential is the name of a secret in the secret store of the
+  # tenant. The operator puts the value in the pod. No value is in this file.
+  credentials:
+    - secret: entra-id-response-tenant-id
+      env: ENTRA_TENANT_ID
+    - secret: entra-id-response-client-id
+      env: ENTRA_CLIENT_ID
+    - secret: entra-id-response-client-secret
+      env: ENTRA_CLIENT_SECRET
+  # Each tool is a response action. Revoke a session, disable an account and
+  # isolate a host need no person (ADR-0180): only a tool that destroys data
+  # waits for one. A new tool of the server waits until this list names it.
+  responseActions: true
+  tools:
+    revoke_sign_in_sessions:
+      approval: none
+    disable_account:
+      approval: none
+      undo: enable_account
+    enable_account:
+      approval: none
+      undo: disable_account

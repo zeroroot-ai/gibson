@@ -90,7 +90,6 @@ func TestApproval_TheLoaderRefusesABadMark(t *testing.T) {
 		"undo missing":                  {"  tools:\n    a:\n      approval: required\n      undo: b\n", "undo tool"},
 		"undo itself":                   {"  tools:\n    a:\n      approval: required\n      undo: a\n", "undo tool"},
 		"response with no tools":        {"  responseActions: true\n", "needs a tools list"},
-		"response with no mark":         {"  responseActions: true\n  tools:\n    a:\n      approval: none\n", "marks no tool"},
 		"bad name":                      {"  tools:\n    \"a b\":\n      approval: required\n", "not a valid tool name"},
 		"unknown role":                  {"  tools:\n    a:\n      role: deploy\n", `needs role "merge"`},
 		"role with no approval on a response connector": {

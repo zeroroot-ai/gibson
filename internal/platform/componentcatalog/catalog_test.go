@@ -1009,3 +1009,68 @@ func TestCatalog_CrowdStrikeHostedConfiguration(t *testing.T) {
 		t.Errorf("env %v args %v", e.Env, e.Args)
 	}
 }
+
+// TestCatalog_ZeroRootConnectors: each connector that Zero Root builds in
+// zeroroot-ai/connectors (release v0.1.0) loads as a Hosted entry with its
+// tool class, an image of zeroroot-ai pinned by digest, streamable HTTP on
+// port 8080, credentials from named secrets, and the vendor base URL as a
+// tenant variable. A response connector names each tool, and no named tool
+// waits for a person (ADR-0180). Each fix loop server names its merge tool
+// with the merge role (gibson#1458).
+func TestCatalog_ZeroRootConnectors(t *testing.T) {
+	cases := []struct {
+		id, class string
+		response  bool
+		merge     string
+		variable  bool
+	}{
+		{"crowdstrike-response", "edr", true, "", true},
+		{"defender-endpoint-response", "edr", true, "", true},
+		{"sentinelone-response", "edr", true, "", true},
+		{"entra-id-response", "identity", true, "", false},
+		{"okta-response", "identity", true, "", true},
+		{"github-fixloop", "git-host", false, "merge_merge_request", true},
+		{"gitlab-fixloop", "git-host", false, "merge_merge_request", true},
+		{"prometheus-health", "observability", false, "", true},
+		{"qualys-vmdr", "scanner", false, "", true},
+		{"puppet-patch", "patch", true, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			e, err := LookupConnector(tc.id)
+			if err != nil {
+				t.Fatalf("LookupConnector(%s): %v", tc.id, err)
+			}
+			if e.Class != tc.class || e.Shape != connectorv1alpha1.ConnectorShapeHosted ||
+				e.Auth != connectorv1alpha1.ConnectorAuthNone {
+				t.Errorf("got class %q shape %q auth %q", e.Class, e.Shape, e.Auth)
+			}
+			if !strings.HasPrefix(e.Image, "ghcr.io/zeroroot-ai/connectors-") || !strings.Contains(e.Image, "@sha256:") {
+				t.Errorf("image %q must be a connectors image of zeroroot-ai pinned by digest", e.Image)
+			}
+			if e.Transport != connectorv1alpha1.ConnectorTransportStreamableHTTP || e.Port != 8080 {
+				t.Errorf("transport %q port %d, want streamable-http on 8080", e.Transport, e.Port)
+			}
+			if len(e.Credentials) == 0 {
+				t.Error("the entry names no credential secret")
+			}
+			if tc.variable && len(e.Variables) == 0 {
+				t.Error("the entry names no tenant variable for the base URL")
+			}
+			if e.ResponseActions != tc.response {
+				t.Errorf("responseActions = %v, want %v", e.ResponseActions, tc.response)
+			}
+			for name := range e.Tools {
+				if e.ApprovalFor(name).Required {
+					t.Errorf("tool %s waits for a person: only a tool that destroys data may", name)
+				}
+			}
+			if tc.response && !e.ApprovalFor("a-new-tool-of-the-vendor").Required {
+				t.Error("a tool that the manifest does not name must wait for a person (fail closed)")
+			}
+			if tc.merge != "" && !e.ApprovalFor(tc.merge).Merge {
+				t.Errorf("tool %s needs the merge role", tc.merge)
+			}
+		})
+	}
+}

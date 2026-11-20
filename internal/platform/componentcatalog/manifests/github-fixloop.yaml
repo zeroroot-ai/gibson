@@ -1,0 +1,39 @@
+# GitHub fix loop connector. Zero Root builds the MCP server in zeroroot-ai/connectors
+# (github-fixloop/, release v0.1.0), because the vendor publishes no server with these tools.
+# The image is public, signed and scanned, and the catalog pins it by digest.
+# Source of the environment: github-fixloop/README.md of zeroroot-ai/connectors at v0.1.0.
+# The server speaks streamable HTTP on :8080 at /mcp.
+id: github-fixloop
+kind: connector
+displayName: GitHub fix loop
+description: >-
+  Reads the state and the deploy of a pull request, merges it on a green
+  pipeline, and reverts a merge, for the fix loop.
+spec:
+  vendor: github
+  class: git-host
+  shape: Hosted
+  image: ghcr.io/zeroroot-ai/connectors-github-fixloop@sha256:71d9706f2e768493f88b9146877c5d6ee047b3ac4e39e5d33c1c14337f6af824
+  transport: streamable-http
+  port: 8080
+  auth: none
+  # Each credential is the name of a secret in the secret store of the
+  # tenant. The operator puts the value in the pod. No value is in this file.
+  credentials:
+    - secret: github-fixloop-token
+      env: GITHUB_TOKEN
+  env:
+    GITHUB_ENVIRONMENT: production
+  # The tenant gives the API URL: https://api.github.com, or
+  # https://<host>/api/v3 for GitHub Enterprise Server. The deploy
+  # environment is production.
+  # The egress allow-list of the pod holds the host of the value.
+  variables:
+    - name: api_url
+      env: GITHUB_API_URL
+      kind: endpoint
+  # The merge tool runs only when the merge request holds its merge slot
+  # (gibson#1458). The other tools need only the grant.
+  tools:
+    merge_merge_request:
+      role: merge

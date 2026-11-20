@@ -139,7 +139,6 @@ func validateTools(id string, s ConnectorSpec) error {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	required := 0
 	for _, name := range names {
 		t := s.Tools[name]
 		if !toolNameRE.MatchString(name) {
@@ -156,7 +155,6 @@ func validateTools(id string, s ConnectorSpec) error {
 				return fmt.Errorf("%s: tool %q needs approval %q or %q, got %q", id, name, ApprovalRequired, ApprovalNone, t.Approval)
 			}
 		case ApprovalRequired:
-			required++
 		case ApprovalNone:
 			if !s.ResponseActions {
 				return fmt.Errorf("%s: tool %q states approval none, but approval none only has a meaning when responseActions is true", id, name)
@@ -173,8 +171,8 @@ func validateTools(id string, s ConnectorSpec) error {
 			return fmt.Errorf("%s: tool %q has a blastRadius that is too long or holds a control character", id, name)
 		}
 	}
-	if s.ResponseActions && required == 0 {
-		return fmt.Errorf("%s: responseActions is true, but the tools list marks no tool as approval required", id)
-	}
+	// A response connector can mark no tool: a response action waits for a
+	// person only when it destroys data (ADR-0180), and a containment does
+	// not. Its unnamed tools still wait (fail closed).
 	return nil
 }
