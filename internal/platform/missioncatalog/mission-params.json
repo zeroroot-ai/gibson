@@ -10,6 +10,16 @@
         "manifestsProject"
       ]
     },
+    "incident-response": {
+      "version": "1.0.0",
+      "params": [
+        "alertId",
+        "bank",
+        "forgeConnector",
+        "manifestsProject",
+        "observabilityConnector"
+      ]
+    },
     "scan": {
       "version": "1.0.0",
       "params": [
