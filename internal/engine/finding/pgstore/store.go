@@ -251,6 +251,39 @@ func (s *Store) Store(ctx context.Context, tenantID string, f finding.EnhancedFi
 	return nil
 }
 
+// setStatusSQL writes the status into the document of the finding. The
+// WHERE clause skips a row that already holds the status, so a repeated write
+// changes nothing.
+const setStatusSQL = `
+UPDATE findings
+SET document = jsonb_set(document, '{status}', to_jsonb($2::text)), updated_at = now()
+WHERE id = $1 AND document->>'status' IS DISTINCT FROM $2::text`
+
+// SetStatus writes one of the four statuses into the document of the finding.
+// It reports whether the row changed. A finding that the table does not hold,
+// or that already holds the status, is not an error and gives false. A status
+// outside the four fails before any write.
+func (s *Store) SetStatus(
+	ctx context.Context, tenantID string, id types.ID, status finding.FindingStatus,
+) (bool, error) {
+	if err := id.Validate(); err != nil {
+		return false, fmt.Errorf("finding store: finding ID: %w", err)
+	}
+	if !status.IsValid() {
+		return false, fmt.Errorf("finding store: %q is not a finding status", status)
+	}
+	c, err := s.conns.For(ctx, tenantID)
+	if err != nil {
+		return false, fmt.Errorf("finding store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	n, err := c.SQL().Exec(ctx, setStatusSQL, id.String(), string(status))
+	if err != nil {
+		return false, fmt.Errorf("finding store: set status of finding %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
 // Get returns the finding with the ID, or finding.ErrNotFound. The result has
 // no evidence, because the store does not read the finding_evidence table for
 // it.

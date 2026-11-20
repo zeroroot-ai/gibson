@@ -12,15 +12,34 @@ import (
 	"github.com/zeroroot-ai/sdk/finding/security"
 )
 
-// FindingStatus represents the lifecycle status of a finding
+// FindingStatus is the lifecycle status of a finding. These four values are the
+// only statuses of a finding in the daemon. The brain, the graph and the
+// findings table all use them (gibson#1518).
 type FindingStatus string
 
 const (
-	StatusOpen          FindingStatus = "open"
-	StatusConfirmed     FindingStatus = "confirmed"
-	StatusResolved      FindingStatus = "resolved"
-	StatusFalsePositive FindingStatus = "false_positive"
+	// StatusOpen is a finding that nobody has started to fix.
+	StatusOpen FindingStatus = "open"
+	// StatusFixing is a finding with a merge request that is not yet merged.
+	StatusFixing FindingStatus = "fixing"
+	// StatusFixed is a finding whose merge request is merged.
+	StatusFixed FindingStatus = "fixed"
+	// StatusVerified is a finding whose fix the check that raised it has proved.
+	StatusVerified FindingStatus = "verified"
 )
+
+// String returns the string form of the status.
+func (s FindingStatus) String() string { return string(s) }
+
+// IsValid reports whether s is one of the four statuses.
+func (s FindingStatus) IsValid() bool {
+	switch s {
+	case StatusOpen, StatusFixing, StatusFixed, StatusVerified:
+		return true
+	default:
+		return false
+	}
+}
 
 // FindingCategory represents the type of security finding
 type FindingCategory string
@@ -214,21 +233,6 @@ func (f *EnhancedFinding) IncrementOccurrence() {
 	f.UpdatedAt = time.Now()
 }
 
-// IsConfirmed returns true if the finding has been confirmed
-func (f EnhancedFinding) IsConfirmed() bool {
-	return f.Status == StatusConfirmed
-}
-
-// IsResolved returns true if the finding has been resolved
-func (f EnhancedFinding) IsResolved() bool {
-	return f.Status == StatusResolved
-}
-
-// IsFalsePositive returns true if the finding is marked as a false positive
-func (f EnhancedFinding) IsFalsePositive() bool {
-	return f.Status == StatusFalsePositive
-}
-
 // IsCritical returns true if the finding is critical severity
 func (f EnhancedFinding) IsCritical() bool {
 	return f.Severity == agent.SeverityCritical
@@ -237,7 +241,7 @@ func (f EnhancedFinding) IsCritical() bool {
 // NeedsAttention returns true if the finding needs immediate attention
 func (f EnhancedFinding) NeedsAttention() bool {
 	return (f.Severity == agent.SeverityCritical || f.Severity == agent.SeverityHigh) &&
-		(f.Status == StatusOpen || f.Status == StatusConfirmed)
+		f.Status == StatusOpen
 }
 
 // GetMitreAttack retrieves the MITRE ATT&CK mappings from Metadata

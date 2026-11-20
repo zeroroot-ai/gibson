@@ -8,6 +8,8 @@ import (
 	"sort"
 
 	"github.com/mlange-42/ark/ecs"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 )
 
 // surpriseBoost is added to an entity's attention when it carries a Surprise, so
@@ -88,20 +90,19 @@ type Finding struct {
 
 // Finding statuses (gibson#1656). FindingStatusOpen is the default for a raised
 // Finding; the others are set by FindingStatusChanged.
+//
+// The values come from package finding, the one definition of the four
+// statuses (gibson#1518). The World stores a status as a plain string.
 const (
-	FindingStatusOpen     = "open"
-	FindingStatusFixing   = "fixing"
-	FindingStatusFixed    = "fixed"
-	FindingStatusVerified = "verified"
+	FindingStatusOpen     = string(finding.StatusOpen)
+	FindingStatusFixing   = string(finding.StatusFixing)
+	FindingStatusFixed    = string(finding.StatusFixed)
+	FindingStatusVerified = string(finding.StatusVerified)
 )
 
 // ValidFindingStatus reports whether s is one of the four Finding statuses.
 func ValidFindingStatus(s string) bool {
-	switch s {
-	case FindingStatusOpen, FindingStatusFixing, FindingStatusFixed, FindingStatusVerified:
-		return true
-	}
-	return false
+	return finding.FindingStatus(s).IsValid()
 }
 
 // FindingRaised promotes an observation/surprise into a confirmed Finding. The

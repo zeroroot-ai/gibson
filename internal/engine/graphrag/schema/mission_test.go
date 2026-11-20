@@ -34,21 +34,6 @@ func TestRetryPolicy_ToJSON(t *testing.T) {
 	assert.Equal(t, policy.Strategy, decoded.Strategy)
 }
 
-// testMission is the shape a :Mission read decodes into. The package has no
-// constructor: nothing here writes a :Mission node (see doc.go).
-func testMission() *Mission {
-	return &Mission{
-		ID:          types.NewID(),
-		Name:        "test-mission",
-		Description: "description",
-		Objective:   "objective",
-		TargetRef:   "target",
-		Status:      MissionStatusSubmitted,
-		CreatedAt:   time.Now(),
-		YAMLSource:  "yaml",
-	}
-}
-
 func TestNewMissionNode(t *testing.T) {
 	id := types.NewID()
 	missionID := types.NewID()

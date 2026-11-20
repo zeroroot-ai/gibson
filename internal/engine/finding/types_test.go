@@ -73,18 +73,11 @@ func TestEnhancedFinding_WithStatus(t *testing.T) {
 	baseFinding := agent.NewFinding("Test", "Test", agent.SeverityLow)
 	enhanced := NewEnhancedFinding(baseFinding, types.NewID(), "agent")
 
-	enhanced = enhanced.WithStatus(StatusConfirmed)
-	assert.Equal(t, StatusConfirmed, enhanced.Status)
-	assert.True(t, enhanced.IsConfirmed())
-	assert.False(t, enhanced.IsResolved())
+	enhanced = enhanced.WithStatus(StatusFixing)
+	assert.Equal(t, StatusFixing, enhanced.Status)
 
-	enhanced = enhanced.WithStatus(StatusResolved)
-	assert.Equal(t, StatusResolved, enhanced.Status)
-	assert.True(t, enhanced.IsResolved())
-	assert.False(t, enhanced.IsConfirmed())
-
-	enhanced = enhanced.WithStatus(StatusFalsePositive)
-	assert.True(t, enhanced.IsFalsePositive())
+	enhanced = enhanced.WithStatus(StatusVerified)
+	assert.Equal(t, StatusVerified, enhanced.Status)
 }
 
 func TestEnhancedFinding_WithReproSteps(t *testing.T) {
@@ -179,13 +172,12 @@ func TestEnhancedFinding_NeedsAttention(t *testing.T) {
 		expected bool
 	}{
 		{"critical open", agent.SeverityCritical, StatusOpen, true},
-		{"critical confirmed", agent.SeverityCritical, StatusConfirmed, true},
-		{"critical resolved", agent.SeverityCritical, StatusResolved, false},
+		{"critical fixing", agent.SeverityCritical, StatusFixing, false},
+		{"critical fixed", agent.SeverityCritical, StatusFixed, false},
 		{"high open", agent.SeverityHigh, StatusOpen, true},
-		{"high confirmed", agent.SeverityHigh, StatusConfirmed, true},
 		{"medium open", agent.SeverityMedium, StatusOpen, false},
 		{"low open", agent.SeverityLow, StatusOpen, false},
-		{"high false positive", agent.SeverityHigh, StatusFalsePositive, false},
+		{"high verified", agent.SeverityHigh, StatusVerified, false},
 	}
 
 	for _, tt := range tests {
@@ -204,7 +196,7 @@ func TestEnhancedFinding_JSONSerialization(t *testing.T) {
 
 	missionID := types.NewID()
 	enhanced := NewEnhancedFinding(baseFinding, missionID, "test-agent")
-	enhanced = enhanced.WithStatus(StatusConfirmed)
+	enhanced = enhanced.WithStatus(StatusFixed)
 	enhanced = enhanced.WithReferences("https://example.com/ref1")
 
 	// Marshal to JSON
@@ -228,9 +220,10 @@ func TestEnhancedFinding_JSONSerialization(t *testing.T) {
 
 func TestFindingStatus_Values(t *testing.T) {
 	assert.Equal(t, FindingStatus("open"), StatusOpen)
-	assert.Equal(t, FindingStatus("confirmed"), StatusConfirmed)
-	assert.Equal(t, FindingStatus("resolved"), StatusResolved)
-	assert.Equal(t, FindingStatus("false_positive"), StatusFalsePositive)
+	assert.Equal(t, FindingStatus("fixing"), StatusFixing)
+	assert.Equal(t, FindingStatus("fixed"), StatusFixed)
+	assert.Equal(t, FindingStatus("verified"), StatusVerified)
+	assert.False(t, FindingStatus("resolved").IsValid())
 }
 
 func TestFindingCategory_Values(t *testing.T) {

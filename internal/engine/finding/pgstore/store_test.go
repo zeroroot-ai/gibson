@@ -6,6 +6,7 @@ package pgstore
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -92,6 +93,23 @@ func (d *fakeDB) Exec(_ context.Context, sql string, args ...any) (int64, error)
 	switch {
 	case contains(sql, "DELETE FROM finding_evidence"):
 		delete(d.evidence, args[0].(string))
+		return 1, nil
+	case contains(sql, "UPDATE findings"):
+		id := args[0].(string)
+		row, ok := d.rows[id]
+		if !ok {
+			return 0, nil
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(row.document, &doc); err != nil {
+			return 0, err
+		}
+		if doc["status"] == args[1].(string) {
+			return 0, nil
+		}
+		doc["status"] = args[1].(string)
+		row.document, _ = json.Marshal(doc)
+		d.rows[id] = row
 		return 1, nil
 	case contains(sql, "INSERT INTO finding_evidence"):
 		id := args[0].(string)
@@ -538,4 +556,29 @@ func TestStore_GetWithEvidenceOfAFindingWithNoEvidence(t *testing.T) {
 func TestStore_GetWithEvidenceNotFound(t *testing.T) {
 	_, err := newTestStore(newFakeDB()).GetWithEvidence(context.Background(), "acme", types.NewID())
 	require.ErrorIs(t, err, finding.ErrNotFound)
+}
+
+func TestSetStatus_UpdatesTheDocument(t *testing.T) {
+	db := newFakeDB()
+	s := &Store{conns: db}
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	require.NoError(t, s.Store(ctx, "acme", f))
+
+	changed, err := s.SetStatus(ctx, "acme", f.ID, finding.StatusFixed)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	got, err := s.Get(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	assert.Equal(t, finding.StatusFixed, got.Status)
+
+	changed, err = s.SetStatus(ctx, "acme", f.ID, finding.StatusFixed)
+	require.NoError(t, err)
+	assert.False(t, changed, "the same status is not a change")
+}
+
+func TestSetStatus_RefusesAStatusOutsideTheFour(t *testing.T) {
+	s := &Store{conns: newFakeDB()}
+	_, err := s.SetStatus(context.Background(), "acme", types.NewID(), finding.FindingStatus("resolved"))
+	require.Error(t, err)
 }

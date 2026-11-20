@@ -13,17 +13,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-// MissionStatus represents the execution status of a mission
-type MissionStatus string
-
-// The values of MissionStatus.
-const (
-	MissionStatusSubmitted MissionStatus = "submitted"
-	MissionStatusWorking   MissionStatus = "working"
-	MissionStatusCompleted MissionStatus = "completed"
-	MissionStatusFailed    MissionStatus = "failed"
-)
-
 // MissionNodeStatus represents the execution status of a mission node
 type MissionNodeStatus string
 
@@ -107,21 +96,6 @@ func (p *RetryPolicy) ToJSON() (string, error) {
 		return "", fmt.Errorf("failed to marshal retry policy: %w", err)
 	}
 	return string(data), nil
-}
-
-// Mission represents a mission node in the graph.
-// Missions track the overall execution state of a security testing mission.
-type Mission struct {
-	ID          types.ID      `json:"id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Objective   string        `json:"objective"`
-	TargetRef   string        `json:"target_ref"`             // Reference to target system
-	Status      MissionStatus `json:"status"`                 // Current execution status
-	CreatedAt   time.Time     `json:"created_at"`             // When mission was created
-	StartedAt   *time.Time    `json:"started_at,omitempty"`   // When execution started
-	CompletedAt *time.Time    `json:"completed_at,omitempty"` // When execution completed
-	YAMLSource  string        `json:"yaml_source"`            // Original YAML for reconstruction
 }
 
 // MissionNode represents a task node in a mission.

@@ -26,6 +26,7 @@ import (
 	bankengine "github.com/zeroroot-ai/gibson/internal/engine/bank"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -1103,6 +1104,15 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.graphWriter,
 		0, // default interval
 		d.logger.WithComponent("graph-projector").Slog(),
+	).Run(ctx)
+
+	// The findings table is a read model of the World too (gibson#1518): this
+	// copies each status change to it.
+	go NewFindingStatusProjector(
+		d.brainRegistry,
+		pgstore.New(func() datapool.Pool { return d.pool }),
+		0, // default interval
+		d.logger.WithComponent("finding-status-projector").Slog(),
 	).Run(ctx)
 
 	// Initialize Redis stores (mission/run stores have been migrated to the
