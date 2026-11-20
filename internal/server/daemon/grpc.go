@@ -1696,6 +1696,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if err := d.registerDomainPack(ctx, srv); err != nil {
 		return nil, err
 	}
+	if err := d.registerIncidentReport(ctx, srv); err != nil {
+		return nil, err
+	}
 	d.registerCatalogPlugin(ctx, srv)
 	if err := d.registerAgentSkill(ctx, srv, pageKeys); err != nil {
 		return nil, err

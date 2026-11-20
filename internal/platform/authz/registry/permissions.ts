@@ -2940,6 +2940,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.IncidentReportService/GetIncidentReport": {
+    method: "/gibson.tenant.v1.IncidentReportService/GetIncidentReport",
+    service: "gibson.tenant.v1.IncidentReportService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.MembershipService/AcceptInvitation": {
     method: "/gibson.tenant.v1.MembershipService/AcceptInvitation",
     service: "gibson.tenant.v1.MembershipService",

@@ -2666,6 +2666,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.IncidentReportService/GetIncidentReport": {
+		Service:           "gibson.tenant.v1.IncidentReportService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.MembershipService/AcceptInvitation": {
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "",
