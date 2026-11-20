@@ -1,0 +1,22 @@
+# AWS Security Hub connector. AWS runs the AWS MCP Server (ADR-0114, ADR-0177).
+# AWS publishes no MCP server for Security Hub only. The AWS MCP Server calls
+# each AWS API, and Security Hub is one of them.
+# Source of the endpoint: https://docs.aws.amazon.com/agent-toolkit/latest/userguide/getting-started-aws-mcp-server.html
+# Source of the auth: https://aws-mcp.us-east-1.api.aws/.well-known/oauth-protected-resource
+# The endpoint is the us-east-1 server. AWS has one endpoint for each of 8 Regions.
+id: aws-security-hub
+kind: connector
+displayName: AWS Security Hub
+description: >-
+  The AWS MCP Server. It calls the Security Hub APIs of the AWS account of
+  the customer to read findings.
+egressAllow:
+  - aws-mcp.us-east-1.api.aws:443
+spec:
+  vendor: aws
+  class: cloud
+  shape: Remote
+  endpoint: https://aws-mcp.us-east-1.api.aws/mcp
+  transport: streamable-http
+  auth: oauth
+  defaultInstanceUrl: https://aws-mcp.us-east-1.api.aws/mcp
