@@ -1,0 +1,7 @@
+# The kind cluster of the reference environment (gibson#1490).
+# One node is enough. The flaw of the app log-shipper reads the kubelet
+# directory of this node, so the node must be a kind node and not a mock.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane

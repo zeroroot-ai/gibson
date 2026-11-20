@@ -1,0 +1,82 @@
+# The seed job fills the Git host. It makes the repo refadmin/platform with the
+# files of apps/ in deploy/, a workflow that deploys them, and one file with a
+# credential in it (flaw "committed-secret", found by a tool read of the Git
+# host). The job builds the fake key from two parts, so no scanner of this
+# repo reads it as a real secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seed-script
+data:
+  deploy-workflow.yaml: |
+    name: deploy
+    on:
+      push:
+        branches: [main]
+    jobs:
+      deploy:
+        runs-on: self-hosted
+        steps:
+          - name: Clone
+            run: git clone "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" src && cd src && git checkout "$GITHUB_SHA"
+          - name: Deploy
+            run: kubectl apply -n refenv -f src/deploy/
+  seed.sh: |
+    set -eu
+    git_api=http://gitea:3000/api/v1
+    auth="$ADMIN_USER:$ADMIN_PASSWORD"
+    until curl -sf http://gitea:3000/api/healthz; do sleep 2; done
+    curl -sf -u "$auth" -X POST "$git_api/user/repos" \
+      -H 'Content-Type: application/json' \
+      -d '{"name":"platform","auto_init":true,"default_branch":"main"}'
+    put() {
+      path=$1
+      file=$2
+      body=$(base64 -w0 "$file")
+      curl -sf -u "$auth" -X POST "$git_api/repos/$ADMIN_USER/platform/contents/$path" \
+        -H 'Content-Type: application/json' \
+        -d "{\"message\":\"seed $path\",\"content\":\"$body\"}"
+    }
+    for f in /apps/*.yaml; do
+      put "deploy/$(basename "$f")" "$f"
+    done
+    put .gitea/workflows/deploy.yaml /script/deploy-workflow.yaml
+    printf 'AWS_ACCESS_KEY_ID=%s%s\n' AKIA IOSFODNN7EXAMPLE > /tmp/ci.env
+    put config/ci.env /tmp/ci.env
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: curlimages/curl@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b
+          command: ["sh", "/script/seed.sh"]
+          env:
+            - name: ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: gitea-admin
+                  key: username
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gitea-admin
+                  key: password
+          volumeMounts:
+            - name: script
+              mountPath: /script
+            - name: apps
+              mountPath: /apps
+      volumes:
+        - name: script
+          configMap:
+            name: seed-script
+        - name: apps
+          configMap:
+            name: app-manifests

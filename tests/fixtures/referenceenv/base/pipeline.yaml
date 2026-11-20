@@ -1,0 +1,133 @@
+# The pipeline of the reference environment: Gitea Actions with one runner.
+# The runner runs each job on its own host (label self-hosted:host), so it needs
+# no container runtime. A job deploys the files of deploy/ in the repo to the
+# namespace refenv with the service account pipeline-deployer.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipeline-deployer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pipeline-deployer
+rules:
+  - apiGroups: ["", "apps"]
+    resources: [deployments, services, configmaps, serviceaccounts]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [roles, rolebindings]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # A fix can narrow a binding, and the API refuses a grant that the caller
+  # does not hold unless the caller can bind and escalate.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [roles, clusterroles]
+    verbs: [escalate, bind]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-deployer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pipeline-deployer
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-deployer
+    namespace: refenv
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: act-runner
+  annotations:
+    refenv.zeroroot.ai/health-url: http://act-runner.refenv.svc.cluster.local:8080/healthz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: act-runner
+  template:
+    metadata:
+      labels:
+        app: act-runner
+    spec:
+      serviceAccountName: pipeline-deployer
+      initContainers:
+        # Copy kubectl into a shared volume for the jobs.
+        - name: kubectl
+          image: rancher/kubectl@sha256:9a13b940de2b2b1da97ac4c3b37608bac61152303a50229a76dbd78fb684c9e8
+          command: ["sh", "-c", "cp /bin/kubectl /tools/kubectl"]
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+        # Get a registration token from the Git host.
+        - name: token
+          image: curlimages/curl@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b
+          command:
+            - sh
+            - -c
+            - |
+              until curl -sf http://gitea:3000/api/healthz; do sleep 2; done
+              curl -sf -u "$ADMIN_USER:$ADMIN_PASSWORD" \
+                http://gitea:3000/api/v1/admin/runners/registration-token \
+                | sed 's/.*"token":"\([^"]*\)".*/\1/' > /reg/token
+          env:
+            - name: ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: gitea-admin
+                  key: username
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gitea-admin
+                  key: password
+          volumeMounts:
+            - name: reg
+              mountPath: /reg
+      containers:
+        - name: runner
+          image: gitea/act_runner@sha256:c57233403eff970945cfb8b13f0e622d2124f4dbc623af3e2c74f061d05e8f60
+          command:
+            - sh
+            - -c
+            - |
+              act_runner register --no-interactive --instance http://gitea:3000 \
+                --token "$(cat /reg/token)" --name refenv-runner --labels self-hosted:host
+              export PATH="/tools:$PATH"
+              act_runner daemon &
+              mkdir -p /tmp/www && echo ok > /tmp/www/healthz
+              exec busybox httpd -f -p 8080 -h /tmp/www
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+            - name: reg
+              mountPath: /reg
+      volumes:
+        - name: tools
+          emptyDir: {}
+        - name: reg
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: act-runner
+spec:
+  selector:
+    app: act-runner
+  ports:
+    - port: 8080
+      targetPort: 8080

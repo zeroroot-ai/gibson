@@ -1,0 +1,72 @@
+# Service catalog-api. Flaw: the path /admin/ answers 200 with no
+# authentication (flaw "unauthenticated-admin-endpoint").
+# Fix: require a credential on /admin/ (nginx auth_basic) or return 401.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-api-nginx
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      location = /healthz {
+        default_type text/plain;
+        return 200 'ok';
+      }
+      location = /catalog {
+        default_type application/json;
+        return 200 '{"items":["widget","gadget"]}';
+      }
+      location /admin/ {
+        default_type application/json;
+        return 200 '{"admin":true,"users":["alice","bob"]}';
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-api
+  annotations:
+    refenv.zeroroot.ai/health-url: http://catalog-api.refenv.svc.cluster.local:8080/healthz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalog-api
+  template:
+    metadata:
+      labels:
+        app: catalog-api
+    spec:
+      containers:
+        - name: catalog-api
+          image: nginxinc/nginx-unprivileged@sha256:5318ef1dbe33bebd2312c4ad64731c424d68fa0f7349870dda10b8d173fedc2e
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: conf
+          configMap:
+            name: catalog-api-nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-api
+spec:
+  selector:
+    app: catalog-api
+  ports:
+    - port: 8080
+      targetPort: 8080

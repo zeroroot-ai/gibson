@@ -1,0 +1,69 @@
+# The flaws of the reference environment (gibson#1490). This file is the
+# machine form of the flaw table in README.md. The test of this directory reads
+# it and checks each row against the manifests.
+#
+# check: attack = an attack predicate of a pack settles on a proof (ADR-0131)
+#        scan   = an image or cluster scan finds it
+#        tool   = a read of a tool of the buyer, through a connector (ADR-0177)
+# technique: the id of the MITRE ATT&CK technique.
+# category: the category of the technique hierarchy (ADR-0135), for an attack.
+flaws:
+  - id: unauthenticated-admin-endpoint
+    service: catalog-api
+    check: attack
+    predicate: unauthenticated_endpoint_exposed
+    category: initial_access
+    technique: T1190
+    destructive: false
+    fix: Require a credential on /admin/ or return 401 there.
+    health_signal: probe_success{service="catalog-api"} == 1
+  - id: credential-in-environment
+    service: payments
+    check: attack
+    predicate: credential_disclosure_detected
+    category: credential_access
+    technique: T1552
+    destructive: false
+    fix: Remove the variables and mount a Secret as a file with mode 0400.
+    health_signal: probe_success{service="payments"} == 1
+  - id: privileged-container
+    service: node-agent
+    check: attack
+    predicate: privileged_container_detected
+    category: privilege_escalation
+    technique: T1611
+    destructive: false
+    fix: Remove privileged and drop all capabilities.
+    health_signal: probe_success{service="node-agent"} == 1
+  - id: node-token-readable
+    service: log-shipper
+    check: attack
+    predicate: node_token_readable
+    category: credential_access
+    technique: T1528
+    destructive: false
+    fix: Remove the hostPath volume of the kubelet pods directory.
+    health_signal: probe_success{service="log-shipper"} == 1
+  - id: wide-rbac-binding
+    service: ops-dashboard
+    check: attack
+    predicate: rbac_write_access_proven
+    category: privilege_escalation
+    technique: T1078
+    destructive: true
+    fix: Bind a Role that grants only what the service needs, or no Role.
+    health_signal: probe_success{service="ops-dashboard"} == 1
+  - id: vulnerable-package-in-image
+    service: reports
+    check: scan
+    tool: trivy-k8s
+    technique: T1190
+    fix: Move the image to a current nginx release, pinned by digest.
+    health_signal: probe_success{service="reports"} == 1
+  - id: committed-secret
+    service: gitea
+    check: tool
+    connector_class: git-host
+    technique: T1552
+    fix: Revoke the key, remove the file from the repo and rewrite its history.
+    health_signal: probe_success{service="gitea"} == 1
