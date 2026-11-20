@@ -235,6 +235,7 @@ func newTestStore(db *fakeDB) *Store { return &Store{conns: db} }
 
 func newFinding(missionID types.ID, title string, sev agent.FindingSeverity, created time.Time) finding.EnhancedFinding {
 	f := finding.NewEnhancedFinding(agent.NewFinding(title, "description of "+title, sev), missionID, "recon")
+	f.Check = finding.Check{Kind: finding.CheckScan}
 	f.CreatedAt = created
 	return f
 }
@@ -563,6 +564,7 @@ func TestSetStatus_UpdatesTheDocument(t *testing.T) {
 	s := &Store{conns: db}
 	ctx := context.Background()
 	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	f.Check = finding.Check{Kind: finding.CheckScan}
 	require.NoError(t, s.Store(ctx, "acme", f))
 
 	changed, err := s.SetStatus(ctx, "acme", f.ID, finding.StatusFixed)
@@ -581,4 +583,20 @@ func TestSetStatus_RefusesAStatusOutsideTheFour(t *testing.T) {
 	s := &Store{conns: newFakeDB()}
 	_, err := s.SetStatus(context.Background(), "acme", types.NewID(), finding.FindingStatus("resolved"))
 	require.Error(t, err)
+}
+
+// A finding with no check fails the write and leaves no row (gibson#1457).
+func TestStore_RefusesAFindingWithNoCheck(t *testing.T) {
+	db := newFakeDB()
+	s := &Store{conns: db}
+	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	f.Check = finding.Check{}
+
+	err := s.Store(context.Background(), "acme", f)
+	require.ErrorIs(t, err, finding.ErrNoCheck)
+	assert.Empty(t, db.rows)
+
+	f.Check = finding.Check{Kind: finding.CheckPredicate} // a predicate needs its type
+	require.ErrorIs(t, s.Store(context.Background(), "acme", f), finding.ErrNoCheck)
 }

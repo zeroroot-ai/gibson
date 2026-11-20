@@ -127,6 +127,9 @@ func (d *daemonImpl) discoveredFindingWriter() ingest.FindingWriter {
 		}
 		enhanced := finding.NewEnhancedFinding(base, missionID, f.AgentName)
 		enhanced.Evidence = evidence
+		// A tool that reports a discovery is a scan of the target. The mission run
+		// is the scan (ADR-0178).
+		enhanced.Check = finding.ScanCheck(missionID)
 		if err := store.Store(ctx, tenant, enhanced); err != nil {
 			return fmt.Errorf("store discovered finding: %w", err)
 		}

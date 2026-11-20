@@ -215,6 +215,9 @@ func newEvidenceRows(items []*typespb.Evidence) ([]evidenceRow, error) {
 // The document of the finding does not hold the evidence. The evidence is in
 // the finding_evidence table only.
 func (s *Store) Store(ctx context.Context, tenantID string, f finding.EnhancedFinding) error {
+	if err := f.Check.Validate(); err != nil {
+		return fmt.Errorf("finding store: finding %s: %w", f.ID, err)
+	}
 	evidence, err := newEvidenceRows(f.Evidence)
 	if err != nil {
 		return err

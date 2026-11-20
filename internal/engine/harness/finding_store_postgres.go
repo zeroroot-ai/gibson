@@ -31,7 +31,11 @@ var _ FindingStore = (*PostgresFindingStore)(nil)
 
 // Store writes the finding as one row of the findings table.
 func (s *PostgresFindingStore) Store(ctx context.Context, tenantID string, missionID types.ID, f agent.Finding) error {
-	if err := s.store.Store(ctx, tenantID, finding.NewEnhancedFinding(f, missionID, "")); err != nil {
+	enhanced := finding.NewEnhancedFinding(f, missionID, "")
+	// A finding that an agent submits is raised by its mission run. A rerun of the
+	// mission is the check that verifies the fix (ADR-0178).
+	enhanced.Check = finding.ScanCheck(missionID)
+	if err := s.store.Store(ctx, tenantID, enhanced); err != nil {
 		return fmt.Errorf("store finding %s: %w", f.ID, err)
 	}
 	return nil

@@ -81,6 +81,10 @@ type EnhancedFinding struct {
 	AgentName     string   `json:"agent_name"`
 	DelegatedFrom *string  `json:"delegated_from,omitempty"`
 
+	// Check is the check that raised the finding (ADR-0178). The same check
+	// verifies the fix. The store refuses a finding with no valid check.
+	Check Check `json:"check"`
+
 	// Classification
 	Subcategory string        `json:"subcategory"`
 	Status      FindingStatus `json:"status"`

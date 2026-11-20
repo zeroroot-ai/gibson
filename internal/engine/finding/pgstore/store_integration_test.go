@@ -91,6 +91,7 @@ func TestStore_Integration_RoundTrip(t *testing.T) {
 
 	mk := func(m types.ID, title string, sev agent.FindingSeverity, at time.Time) finding.EnhancedFinding {
 		f := finding.NewEnhancedFinding(agent.NewFinding(title, "d", sev), m, "recon")
+		f.Check = finding.Check{Kind: finding.CheckScan}
 		f.CreatedAt = at
 		return f
 	}
@@ -126,6 +127,7 @@ func TestStore_Integration_EvidenceRowsAndCascade(t *testing.T) {
 	s, pool := newStore(t)
 	ctx := context.Background()
 	f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+	f.Check = finding.Check{Kind: finding.CheckScan}
 	f.Evidence = []*typespb.Evidence{
 		{
 			Title: "tool call httpx (call-1)", Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Content: "recorded",
@@ -164,6 +166,7 @@ func TestStore_Integration_EvidenceRowsAndCascade(t *testing.T) {
 
 	// The store refuses an invalid item and writes no finding row.
 	bad := finding.NewEnhancedFinding(agent.NewFinding("b", "d", agent.SeverityLow), types.NewID(), "recon")
+	bad.Check = finding.Check{Kind: finding.CheckScan}
 	bad.Evidence = []*typespb.Evidence{{Content: "x", Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED}}
 	require.Error(t, s.Store(ctx, "acme", bad))
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings WHERE id = $1`, bad.ID.String()).Scan(&n))
@@ -183,6 +186,7 @@ func TestStore_Integration_TransactionRollback(t *testing.T) {
 	s, pool := newStore(t)
 	ctx := context.Background()
 	f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+	f.Check = finding.Check{Kind: finding.CheckScan}
 	f.Evidence = []*typespb.Evidence{
 		{Title: "ok", Content: "fine", Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED},
 		{Title: "bad", Content: "nul\x00byte", Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED},
@@ -205,6 +209,7 @@ func TestStore_Integration_SizeLimit(t *testing.T) {
 	ctx := context.Background()
 	mk := func(size int) finding.EnhancedFinding {
 		f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+		f.Check = finding.Check{Kind: finding.CheckScan}
 		f.Evidence = []*typespb.Evidence{{
 			Content: strings.Repeat("x", size), Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, ToolCallId: "call-1",
 		}}
@@ -235,6 +240,7 @@ func TestStore_Integration_FindAndFindWithEvidence(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	mk := func(m types.ID, title, desc, cat string, sev agent.FindingSeverity, at time.Time) finding.EnhancedFinding {
 		f := finding.NewEnhancedFinding(agent.NewFinding(title, desc, sev).WithCategory(cat), m, "recon")
+		f.Check = finding.Check{Kind: finding.CheckScan}
 		f.CreatedAt = at
 		return f
 	}
@@ -315,6 +321,7 @@ func TestStore_Integration_CountsAndDailyCounts(t *testing.T) {
 	now := time.Now().UTC()
 	mk := func(sev agent.FindingSeverity, cat string, at time.Time) finding.EnhancedFinding {
 		f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", sev).WithCategory(cat), m, "recon")
+		f.Check = finding.Check{Kind: finding.CheckScan}
 		f.CreatedAt = at
 		return f
 	}
