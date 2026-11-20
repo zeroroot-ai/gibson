@@ -38,12 +38,24 @@ package brain
 // with one bet's settlement attempt: SettleBetTrue's own terminal-settlement
 // check already prevents a second attempt once one succeeds, so there is
 // never more than one outstanding destructive request per hypothesis.
+//
+// A tool call of a connector uses the same record and the same two events
+// (gibson#1474, ADR-0180). A tool call has no hypothesis, so its identity is a
+// key that the daemon derives from the tenant, the mission, the connector, the
+// tool and the arguments (ToolCallKey). The ActionKind of the record is
+// ActionKindToolCall. A third event, destructive_action.consumed, records that
+// an approved call ran, so one approval releases one call.
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/mlange-42/ark/ecs"
@@ -84,6 +96,20 @@ type DestructiveAction struct {
 	// observation.go's ObservedAt uses).
 	RequestedAtUnixMS int64
 
+	// ActionKind states what the request is for. An empty value is a destructive
+	// proof. ActionKindToolCall is a call of a connector tool. The fields
+	// below it are set only for a tool call.
+	ActionKind string
+	// CallKey is the key of the call without its sequence number.
+	CallKey string
+	// Connector, Tool and ArgsHash name the call that the approval covers.
+	Connector string
+	Tool      string
+	ArgsHash  string
+	// Consumed is set once the approved call was released. One approval
+	// releases one call.
+	Consumed bool
+
 	// Decided, Approved, UserID, DecidedAtUnixMS are set only once a
 	// DestructiveActionDecided event folds (terminal: the first decision
 	// wins, mirroring BetSettlement's own terminal-settlement rule).
@@ -110,6 +136,13 @@ type DestructiveActionRequested struct {
 	// replay. An event from before these fields decodes with zero values.
 	BlastRadius   string        `json:",omitempty"`
 	Reversibility Reversibility `json:",omitempty"`
+	// ActionKind, CallKey, Connector, Tool and ArgsHash identify a request for a
+	// tool call. They are empty for a destructive proof.
+	ActionKind string `json:",omitempty"`
+	CallKey    string `json:",omitempty"`
+	Connector  string `json:",omitempty"`
+	Tool       string `json:",omitempty"`
+	ArgsHash   string `json:",omitempty"`
 }
 
 // Kind identifies the destructive_action.requested brain event.
@@ -146,6 +179,11 @@ func applyDestructiveActionRequested(w *World, e DestructiveActionRequested) {
 		BlastRadius:       e.BlastRadius,
 		Reversibility:     e.Reversibility,
 		RequestedAtUnixMS: e.RequestedAtUnixMS,
+		ActionKind:        e.ActionKind,
+		CallKey:           e.CallKey,
+		Connector:         e.Connector,
+		Tool:              e.Tool,
+		ArgsHash:          e.ArgsHash,
 	})
 	reconcileInputRequired(w, e.MissionID)
 }
@@ -229,6 +267,38 @@ func applyDestructiveActionDecided(w *World, e DestructiveActionDecided) {
 	// Query exhausted → world unlocked.
 }
 
+// DestructiveActionConsumed records that the daemon released the call that an
+// approval covers (gibson#1474). It makes the approval single use: it folds
+// into the same record, so a restart and a replay keep it.
+type DestructiveActionConsumed struct {
+	HypothesisID     string
+	ConsumedAtUnixMS int64
+}
+
+// Kind identifies the destructive_action.consumed brain event.
+func (DestructiveActionConsumed) Kind() string { return "destructive_action.consumed" }
+
+// applyDestructiveActionConsumed folds a DestructiveActionConsumed event. Only
+// an approved tool call that is not yet consumed changes. An event for any
+// other record is dropped, so a stray event cannot spend a proof.
+func applyDestructiveActionConsumed(w *World, e DestructiveActionConsumed) {
+	if e.HypothesisID == "" {
+		return
+	}
+	q := ecs.NewFilter1[DestructiveAction](w.ecs).Query()
+	for q.Next() {
+		a := q.Get()
+		if a.HypothesisID != e.HypothesisID {
+			continue
+		}
+		if a.ActionKind == ActionKindToolCall && a.Decided && a.Approved {
+			a.Consumed = true
+		}
+		q.Close()
+		return
+	}
+}
+
 // DestructiveActionSnapshot is a stable, comparable view of a DestructiveAction.
 type DestructiveActionSnapshot struct {
 	HypothesisID      string
@@ -244,6 +314,12 @@ type DestructiveActionSnapshot struct {
 	DecidedAtUnixMS   int64
 	BlastRadius       string        `json:",omitempty"`
 	Reversibility     Reversibility `json:",omitempty"`
+	ActionKind        string        `json:",omitempty"`
+	CallKey           string        `json:",omitempty"`
+	Connector         string        `json:",omitempty"`
+	Tool              string        `json:",omitempty"`
+	ArgsHash          string        `json:",omitempty"`
+	Consumed          bool          `json:",omitempty"`
 }
 
 // DestructiveActionSnapshot returns destructive actions in deterministic
@@ -269,6 +345,12 @@ func (w *World) DestructiveActionSnapshot() []DestructiveActionSnapshot {
 			DecidedAtUnixMS:   a.DecidedAtUnixMS,
 			BlastRadius:       a.BlastRadius,
 			Reversibility:     a.Reversibility,
+			ActionKind:        a.ActionKind,
+			CallKey:           a.CallKey,
+			Connector:         a.Connector,
+			Tool:              a.Tool,
+			ArgsHash:          a.ArgsHash,
+			Consumed:          a.Consumed,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].HypothesisID < out[j].HypothesisID })
@@ -327,6 +409,10 @@ type DestructiveAuthorizationQueue struct {
 	// now is an injectable clock, defaulting to time.Now, so tests can pin
 	// timestamps deterministically without sleeping.
 	now func() time.Time
+
+	// toolMu makes the read of a tool call record and the write that follows
+	// one step, so two equal calls cannot both claim one approval.
+	toolMu sync.Mutex
 }
 
 // NewDestructiveAuthorizationQueue constructs a queue bound to engine. engine
@@ -395,6 +481,11 @@ func (q *DestructiveAuthorizationQueue) Request(tenant string, req DestructiveAu
 	if req.HypothesisID == "" {
 		return "", errors.New("brain: destructive authorization request requires a hypothesis id")
 	}
+	if strings.HasPrefix(req.HypothesisID, toolCallIDPrefix) {
+		// The prefix names the requests of tool calls. An agent cannot take
+		// the identity of a tool call with a proof request.
+		return "", fmt.Errorf("brain: hypothesis id %q uses the reserved prefix %q", req.HypothesisID, toolCallIDPrefix)
+	}
 
 	q.engine.Submit(DestructiveActionRequested{
 		HypothesisID:      req.HypothesisID,
@@ -430,7 +521,7 @@ func (q *DestructiveAuthorizationQueue) Verify(_ context.Context, _ string, req 
 	}
 
 	for _, a := range q.engine.DestructiveActionSnapshot() {
-		if a.HypothesisID != req.HypothesisID {
+		if a.HypothesisID != req.HypothesisID || a.ActionKind != ActionKindProof {
 			continue
 		}
 		if !a.Decided {
@@ -499,4 +590,146 @@ func (q *DestructiveAuthorizationQueue) Decide(hypothesisID, userID string, appr
 		DecidedAtUnixMS: q.now().UnixMilli(),
 	})
 	return nil
+}
+
+// ActionKindProof is the ActionKind of a destructive proof request. It is the empty
+// string, so a record from before the ActionKind field keeps its meaning.
+const ActionKindProof = ""
+
+// ActionKindToolCall is the ActionKind of a request for a tool call of a connector
+// (gibson#1474).
+const ActionKindToolCall = "tool_call"
+
+// toolCallIDPrefix starts the identity of each tool call request. Request
+// refuses a proof with this prefix.
+const toolCallIDPrefix = "tool-call:"
+
+// ToolCallKey derives the key of a tool call. The key covers the tenant, the
+// mission, the connector, the tool and the hash of the arguments, so an
+// approval of one call does not cover another target, another tool or another
+// mission. Each part has a length prefix, so two different calls cannot form the
+// same input.
+func ToolCallKey(tenant, missionID, connector, tool, argsHash string) string {
+	h := sha256.New()
+	for _, part := range []string{tenant, missionID, connector, tool, argsHash} {
+		fmt.Fprintf(h, "%d:%s|", len(part), part)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// ToolCallRequest is one call of a marked tool that waits for the approval of a
+// person.
+type ToolCallRequest struct {
+	MissionID string
+	Connector string
+	Tool      string
+	// ArgsHash is the hash of the canonical arguments of the call.
+	ArgsHash string
+	// BlastRadius and Reversibility are for the approver. The manifest of the
+	// connector and the arguments of the call give them.
+	BlastRadius   string
+	Reversibility Reversibility
+}
+
+// ToolCallState is the state of one call in the approval queue.
+type ToolCallState int
+
+const (
+	// ToolCallPending means that a request waits for a decision. The call must
+	// not run.
+	ToolCallPending ToolCallState = iota + 1
+	// ToolCallDenied means that a person refused the call.
+	ToolCallDenied
+	// ToolCallApproved means that a person approved the call and this check
+	// spent the approval. The caller runs the call now, one time.
+	ToolCallApproved
+)
+
+// AuthorizeToolCall is the one check of the approval queue at tool dispatch. It
+// never blocks.
+//
+//   - A call with no request records one request and returns ToolCallPending
+//     with the id of the request.
+//   - A call with a request that waits returns ToolCallPending and records
+//     nothing new.
+//   - A call with a denied request returns ToolCallDenied. The decision is final.
+//   - A call with an approved request that is not spent records the spend and
+//     returns ToolCallApproved. The next equal call has no approval left and
+//     starts a new request.
+//
+// An error means that the check could not finish. The caller must not run the
+// call.
+func (q *DestructiveAuthorizationQueue) AuthorizeToolCall(
+	ctx context.Context, tenant string, req ToolCallRequest,
+) (ToolCallState, string, error) {
+	if req.Connector == "" || req.Tool == "" || req.ArgsHash == "" {
+		return 0, "", errors.New("brain: a tool call request needs a connector, a tool and an argument hash")
+	}
+	key := ToolCallKey(tenant, req.MissionID, req.Connector, req.Tool, req.ArgsHash)
+
+	q.toolMu.Lock()
+	defer q.toolMu.Unlock()
+
+	var mine []DestructiveActionSnapshot
+	for _, a := range q.engine.DestructiveActionSnapshot() {
+		if a.ActionKind == ActionKindToolCall && a.CallKey == key {
+			mine = append(mine, a)
+		}
+	}
+	// The sequence number is part of the id, so a numeric order is the order of
+	// creation.
+	sort.Slice(mine, func(i, j int) bool { return toolCallSeq(mine[i].HypothesisID) < toolCallSeq(mine[j].HypothesisID) })
+
+	for _, a := range mine {
+		switch {
+		case !a.Decided:
+			return ToolCallPending, a.HypothesisID, nil
+		case !a.Approved:
+			return ToolCallDenied, a.HypothesisID, nil
+		case a.Consumed:
+			continue
+		}
+		err := q.engine.SubmitAndWait(ctx, DestructiveActionConsumed{
+			HypothesisID:     a.HypothesisID,
+			ConsumedAtUnixMS: q.now().UnixMilli(),
+		})
+		if err != nil {
+			return 0, "", fmt.Errorf("brain: record the use of the approval %q: %w", a.HypothesisID, err)
+		}
+		return ToolCallApproved, a.HypothesisID, nil
+	}
+
+	id := toolCallIDPrefix + key + "#" + strconv.Itoa(len(mine))
+	err := q.engine.SubmitAndWait(ctx, DestructiveActionRequested{
+		HypothesisID:      id,
+		Tenant:            tenant,
+		MissionID:         req.MissionID,
+		Technique:         "mcp:" + req.Connector + ":" + req.Tool,
+		PredicateType:     ActionKindToolCall,
+		BlastRadius:       req.BlastRadius,
+		Reversibility:     req.Reversibility,
+		RequestedAtUnixMS: q.now().UnixMilli(),
+		ActionKind:        ActionKindToolCall,
+		CallKey:           key,
+		Connector:         req.Connector,
+		Tool:              req.Tool,
+		ArgsHash:          req.ArgsHash,
+	})
+	if err != nil {
+		return 0, "", fmt.Errorf("brain: record the approval request of %s:%s: %w", req.Connector, req.Tool, err)
+	}
+	return ToolCallPending, id, nil
+}
+
+// toolCallSeq reads the sequence number at the end of a tool call id.
+func toolCallSeq(id string) int {
+	i := strings.LastIndexByte(id, '#')
+	if i < 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(id[i+1:])
+	if err != nil {
+		return 0
+	}
+	return n
 }

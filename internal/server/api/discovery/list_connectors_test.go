@@ -104,9 +104,15 @@ func TestListConnectors_RwxPerCaller(t *testing.T) {
 	if g.GetDisplayName() == "" {
 		t.Error("catalog-backed connector must carry a display name")
 	}
+	if g.GetToolClass() != "git-host" {
+		t.Errorf("gitlab tool class = %q, want git-host", g.GetToolClass())
+	}
 	ghost := byName["ghost"]
 	if ghost == nil || ghost.GetDisplayName() != "ghost" {
 		t.Fatalf("off-catalog connector must fall back to its bare id: %+v", ghost)
+	}
+	if ghost.GetToolClass() != "" {
+		t.Errorf("off-catalog connector tool class = %q, want empty", ghost.GetToolClass())
 	}
 }
 

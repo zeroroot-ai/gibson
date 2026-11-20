@@ -434,6 +434,11 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			BlastRadius:       a.BlastRadius,
 			Reversibility:     a.Reversibility,
 			RequestedAtUnixMS: a.RequestedAtUnixMS,
+			ActionKind:        a.ActionKind,
+			CallKey:           a.CallKey,
+			Connector:         a.Connector,
+			Tool:              a.Tool,
+			ArgsHash:          a.ArgsHash,
 		})
 		if a.Decided {
 			Reduce(w, DestructiveActionDecided{
@@ -442,6 +447,9 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 				UserID:          a.UserID,
 				DecidedAtUnixMS: a.DecidedAtUnixMS,
 			})
+		}
+		if a.Consumed {
+			Reduce(w, DestructiveActionConsumed{HypothesisID: a.HypothesisID})
 		}
 	}
 

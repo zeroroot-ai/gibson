@@ -216,6 +216,7 @@ func (s *Server) catalogItemForScope(
 		Version:         info.Version,
 		KillSwitches:    switches,
 		InTenantCatalog: inCatalog,
+		ToolClass:       info.Metadata["tool_class"],
 	}
 
 	// denying_gates: cheap heuristic — if the user currently doesn't have

@@ -144,6 +144,7 @@ func (s *HarnessCallbackService) serveMetaTool(ctx context.Context, req *harness
 		authorizer,
 		s.connectors,
 	)
+	handler.WithApprovalGate(s.toolApproval)
 	if store := s.agentSkillStore(); store != nil {
 		handler.WithSkills(store, s.skillLoadHook(req.GetContext()))
 	}
@@ -289,6 +290,16 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 	case errors.Is(err, metatool.ErrRunInactive):
 		// gibson:no-tool-executed — denied before dispatch.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "mission run is not active"), nil
+	case errors.Is(err, metatool.ErrApprovalPending):
+		// gibson:no-tool-executed — a person has not approved the call yet.
+		return withToolCallID(metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+			err.Error()+". Do not retry now. Call again with the same arguments after the approval."), callID), nil
+	case errors.Is(err, metatool.ErrApprovalDenied):
+		// gibson:no-tool-executed — a person denied the call.
+		return withToolCallID(metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, err.Error()), callID), nil
+	case errors.Is(err, metatool.ErrApprovalUnavailable):
+		// gibson:no-tool-executed — the tool needs approval and no queue exists.
+		return withToolCallID(metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, err.Error()), callID), nil
 	case errors.Is(err, metatool.ErrAuditUnavailable):
 		s.logger.ErrorContext(ctx, "meta-tool invoke refused: the audit record could not be written", "id", in.ID, "tenant", caller.Tenant, "err", err)
 		// gibson:no-tool-executed — no call happens without its record.

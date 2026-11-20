@@ -34,8 +34,21 @@ import (
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
 )
+
+// TenantConnectors is the slice of the tenant connector table that the
+// authorization needs: what the tenant chose when it enabled the connector
+// (gibson#1538). *tenantconnector.Store satisfies it.
+type TenantConnectors interface {
+	Get(ctx context.Context, tenantID, connectorID string) (tenantconnector.Connector, error)
+}
+
+// ConnectorCatalog finds the catalog entry of a connector. The default is
+// componentcatalog.LookupConnector. A test can give its own.
+type ConnectorCatalog func(id string) (componentcatalog.ConnectorEntry, error)
 
 // ConnectorSecretStore is the slice of the platform secrets service this
 // server needs. The tenant comes from the call context, as everywhere else in
@@ -78,6 +91,13 @@ type ConnectorAuthAdminConfig struct {
 	// disables StartConnectorAuthorization.
 	CallbackBaseURL string
 	Now             func() time.Time
+	// Connectors holds the OAuth client that a tenant registered for a
+	// connector with no dynamic client registration. Nil makes such a
+	// connector fail at authorization with a clear error.
+	Connectors TenantConnectors
+	// Catalog finds the catalog entry of a connector. Nil means the embedded
+	// catalog.
+	Catalog ConnectorCatalog
 }
 
 // ConnectorAuthAdminServer implements tenantv1.ConnectorAuthServiceServer.
@@ -91,6 +111,8 @@ type ConnectorAuthAdminServer struct {
 	pending     *connectorauth.PendingStore
 	callbackURL string
 	now         func() time.Time
+	connectors  TenantConnectors
+	catalog     ConnectorCatalog
 }
 
 // NewConnectorAuthAdminServer constructs the server. Secrets and Prover are
@@ -112,6 +134,10 @@ func NewConnectorAuthAdminServer(cfg ConnectorAuthAdminConfig) (*ConnectorAuthAd
 	if now == nil {
 		now = time.Now
 	}
+	catalog := cfg.Catalog
+	if catalog == nil {
+		catalog = componentcatalog.LookupConnector
+	}
 	return &ConnectorAuthAdminServer{
 		secrets:     cfg.Secrets,
 		prover:      cfg.Prover,
@@ -120,6 +146,8 @@ func NewConnectorAuthAdminServer(cfg ConnectorAuthAdminConfig) (*ConnectorAuthAd
 		pending:     cfg.Pending,
 		callbackURL: strings.TrimRight(cfg.CallbackBaseURL, "/"),
 		now:         now,
+		connectors:  cfg.Connectors,
+		catalog:     catalog,
 	}, nil
 }
 
@@ -209,6 +237,23 @@ func (s *ConnectorAuthAdminServer) StartConnectorAuthorization(ctx context.Conte
 
 	redirectURI := s.callbackURL + connectorauth.CallbackPath
 
+	// The catalog entry states the scope that the authorization asks for
+	// (oauthScope) and who registers the OAuth client (oauthClient). A
+	// connector that is not in the catalog asks for no scope and registers a
+	// client at the vendor.
+	entry, inCatalog := s.catalogEntry(connector)
+	scope := ""
+	var reg *connectorauth.ClientRegistration
+	if inCatalog {
+		scope = entry.OAuthScope
+		if entry.OAuthClient == componentcatalog.OAuthClientTenant {
+			reg, err = s.tenantClient(ctx, tenant, entry, instanceURL)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// The instance URL doubles as the protected-resource base, so a vendor that
 	// advertises RFC 9728 metadata off it is discovered too.
 	meta, err := connectorauth.Discover(ctx, s.client, instanceURL, instanceURL)
@@ -216,14 +261,11 @@ func (s *ConnectorAuthAdminServer) StartConnectorAuthorization(ctx context.Conte
 		return nil, status.Errorf(codes.FailedPrecondition, "vendor discovery failed: %v", netguard.RedactBlocked(ctx, err))
 	}
 
-	// The catalog-driven scope belongs to a later slice; for now the vendor's
-	// default applies, and the granted scope is recorded from the token
-	// response at exchange time.
-	const scope = ""
-
-	reg, err := connectorauth.RegisterClient(ctx, s.client, meta.RegistrationEndpoint, redirectURI, scope)
-	if err != nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "dynamic client registration failed: %v", netguard.RedactBlocked(ctx, err))
+	if reg == nil {
+		reg, err = connectorauth.RegisterClient(ctx, s.client, meta.RegistrationEndpoint, redirectURI, scope)
+		if err != nil {
+			return nil, status.Errorf(codes.FailedPrecondition, "dynamic client registration failed: %v", netguard.RedactBlocked(ctx, err))
+		}
 	}
 
 	pkce, err := connectorauth.GeneratePKCE()
@@ -259,6 +301,71 @@ func (s *ConnectorAuthAdminServer) StartConnectorAuthorization(ctx context.Conte
 		AuthorizeUrl: authorizeURL,
 		State:        state,
 	}, nil
+}
+
+func (s *ConnectorAuthAdminServer) catalogEntry(connector string) (componentcatalog.ConnectorEntry, bool) {
+	entry, err := s.catalog(connector)
+	return entry, err == nil
+}
+
+// tenantClient returns the OAuth client that the tenant registered for the
+// connector, with the client secret read from the secret store of the tenant
+// (gibson#1538). It never returns the secret in an error.
+//
+// The client secret goes to the token endpoint that discovery finds at the
+// instance URL. A tenant admin could name any secret of the tenant and point
+// the instance URL at a host that it owns, so the instance URL must be a host
+// of the connector: the host of the endpoint, of the default instance URL or
+// of the endpoint of the tenant.
+func (s *ConnectorAuthAdminServer) tenantClient(
+	ctx context.Context, tenant auth.TenantID, entry componentcatalog.ConnectorEntry, instanceURL string,
+) (*connectorauth.ClientRegistration, error) {
+	if s.connectors == nil {
+		return nil, status.Error(codes.FailedPrecondition, "tenant OAuth clients are not configured on this daemon")
+	}
+	row, err := s.connectors.Get(ctx, tenant.String(), entry.ID)
+	if err != nil {
+		if errors.Is(err, tenantconnector.ErrNotEnabled) {
+			return nil, status.Errorf(codes.FailedPrecondition, "connector %q is not enabled", entry.ID)
+		}
+		return nil, status.Errorf(codes.Internal, "read the connector of the tenant: %v", err)
+	}
+	if row.OAuthClientID == "" || row.OAuthClientSecretName == "" {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"connector %q needs an OAuth client: enable it again with oauth_client_id and oauth_client_secret_name", entry.ID)
+	}
+	if !hostOfConnector(instanceURL, entry, row) {
+		return nil, status.Errorf(codes.InvalidArgument, "instance_url must be a host of connector %q", entry.ID)
+	}
+	raw, err := s.secrets.Resolve(ctx, row.OAuthClientSecretName)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"the client secret %q is not in the secret store of the tenant", row.OAuthClientSecretName)
+		}
+		return nil, status.Errorf(codes.Internal, "read the client secret: %v", err)
+	}
+	secret := strings.TrimSpace(string(raw))
+	if secret == "" {
+		return nil, status.Errorf(codes.FailedPrecondition, "the client secret %q is empty", row.OAuthClientSecretName)
+	}
+	return &connectorauth.ClientRegistration{ClientID: row.OAuthClientID, ClientSecret: secret}, nil
+}
+
+// hostOfConnector reports whether the host of rawURL is the host of the
+// endpoint, of the default instance URL or of the endpoint of the tenant.
+func hostOfConnector(rawURL string, entry componentcatalog.ConnectorEntry, row tenantconnector.Connector) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	for _, known := range []string{entry.Endpoint, entry.DefaultInstanceURL, row.Endpoint} {
+		if k, kerr := url.Parse(known); kerr == nil && k.Hostname() != "" &&
+			strings.EqualFold(k.Hostname(), u.Hostname()) && k.Port() == u.Port() {
+			return true
+		}
+	}
+	return false
 }
 
 // CompleteConnectorAuthorization finishes the authorization the daemon started:

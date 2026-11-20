@@ -9,6 +9,7 @@ egressAllow:
   - gitlab.com:443
 spec:
   vendor: gitlab
+  class: git-host
   shape: Remote
   endpoint: https://gitlab.com/api/v4/mcp
   transport: streamable-http
