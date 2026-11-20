@@ -1,0 +1,21 @@
+# Jira connector. Atlassian runs the Atlassian Rovo MCP Server (ADR-0114, ADR-0177).
+# Source of the endpoint:
+#   https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/
+# Source of the tools: https://support.atlassian.com/atlassian-rovo-mcp-server/docs/supported-tools/
+# Source of the auth: https://mcp.atlassian.com/.well-known/oauth-authorization-server
+id: jira
+kind: connector
+displayName: Jira
+description: >-
+  The Atlassian Rovo MCP Server. It reads, creates and changes issues in the
+  Jira Cloud site of the customer.
+egressAllow:
+  - mcp.atlassian.com:443
+spec:
+  vendor: atlassian
+  class: ticket
+  shape: Remote
+  endpoint: https://mcp.atlassian.com/v2/mcp
+  transport: streamable-http
+  auth: oauth
+  defaultInstanceUrl: https://mcp.atlassian.com/v2/mcp
