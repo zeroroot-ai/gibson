@@ -149,3 +149,32 @@ func TestExposureWindows_ARevertThatWaitsIsWaitTime(t *testing.T) {
 		t.Errorf("f2 wait = %v, want 1h", wins[1].Wait)
 	}
 }
+
+// A replay of the mission of a fix holds each event of the fix loop that
+// names the mission, and no event of another mission (gibson#1465).
+func TestMissionSlice_HoldsTheFixLoopOfTheMission(t *testing.T) {
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	mine := []Event{
+		FindingStatusChanged{ID: "f1", Status: FindingStatusFixing, MergeRequest: "mr-1", MissionID: "fix-1", At: at},
+		DeployObserved{MergeRequest: "mr-1", MissionID: "fix-1", At: at},
+		HealthObserved{MergeRequest: "mr-1", MissionID: "fix-1", At: at},
+		HealthUnavailable{MergeRequest: "mr-1", MissionID: "fix-1", At: at},
+		RevertRequested{MergeRequest: "mr-1", MissionID: "fix-1", At: at},
+		FixClaimed{ID: "f1", Claim: "c", MissionID: "fix-1", At: at},
+		FixClaimReleased{ID: "f1", Claim: "c", MissionID: "fix-1", At: at},
+		FixReverted{MergeRequest: "mr-1", MissionID: "fix-1", At: at},
+		CheckRerun{ID: "f1", MissionID: "fix-1", EvidenceAt: at},
+		MergeRequestQueued{MergeRequest: "mr-1", MissionID: "fix-1", At: at},
+		MergeGranted{MergeRequest: "mr-1", MissionID: "fix-1", At: at},
+		FindingPrioritized{ID: "f1", MissionID: "fix-1"},
+		MergeRequestObserved{Key: "mr-1", MissionID: "fix-1", At: at},
+	}
+	others := []Event{
+		FixReverted{MergeRequest: "mr-2", MissionID: "fix-2", At: at},
+		RevertRequested{MergeRequest: "mr-2", At: at},
+	}
+	got := MissionSlice(append(append([]Event(nil), mine...), others...), "fix-1")
+	if len(got) != len(mine) {
+		t.Fatalf("slice holds %d events, want %d: %+v", len(got), len(mine), got)
+	}
+}

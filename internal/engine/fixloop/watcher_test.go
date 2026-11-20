@@ -390,3 +390,17 @@ func TestAgentClaimMovesNoFinding(t *testing.T) {
 		t.Fatalf("status = %q, want fixing", got)
 	}
 }
+
+// A watcher needs its reader, its reverter and its placer at construction.
+func TestNewWatcher_RefusesAMissingDependency(t *testing.T) {
+	r, rv := &fakeReader{}, &fakeReverter{}
+	if _, err := NewWatcher(nil, rv, fakePlacer{}, nil, nil); err == nil {
+		t.Error("no reader: want an error")
+	}
+	if _, err := NewWatcher(r, nil, fakePlacer{}, nil, nil); err == nil {
+		t.Error("no reverter: want an error")
+	}
+	if _, err := NewWatcher(r, rv, nil, nil, nil); err == nil {
+		t.Error("no placer: want an error")
+	}
+}

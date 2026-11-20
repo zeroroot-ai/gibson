@@ -7,6 +7,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 )
 
 type fakeTenantGraph struct {
@@ -37,5 +40,23 @@ func TestQuerierGraph_ReadsTheGraphOfTheTenantOfTheContext(t *testing.T) {
 	g.err = errors.New("down")
 	if _, err := r.Read(tenantCtx(t), "q", nil); err == nil {
 		t.Error("a failed read: want an error")
+	}
+}
+
+// The history read takes the tenant from the context and reads the Timeline
+// of that tenant.
+func TestBrainHistory_ReadsTheTimelineOfTheTenantOfTheContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	if err := reg.For("acme").SubmitAndWait(ctx, brain.FindingRaised{ID: "f1"}); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := BrainHistory{Registry: reg}.History(tenantCtx(t))
+	if err != nil || len(evs) != 1 {
+		t.Fatalf("history = %v, %v", evs, err)
+	}
+	if _, err := (BrainHistory{Registry: reg}).History(context.Background()); !errors.Is(err, ErrNoTenant) {
+		t.Errorf("no tenant: err = %v", err)
 	}
 }
