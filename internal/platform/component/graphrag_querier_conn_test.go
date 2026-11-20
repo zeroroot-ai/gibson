@@ -158,9 +158,6 @@ func TestQuerier_FindingReadsEncodeJSON(t *testing.T) {
 		"GetRelatedFindings": func() ([]byte, error) {
 			return q.GetRelatedFindings(context.Background(), "acme", types.NewID().String())
 		},
-		"GetAttackChains": func() ([]byte, error) {
-			return q.GetAttackChains(context.Background(), "acme", "T1059", 2)
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, err := call()

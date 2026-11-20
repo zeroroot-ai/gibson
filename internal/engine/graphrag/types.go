@@ -213,42 +213,6 @@ func (r *Relationship) Validate() error {
 	return nil
 }
 
-// AttackPattern represents an attack pattern node in the graph.
-// This is a specialized node type for MITRE ATT&CK patterns.
-type AttackPattern struct {
-	ID          types.ID  `json:"id"`
-	TechniqueID string    `json:"technique_id"` // e.g., "T1566"
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Tactics     []string  `json:"tactics"`   // e.g., ["Initial Access", "Execution"]
-	Platforms   []string  `json:"platforms"` // e.g., ["Windows", "Linux"]
-	DataSources []string  `json:"data_sources,omitempty"`
-	References  []string  `json:"references,omitempty"`
-	Embedding   []float64 `json:"embedding,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-// ToGraphNode converts the AttackPattern to a GraphNode.
-func (ap *AttackPattern) ToGraphNode() *GraphNode {
-	node := NewGraphNode(ap.ID, NodeType("attack_pattern"))
-	node.WithProperties(map[string]any{
-		"technique_id": ap.TechniqueID,
-		"name":         ap.Name,
-		"description":  ap.Description,
-		"tactics":      ap.Tactics,
-		"platforms":    ap.Platforms,
-		"data_sources": ap.DataSources,
-		"references":   ap.References,
-	})
-	if len(ap.Embedding) > 0 {
-		node.WithEmbedding(ap.Embedding)
-	}
-	node.CreatedAt = ap.CreatedAt
-	node.UpdatedAt = ap.UpdatedAt
-	return node
-}
-
 // FindingNode represents a security finding node in the graph.
 // This connects findings to the knowledge graph for contextual analysis.
 type FindingNode struct {

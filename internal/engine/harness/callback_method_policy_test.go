@@ -92,6 +92,10 @@ func TestCallbackAgentSurface_MatchesImplementedRPCs(t *testing.T) {
 	unimplemented := map[string]bool{
 		harnesspb.HarnessCallbackService_GetPlanContext_FullMethodName:  true,
 		harnesspb.HarnessCallbackService_ReportStepHints_FullMethodName: true,
+		// The attack reads were removed (gibson#1521). The pinned SDK declares
+		// them until zeroroot-ai/sdk#359 ships.
+		harnesspb.HarnessCallbackService_FindSimilarAttacks_FullMethodName: true,
+		harnesspb.HarnessCallbackService_GetAttackChains_FullMethodName:    true,
 		// RequestDestructiveAuthorization (ADR-0132, gibson#390) landed:
 		// callback_request_destructive_authorization.go serves it, and
 		// SubmitProof's SettleBetTrue now verifies the recorded decision — no

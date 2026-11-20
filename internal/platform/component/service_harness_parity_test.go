@@ -114,12 +114,6 @@ func (m *mockGraphRAGQuerier) QueryNodes(_ context.Context, _ string, _ *graphra
 func (m *mockGraphRAGQuerier) StoreNode(_ context.Context, _ string, _ *graphragpb.GraphNode) (string, error) {
 	return m.storeID, m.storeErr
 }
-func (m *mockGraphRAGQuerier) FindSimilarAttacks(_ context.Context, _, _ string, _ int) ([]byte, error) {
-	return nil, nil
-}
-func (m *mockGraphRAGQuerier) GetAttackChains(_ context.Context, _, _ string, _ int) ([]byte, error) {
-	return nil, nil
-}
 func (m *mockGraphRAGQuerier) FindSimilarFindings(_ context.Context, _, _ string, _ int) ([]byte, error) {
 	return nil, nil
 }

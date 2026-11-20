@@ -162,24 +162,6 @@ func (h *MiddlewareHarness) QueryNodes(ctx context.Context, q *graphragpb.GraphQ
 	return results, nil
 }
 
-// FindSimilarAttacks forwards to the wrapped harness.
-func (h *MiddlewareHarness) FindSimilarAttacks(ctx context.Context, content string, topK int) ([]*graphragpb.AttackPattern, error) {
-	results, err := h.inner.FindSimilarAttacks(ctx, content, topK)
-	if err != nil {
-		return nil, fmt.Errorf("middleware: find similar attacks: %w", err)
-	}
-	return results, nil
-}
-
-// GetAttackChains forwards to the wrapped harness.
-func (h *MiddlewareHarness) GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]*graphragpb.AttackChain, error) {
-	results, err := h.inner.GetAttackChains(ctx, techniqueID, maxDepth)
-	if err != nil {
-		return nil, fmt.Errorf("middleware: get attack chains: %w", err)
-	}
-	return results, nil
-}
-
 // FindSimilarFindings forwards to the wrapped harness.
 func (h *MiddlewareHarness) FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]*graphragpb.FindingNode, error) {
 	results, err := h.inner.FindSimilarFindings(ctx, findingID, topK)

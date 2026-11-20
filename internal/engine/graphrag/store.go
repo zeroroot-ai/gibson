@@ -8,7 +8,6 @@ package graphrag
 //
 // Domain-specific reads live in:
 //   - store_findings.go: FindSimilarFindings, GetRelatedFindings
-//   - store_attacks.go:  FindSimilarAttacks, GetAttackChains
 //
 // There are no write methods: the projector is the graph's sole writer
 // (ADR-0112) and the write half was removed in gibson#1322.

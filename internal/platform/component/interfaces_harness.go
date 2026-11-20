@@ -41,10 +41,6 @@ type OntologyReasoner interface {
 type GraphRAGQuerier interface {
 	// QueryNodes searches the knowledge graph.
 	QueryNodes(ctx context.Context, tenant string, query *graphragpb.GraphQuery) ([]*graphragpb.QueryResult, error)
-	// FindSimilarAttacks returns JSON-encoded []graphrag.AttackPattern.
-	FindSimilarAttacks(ctx context.Context, tenant, content string, topK int) ([]byte, error)
-	// GetAttackChains returns JSON-encoded []graphrag.AttackChain.
-	GetAttackChains(ctx context.Context, tenant, techniqueID string, maxDepth int) ([]byte, error)
 	// FindSimilarFindings returns JSON-encoded []graphrag.FindingNode.
 	FindSimilarFindings(ctx context.Context, tenant, findingID string, topK int) ([]byte, error)
 	// GetRelatedFindings returns JSON-encoded []graphrag.FindingNode.
