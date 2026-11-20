@@ -892,6 +892,11 @@ message ListActionsByGrantRequest {
   // zero to means now.
   google.protobuf.Timestamp from = 1;
   google.protobuf.Timestamp to = 2;
+  // page_size is the most groups one page returns. Zero means 100.
+  int32 page_size = 3 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page, for the same
+  // range. Empty starts at the first group.
+  string page_token = 4 [(buf.validate.field).string = { max_len: 1024 }];
 }
 message ActionGroup {
   // grant_object and grant_relation name the grant that allowed the action. For
@@ -917,9 +922,15 @@ message ListActionsByGrantResponse {
   // truncated is true when the range holds more audit records than one read
   // returns.
   bool truncated = 2;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 3;
 }
 
-message ListWaitingOnPersonRequest {}
+message ListWaitingOnPersonRequest {
+  // page_size is the most items one page returns. Zero means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
 message WaitingItem {
   // kind is destructive_action, merge_refused, next_scan or no_health_signal.
   string kind = 1;
@@ -930,4 +941,6 @@ message WaitingItem {
 }
 message ListWaitingOnPersonResponse {
   repeated WaitingItem items = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
 }

@@ -256,8 +256,14 @@ func (s *worldServer) ListActionsByGrant(ctx context.Context, req *worldpb.ListA
 		s.logger.WarnContext(ctx, "world: audit read failed", "error", err)
 		return nil, status.Error(codes.Unavailable, "the audit record is not readable now")
 	}
-	resp := &worldpb.ListActionsByGrantResponse{Truncated: truncated}
-	for _, g := range blueteam.GroupActions(calls, changes, from, to) {
+	pg, err := s.pageOf(ctx, "ListActionsByGrant", req.GetPageSize(), req.GetPageToken(),
+		from.UTC().Format(time.RFC3339Nano), to.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	page, next := pagetoken.Page(pg, blueteam.GroupActions(calls, changes, from, to), actionGroupKey)
+	resp := &worldpb.ListActionsByGrantResponse{Truncated: truncated, NextPageToken: next}
+	for _, g := range page {
 		resp.Groups = append(resp.Groups, &worldpb.ActionGroup{
 			GrantObject: g.Grant.Object, GrantRelation: g.Grant.Relation, Grantor: g.Grantor,
 			Refused: g.Refused, Count: pagetoken.Int32(g.Count),
@@ -269,7 +275,7 @@ func (s *worldServer) ListActionsByGrant(ctx context.Context, req *worldpb.ListA
 }
 
 // ListWaitingOnPerson implements WorldServiceServer.
-func (s *worldServer) ListWaitingOnPerson(ctx context.Context, _ *worldpb.ListWaitingOnPersonRequest) (*worldpb.ListWaitingOnPersonResponse, error) {
+func (s *worldServer) ListWaitingOnPerson(ctx context.Context, req *worldpb.ListWaitingOnPersonRequest) (*worldpb.ListWaitingOnPersonResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -278,8 +284,14 @@ func (s *worldServer) ListWaitingOnPerson(ctx context.Context, _ *worldpb.ListWa
 	if err != nil {
 		return nil, err
 	}
-	resp := &worldpb.ListWaitingOnPersonResponse{}
-	for _, it := range blueteam.WaitingOnPerson(e.Findings(), e.DestructiveActionSnapshot(), evs, s.clockNow()) {
+	pg, err := s.pageOf(ctx, "ListWaitingOnPerson", req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	items := blueteam.WaitingOnPerson(e.Findings(), e.DestructiveActionSnapshot(), evs, s.clockNow())
+	page, next := pagetoken.Page(pg, items, waitingKey)
+	resp := &worldpb.ListWaitingOnPersonResponse{NextPageToken: next}
+	for _, it := range page {
 		resp.Items = append(resp.Items, &worldpb.WaitingItem{
 			Kind: string(it.Kind), Id: it.ID, Since: timestamppb.New(it.Since), WaitedSeconds: seconds(it.Waited),
 		})
@@ -356,3 +368,17 @@ func (d *daemonImpl) blueTeamWorldServer(s *worldServer) *worldServer {
 	}
 	return s.WithBlueTeamSources(places, confidence, actions)
 }
+
+// actionGroupKey orders the groups of ListActionsByGrant for paging: the
+// groups that a grant allowed first, then the refused ones, each by the grant
+// and the person who gave it.
+func actionGroupKey(g blueteam.ActionGroup) string {
+	refused := "0"
+	if g.Refused {
+		refused = "1"
+	}
+	return refused + "\x00" + g.Grant.Object + "\x00" + g.Grant.Relation + "\x00" + g.Grantor
+}
+
+// waitingKey orders the items of ListWaitingOnPerson for paging.
+func waitingKey(it blueteam.WaitItem) string { return string(it.Kind) + "\x00" + it.ID }
