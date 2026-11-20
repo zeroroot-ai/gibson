@@ -470,13 +470,13 @@ func TestA2AInbound(t *testing.T) {
 
 	t.Run("a message starts a mission, and the Task holds the findings", func(t *testing.T) {
 		// The text names a target and a range. The daemon never reads a target from text.
-		id, state := f.startFromMessage(t, caller, sendParams("scan "+f.targets[2]+" and 203.0.113.0/24"))
+		id, state := f.startFromMessage(t, caller, sendParams("scan "+f.targets[2]+" and 203.0.113.0/24", f.targets[0]))
 		require.Equal(t, "TASK_STATE_SUBMITTED", state)
 
 		work := f.nextWork(t, caller, id)
 		require.Equal(t, id, work.MissionID, "the agent got work of the mission that the message started")
 		require.Equal(t, f.targets[0], f.primaryTarget(t, id),
-			"a target in the text changes nothing: the mission has the published targets")
+			"a target in the text changes nothing: the mission has the target of the data part")
 		f.waitState(t, caller, id, "TASK_STATE_WORKING") // the World holds the run
 
 		_, err := submitFinding(ctx, f.comp, work.WorkID, evidenceFinding{
@@ -541,13 +541,25 @@ func TestA2AInbound(t *testing.T) {
 		}
 	})
 
+	t.Run("a message with no data part to a definition with no for_each is rejected", func(t *testing.T) {
+		// The definition has three published targets and no for_each node. One run takes
+		// one target, so a message must name it. The Task says so, and no mission starts.
+		status, body := caller.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan everything"), nil)
+		require.Equal(t, http.StatusOK, status, "body: %s", body)
+		r := decodeRPC(t, body)
+		require.Nil(t, r.Error, "body: %s", body)
+		require.NotNil(t, r.Result.Task, "body: %s", body)
+		require.Equal(t, rejectedState, r.Result.Task.Status.State)
+		require.Contains(t, string(body), "no for_each node")
+	})
+
 	t.Run("an agent with no published definition is refused", func(t *testing.T) {
 		status, body := caller.rpc(ctx, t, inboundUnpublished, "SendMessage", sendParams("scan"), nil)
 		requireRejected(t, status, body, "an agent that is not published")
 	})
 
 	t.Run("a Task cancel ends the mission and only the mission of the caller", func(t *testing.T) {
-		id, _ := f.startFromMessage(t, caller, sendParams("scan until canceled"))
+		id, _ := f.startFromMessage(t, caller, sendParams("scan until canceled", f.targets[0]))
 		work := f.nextWork(t, caller, id)
 		require.Equal(t, id, work.MissionID)
 		f.waitState(t, caller, id, "TASK_STATE_WORKING")
@@ -589,7 +601,7 @@ func TestA2AInbound(t *testing.T) {
 		f.grant(t, keeperID)
 		var id string
 		helpers.Eventually(t, time.Minute, "the keeper starts a mission", func() (bool, string) {
-			status, body := keeper.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan"), nil)
+			status, body := keeper.rpc(ctx, t, inboundAgent, "SendMessage", sendParams("scan", f.targets[0]), nil)
 			r := decodeRPC(t, body)
 			if status != http.StatusOK || r.Result.Task == nil {
 				return false, string(body)
