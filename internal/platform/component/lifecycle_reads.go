@@ -83,6 +83,11 @@ type ApplicationFinding struct {
 	Priority       string `json:"priority,omitempty"`
 	PriorityRule   string `json:"priority_rule,omitempty"`
 	PriorityReason string `json:"priority_reason,omitempty"`
+	// FixBlockedReason is why the fix agent did not fix this Finding, as the
+	// agent wrote it back on the Finding (the node property
+	// fix_blocked_reason). The next pass reads it and does not try the same
+	// Finding again. Empty means that no pass gave up on it.
+	FixBlockedReason string `json:"fix_blocked_reason,omitempty"`
 }
 
 // applicationFindingsCypher walks one Application's lifecycle subgraph.
@@ -122,7 +127,8 @@ RETURN
   coalesce(img.key, '')            AS image_key,
   coalesce(f.priority, '')         AS priority,
   coalesce(f.priority_rule, '')    AS priority_rule,
-  coalesce(f.priority_reason, '')  AS priority_reason
+  coalesce(f.priority_reason, '')  AS priority_reason,
+  coalesce(f.fix_blocked_reason, '') AS fix_blocked_reason
 ORDER BY finding_id
 LIMIT $limit`
 
@@ -187,6 +193,8 @@ func encodeApplicationFindings(rows []map[string]any) ([]byte, error) {
 			Priority:        stringField(r, "priority"),
 			PriorityRule:    stringField(r, "priority_rule"),
 			PriorityReason:  stringField(r, "priority_reason"),
+
+			FixBlockedReason: stringField(r, "fix_blocked_reason"),
 		})
 	}
 	encoded, err := json.Marshal(out)

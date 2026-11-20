@@ -35,6 +35,8 @@ func TestEncodeApplicationFindings_MapsEveryColumn(t *testing.T) {
 		"priority":         "P1",
 		"priority_rule":    "R01",
 		"priority_reason":  "listed in CISA KEV",
+
+		"fix_blocked_reason": "the flaw is on a host",
 	}}
 
 	encoded, err := encodeApplicationFindings(rows)
@@ -55,6 +57,7 @@ func TestEncodeApplicationFindings_MapsEveryColumn(t *testing.T) {
 		Reachable: true, Exposed: true,
 		DeploymentKey: "customer-portal/prod", ImageKey: "sha256:abc",
 		Priority: "P1", PriorityRule: "R01", PriorityReason: "listed in CISA KEV",
+		FixBlockedReason: "the flaw is on a host",
 	}
 	if got[0] != want {
 		t.Errorf("mapping drifted:\n got %+v\nwant %+v", got[0], want)
@@ -359,7 +362,7 @@ func TestApplicationFindingsCypher_ReturnsThePriorityColumnsTheStructReads(t *te
 	// files. A field added to the struct but not to the query reads as "no
 	// pass has decided" forever — silently, and exactly like the untriaged
 	// case above, which is why this is pinned rather than left to review.
-	for _, alias := range []string{"AS priority", "AS priority_rule", "AS priority_reason"} {
+	for _, alias := range []string{"AS priority", "AS priority_rule", "AS priority_reason", "AS fix_blocked_reason"} {
 		if !strings.Contains(applicationFindingsCypher, alias) {
 			t.Errorf("the query does not return %q, so the struct field is always empty", alias)
 		}

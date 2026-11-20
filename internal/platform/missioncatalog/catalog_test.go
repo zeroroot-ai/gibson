@@ -52,6 +52,14 @@ var paramsByMission = map[string]map[string]string{
 	"security-test": {
 		"application": "reference-environment",
 	},
+	"fix": {
+		"bank":           "bank/coding",
+		"finding":        "finding-42",
+		"forgeConnector": "gitlab-fixloop",
+		"project":        "examplebank/customer-portal",
+		"baseBranch":     "main",
+		"brief":          "Finding: \"finding-42\"\nWeakness: \"CVE-2025-1234\"",
+	},
 	"closed-loop": {
 		"application":            "reference-environment",
 		"bank":                   "bank/red-blue",
