@@ -247,39 +247,47 @@ func (n *Neo4jProvisioner) Deprovision(ctx context.Context, tenantID string) err
 	return errors.Join(errs...)
 }
 
-// applyResources resolves the size of the instance and applies the five K8s
-// resources.
-func (n *Neo4jProvisioner) applyResources(
-	ctx context.Context, tenantID, tenantNS, neo4jPassword string, override *gibsonv1alpha1.TenantNeo4jResources,
-) error {
+// sizeFor resolves the size of the instance of one tenant: the default of the
+// chart, then the size on the Tenant, then the floor of an instance that runs.
+// It returns the StatefulSet that exists, or nil when there is none.
+func (n *Neo4jProvisioner) sizeFor(
+	ctx context.Context, tenantID, tenantNS string, override *gibsonv1alpha1.TenantNeo4jResources,
+) (neo4jSize, *appsv1.StatefulSet, error) {
 	names, err := tenantNames(tenantID)
 	if err != nil {
-		return err
+		return neo4jSize{}, nil, err
 	}
 	chartDefault, err := n.defaultSize(ctx)
 	if err != nil {
-		return fmt.Errorf("dataplane/neo4j: tenant %q: %w", tenantID, err)
+		return neo4jSize{}, nil, fmt.Errorf("dataplane/neo4j: tenant %q: %w", tenantID, err)
 	}
 	size, err := resolveNeo4jSize(chartDefault, override)
 	if err != nil {
-		return fmt.Errorf("dataplane/neo4j: tenant %q: %w", tenantID, err)
+		return neo4jSize{}, nil, fmt.Errorf("dataplane/neo4j: tenant %q: %w", tenantID, err)
 	}
 
 	// Read the StatefulSet before the build. An instance that runs keeps the
 	// CPU and the memory it has when only the default is smaller.
 	existingSTS := &appsv1.StatefulSet{}
-	stsExists := true
 	stsKey := types.NamespacedName{Name: names.Neo4jStatefulSet(), Namespace: tenantNS}
 	if getErr := n.cfg.K8sClient.Get(ctx, stsKey, existingSTS); getErr != nil {
-		if !apierrors.IsNotFound(getErr) {
-			return fmt.Errorf("dataplane/neo4j: get StatefulSet: %w", getErr)
+		if apierrors.IsNotFound(getErr) {
+			return size, nil, nil
 		}
-		stsExists = false
+		return neo4jSize{}, nil, fmt.Errorf("dataplane/neo4j: get StatefulSet: %w", getErr)
 	}
-	if stsExists {
-		size = size.notBelowRunning(existingSTS, override)
-	}
+	return size.notBelowRunning(existingSTS, override), existingSTS, nil
+}
 
+// applyResources resolves the size of the instance and applies the five K8s
+// resources.
+func (n *Neo4jProvisioner) applyResources(
+	ctx context.Context, tenantID, tenantNS, neo4jPassword string, override *gibsonv1alpha1.TenantNeo4jResources,
+) error {
+	size, existingSTS, err := n.sizeFor(ctx, tenantID, tenantNS, override)
+	if err != nil {
+		return err
+	}
 	sts, svc, pvc, secret, np := n.buildResources(tenantID, tenantNS, neo4jPassword, size)
 
 	// Apply NetworkPolicy FIRST — before the StatefulSet that creates the
@@ -339,8 +347,13 @@ func (n *Neo4jProvisioner) applyResources(
 		return fmt.Errorf("dataplane/neo4j: get Service: %w", err)
 	}
 
-	// Apply StatefulSet (create-or-update).
-	if !stsExists {
+	return n.applyStatefulSet(ctx, sts, existingSTS)
+}
+
+// applyStatefulSet creates the StatefulSet, or reconciles the pod template of
+// the StatefulSet that exists.
+func (n *Neo4jProvisioner) applyStatefulSet(ctx context.Context, sts, existingSTS *appsv1.StatefulSet) error {
+	if existingSTS == nil {
 		if err := n.cfg.K8sClient.Create(ctx, sts); err != nil {
 			return fmt.Errorf("dataplane/neo4j: create StatefulSet: %w", err)
 		}
@@ -761,7 +774,11 @@ func resolveNeo4jSize(chartDefault neo4jSize, override *gibsonv1alpha1.TenantNeo
 
 // validate applies to a size the same rules that a Tenant size obeys.
 func (s neo4jSize) validate() error {
-	return (&gibsonv1alpha1.TenantNeo4jResources{Storage: &s.Storage, CPU: &s.CPU, Memory: &s.Memory}).Validate()
+	res := &gibsonv1alpha1.TenantNeo4jResources{Storage: &s.Storage, CPU: &s.CPU, Memory: &s.Memory}
+	if err := res.Validate(); err != nil {
+		return fmt.Errorf("the size is not usable: %w", err)
+	}
+	return nil
 }
 
 // notBelowRunning keeps the CPU and the memory of an instance that runs when
