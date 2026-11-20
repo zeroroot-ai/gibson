@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"os"
@@ -133,7 +134,11 @@ func (d *daemonImpl) buildA2AInboundServer() (*httpSubsystem, error) {
 	if d.inboundMissions == nil || d.compRegistry == nil || !ok {
 		return nil, fmt.Errorf("%s: the published missions and the component registry are not available", label)
 	}
-	tlsCfg, err := d.peerTLSConfig(label, edge)
+	// TLS 1.2 is the lowest version. The Edge is an Envoy, and an Envoy upstream offers
+	// TLS 1.2 at most when its cluster sets no tls_params. A minimum of TLS 1.3 made
+	// every Edge call fail the handshake (exit test run 44638502554). The peer is pinned
+	// by SPIFFE ID on mutual TLS, so the version is not what keeps another peer out.
+	tlsCfg, err := d.peerTLSConfig(label, edge, tls.VersionTLS12)
 	if err != nil {
 		return nil, err
 	}

@@ -96,7 +96,7 @@ func TestInboundListener_RefusesAPeerThatIsNotTheEdge(t *testing.T) {
 	d := a2aListenerDaemon(t, func(d *daemonImpl) {
 		d.spiffeX509Source = pkiSource{svid: pki.svid(t, server), bundle: pki.bundle}
 	})
-	cfg, err := d.peerTLSConfig("A2A inbound listener", edge)
+	cfg, err := d.peerTLSConfig("A2A inbound listener", edge, tls.VersionTLS12)
 	require.NoError(t, err)
 
 	lis, err := tls.Listen("tcp", "127.0.0.1:0", cfg)
@@ -145,7 +145,7 @@ func TestInboundListener_AcceptsTheEdgeThatOffersTLS12AtMost(t *testing.T) {
 	d := a2aListenerDaemon(t, func(d *daemonImpl) {
 		d.spiffeX509Source = pkiSource{svid: pki.svid(t, server), bundle: pki.bundle}
 	})
-	cfg, err := d.peerTLSConfig("A2A inbound listener", edge)
+	cfg, err := d.peerTLSConfig("A2A inbound listener", edge, tls.VersionTLS12)
 	require.NoError(t, err)
 	lis, err := tls.Listen("tcp", "127.0.0.1:0", cfg)
 	require.NoError(t, err)
@@ -169,4 +169,46 @@ func TestInboundListener_AcceptsTheEdgeThatOffersTLS12AtMost(t *testing.T) {
 	resp, derr := hc.Do(req)
 	require.NoError(t, derr, "the handshake finishes with a client that offers TLS 1.2 at most")
 	_ = resp.Body.Close()
+}
+
+// Each listener has its own lowest TLS version. The gateway listener keeps TLS 1.3, and
+// a client that offers TLS 1.2 at most cannot finish a handshake with it. The inbound
+// listener takes TLS 1.2, because the Edge offers no more by default.
+func TestPeerTLSConfig_EachListenerHasItsOwnMinimumVersion(t *testing.T) {
+	pki := newTestPKI(t)
+	peer := spiffeid.RequireFromPath(pki.td, "/platform/agentgateway")
+	server := spiffeid.RequireFromPath(pki.td, "/gibson/daemon")
+	d := a2aListenerDaemon(t, func(d *daemonImpl) {
+		d.spiffeX509Source = pkiSource{svid: pki.svid(t, server), bundle: pki.bundle}
+	})
+	for name, min := range map[string]uint16{"gateway": tls.VersionTLS13, "inbound": tls.VersionTLS12} {
+		cfg, err := d.peerTLSConfig(name, peer, min)
+		require.NoError(t, err)
+		assert.Equal(t, min, cfg.MinVersion, name)
+	}
+
+	handshake := func(min uint16) error {
+		cfg, err := d.peerTLSConfig("test", peer, min)
+		require.NoError(t, err)
+		lis, err := tls.Listen("tcp", "127.0.0.1:0", cfg)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lis.Close() })
+		go func() {
+			c, aerr := lis.Accept()
+			if aerr == nil {
+				_ = c.(*tls.Conn).Handshake()
+				_ = c.Close()
+			}
+		}()
+		client := pkiSource{svid: pki.svid(t, peer), bundle: pki.bundle}
+		cc := tlsconfig.MTLSClientConfig(client, client, tlsconfig.AuthorizeID(server))
+		cc.MaxVersion = tls.VersionTLS12
+		conn, derr := tls.Dial("tcp", lis.Addr().String(), cc)
+		if derr != nil {
+			return fmt.Errorf("dial: %w", derr)
+		}
+		return conn.Close()
+	}
+	require.Error(t, handshake(tls.VersionTLS13), "the gateway listener refuses a client that offers TLS 1.2 at most")
+	require.NoError(t, handshake(tls.VersionTLS12), "the inbound listener accepts it")
 }

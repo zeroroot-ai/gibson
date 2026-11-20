@@ -135,7 +135,7 @@ func (d *daemonImpl) buildA2AServer() (*httpSubsystem, error) {
 	if d.brainRegistry == nil || d.brainExecutor == nil {
 		return nil, errors.New("A2A listener: the brain is not available")
 	}
-	tlsCfg, err := d.peerTLSConfig("A2A listener", gateway)
+	tlsCfg, err := d.peerTLSConfig("A2A listener", gateway, tls.VersionTLS13)
 	if err != nil {
 		return nil, err
 	}
@@ -162,8 +162,11 @@ func (d *daemonImpl) buildA2AServer() (*httpSubsystem, error) {
 
 // peerTLSConfig builds the TLS config of an A2A listener. The config accepts the
 // one SPIFFE ID of the peer and no other. It needs SPIFFE mTLS, a peer inside the
-// trust domain of the install, and an open X.509 source.
-func (d *daemonImpl) peerTLSConfig(label string, peer spiffeid.ID) (*tls.Config, error) {
+// trust domain of the install, and an open X.509 source. minVersion is the lowest TLS
+// version of the listener. Each listener sets its own, because its peer decides what
+// it can offer: the Agent gateway proxy offers TLS 1.3, and the Edge (an Envoy) offers
+// TLS 1.2 at most when its cluster sets no tls_params.
+func (d *daemonImpl) peerTLSConfig(label string, peer spiffeid.ID, minVersion uint16) (*tls.Config, error) {
 	if d.config.Auth.SPIFFE == nil || d.config.Auth.SPIFFE.WorkloadAPISocket == "" {
 		return nil, fmt.Errorf("%s: the peer identity needs SPIFFE mTLS, and SPIFFE is not configured", label)
 	}
@@ -174,12 +177,9 @@ func (d *daemonImpl) peerTLSConfig(label string, peer spiffeid.ID) (*tls.Config,
 	if !ok || x509Source == nil || isNilWorkloadSource(d.spiffeX509Source) {
 		return nil, fmt.Errorf("%s: the SPIFFE X.509 source is not open (got %T)", label, d.spiffeX509Source)
 	}
-	// The minimum version is the one of go-spiffe (TLS 1.2), as on the daemon gRPC
-	// listener. The Edge is an Envoy, and an Envoy upstream offers TLS 1.2 at most when
-	// its cluster sets no tls_params. A minimum of TLS 1.3 here made every Edge call
-	// fail the handshake (exit test run 44638502554). The peer is pinned by SPIFFE ID
-	// on mutual TLS, so the version is not what keeps another peer out.
-	return tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(peer)), nil
+	cfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(peer))
+	cfg.MinVersion = minVersion
+	return cfg, nil
 }
 
 // x509Source is the SVID and the trust bundles that an A2A listener serves with.
