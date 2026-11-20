@@ -105,7 +105,7 @@ func newInboundRuns(starter *recordingStarter) *inboundRuns {
 	e.TargetHashes = map[string]string{"t1": "h1", "t2": "h2", "t3": "h3"}
 	pubs.entries["recon"] = e
 	source := &fakePinSource{
-		def:    api.InboundDefinition{ID: "def-1", Hash: "hash-1", Agents: []string{"recon"}},
+		def:    api.InboundDefinition{ID: "def-1", Hash: "hash-1", Agents: []string{"recon"}, FansOut: true},
 		hashes: map[string]string{"t1": "h1", "t2": "h2", "t3": "h3"},
 	}
 	return &inboundRuns{published: pubs, source: source, starter: starter}
@@ -1195,4 +1195,25 @@ func TestResultGate_BoundsAllTenantsTogether(t *testing.T) {
 	r1()
 	_, ok = g.acquire("initech", "c")
 	assert.True(t, ok, "a permit that was given back is free")
+}
+
+// A definition with no for_each node cannot run against more than one target. The
+// daemon would start the mission and then fail it. The message gets a rejected Task
+// with the reason, and no mission starts. A message that names one target still runs.
+func TestInboundRuns_ADefinitionWithNoForEachTakesOneTarget(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	r.source.(*fakePinSource).def.FansOut = false
+
+	task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("scan everything")))
+
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateRejected, task.Status.State)
+	assert.Contains(t, a2aserver.TextOf(task.Status.Message), "no for_each node")
+	assert.Empty(t, starter.started, "no mission starts")
+
+	one, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("scan one"), a2a.NewDataPart(map[string]any{"targets": []string{"t2"}})))
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateSubmitted, one.Status.State)
+	assert.Len(t, starter.started, 1)
 }

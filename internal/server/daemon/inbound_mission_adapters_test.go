@@ -237,3 +237,30 @@ func TestTargetHash_Golden(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "043ac3433b605c3b8a2a052bc69824b57b09201b314794ad17d73a9c51750767", got)
 }
+
+// A definition fans out when it has a for_each node. A run against more than one
+// target needs one, so the source reports it.
+func TestInboundMissionSource_DefinitionReportsAForEachNode(t *testing.T) {
+	f := newInboundSourceFixture(t)
+	plain, err := f.source.Definition(f.ctx, "recon-def")
+	require.NoError(t, err)
+	assert.False(t, plain.FansOut, "a definition with no for_each node does not fan out")
+
+	conn, err := f.source.pool.For(f.ctx, auth.MustNewTenantID("acme"))
+	require.NoError(t, err)
+	require.NoError(t, mission.NewConnBoundMissionStore(conn.Redis).CreateDefinition(f.ctx, &missionpb.MissionDefinition{
+		Id: "def-fan", Name: "fan-def",
+		Nodes: map[string]*missionpb.MissionNode{
+			"each": {
+				Id: "each", Type: missionpb.NodeType_NODE_TYPE_FOR_EACH,
+				Config: &missionpb.MissionNode_ForEachConfig{ForEachConfig: &missionpb.ForEachNodeConfig{
+					Template: inboundAgentNode("scan", "recon"),
+				}},
+			},
+		},
+	}))
+
+	fan, err := f.source.Definition(f.ctx, "fan-def")
+	require.NoError(t, err)
+	assert.True(t, fan.FansOut)
+}

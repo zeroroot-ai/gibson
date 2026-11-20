@@ -43,6 +43,10 @@ type InboundDefinition struct {
 	Hash string
 	// Agents are the names of the agents in its agent nodes.
 	Agents []string
+	// FansOut is true when the definition has a for_each node. A run against more than
+	// one target needs it. Without it the daemon refuses the run, because the run
+	// would assess the first target only and report as though it covered all.
+	FansOut bool
 }
 
 // InboundMissionSource reads the part of the mission side that publishing and

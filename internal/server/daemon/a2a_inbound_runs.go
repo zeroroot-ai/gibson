@@ -260,6 +260,18 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	if reason != "" {
 		return a2aserver.RejectedTask(reason + ". An admin of the tenant must publish it again"), nil
 	}
+	// A run against more than one target needs a for_each node. Without it the daemon
+	// would fail the mission after it started. The message gets the reason at once.
+	if len(targets) > 1 {
+		def, derr := r.source.Definition(ctx, pub.DefinitionID)
+		if derr != nil {
+			return nil, fmt.Errorf("read the definition of agent %s: %w", req.Agent, derr)
+		}
+		if !def.FansOut {
+			return a2aserver.RejectedTask("the definition has no for_each node, so one message can use one target only. " +
+				"Name one target in a data part"), nil
+		}
+	}
 	ctx = auth.WithIdentity(ctx, auth.Identity{
 		Subject: c.Subject, Issuer: auth.IssuerCapabilityGrant, CredentialType: auth.CredentialCapabilityGrant,
 		Tenant: tenant,

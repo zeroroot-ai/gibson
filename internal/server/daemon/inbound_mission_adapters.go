@@ -121,7 +121,16 @@ func (s *inboundMissionSource) Definition(ctx context.Context, definitionID stri
 	if err != nil {
 		return api.InboundDefinition{}, err
 	}
+	flat, err := flattenParallel(def)
+	if err != nil {
+		return api.InboundDefinition{}, fmt.Errorf("read the nodes of the definition: %w", err)
+	}
 	out := api.InboundDefinition{ID: def.GetId(), Hash: hash}
+	for _, node := range flat {
+		if node.GetType() == missionpb.NodeType_NODE_TYPE_FOR_EACH {
+			out.FansOut = true
+		}
+	}
 	for _, node := range def.GetNodes() {
 		if name := node.GetAgentConfig().GetAgentName(); name != "" {
 			out.Agents = append(out.Agents, name)
