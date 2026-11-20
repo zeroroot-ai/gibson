@@ -52,6 +52,7 @@ func TestCoreCategoriesIncludeEveryEnumValue(t *testing.T) {
 	for _, want := range []CategoryID{
 		"prompt_injection", "jailbreak", "extraction", "dos",
 		"poisoning", "evasion", "reconnaissance", "custom",
+		"initial_access", "credential_access", "privilege_escalation",
 	} {
 		assert.True(t, GlobalTechniques.HasCategory(want), "core categories missing %q", want)
 	}

@@ -35,6 +35,9 @@ func TestTechniqueType_String(t *testing.T) {
 		{"poisoning", TechniquePoisoning, "poisoning"},
 		{"evasion", TechniqueEvasion, "evasion"},
 		{"reconnaissance", TechniqueReconnaissance, "reconnaissance"},
+		{"initial_access", TechniqueInitialAccess, "initial_access"},
+		{"credential_access", TechniqueCredentialAccess, "credential_access"},
+		{"privilege_escalation", TechniquePrivilegeEscalation, "privilege_escalation"},
 		{"custom", TechniqueCustom, "custom"},
 	}
 
@@ -48,25 +51,28 @@ func TestTechniqueType_String(t *testing.T) {
 }
 
 // TestAllTechniqueTypes tests that AllTechniqueTypes returns exactly the
-// eight seed values — this is the seed coreCategories() in
+// eleven seed values — this is the seed coreCategories() in
 // internal/engine/taxonomy/technique.go builds GlobalTechniques from.
 func TestAllTechniqueTypes(t *testing.T) {
 	all := AllTechniqueTypes()
 
-	const expected = 8
+	const expected = 11
 	if len(all) != expected {
 		t.Errorf("AllTechniqueTypes() returned %d types, want %d", len(all), expected)
 	}
 
 	want := map[TechniqueType]bool{
-		TechniquePromptInjection: true,
-		TechniqueJailbreak:       true,
-		TechniqueExtraction:      true,
-		TechniqueDoS:             true,
-		TechniquePoisoning:       true,
-		TechniqueEvasion:         true,
-		TechniqueReconnaissance:  true,
-		TechniqueCustom:          true,
+		TechniquePromptInjection:     true,
+		TechniqueJailbreak:           true,
+		TechniqueExtraction:          true,
+		TechniqueDoS:                 true,
+		TechniquePoisoning:           true,
+		TechniqueEvasion:             true,
+		TechniqueReconnaissance:      true,
+		TechniqueInitialAccess:       true,
+		TechniqueCredentialAccess:    true,
+		TechniquePrivilegeEscalation: true,
+		TechniqueCustom:              true,
 	}
 
 	for _, tt := range all {

@@ -7,14 +7,17 @@ package types
 type TechniqueType string
 
 const (
-	TechniquePromptInjection TechniqueType = "prompt_injection"
-	TechniqueJailbreak       TechniqueType = "jailbreak"
-	TechniqueExtraction      TechniqueType = "extraction"
-	TechniqueDoS             TechniqueType = "dos"
-	TechniquePoisoning       TechniqueType = "poisoning"
-	TechniqueEvasion         TechniqueType = "evasion"
-	TechniqueReconnaissance  TechniqueType = "reconnaissance"
-	TechniqueCustom          TechniqueType = "custom"
+	TechniquePromptInjection     TechniqueType = "prompt_injection"
+	TechniqueJailbreak           TechniqueType = "jailbreak"
+	TechniqueExtraction          TechniqueType = "extraction"
+	TechniqueDoS                 TechniqueType = "dos"
+	TechniquePoisoning           TechniqueType = "poisoning"
+	TechniqueEvasion             TechniqueType = "evasion"
+	TechniqueReconnaissance      TechniqueType = "reconnaissance"
+	TechniqueInitialAccess       TechniqueType = "initial_access"
+	TechniqueCredentialAccess    TechniqueType = "credential_access"
+	TechniquePrivilegeEscalation TechniqueType = "privilege_escalation"
+	TechniqueCustom              TechniqueType = "custom"
 )
 
 // String returns the string representation of the TechniqueType
@@ -35,6 +38,9 @@ func AllTechniqueTypes() []TechniqueType {
 		TechniquePoisoning,
 		TechniqueEvasion,
 		TechniqueReconnaissance,
+		TechniqueInitialAccess,
+		TechniqueCredentialAccess,
+		TechniquePrivilegeEscalation,
 		TechniqueCustom,
 	}
 }

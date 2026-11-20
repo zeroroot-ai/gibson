@@ -5,11 +5,14 @@ package referenceenv
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 )
 
 func load(t *testing.T) (docs []Doc, flaws []Flaw) {
@@ -34,6 +37,23 @@ func TestReferenceEnvironment_ReadmeNamesEachFlaw(t *testing.T) {
 	require.NoError(t, err)
 	for _, f := range flaws {
 		assert.Contains(t, string(readme), "`"+f.ID+"`", "README.md must name the flaw %s", f.ID)
+	}
+}
+
+// TestReferenceEnvironment_EachAttackFlawHasAPredicate: the main pack binds the
+// predicate of each attack flaw, with the category and the destructive state
+// that flaws.yaml states (gibson#1512).
+func TestReferenceEnvironment_EachAttackFlawHasAPredicate(t *testing.T) {
+	_, flaws := load(t)
+	pack, ok := ontology.EmbeddedCatalog().Get(ontology.MainDomainPackName)
+	require.True(t, ok)
+	for _, f := range flaws {
+		if f.Check != CheckAttack {
+			continue
+		}
+		assert.Contains(t, pack.Predicates, f.Predicate, "flaw %s", f.ID)
+		assert.Equal(t, f.Category, pack.Techniques[f.Predicate], "flaw %s", f.ID)
+		assert.Equal(t, !*f.Destructive, slices.Contains(pack.NonDestructivePredicates, f.Predicate), "flaw %s", f.ID)
 	}
 }
 

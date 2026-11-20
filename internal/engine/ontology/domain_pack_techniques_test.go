@@ -25,9 +25,12 @@ func TestMainDomainPack_TechniquesRollUpToTheirCategories(t *testing.T) {
 	require.NoError(t, err)
 
 	want := map[taxonomy.TechniqueID]taxonomy.CategoryID{
-		"unauthenticated_endpoint_exposed": "reconnaissance",
-		"credential_disclosure_detected":   "extraction",
+		"unauthenticated_endpoint_exposed": "initial_access",
+		"credential_disclosure_detected":   "credential_access",
 		"prompt_injection_marker_present":  "prompt_injection",
+		"privileged_container_detected":    "privilege_escalation",
+		"node_token_readable":              "credential_access",
+		"rbac_write_access_proven":         "privilege_escalation",
 	}
 	assert.Len(t, extended.Techniques(), len(want))
 	for technique, category := range want {
