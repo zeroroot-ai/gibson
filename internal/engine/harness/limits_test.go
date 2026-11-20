@@ -199,10 +199,10 @@ func TestCheckSpawnLimits_NoCountLimit(t *testing.T) {
 	ctx := context.Background()
 	parentID := newID("parent-1")
 
-	missions := []*MissionRecord{
-		{ID: parentID, Depth: 0, Status: MissionStatusWorking},
-	}
-	for i := range 500 {
+	const children = 500
+	missions := make([]*MissionRecord, 0, children+1)
+	missions = append(missions, &MissionRecord{ID: parentID, Depth: 0, Status: MissionStatusWorking})
+	for i := range children {
 		missions = append(missions, &MissionRecord{
 			ID:              newID(fmt.Sprintf("child-%d", i)),
 			ParentMissionID: &parentID,
