@@ -126,8 +126,8 @@ type PendingRegistration struct {
 	OwnerEmail string `protobuf:"bytes,2,opt,name=owner_email,json=ownerEmail,proto3" json:"owner_email,omitempty"`
 	// workspace_name is the workspace they asked for.
 	WorkspaceName string `protobuf:"bytes,3,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
-	// tier is the plan they asked for, as they typed it. The plan gate runs at
-	// approval time, so an unknown tier is refused then rather than hidden here.
+	// tier is the optional plan they asked for, as they typed it. Gibson does
+	// not judge it. Step 2 of gibson#1531 deletes it.
 	Tier string `protobuf:"bytes,4,opt,name=tier,proto3" json:"tier,omitempty"`
 	// owner_first_name / owner_last_name are the profile fields they supplied.
 	OwnerFirstName string `protobuf:"bytes,5,opt,name=owner_first_name,json=ownerFirstName,proto3" json:"owner_first_name,omitempty"`
@@ -396,8 +396,8 @@ type AdminApproveRegistrationResponse struct {
 	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	// owner_user_id is the identity-provider id of the now-active owner.
 	OwnerUserId string `protobuf:"bytes,2,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
-	// plan_id is the canonical plan the server-side gate resolved, the same
-	// value enqueued for the operator.
+	// plan_id is the plan id of the registration, the same value enqueued for
+	// the operator. Empty when the person gave none.
 	PlanId string `protobuf:"bytes,3,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 }
 
@@ -570,8 +570,8 @@ type AdminProvisionTenantRequest struct {
 	DisplayName string `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	// owner_email becomes Tenant.spec.owner. Required.
 	OwnerEmail string `protobuf:"bytes,3,opt,name=owner_email,json=ownerEmail,proto3" json:"owner_email,omitempty"`
-	// tier becomes Tenant.spec.tier ("team"/"org"/"enterprise"/...). Empty
-	// defaults to "team" (matching provisionTenantAction's `?? 'team'`).
+	// tier becomes Tenant.spec.tier. It is optional, and an empty tier gives
+	// a Tenant with no spec.tier. Step 2 of gibson#1531 deletes it.
 	Tier string `protobuf:"bytes,4,opt,name=tier,proto3" json:"tier,omitempty"`
 }
 

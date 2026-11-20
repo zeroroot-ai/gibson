@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr/testr"
@@ -15,8 +16,10 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/validation"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -82,7 +85,6 @@ func TestReconcile_AddsFinalizerOnFirstPass(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme Corp",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 	}
 	r, c := newFakeReconciler(t, tenant)
@@ -109,6 +111,38 @@ func TestReconcile_AddsFinalizerOnFirstPass(t *testing.T) {
 	}
 }
 
+// TestReconcile_AnyTierGetsANamespace pins that spec.tier never reaches a
+// namespace label (gibson#1531). The tier is any string, and a label value is
+// at most 63 characters from a fixed set, so a copied tier could make the API
+// server refuse the namespace.
+func TestReconcile_AnyTierGetsANamespace(t *testing.T) {
+	for _, tier := range []gibsonv1alpha1.TenantTier{"", "Gold Plan", gibsonv1alpha1.TenantTier(strings.Repeat("x", 100))} {
+		tenant := &gibsonv1alpha1.Tenant{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "acme",
+				Finalizers: []string{gibsonv1alpha1.TenantFinalizer},
+			},
+			Spec: gibsonv1alpha1.TenantSpec{DisplayName: "Acme", Owner: "owner@acme.com", Tier: tier},
+		}
+		r, c := newFakeReconciler(t, tenant)
+		if _, err := r.Reconcile(context.Background(), reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "acme"},
+		}); err != nil {
+			t.Fatalf("reconcile with tier %q: %v", tier, err)
+		}
+		ns := &corev1.Namespace{}
+		if err := c.Get(context.Background(), types.NamespacedName{Name: "tenant-acme"}, ns); err != nil {
+			t.Fatalf("tier %q: namespace missing: %v", tier, err)
+		}
+		if errs := validation.ValidateLabels(ns.Labels, field.NewPath("labels")); len(errs) > 0 {
+			t.Errorf("tier %q: namespace labels are not valid: %v", tier, errs)
+		}
+		if v, ok := ns.Labels["gibson.zeroroot.ai/tier"]; ok {
+			t.Errorf("tier %q: the namespace got the tier label %q", tier, v)
+		}
+	}
+}
+
 func TestReconcile_ProvisionsNamespaceAndPolicy(t *testing.T) {
 	tenant := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{
@@ -118,7 +152,7 @@ func TestReconcile_ProvisionsNamespaceAndPolicy(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanEnterprise,
+			Tier:        "enterprise",
 		},
 	}
 	r, c := newFakeReconciler(t, tenant)
@@ -140,9 +174,6 @@ func TestReconcile_ProvisionsNamespaceAndPolicy(t *testing.T) {
 	}
 	if ns.Labels["gibson.zeroroot.ai/tenant"] != "acme" {
 		t.Errorf("missing tenant label: %v", ns.Labels)
-	}
-	if ns.Labels["gibson.zeroroot.ai/tier"] != "enterprise" {
-		t.Errorf("missing tier label: %v", ns.Labels)
 	}
 
 	// NetworkPolicy should exist.
@@ -213,7 +244,6 @@ func TestReconcile_NetworkPolicy_NoBoltGrantOnDefaultDeny(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanEnterprise,
 		},
 	}
 	r, c := newFakeReconciler(t, tenant)
@@ -253,7 +283,6 @@ func TestReconcile_NetworkPolicy_EgressIsDNSOnly(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanEnterprise,
 		},
 	}
 	r, c := newFakeReconciler(t, tenant)
@@ -327,7 +356,6 @@ func TestReconcile_CorrelationID_FromAnnotation(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Corr Test",
 			Owner:       "owner@example.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 	}
 
@@ -380,7 +408,6 @@ func TestReconcile_CorrelationID_EmptyWhenMissing(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "No Corr",
 			Owner:       "owner@example.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 	}
 
@@ -431,7 +458,6 @@ func TestReconcile_DeletionRunsFinalizer(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 		Status: gibsonv1alpha1.TenantStatus{
 			Namespace: "tenant-acme",
@@ -525,7 +551,6 @@ func TestReconcile_157_DeletionRemovesFinalizerEvenWhenTeardownBlocked(t *testin
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Stuck",
 			Owner:       "owner@stuck.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 		Status: gibsonv1alpha1.TenantStatus{
 			Namespace: "tenant-stuck",
@@ -597,7 +622,6 @@ func TestReconcile_157_DeletionSkipsProvisionSaga(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Deleting",
 			Owner:       "owner@deleting.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 		Status: gibsonv1alpha1.TenantStatus{
 			Namespace: "tenant-deleting",

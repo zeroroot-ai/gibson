@@ -27,7 +27,7 @@ package main
 //
 // # Optional env vars
 //
-//	BOOTSTRAP_ADMIN_TIER    — plan tier; defaults to "team"
+//	BOOTSTRAP_ADMIN_TIER    — optional plan id; empty means no plan
 //
 // # Output
 //
@@ -105,10 +105,8 @@ func loadSeedFirstAdminConfig() (seedFirstAdminConfig, error) {
 		return seedFirstAdminConfig{}, errors.New("BOOTSTRAP_TENANT_DISPLAY_NAME env must be set")
 	}
 
+	// The plan id is optional (gibson#1531). Empty means no plan.
 	tier := os.Getenv("BOOTSTRAP_ADMIN_TIER")
-	if tier == "" {
-		tier = "team"
-	}
 
 	return seedFirstAdminConfig{
 		DaemonAddr:        daemonAddr,

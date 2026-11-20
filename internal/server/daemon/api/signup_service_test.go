@@ -31,7 +31,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
-	"github.com/zeroroot-ai/gibson/internal/platform/plans"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -753,16 +752,10 @@ func TestSignup_SessionOverridesClientSuppliedIdentity(t *testing.T) {
 	if resp.GetTenantId() != "acme-red-team" {
 		t.Errorf("TenantId = %q, want the slug derived from the verified row", resp.GetTenantId())
 	}
-	// The response must carry the RESOLVED canonical plan id (gibson#1325), not
-	// the raw "team" verification-row string echoed back: it is the id the gate
-	// accepted and the operator was enqueued with, so the caller bills on the
-	// same id by construction instead of re-deriving the tier itself.
-	wantPlan, ok := plans.Lookup("team")
-	if !ok {
-		t.Fatal("plans.Lookup(\"team\") missing — test fixture out of sync with the plan set")
-	}
-	if resp.GetPlanId() != wantPlan.ID {
-		t.Errorf("PlanId = %q, want the resolved plan id %q", resp.GetPlanId(), wantPlan.ID)
+	// The response carries the plan id of the verification row, the same id
+	// the tenant was enqueued with (gibson#1325).
+	if resp.GetPlanId() != "team" {
+		t.Errorf("PlanId = %q, want the plan id of the verification row", resp.GetPlanId())
 	}
 	if len(h.idp.createHumanReqs) != 1 {
 		t.Fatalf("CreateHumanUser calls = %d", len(h.idp.createHumanReqs))
@@ -1038,7 +1031,6 @@ func TestRequestEmailVerification_Validation(t *testing.T) {
 		{"missing email", func(r *tenantv1.RequestEmailVerificationRequest) { r.OwnerEmail = "" }},
 		{"malformed email", func(r *tenantv1.RequestEmailVerificationRequest) { r.OwnerEmail = "not-an-email" }},
 		{"missing workspace", func(r *tenantv1.RequestEmailVerificationRequest) { r.WorkspaceName = "" }},
-		{"missing tier", func(r *tenantv1.RequestEmailVerificationRequest) { r.Tier = "" }},
 		{"workspace yields empty slug", func(r *tenantv1.RequestEmailVerificationRequest) { r.WorkspaceName = "***" }},
 	}
 	for _, tc := range cases {

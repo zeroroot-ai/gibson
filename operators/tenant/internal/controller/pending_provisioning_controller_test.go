@@ -81,6 +81,31 @@ func TestDrain_CreatesTenantCRAndAcks(t *testing.T) {
 	}
 }
 
+// TestDrain_NoTier_CreatesTenantWithNoTier pins that a queued tenant with no
+// plan gets a Tenant with no spec.tier (gibson#1531).
+func TestDrain_NoTier_CreatesTenantWithNoTier(t *testing.T) {
+	scheme := setupScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	d := &stubDaemon{pending: []provision.PendingTenant{{
+		TenantID: "acme", OwnerUserID: "u-1", OwnerEmail: "owner@acme.test", WorkspaceName: "Acme Inc",
+	}}}
+
+	r := newRunnable(t, c, d)
+	if err := r.drain(context.Background()); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	var got gibsonv1alpha1.Tenant
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
+		t.Fatalf("expected Tenant CR created: %v", err)
+	}
+	if got.Spec.Tier != "" {
+		t.Errorf("tier: got %q, want empty", got.Spec.Tier)
+	}
+	if len(d.acked) != 1 || d.acked[0] != "acme" {
+		t.Errorf("expected acme acked, got %v", d.acked)
+	}
+}
+
 func TestDrain_ExistingTenant_NoDoubleCreateButAcks(t *testing.T) {
 	scheme := setupScheme(t)
 	// Seed an existing Tenant CR with a DIFFERENT spec so we can prove the

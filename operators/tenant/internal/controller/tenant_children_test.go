@@ -84,7 +84,6 @@ func childOrchestrationTenant() *gibsonv1alpha1.Tenant {
 		ObjectMeta: metav1.ObjectMeta{Name: "acme", UID: types.UID("uid-acme")},
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme Inc",
-			Tier:        gibsonv1alpha1.TenantPlanEnterprise,
 		},
 	}
 }
@@ -158,7 +157,9 @@ func TestChildOrchestration_CreationOrder(t *testing.T) {
 }
 
 // TestChildOrchestration_ReadinessGate verifies the Tenant only flips to Ready
-// once ALL four owned sub-CRDs report Status.Ready.
+// once ALL four owned sub-CRDs report Status.Ready. The Tenant has no
+// spec.tier, so this test also pins that a Tenant with no plan reaches Ready
+// (gibson#1531).
 func TestChildOrchestration_ReadinessGate(t *testing.T) {
 	r, c := newChildOrchestrationReconciler(t, childOrchestrationTenant())
 

@@ -29,9 +29,6 @@ const (
 	// is false (dev clusters).
 	ConditionVaultTransitReady = "VaultTransitReady"
 
-	// ConditionPlanSyncComplete reports the plan-sync step.
-	ConditionPlanSyncComplete = "PlanSyncComplete"
-
 	// ConditionMasterKeyReady reports the master-key Secret materialisation
 	// step. Owned by the platform-operator so helm chart owners don't have
 	// to play `lookup` games to keep a randAlphaNum stable across upgrades.
@@ -454,7 +451,10 @@ type VaultTransitSpec struct {
 	KeyName string `json:"keyName,omitempty"`
 }
 
-// PlanSyncSpec describes the plan-sync step.
+// PlanSyncSpec is ignored. The operator has no plan-sync step (gibson#1531).
+// The type stays while the chart still renders spec.planSync, because the
+// structural CRD schema refuses an unknown field. Step 2 of gibson#1531
+// deletes it.
 type PlanSyncSpec struct {
 	// PlansConfigMapRef points at the ConfigMap + key holding the gibson
 	// plans data. The reconciler hashes the content and re-syncs only
@@ -658,7 +658,9 @@ type PlatformBootstrapSpec struct {
 	// +kubebuilder:validation:Required
 	VaultTransit VaultTransitSpec `json:"vaultTransit"`
 
-	// PlanSync describes the plan-sync step.
+	// PlanSync is ignored. The operator has no plan-sync step (gibson#1531).
+	// The field stays while the chart still renders it. Step 2 of
+	// gibson#1531 deletes it.
 	// +optional
 	PlanSync *PlanSyncSpec `json:"planSync,omitempty"`
 

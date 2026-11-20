@@ -251,7 +251,10 @@ spec:
                   type: object
                 type: array
               planSync:
-                description: PlanSync describes the plan-sync step.
+                description: |-
+                  PlanSync is ignored. The operator has no plan-sync step (gibson#1531).
+                  The field stays while the chart still renders it. Step 2 of
+                  gibson#1531 deletes it.
                 properties:
                   plansConfigMapRef:
                     description: |-

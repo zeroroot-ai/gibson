@@ -171,8 +171,8 @@ message PendingRegistration {
   string owner_email = 2;
   // workspace_name is the workspace they asked for.
   string workspace_name = 3;
-  // tier is the plan they asked for, as they typed it. The plan gate runs at
-  // approval time, so an unknown tier is refused then rather than hidden here.
+  // tier is the optional plan they asked for, as they typed it. Gibson does
+  // not judge it. Step 2 of gibson#1531 deletes it.
   string tier = 4;
   // owner_first_name / owner_last_name are the profile fields they supplied.
   string owner_first_name = 5;
@@ -215,8 +215,8 @@ message AdminApproveRegistrationResponse {
   string tenant_id = 1;
   // owner_user_id is the identity-provider id of the now-active owner.
   string owner_user_id = 2;
-  // plan_id is the canonical plan the server-side gate resolved, the same
-  // value enqueued for the operator.
+  // plan_id is the plan id of the registration, the same value enqueued for
+  // the operator. Empty when the person gave none.
   string plan_id = 3;
 }
 
@@ -246,8 +246,8 @@ message AdminProvisionTenantRequest {
   string display_name = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // owner_email becomes Tenant.spec.owner. Required.
   string owner_email = 3 [(buf.validate.field).string = { min_len: 1, max_len: 4096 }];
-  // tier becomes Tenant.spec.tier ("team"/"org"/"enterprise"/...). Empty
-  // defaults to "team" (matching provisionTenantAction's `?? 'team'`).
+  // tier becomes Tenant.spec.tier. It is optional, and an empty tier gives
+  // a Tenant with no spec.tier. Step 2 of gibson#1531 deletes it.
   string tier = 4 [(buf.validate.field).string = { max_len: 4096 }];
 }
 

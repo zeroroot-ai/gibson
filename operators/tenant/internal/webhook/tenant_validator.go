@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/plans"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
 
@@ -39,21 +38,6 @@ const ValidatePath = "/validate-tenant"
 // The trailing "?" makes the interior+final group optional so a single
 // character (e.g. "a") still passes.
 var slugRE = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,58}[a-z0-9])?$`)
-
-// Tier validity is answered by internal/platform/plans, the single canonical
-// plan registry the daemon's signup gate also consults. The webhook used to
-// keep its own hand-maintained set; two sets meant two things to update when
-// plans.yaml changed.
-//
-// The daemon rejects unknown ids; accepting a legacy id at the webhook would
-// let a Tenant land that gets stuck at the Entitlements saga step. Legacy ids
-// (solo/squad/platform/enterprise-cloud/enterprise-onprem/public-sector/free/
-// pro) are remapped by the chart's tenant-tier-migrate pre-upgrade Job before
-// this webhook starts rejecting them — see spec
-// plans-and-quotas-simplification.
-func tierIsValid(t gibsonv1alpha1.TenantTier) bool {
-	return plans.Known(string(t))
-}
 
 const maxDisplayNameLen = 120
 
@@ -169,9 +153,6 @@ func validateTenantFields(t *gibsonv1alpha1.Tenant) error {
 	if err := validateOwner(t.Spec.Owner); err != nil {
 		return err
 	}
-	if err := validateTier(t.Spec.Tier); err != nil {
-		return err
-	}
 	if err := validateDisplayName(t.Spec.DisplayName); err != nil {
 		return err
 	}
@@ -203,18 +184,6 @@ func validateOwner(owner string) error {
 	}
 	if _, err := mail.ParseAddress(owner); err != nil {
 		return fmt.Errorf("spec.owner %q is not a valid email address: %w", owner, err)
-	}
-	return nil
-}
-
-// validateTier checks that spec.tier is one of the known tier constants.
-func validateTier(tier gibsonv1alpha1.TenantTier) error {
-	if tier == "" {
-		return fmt.Errorf("spec.tier must not be empty")
-	}
-	if !tierIsValid(tier) {
-		return fmt.Errorf("spec.tier %q is invalid: must be one of %s (legacy ids are remapped by the chart's tenant-tier-migrate Job before this webhook rejects them)",
-			tier, strings.Join(plans.IDs(), ", "))
 	}
 	return nil
 }

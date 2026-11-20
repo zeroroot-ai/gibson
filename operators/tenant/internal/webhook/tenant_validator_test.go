@@ -23,7 +23,6 @@ func validTenant() *gibsonv1alpha1.Tenant {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme Corp",
 			Owner:       "admin@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 	}
 }
@@ -107,51 +106,6 @@ func TestValidateOwner_Invalid(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			if err := validateOwner(tc.addr); err == nil {
 				t.Errorf("expected %q (%s) to be rejected, but it passed", tc.addr, tc.desc)
-			}
-		})
-	}
-}
-
-// --- tier tests ---
-
-func TestValidateTier_Valid(t *testing.T) {
-	tiers := []gibsonv1alpha1.TenantTier{
-		gibsonv1alpha1.TenantPlanTeam,
-		gibsonv1alpha1.TenantPlanOrg,
-		gibsonv1alpha1.TenantPlanEnterprise,
-		gibsonv1alpha1.TenantPlanEnterpriseDeploy,
-	}
-	for _, tier := range tiers {
-		t.Run(string(tier), func(t *testing.T) {
-			if err := validateTier(tier); err != nil {
-				t.Errorf("expected tier %q to be valid, got: %v", tier, err)
-			}
-		})
-	}
-}
-
-func TestValidateTier_Invalid(t *testing.T) {
-	cases := []gibsonv1alpha1.TenantTier{
-		"",
-		"basic",
-		"premium",
-		"FREE",
-		"Pro",
-		// Legacy ids — chart's tenant-tier-migrate Job rewrites these to
-		// canonical ids before this webhook starts rejecting them.
-		"free",
-		"pro",
-		"solo",
-		"squad",
-		"platform",
-		"enterprise-cloud",
-		"enterprise-onprem",
-		"public-sector",
-	}
-	for _, tier := range cases {
-		t.Run(string(tier), func(t *testing.T) {
-			if err := validateTier(tier); err == nil {
-				t.Errorf("expected tier %q to be rejected, but it passed", tier)
 			}
 		})
 	}
@@ -264,26 +218,18 @@ func TestTenantValidator_ValidateCreate_InvalidOwner(t *testing.T) {
 	}
 }
 
-func TestTenantValidator_ValidateCreate_InvalidTier(t *testing.T) {
-	v := &TenantValidator{}
-	tn := validTenant()
-	tn.Spec.Tier = "gold"
-	_, err := v.ValidateCreate(context.Background(), tn)
-	if err == nil {
-		t.Fatal("expected rejection for unknown tier, got nil")
-	}
-	if !strings.Contains(err.Error(), "spec.tier") {
-		t.Errorf("expected error to mention spec.tier, got: %v", err)
-	}
-}
-
-func TestTenantValidator_ValidateCreate_EmptyTier(t *testing.T) {
-	v := &TenantValidator{}
-	tn := validTenant()
-	tn.Spec.Tier = ""
-	_, err := v.ValidateCreate(context.Background(), tn)
-	if err == nil {
-		t.Fatal("expected rejection for empty tier, got nil")
+// TestTenantValidator_ValidateCreate_AcceptsAnyTier pins that the webhook
+// refuses no Tenant for its plan (gibson#1531): no tier, and any tier value.
+func TestTenantValidator_ValidateCreate_AcceptsAnyTier(t *testing.T) {
+	for _, tier := range []gibsonv1alpha1.TenantTier{"", "team", "gold"} {
+		t.Run(string(tier), func(t *testing.T) {
+			v := &TenantValidator{}
+			tn := validTenant()
+			tn.Spec.Tier = tier
+			if _, err := v.ValidateCreate(context.Background(), tn); err != nil {
+				t.Fatalf("a Tenant with tier %q must pass, got: %v", tier, err)
+			}
+		})
 	}
 }
 
@@ -317,7 +263,7 @@ func TestTenantValidator_ValidateUpdate_Valid(t *testing.T) {
 	oldTn := validTenant()
 	newTn := validTenant()
 	// Changing tier and displayName is allowed on update.
-	newTn.Spec.Tier = gibsonv1alpha1.TenantPlanEnterprise
+	newTn.Spec.Tier = "enterprise"
 	newTn.Spec.DisplayName = "Acme Corp Enterprise"
 	_, err := v.ValidateUpdate(context.Background(), oldTn, newTn)
 	if err != nil {
@@ -359,14 +305,18 @@ func TestTenantValidator_ValidateUpdate_ImmutableOwner(t *testing.T) {
 	}
 }
 
-func TestTenantValidator_ValidateUpdate_InvalidNewTier(t *testing.T) {
-	v := &TenantValidator{}
-	oldTn := validTenant()
-	newTn := validTenant()
-	newTn.Spec.Tier = "diamond"
-	_, err := v.ValidateUpdate(context.Background(), oldTn, newTn)
-	if err == nil {
-		t.Fatal("expected rejection for invalid tier on update, got nil")
+// TestTenantValidator_ValidateUpdate_AcceptsAnyTier pins that an update
+// refuses no tier change (gibson#1531): to any value, and to no tier.
+func TestTenantValidator_ValidateUpdate_AcceptsAnyTier(t *testing.T) {
+	for _, tier := range []gibsonv1alpha1.TenantTier{"", "diamond"} {
+		v := &TenantValidator{}
+		oldTn := validTenant()
+		oldTn.Spec.Tier = "team"
+		newTn := validTenant()
+		newTn.Spec.Tier = tier
+		if _, err := v.ValidateUpdate(context.Background(), oldTn, newTn); err != nil {
+			t.Fatalf("an update to tier %q must pass, got: %v", tier, err)
+		}
 	}
 }
 

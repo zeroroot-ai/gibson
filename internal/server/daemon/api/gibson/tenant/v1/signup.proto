@@ -182,8 +182,8 @@ message RegisterRequest {
   // yield a valid tenant slug.
   string workspace_name = 3 [(buf.validate.field).string = { max_len: 1024 }];
 
-  // tier is the canonical plan id. Required, and resolved against the same
-  // server-side plan gate the open rung uses.
+  // tier is an optional plan id. Gibson does not judge it. Step 2 of
+  // gibson#1531 deletes it.
   string tier = 4 [(buf.validate.field).string = { max_len: 4096 }];
 
   // owner_first_name / owner_last_name populate the human-user profile.
@@ -235,7 +235,8 @@ message RequestEmailVerificationRequest {
   // verification row and read back at completion. Required.
   string workspace_name = 3 [(buf.validate.field).string = { max_len: 1024 }];
 
-  // tier is the canonical plan id ("team", "org", "enterprise"). Required.
+  // tier is an optional plan id. Gibson does not judge it. It goes to the
+  // external signup step. Step 2 of gibson#1531 deletes it.
   string tier = 4 [(buf.validate.field).string = { max_len: 4096 }];
 
   // owner_first_name / owner_last_name populate the eventual human-user
@@ -351,12 +352,9 @@ message SignupResponse {
   // created. Same tag and same meaning it has always had.
   string owner_user_id = 3;
 
-  // plan_id is the canonical plan the server-side gate resolved and provisioned
-  // against — the same value enqueued for the operator, not the raw
-  // verification-row tier string. Callers must never see an id the gate did not
-  // accept, so this is populated from the resolved plan rather than echoed from
-  // the request. Additive: field 4 is free and no reserved range covers it
-  // (gibson#1325).
+  // plan_id is the plan id of the verification row, the same value enqueued
+  // for the operator (gibson#1325). Empty when the caller gave none. Step 2 of
+  // gibson#1531 deletes it.
   string plan_id = 4;
 
   // step_url is where the browser goes for the external signup step. Empty

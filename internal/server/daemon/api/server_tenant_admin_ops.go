@@ -40,10 +40,6 @@ import (
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
-// defaultProvisionTier mirrors the dashboard's provisionTenantAction default
-// (`parsed.data.tier ?? 'team'`): an empty tier on provision becomes "team".
-const defaultProvisionTier = "team"
-
 // --- AdminTenantService (dashboard-facing) -------------------------------
 
 // ProvisionedOwnerInviter issues the founding Owner's invitation for a tenant
@@ -95,10 +91,9 @@ func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.A
 	if err := ensureTenantAdminOpsTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
+	// The tier is optional. An empty tier stays empty, and the Tenant gets no
+	// spec.tier. The field leaves the wire in step 2 of gibson#1531.
 	tier := req.GetTier()
-	if tier == "" {
-		tier = defaultProvisionTier
-	}
 	rec, err := s.recordTenantRequest(ctx, auditActionTenantAdminProvision, req.GetTenantId(), map[string]any{
 		"display_name": req.GetDisplayName(), "owner_email": req.GetOwnerEmail(), "tier": tier,
 	})

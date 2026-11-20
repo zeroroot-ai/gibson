@@ -159,6 +159,21 @@ func TestFirstTenantSeedFromEnv(t *testing.T) {
 		}
 	})
 
+	t.Run("enabled with no tier seeds a tenant with no tier", func(t *testing.T) {
+		m := map[string]string{}
+		for k, v := range base {
+			m[k] = v
+		}
+		delete(m, "FIRST_TENANT_TIER")
+		seed, enabled, err := FirstTenantSeedFromEnv(getenvFrom(m), enq)
+		if err != nil || !enabled || seed == nil {
+			t.Fatalf("a seed with no FIRST_TENANT_TIER must be enabled, got (%v,%v,%v)", seed, enabled, err)
+		}
+		if seed.Tier != "" {
+			t.Errorf("seed tier = %q, want empty", seed.Tier)
+		}
+	})
+
 	t.Run("enabled but missing tenant id errors", func(t *testing.T) {
 		m := map[string]string{"FIRST_TENANT_ENABLED": "true", "FIRST_TENANT_OWNER_EMAIL": "a@b.test"}
 		seed, enabled, err := FirstTenantSeedFromEnv(getenvFrom(m), enq)

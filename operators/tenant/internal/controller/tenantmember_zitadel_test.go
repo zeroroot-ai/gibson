@@ -141,7 +141,6 @@ func tenantWithOrgID() *gibsonv1alpha1.Tenant {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Acme",
 			Owner:       "owner@acme.com",
-			Tier:        gibsonv1alpha1.TenantPlanTeam,
 		},
 		Status: gibsonv1alpha1.TenantStatus{
 			ZitadelOrgID: "org-111",

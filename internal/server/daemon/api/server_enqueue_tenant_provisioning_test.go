@@ -46,9 +46,10 @@ func TestEnqueueTenantProvisioning_FreshInsert_DefaultsTier(t *testing.T) {
 	srv.platformDB = db
 
 	expectEnsureTable(mock)
-	// owner_user_id is empty (no Zitadel user yet); tier defaults to "team".
+	// owner_user_id is empty (no Zitadel user yet). An empty tier stays empty
+	// (gibson#1531).
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
-		WithArgs("acme", "", "owner@acme.test", "Acme Inc", "team", "pending", "", "", sql.NullTime{}, false, "").
+		WithArgs("acme", "", "owner@acme.test", "Acme Inc", "", "pending", "", "", sql.NullTime{}, false, "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	resp, err := srv.EnqueueTenantProvisioning(context.Background(),

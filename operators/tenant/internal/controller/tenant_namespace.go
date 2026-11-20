@@ -179,7 +179,6 @@ func (p *NamespaceProvisioner) ensureNamespace(ctx context.Context, t *gibsonv1a
 			Labels: map[string]string{
 				"gibson.zeroroot.ai/tenant":     t.Name,
 				"gibson.zeroroot.ai/managed-by": "tenant-operator",
-				"gibson.zeroroot.ai/tier":       string(t.Spec.Tier),
 				podSecurityEnforceLabel:         podSecurityRestricted,
 			},
 			Annotations: map[string]string{
