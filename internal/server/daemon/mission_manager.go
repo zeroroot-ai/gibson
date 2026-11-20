@@ -1238,7 +1238,8 @@ func (m *missionManager) reserveChildBudget(ctx context.Context, poolConn *datap
 func (m *missionManager) failBeforeStart(tenantID auth.TenantID, missionID, runID, name, reason string) {
 	// The reason reaches the Task and the World. It is logged too, because a mission
 	// that fails here leaves no other line in the daemon log.
-	m.logger.Error("mission failed before it started", "mission_id", missionID, "reason", reason)
+	m.logger.Error("mission failed before it started",
+		"mission_id", missionID, "tenant_id", tenantID.String(), "reason", reason)
 	eng := m.brainRegistry.For(tenantID.String())
 	eng.Submit(brain.MissionProjected{ID: missionID, RunID: runID, Name: name})
 	eng.Submit(brain.MissionStarted{ID: missionID, RunID: runID, Name: name})
@@ -1370,7 +1371,6 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	bootstrapper := NewGraphBootstrapper(m.graphWriter, m.logger)
 	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.tenantID.String(), active.mission, def, missionRun, proj, fanOrigins, fanTargets)
 	if err != nil {
-		m.logger.Error("failed to bootstrap mission graph", "error", err, "mission_id", missionID)
 		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), fmt.Sprintf("failed to initialize mission graph: %v", err))
 		return
 	}
