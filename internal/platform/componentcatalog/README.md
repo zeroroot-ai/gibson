@@ -4,7 +4,7 @@ The catalog is the set of manifests in `manifests/`. The `gibson` binary embeds 
 
 ## How a new connector reaches a running platform
 
-1. Write one manifest in `manifests/<id>.yaml` with `kind: connector`. A connector has no handler code and no image build.
+1. Write one manifest in `manifests/<id>.yaml` with `kind: connector`. A connector has no handler code and no image build. The `spec` states one tool class in `class`: `siem`, `edr`, `scanner`, `identity`, `cloud`, `observability`, `git-host`, `ticket`, `paging` or `patch` (ADR-0177). The loader refuses a connector with no class or with a class outside this list.
 2. Open a pull request in `gibson`. The catalog loader validates the manifest in the tests (`catalog_test.go`).
 3. Merge the pull request. The next `gibson` release embeds the manifest.
 4. Upgrade the daemon to that release. At start, the daemon seeds the `platform_enabled` tuple of each catalog entry, and removes the tuple of an entry that left the catalog.

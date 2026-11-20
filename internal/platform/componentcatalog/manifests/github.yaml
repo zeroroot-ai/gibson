@@ -9,6 +9,7 @@ egressAllow:
   - api.githubcopilot.com:443
 spec:
   vendor: github
+  class: git-host
   shape: Remote
   endpoint: https://api.githubcopilot.com/mcp/
   transport: streamable-http

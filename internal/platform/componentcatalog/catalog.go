@@ -89,6 +89,16 @@ type ConnectorSpec struct {
 	Auth               connectorv1alpha1.ConnectorAuthKind  `yaml:"auth"`
 	OAuthScope         string                               `yaml:"oauthScope"`
 	DefaultInstanceURL string                               `yaml:"defaultInstanceUrl"`
+	// Class is the tool class of the connector (ADR-0177). It states what kind
+	// of tool of the buyer the connector reads or drives. See ConnectorClasses.
+	Class string `yaml:"class"`
+}
+
+// ConnectorClasses is the closed list of tool classes of a connector
+// (ADR-0177). The loader refuses a connector with a class outside the list.
+var ConnectorClasses = []string{
+	"siem", "edr", "scanner", "identity", "cloud",
+	"observability", "git-host", "ticket", "paging", "patch",
 }
 
 // WorkloadSpec is the shared hosting shape for an external gRPC component
@@ -540,6 +550,9 @@ func validateConnector(id string, s ConnectorSpec) error {
 	default:
 		return fmt.Errorf("%s: auth %q must be none, secret, or oauth", id, s.Auth)
 	}
+	if !slices.Contains(ConnectorClasses, s.Class) {
+		return fmt.Errorf("%s: class %q must be one of %s", id, s.Class, strings.Join(ConnectorClasses, ", "))
+	}
 	return nil
 }
 
@@ -664,6 +677,8 @@ type ConnectorEntry struct {
 	Transport          connectorv1alpha1.ConnectorTransport
 	Auth               connectorv1alpha1.ConnectorAuthKind
 	DefaultInstanceURL string
+	// Class is the tool class of the connector (ADR-0177).
+	Class string
 }
 
 func (m Manifest) toConnectorEntry() ConnectorEntry {
@@ -680,6 +695,7 @@ func (m Manifest) toConnectorEntry() ConnectorEntry {
 		Transport:          s.Transport,
 		Auth:               s.Auth,
 		DefaultInstanceURL: s.DefaultInstanceURL,
+		Class:              s.Class,
 	}
 }
 

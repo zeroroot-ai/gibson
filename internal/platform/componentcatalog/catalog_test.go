@@ -9,6 +9,7 @@ package componentcatalog
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -28,7 +29,7 @@ func manifestFSWith(files map[string]string) fstest.MapFS {
 // discriminates into the right spec.
 func TestLoad_AllKinds(t *testing.T) {
 	fsys := manifestFSWith(map[string]string{
-		"conn.yaml": "id: gl\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x/mcp\n  auth: oauth\n",
+		"conn.yaml": "id: gl\nkind: connector\nspec:\n  class: git-host\n  shape: Remote\n  endpoint: https://x/mcp\n  auth: oauth\n",
 		"plug.yaml": "id: pl\nkind: plugin\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x/p@sha256:abc\n",
 		"tool.yaml": "id: nm\nkind: tool\nspec:\n  contentTrust: untrusted\n  dispatchMode: sandboxed\n  command: nmap\n  image: ghcr.io/x/t@sha256:abc\n",
 		"agnt.yaml": "id: zc\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x/a@sha256:abc\n  model: sonnet\n",
@@ -75,6 +76,8 @@ func TestLoad_FailLoud(t *testing.T) {
 		"connector remote+image": {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  image: y\n  auth: none\n", "must not set image"},
 		"connector bad auth":     {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  auth: bogus\n", "must be none, secret, or oauth"},
 		"hosted first-party tag": {"id: x\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/zeroroot-ai/foo:v1\n  auth: none\n", "digest-pinned"},
+		"connector no class":     {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  auth: none\n", "class \"\" must be one of"},
+		"connector bad class":    {"id: x\nkind: connector\nspec:\n  class: firewall\n  shape: Remote\n  endpoint: https://x\n  auth: none\n", "class \"firewall\" must be one of"},
 		"hosted third-party tag": {"id: x\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server\n  auth: none\n", "digest-pinned"},
 	}
 	for name, tc := range cases {
@@ -135,12 +138,12 @@ func TestManifestKinds_EachKindHasASpecCheck(t *testing.T) {
 // tenant data plane.
 func TestLoad_HostedConnectorImagePolicy(t *testing.T) {
 	if _, err := load(manifestFSWith(map[string]string{
-		"a.yaml": "id: fp\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/zeroroot-ai/foo@sha256:abc\n  auth: none\n",
+		"a.yaml": "id: fp\nkind: connector\nspec:\n  class: scanner\n  shape: Hosted\n  image: ghcr.io/zeroroot-ai/foo@sha256:abc\n  auth: none\n",
 	})); err != nil {
 		t.Fatalf("first-party digest-pinned image should load: %v", err)
 	}
 	if _, err := load(manifestFSWith(map[string]string{
-		"b.yaml": "id: tp\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server@sha256:abc\n  auth: none\n",
+		"b.yaml": "id: tp\nkind: connector\nspec:\n  class: scanner\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server@sha256:abc\n  auth: none\n",
 	})); err != nil {
 		t.Fatalf("third-party digest-pinned image should load: %v", err)
 	}
@@ -195,6 +198,30 @@ func TestConnectorProjection(t *testing.T) {
 	}
 	if _, err := LookupConnector("nope"); err == nil {
 		t.Error("LookupConnector(nope) should error")
+	}
+}
+
+// TestCatalog_EveryConnectorStatesAClass: each connector in the embedded
+// catalog states one tool class of the closed list, and the projection keeps
+// it (ADR-0177, gibson#1428).
+func TestCatalog_EveryConnectorStatesAClass(t *testing.T) {
+	entries := ListConnectors()
+	if len(entries) == 0 {
+		t.Fatal("the embedded catalog holds no connector")
+	}
+	for _, e := range entries {
+		if !slices.Contains(ConnectorClasses, e.Class) {
+			t.Errorf("connector %q has class %q, want one of %v", e.ID, e.Class, ConnectorClasses)
+		}
+	}
+	for _, id := range []string{"gitlab", "github"} {
+		e, err := LookupConnector(id)
+		if err != nil {
+			t.Fatalf("LookupConnector(%s): %v", id, err)
+		}
+		if e.Class != "git-host" {
+			t.Errorf("connector %q has class %q, want git-host", id, e.Class)
+		}
 	}
 }
 
