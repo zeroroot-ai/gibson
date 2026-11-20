@@ -330,6 +330,39 @@ func (f *inboundFixture) waitState(t *testing.T, c *inboundClient, id, want stri
 	return last
 }
 
+// nextWork waits for the next work item of the held agent. A Task that ends before
+// the agent gets work fails the test at once, with the state and the message of the
+// Task. Without this, a mission that failed before it started reads as a timeout of
+// six minutes with no reason.
+func (f *inboundFixture) nextWork(t *testing.T, c *inboundClient, taskID string) *helpers.HeldWork {
+	t.Helper()
+	deadline := time.After(inboundTimeout)
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case w := <-f.agent.Works():
+			return w
+		case <-deadline:
+			t.Fatalf("the agent %s got no work item within %s: the mission never dispatched it", inboundAgent, inboundTimeout)
+		case <-tick.C:
+			status, body := c.rpc(f.ctx, t, inboundAgent, "GetTask", `{"id":"`+taskID+`"}`, nil)
+			if status != http.StatusOK {
+				continue
+			}
+			r := decodeTaskRPC(t, body)
+			if r.Result.Task == nil {
+				continue
+			}
+			switch r.Result.Task.Status.State {
+			case "TASK_STATE_FAILED", "TASK_STATE_REJECTED", "TASK_STATE_CANCELED", "TASK_STATE_COMPLETED":
+				t.Fatalf("the Task %s ended with %s before the agent got work: %s",
+					taskID, r.Result.Task.Status.State, body)
+			}
+		}
+	}
+}
+
 // primaryTarget reads the primary target of a mission from the daemon.
 func (f *inboundFixture) primaryTarget(t *testing.T, missionID string) string {
 	t.Helper()
@@ -440,7 +473,7 @@ func TestA2AInbound(t *testing.T) {
 		id, state := f.startFromMessage(t, caller, sendParams("scan "+f.targets[2]+" and 203.0.113.0/24"))
 		require.Equal(t, "TASK_STATE_SUBMITTED", state)
 
-		work := f.agent.Next(t, inboundTimeout)
+		work := f.nextWork(t, caller, id)
 		require.Equal(t, id, work.MissionID, "the agent got work of the mission that the message started")
 		require.Equal(t, f.targets[0], f.primaryTarget(t, id),
 			"a target in the text changes nothing: the mission has the published targets")
@@ -485,7 +518,7 @@ func TestA2AInbound(t *testing.T) {
 	t.Run("a data part narrows the targets, and nothing else does", func(t *testing.T) {
 		id, state := f.startFromMessage(t, caller, sendParams("scan the middle target", f.targets[1]))
 		require.Equal(t, "TASK_STATE_SUBMITTED", state)
-		work := f.agent.Next(t, inboundTimeout)
+		work := f.nextWork(t, caller, id)
 		require.Equal(t, id, work.MissionID)
 		require.Equal(t, f.targets[1], f.primaryTarget(t, id), "the mission has exactly the target of the data part")
 		work.Complete()
@@ -515,7 +548,7 @@ func TestA2AInbound(t *testing.T) {
 
 	t.Run("a Task cancel ends the mission and only the mission of the caller", func(t *testing.T) {
 		id, _ := f.startFromMessage(t, caller, sendParams("scan until canceled"))
-		work := f.agent.Next(t, inboundTimeout)
+		work := f.nextWork(t, caller, id)
 		require.Equal(t, id, work.MissionID)
 		f.waitState(t, caller, id, "TASK_STATE_WORKING")
 
@@ -564,7 +597,7 @@ func TestA2AInbound(t *testing.T) {
 			id = r.Result.Task.ID
 			return true, ""
 		})
-		work := f.agent.Next(t, inboundTimeout)
+		work := f.nextWork(t, keeper, id)
 		work.Complete()
 		f.waitState(t, keeper, id, "TASK_STATE_COMPLETED")
 
