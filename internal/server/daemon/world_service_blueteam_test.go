@@ -185,14 +185,14 @@ func TestListActionsByGrant(t *testing.T) {
 		require.True(t, to.Equal(blueAt(5)))
 		require.True(t, from.Equal(blueAt(1)))
 		return []audit.PgEntry{
-				{Action: "connector.tool.call", ActorID: "agent:a1", TargetID: "gitlab", CreatedAt: blueAt(2),
-					Metadata: md(map[string]any{"result": "success", "details": map[string]string{"tool": "merge"}})},
-				{Action: "connector.tool.call", ActorID: "agent:a2", TargetID: "gitlab", CreatedAt: blueAt(3),
-					Metadata: md(map[string]any{"result": "failure", "details": map[string]string{"error": "unauthorized"}})},
-			}, []audit.PgEntry{
-				{Action: "agent_grant_added", ActorID: "user:ann", TargetID: "agent:a1", CreatedAt: blueAt(0),
-					Metadata: md(map[string]any{"object": authz.ConnectorComponentObject("gitlab"), "relation": "can_execute"})},
-			}, false, nil
+			{Action: "connector.tool.call", ActorID: "agent:a1", TargetID: "gitlab", CreatedAt: blueAt(2),
+				Metadata: md(map[string]any{"result": "success", "details": map[string]string{"tool": "merge"}})},
+			{Action: "connector.tool.call", ActorID: "agent:a2", TargetID: "gitlab", CreatedAt: blueAt(3),
+				Metadata: md(map[string]any{"result": "failure", "details": map[string]string{"error": "unauthorized"}})},
+		}, []audit.PgEntry{
+			{Action: "agent_grant_added", ActorID: "user:ann", TargetID: "agent:a1", CreatedAt: blueAt(0),
+				Metadata: md(map[string]any{"object": authz.ConnectorComponentObject("gitlab"), "relation": "can_execute"})},
+		}, false, nil
 	}
 	resp, err := srv.ListActionsByGrant(worldTenantCtx("acme"), &worldpb.ListActionsByGrantRequest{
 		From: timestamppb.New(blueAt(1)), To: timestamppb.New(blueAt(5)),
