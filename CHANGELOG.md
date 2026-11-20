@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.167.0](https://github.com/zeroroot-ai/gibson/compare/v0.166.0...v0.167.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove the tenant quota rpcs and the tenant_quotas table ([#1554](https://github.com/zeroroot-ai/gibson/issues/1554))
+
+### Features
+
+* accept a tenant and a signup with no plan ([#1555](https://github.com/zeroroot-ai/gibson/issues/1555)) ([14e50b6](https://github.com/zeroroot-ai/gibson/commit/14e50b6f95381b6cded8dde287539139259ffadc))
+* remove the tenant quota rpcs and the tenant_quotas table ([#1554](https://github.com/zeroroot-ai/gibson/issues/1554)) ([cf4b124](https://github.com/zeroroot-ai/gibson/commit/cf4b124f52b8d947eb64db5d61a46cdca984bc2c)), closes [#1530](https://github.com/zeroroot-ai/gibson/issues/1530) [#1525](https://github.com/zeroroot-ai/gibson/issues/1525)
+
 ## [0.166.0](https://github.com/zeroroot-ai/gibson/compare/v0.165.1...v0.166.0) (2026-11-20)
 
 

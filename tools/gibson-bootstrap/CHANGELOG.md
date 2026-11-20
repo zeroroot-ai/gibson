@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v2.0.0...gibson-bootstrap-v2.1.0) (2026-11-20)
+
+
+### Features
+
+* accept a tenant and a signup with no plan ([#1555](https://github.com/zeroroot-ai/gibson/issues/1555)) ([14e50b6](https://github.com/zeroroot-ai/gibson/commit/14e50b6f95381b6cded8dde287539139259ffadc))
+
 ## [2.0.0](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.6.1...gibson-bootstrap-v2.0.0) (2026-11-19)
 
 
