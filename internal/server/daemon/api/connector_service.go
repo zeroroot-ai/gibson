@@ -116,6 +116,7 @@ func (s *ConnectorService) ListCatalog(
 			ToolClass:          e.Class,
 			EndpointPatterns:   e.EndpointPatterns,
 			OauthClient:        e.OAuthClient,
+			Variables:          catalogVariables(e),
 		})
 	}
 	return &tenantv1.ListCatalogResponse{Entries: out}, nil
@@ -161,6 +162,15 @@ func (s *ConnectorService) EnableConnector(
 	return &tenantv1.EnableConnectorResponse{Connector: c.ConnectorID, Phase: c.Phase}, nil
 }
 
+// catalogVariables lists the variables that a tenant gives for an entry.
+func catalogVariables(e componentcatalog.ConnectorEntry) []*tenantv1.CatalogVariable {
+	out := make([]*tenantv1.CatalogVariable, 0, len(e.Variables))
+	for _, v := range e.Variables {
+		out = append(out, &tenantv1.CatalogVariable{Name: v.Name, Kind: v.Kind, Patterns: v.Patterns})
+	}
+	return out
+}
+
 // tenantChoice checks what the tenant chose against the catalog entry, and
 // returns what the store keeps. A tenant endpoint must match a pattern of the
 // entry (gibson#1534). A tenant OAuth client is required for an entry that has
@@ -176,6 +186,14 @@ func tenantChoice(entry componentcatalog.ConnectorEntry, req *tenantv1.EnableCon
 	} else if entry.Shape == connectorv1alpha1.ConnectorShapeRemote && entry.Endpoint == "" {
 		return cfg, status_grpc.Errorf(codes.InvalidArgument,
 			"EnableConnector: connector %q needs an endpoint that matches %v", entry.ID, entry.EndpointPatterns)
+	}
+	if len(entry.Variables) > 0 || len(req.GetVariables()) > 0 {
+		// A value that the entry does not declare, or a missing one, is an
+		// error. The check also refuses a private or cluster host (gibson#1508).
+		if _, err := entry.ResolveVariables(req.GetVariables()); err != nil {
+			return cfg, status_grpc.Errorf(codes.InvalidArgument, "EnableConnector: %v", err)
+		}
+		cfg.Variables = req.GetVariables()
 	}
 	id, name := req.GetOauthClientId(), req.GetOauthClientSecretName()
 	switch {
@@ -219,6 +237,7 @@ func (s *ConnectorService) ListConnectors(
 			DiscoveredTools: r.DiscoveredTools,
 			LastError:       r.LastError,
 			Endpoint:        r.Endpoint,
+			Variables:       r.Variables,
 		}
 		if entry, lerr := componentcatalog.LookupConnector(r.ConnectorID); lerr == nil {
 			c.Shape = string(entry.Shape)

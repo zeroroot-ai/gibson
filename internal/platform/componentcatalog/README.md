@@ -120,3 +120,29 @@ A variable name is used once, across `credentials` and `env`. A Remote connector
 ## A first-party plugin
 
 A plugin in `plugins/<name>/` of this repo is its own Go module. The image workflow builds and signs its image, and writes the digest into its manifest through a pull request (gibson#790). No person edits that image line.
+
+## A Hosted connector with a value from the tenant
+
+Some Hosted servers must reach a host that only the customer knows. The Ansible Automation Platform MCP server needs `BASE_URL`, the address of the AAP of the customer (gibson#1508). A manifest declares a `variables` list in `spec`.
+
+```yaml
+shape: Hosted
+variables:
+  - name: base_url   # the key in the enable request
+    env: BASE_URL    # the variable of the pod
+    kind: endpoint   # the only kind: an https URL
+    patterns: []     # optional: limit the host, same grammar as endpointPatterns
+```
+
+The tenant gives a value for each variable in `EnableConnector` (`variables`). The pod gets the canonical value as the variable `env`. The egress allow-list of the pod holds the exact `host:port` of the value, in addition to the `egressAllow` of the manifest.
+
+The daemon applies these rules at enable time and again each time it hands the connector to the operator:
+
+- The value is an https URL. It has no user info, no query, no fragment, no escape and no IP address.
+- The host is a public DNS name. Its last label must be a public suffix of the ICANN list. This refuses `localhost`, `.svc`, `.cluster.local`, `.local`, `.internal`, `.lan` and `.corp`.
+- The port is 443 or a number from 1024 to 65535.
+- With `patterns`, the value must match one of them. With no pattern, any public name is allowed, because the host belongs to the customer. The egress entry is never a wildcard.
+- The daemon refuses a missing value and a value that the manifest does not declare.
+- A stored value that a later manifest or rule refuses gives the pod no value and no egress host.
+
+A public name can resolve to a private address. The daemon does not resolve names. The `CiliumNetworkPolicy` of the connector refuses private addresses (ADR-0114), and this is the second layer.

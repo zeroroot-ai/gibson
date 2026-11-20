@@ -104,6 +104,21 @@ message CatalogEntry {
   // and the name of the secret at enable time (gibson#1538). It is empty for an
   // entry that does not use OAuth.
   string oauth_client = 9;
+  // variables are the values that a tenant gives when it enables a Hosted
+  // connector (gibson#1508). A connector with variables takes a value for each
+  // of them in EnableConnectorRequest.variables.
+  repeated CatalogVariable variables = 10;
+}
+
+// CatalogVariable declares one value that a tenant gives for a Hosted
+// connector, for example the address of its own Ansible Automation Platform.
+message CatalogVariable {
+  // name is the key of the value in EnableConnectorRequest.variables.
+  string name = 1;
+  // kind is "endpoint": an https URL of a public DNS name.
+  string kind = 2;
+  // patterns limit the value. Empty means any public DNS name.
+  repeated string patterns = 3;
 }
 
 message ListCatalogRequest {}
@@ -127,6 +142,16 @@ message EnableConnectorRequest {
   // the tenant that holds the client secret. The request never carries the
   // secret value. It is required with oauth_client_id.
   string oauth_client_secret_name = 4 [(buf.validate.field).string = { max_len: 512 }];
+  // variables are the values for the variables of a Hosted connector, by
+  // name (gibson#1508). The daemon refuses a missing value, a value that the
+  // entry does not declare, and a value that breaks the rules of the entry: an
+  // https URL of a public DNS name, with no IP address, no private or cluster
+  // name and no system port. The egress of the connector follows the values.
+  map<string, string> variables = 5 [(buf.validate.field).map = {
+    max_pairs: 8
+    keys: { string: { max_len: 64 } }
+    values: { string: { max_len: 2048 } }
+  }];
 }
 
 message EnableConnectorResponse {
@@ -152,6 +177,9 @@ message Connector {
   // endpoint is the endpoint that the tenant gave. It is empty when the
   // connector uses the default endpoint of the catalog entry.
   string endpoint = 8;
+  // variables are the values that the tenant gave for the variables of a Hosted
+  // connector. A value is the URL of a host and never a credential.
+  map<string, string> variables = 9;
 }
 
 message ListConnectorsRequest {}

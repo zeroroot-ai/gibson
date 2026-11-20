@@ -150,6 +150,27 @@ func (s *DaemonServer) desiredConnector(
 			"connector", r.ConnectorID, "error", err)
 		res = componentcatalog.ResolvedEndpoint{}
 	}
+	// The values that the tenant gave for the variables of a Hosted connector
+	// are checked again, like the endpoint. When the check fails, the pod gets
+	// no value and no egress host for them (gibson#1508).
+	env := entry.Env
+	egress := res.EgressAllow
+	if len(entry.Variables) > 0 {
+		vars, verr := entry.ResolveVariables(r.Variables)
+		if verr != nil {
+			s.logger.Warn("connector variables are outside the catalog rules",
+				"connector", r.ConnectorID, "error", verr)
+		} else {
+			env = make(map[string]string, len(entry.Env)+len(vars.Env))
+			for k, v := range entry.Env {
+				env[k] = v
+			}
+			for k, v := range vars.Env {
+				env[k] = v
+			}
+			egress = append(append([]string{}, egress...), vars.EgressAllow...)
+		}
+	}
 	d := &daemonoperatorv1.DesiredConnector{
 		TenantId:    r.TenantID,
 		ConnectorId: r.ConnectorID,
@@ -158,8 +179,8 @@ func (s *DaemonServer) desiredConnector(
 		Endpoint:    res.Endpoint,
 		Transport:   string(entry.Transport),
 		Auth:        string(entry.Auth),
-		EgressAllow: res.EgressAllow,
-		Env:         entry.Env,
+		EgressAllow: egress,
+		Env:         env,
 		Args:        entry.Args,
 		Port:        int32(entry.Port), //nolint:gosec // G115: the catalog loader limits the port to 65535
 	}

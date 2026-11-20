@@ -113,6 +113,9 @@ type ConnectorSpec struct {
 	ResponseActions bool `yaml:"responseActions"`
 	// Tools marks tools by name. See approval.go.
 	Tools map[string]ConnectorTool `yaml:"tools"`
+	// Variables declare the values that a tenant gives for a Hosted
+	// connector (gibson#1508). See variables.go.
+	Variables []TenantVariable `yaml:"variables"`
 }
 
 // ConnectorClasses is the closed list of tool classes of a connector
@@ -583,6 +586,9 @@ func validateConnector(id string, s ConnectorSpec, egress []string) error {
 	if err := validateTools(id, s); err != nil {
 		return err
 	}
+	if err := validateTenantVariables(id, s); err != nil {
+		return err
+	}
 	return validateHostedConfig(id, s)
 }
 
@@ -727,6 +733,8 @@ type ConnectorEntry struct {
 	// ResponseActions and Tools carry the approval marks. See ApprovalFor.
 	ResponseActions bool
 	Tools           map[string]ConnectorTool
+	// Variables are the values that a tenant gives. See ResolveVariables.
+	Variables []TenantVariable
 }
 
 func (m Manifest) toConnectorEntry() ConnectorEntry {
@@ -755,6 +763,7 @@ func (m Manifest) toConnectorEntry() ConnectorEntry {
 		ImagePullSecret:    s.ImagePullSecret,
 		ResponseActions:    s.ResponseActions,
 		Tools:              s.Tools,
+		Variables:          s.Variables,
 	}
 }
 

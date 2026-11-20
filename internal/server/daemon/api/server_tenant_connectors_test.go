@@ -30,10 +30,10 @@ func connectorServer(t *testing.T) (*DaemonServer, sqlmock.Sqlmock) {
 func TestListDesiredConnectors_ReturnsCatalogFields(t *testing.T) {
 	srv, mock := connectorServer(t)
 	mock.ExpectQuery("FROM tenant_connectors ORDER BY tenant_id, connector_id").
-		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error", "endpoint", "oauth_client_id", "oauth_client_secret_name"}).
-			AddRow("acme", "gitlab", "Ready", 3, "", "", "", "").
-			AddRow("acme", "left-the-catalog", "Ready", 0, "", "", "", "").
-			AddRow("globex", "gitlab", "Pending", 0, "", "", "", ""))
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error", "endpoint", "oauth_client_id", "oauth_client_secret_name", "variables"}).
+			AddRow("acme", "gitlab", "Ready", 3, "", "", "", "", "{}").
+			AddRow("acme", "left-the-catalog", "Ready", 0, "", "", "", "", "{}").
+			AddRow("globex", "gitlab", "Pending", 0, "", "", "", "", "{}"))
 
 	resp, err := srv.ListDesiredConnectors(context.Background(), &daemonoperatorv1.ListDesiredConnectorsRequest{})
 	if err != nil {
@@ -102,7 +102,7 @@ func TestReportConnectorStatus(t *testing.T) {
 func TestAdoptConnector(t *testing.T) {
 	srv, mock := connectorServer(t)
 	ctx := context.Background()
-	mock.ExpectExec("INSERT INTO tenant_connectors").WithArgs("acme", "gitlab", "", "", "").
+	mock.ExpectExec("INSERT INTO tenant_connectors").WithArgs("acme", "gitlab", "", "", "", "{}").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if _, err := srv.AdoptConnector(ctx, &daemonoperatorv1.AdoptConnectorRequest{TenantId: "acme", ConnectorId: "gitlab"}); err != nil {
 		t.Fatalf("adopt: %v", err)
@@ -124,13 +124,13 @@ func TestAdoptConnector(t *testing.T) {
 // endpoint that the manifest no longer allows reaches no host (gibson#1534).
 func TestListDesiredConnectors_EndpointFollowsTheTenant(t *testing.T) {
 	cols := []string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error",
-		"endpoint", "oauth_client_id", "oauth_client_secret_name"}
+		"endpoint", "oauth_client_id", "oauth_client_secret_name", "variables"}
 	srv, mock := connectorServer(t)
 	mock.ExpectQuery("FROM tenant_connectors ORDER BY tenant_id, connector_id").
 		WillReturnRows(sqlmock.NewRows(cols).
-			AddRow("acme", "datadog", "Ready", 0, "", "https://mcp.datadoghq.eu/v1/mcp", "", "").
-			AddRow("globex", "datadog", "Ready", 0, "", "", "", "").
-			AddRow("initech", "datadog", "Ready", 0, "", "https://mcp.evil.example/v1/mcp", "", ""))
+			AddRow("acme", "datadog", "Ready", 0, "", "https://mcp.datadoghq.eu/v1/mcp", "", "", "{}").
+			AddRow("globex", "datadog", "Ready", 0, "", "", "", "", "{}").
+			AddRow("initech", "datadog", "Ready", 0, "", "https://mcp.evil.example/v1/mcp", "", "", "{}"))
 
 	resp, err := srv.ListDesiredConnectors(context.Background(), &daemonoperatorv1.ListDesiredConnectorsRequest{})
 	if err != nil {
@@ -157,10 +157,10 @@ func TestListDesiredConnectors_EndpointFollowsTheTenant(t *testing.T) {
 // answer holds the names of secrets and never a value.
 func TestListDesiredConnectors_HostedConfiguration(t *testing.T) {
 	cols := []string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error",
-		"endpoint", "oauth_client_id", "oauth_client_secret_name"}
+		"endpoint", "oauth_client_id", "oauth_client_secret_name", "variables"}
 	srv, mock := connectorServer(t)
 	mock.ExpectQuery("FROM tenant_connectors").
-		WillReturnRows(sqlmock.NewRows(cols).AddRow("acme", "crowdstrike-falcon", "Ready", 0, "", "", "", ""))
+		WillReturnRows(sqlmock.NewRows(cols).AddRow("acme", "crowdstrike-falcon", "Ready", 0, "", "", "", "", "{}"))
 	resp, err := srv.ListDesiredConnectors(context.Background(), &daemonoperatorv1.ListDesiredConnectorsRequest{})
 	if err != nil {
 		t.Fatal(err)

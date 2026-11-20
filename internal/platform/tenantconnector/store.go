@@ -10,6 +10,7 @@ package tenantconnector
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -51,6 +52,10 @@ type Config struct {
 	// OAuthClientSecretName is the name of the secret of the tenant that holds
 	// the client secret. The table holds the name and never the value.
 	OAuthClientSecretName string
+	// Variables holds the values that the tenant gave for the variables of a
+	// Hosted connector, by name (gibson#1508). Each value is a URL of a host,
+	// never a credential.
+	Variables map[string]string
 }
 
 // Status is a report of the connector operator about one connector. The
@@ -108,11 +113,19 @@ func (s *Store) Adopt(ctx context.Context, tenantID, connectorID string) error {
 
 func (s *Store) insert(ctx context.Context, tenantID, connectorID string, cfg Config) (int64, error) {
 	const query = `
-INSERT INTO tenant_connectors (tenant_id, connector_id, endpoint, oauth_client_id, oauth_client_secret_name)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO tenant_connectors (tenant_id, connector_id, endpoint, oauth_client_id, oauth_client_secret_name, variables)
+VALUES ($1, $2, $3, $4, $5, $6::jsonb)
 ON CONFLICT (tenant_id, connector_id) DO NOTHING`
+	vars := cfg.Variables
+	if vars == nil {
+		vars = map[string]string{}
+	}
+	encoded, err := json.Marshal(vars)
+	if err != nil {
+		return 0, fmt.Errorf("tenantconnector: encode the variables of %s/%s: %w", tenantID, connectorID, err)
+	}
 	res, err := s.db.ExecContext(ctx, query, tenantID, connectorID,
-		cfg.Endpoint, cfg.OAuthClientID, cfg.OAuthClientSecretName)
+		cfg.Endpoint, cfg.OAuthClientID, cfg.OAuthClientSecretName, string(encoded))
 	if err != nil {
 		return 0, fmt.Errorf("tenantconnector: insert %s/%s: %w", tenantID, connectorID, err)
 	}
@@ -144,7 +157,7 @@ func (s *Store) Disable(ctx context.Context, tenantID, connectorID string) error
 }
 
 const selectColumns = `tenant_id, connector_id, phase, discovered_tools, last_error, ` +
-	`endpoint, oauth_client_id, oauth_client_secret_name`
+	`endpoint, oauth_client_id, oauth_client_secret_name, variables::text`
 
 // List returns the connectors of one tenant, in connector order.
 func (s *Store) List(ctx context.Context, tenantID string) ([]Connector, error) {
@@ -213,9 +226,15 @@ func (s *Store) query(ctx context.Context, op, query string, args ...any) ([]Con
 	var out []Connector
 	for rows.Next() {
 		var c Connector
+		var vars string
 		if err := rows.Scan(&c.TenantID, &c.ConnectorID, &c.Phase, &c.DiscoveredTools, &c.LastError,
-			&c.Endpoint, &c.OAuthClientID, &c.OAuthClientSecretName); err != nil {
+			&c.Endpoint, &c.OAuthClientID, &c.OAuthClientSecretName, &vars); err != nil {
 			return nil, fmt.Errorf("tenantconnector: %s: scan: %w", op, err)
+		}
+		if vars != "" && vars != "{}" {
+			if err := json.Unmarshal([]byte(vars), &c.Variables); err != nil {
+				return nil, fmt.Errorf("tenantconnector: %s: decode the variables of %s/%s: %w", op, c.TenantID, c.ConnectorID, err)
+			}
 		}
 		out = append(out, c)
 	}
