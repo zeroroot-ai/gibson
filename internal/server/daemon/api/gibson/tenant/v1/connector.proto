@@ -90,6 +90,10 @@ message CatalogEntry {
   // "https://gitlab.com"). Empty for a self-hostable vendor with no single
   // default, so the operator enters their own instance URL.
   string default_instance_url = 6;
+  // tool_class is the tool class of the connector (ADR-0177): siem, edr,
+  // scanner, identity, cloud, observability, git-host, ticket, paging or
+  // patch.
+  string tool_class = 7;
 }
 
 message ListCatalogRequest {}
@@ -120,6 +124,9 @@ message Connector {
   string phase = 4;
   int32 discovered_tools = 5;
   string last_error = 6;
+  // tool_class is the tool class of the catalog entry of the connector. It is
+  // empty when the connector left the catalog.
+  string tool_class = 7;
 }
 
 message ListConnectorsRequest {}

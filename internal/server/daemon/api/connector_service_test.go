@@ -135,6 +135,9 @@ func TestListCatalog(t *testing.T) {
 	assert.True(t, ids["gitlab"], "gitlab must be in the catalog")
 	assert.True(t, ids["github"], "github must be in the catalog")
 	assert.False(t, ids["osv"], "the OSV prototype left the catalog (gibson#750)")
+	for _, e := range resp.GetEntries() {
+		assert.NotEmpty(t, e.GetToolClass(), "catalog entry %s has no tool class", e.GetId())
+	}
 
 	_, err = s.ListCatalog(context.Background(), &tenantv1.ListCatalogRequest{})
 	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
@@ -186,6 +189,7 @@ func TestListConnectors(t *testing.T) {
 	assert.Equal(t, int32(9), got.GetDiscoveredTools())
 	assert.Equal(t, "Remote", got.GetShape())
 	assert.Equal(t, "pod", got.GetRuntime())
+	assert.Equal(t, "git-host", got.GetToolClass())
 
 	_, err = s.ListConnectors(context.Background(), &tenantv1.ListConnectorsRequest{})
 	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
@@ -266,4 +270,15 @@ func TestCatalogGate(t *testing.T) {
 		_, err = s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{CatalogId: "gitlab"})
 		assert.Equal(t, codes.Internal, grpcCode(err))
 	})
+}
+
+// A connector that left the catalog returns an empty class (gibson#1537).
+func TestListConnectors_ToolClassEmptyWhenLeftCatalog(t *testing.T) {
+	s, _ := newConnectorService(t,
+		tenantconnector.Connector{TenantID: "acme", ConnectorID: "left-the-catalog", Phase: "Ready"},
+	)
+	resp, err := s.ListConnectors(tenantCtx("acme"), &tenantv1.ListConnectorsRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetConnectors(), 1)
+	assert.Empty(t, resp.GetConnectors()[0].GetToolClass())
 }

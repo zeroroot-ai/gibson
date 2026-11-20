@@ -113,6 +113,7 @@ func (s *ConnectorService) ListCatalog(
 			Shape:              string(e.Shape),
 			Auth:               string(e.Auth),
 			DefaultInstanceUrl: e.DefaultInstanceURL,
+			ToolClass:          e.Class,
 		})
 	}
 	return &tenantv1.ListCatalogResponse{Entries: out}, nil
@@ -178,6 +179,7 @@ func (s *ConnectorService) ListConnectors(
 		}
 		if entry, lerr := componentcatalog.LookupConnector(r.ConnectorID); lerr == nil {
 			c.Shape = string(entry.Shape)
+			c.ToolClass = entry.Class
 		}
 		out = append(out, c)
 	}
