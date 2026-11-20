@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.166.0](https://github.com/zeroroot-ai/gibson/compare/v0.165.1...v0.166.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove the tenant concurrency quotas and the entitlements seam ([#1551](https://github.com/zeroroot-ai/gibson/issues/1551))
+
+### Features
+
+* remove the tenant concurrency quotas and the entitlements seam ([#1551](https://github.com/zeroroot-ai/gibson/issues/1551)) ([58e3d9a](https://github.com/zeroroot-ai/gibson/commit/58e3d9aed3a9f2caa85e70c49c2347ffa2cdb662))
+* **tenant-operator:** size the tenant neo4j without a plan ([#1550](https://github.com/zeroroot-ai/gibson/issues/1550)) ([2ec4dc5](https://github.com/zeroroot-ai/gibson/commit/2ec4dc57492eaa396b151fbd390ac47e4ddac248))
+
 ## [0.165.1](https://github.com/zeroroot-ai/gibson/compare/v0.165.0...v0.165.1) (2026-11-20)
 
 
