@@ -94,6 +94,16 @@ message CatalogEntry {
   // scanner, identity, cloud, observability, git-host, ticket, paging or
   // patch.
   string tool_class = 7;
+  // endpoint_patterns are the endpoints that a tenant may give when it enables
+  // a Remote connector (gibson#1534). Empty means the entry takes no tenant
+  // endpoint. A pattern is an https URL. Its host is exact or starts with one
+  // wildcard label, and a path segment can be one "*".
+  repeated string endpoint_patterns = 8;
+  // oauth_client is "dynamic" when the daemon registers an OAuth client at the
+  // vendor, and "tenant" when the tenant registers it and gives the client id
+  // and the name of the secret at enable time (gibson#1538). It is empty for an
+  // entry that does not use OAuth.
+  string oauth_client = 9;
 }
 
 message ListCatalogRequest {}
@@ -105,6 +115,18 @@ message ListCatalogResponse {
 message EnableConnectorRequest {
   // catalog_id is the id of the entry to enable (for example "gitlab").
   string catalog_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  // endpoint is the MCP endpoint of a Remote connector with endpoint_patterns
+  // (gibson#1534). The daemon refuses an endpoint outside the patterns. Empty
+  // selects the default endpoint of the catalog entry.
+  string endpoint = 2 [(buf.validate.field).string = { max_len: 2048 }];
+  // oauth_client_id is the id of the OAuth client that the tenant registered at
+  // its identity provider. It is required when the entry has
+  // oauth_client = "tenant", and refused otherwise (gibson#1538).
+  string oauth_client_id = 3 [(buf.validate.field).string = { max_len: 512 }];
+  // oauth_client_secret_name is the name of the secret in the secret store of
+  // the tenant that holds the client secret. The request never carries the
+  // secret value. It is required with oauth_client_id.
+  string oauth_client_secret_name = 4 [(buf.validate.field).string = { max_len: 512 }];
 }
 
 message EnableConnectorResponse {
@@ -127,6 +149,9 @@ message Connector {
   // tool_class is the tool class of the catalog entry of the connector. It is
   // empty when the connector left the catalog.
   string tool_class = 7;
+  // endpoint is the endpoint that the tenant gave. It is empty when the
+  // connector uses the default endpoint of the catalog entry.
+  string endpoint = 8;
 }
 
 message ListConnectorsRequest {}

@@ -25,24 +25,24 @@ func TestStore_Enable(t *testing.T) {
 	ctx := context.Background()
 	store, mock := newMockStore(t)
 
-	mock.ExpectExec("INSERT INTO tenant_connectors").WithArgs("acme", "gitlab").
+	mock.ExpectExec("INSERT INTO tenant_connectors").WithArgs("acme", "gitlab", "", "", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	c, err := store.Enable(ctx, "acme", "gitlab")
+	c, err := store.Enable(ctx, "acme", "gitlab", Config{})
 	require.NoError(t, err)
 	assert.Equal(t, Connector{TenantID: "acme", ConnectorID: "gitlab", Phase: PhasePending}, c)
 
-	mock.ExpectExec("INSERT INTO tenant_connectors").WithArgs("acme", "gitlab").
+	mock.ExpectExec("INSERT INTO tenant_connectors").WithArgs("acme", "gitlab", "", "", "").
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	_, err = store.Enable(ctx, "acme", "gitlab")
+	_, err = store.Enable(ctx, "acme", "gitlab", Config{})
 	require.ErrorIs(t, err, ErrAlreadyEnabled)
 
 	mock.ExpectExec("INSERT INTO tenant_connectors").WillReturnError(errors.New("db down"))
-	_, err = store.Enable(ctx, "acme", "gitlab")
+	_, err = store.Enable(ctx, "acme", "gitlab", Config{})
 	require.Error(t, err)
 
-	_, err = store.Enable(ctx, "", "gitlab")
+	_, err = store.Enable(ctx, "", "gitlab", Config{})
 	require.Error(t, err)
-	_, err = store.Enable(ctx, "acme", "")
+	_, err = store.Enable(ctx, "acme", "", Config{})
 	require.Error(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -52,7 +52,7 @@ func TestStore_Adopt(t *testing.T) {
 	store, mock := newMockStore(t)
 
 	// A row that exists is not an error: adopt is idempotent.
-	mock.ExpectExec("ON CONFLICT").WithArgs("acme", "gitlab").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("ON CONFLICT").WithArgs("acme", "gitlab", "", "", "").WillReturnResult(sqlmock.NewResult(0, 0))
 	require.NoError(t, store.Adopt(ctx, "acme", "gitlab"))
 	mock.ExpectExec("INSERT INTO tenant_connectors").WillReturnError(errors.New("db down"))
 	require.Error(t, store.Adopt(ctx, "acme", "gitlab"))
@@ -78,18 +78,19 @@ func TestStore_Disable(t *testing.T) {
 func TestStore_ListAndListAll(t *testing.T) {
 	ctx := context.Background()
 	store, mock := newMockStore(t)
-	cols := []string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error"}
+	cols := []string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error", "endpoint", "oauth_client_id", "oauth_client_secret_name"}
 
 	mock.ExpectQuery("WHERE tenant_id = \\$1").WithArgs("acme").
-		WillReturnRows(sqlmock.NewRows(cols).AddRow("acme", "gitlab", "Ready", 12, ""))
+		WillReturnRows(sqlmock.NewRows(cols).AddRow("acme", "gitlab", "Ready", 12, "", "https://acme.example.com/mcp", "cid", "cs-name"))
 	got, err := store.List(ctx, "acme")
 	require.NoError(t, err)
-	assert.Equal(t, []Connector{{TenantID: "acme", ConnectorID: "gitlab", Phase: "Ready", DiscoveredTools: 12}}, got)
+	assert.Equal(t, []Connector{{TenantID: "acme", ConnectorID: "gitlab", Phase: "Ready", DiscoveredTools: 12,
+		Config: Config{Endpoint: "https://acme.example.com/mcp", OAuthClientID: "cid", OAuthClientSecretName: "cs-name"}}}, got)
 
 	mock.ExpectQuery("ORDER BY tenant_id, connector_id").
 		WillReturnRows(sqlmock.NewRows(cols).
-			AddRow("acme", "gitlab", "Pending", 0, "").
-			AddRow("globex", "slack", "Failed", 0, "boom"))
+			AddRow("acme", "gitlab", "Pending", 0, "", "", "", "").
+			AddRow("globex", "slack", "Failed", 0, "boom", "", "", ""))
 	all, err := store.ListAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, all, 2)
@@ -105,18 +106,18 @@ func TestStore_ListAndListAll(t *testing.T) {
 func TestStore_ListPage(t *testing.T) {
 	ctx := context.Background()
 	store, mock := newMockStore(t)
-	cols := []string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error"}
+	cols := []string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error", "endpoint", "oauth_client_id", "oauth_client_secret_name"}
 
 	mock.ExpectQuery(`ORDER BY tenant_id, connector_id LIMIT \$1`).WithArgs(2).
 		WillReturnRows(sqlmock.NewRows(cols).
-			AddRow("acme", "gitlab", "Pending", 0, "").
-			AddRow("globex", "slack", "Ready", 0, ""))
+			AddRow("acme", "gitlab", "Pending", 0, "", "", "", "").
+			AddRow("globex", "slack", "Ready", 0, "", "", "", ""))
 	got, err := store.ListPage(ctx, nil, 2)
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 
 	mock.ExpectQuery(`WHERE \(tenant_id, connector_id\) > \(\$2, \$3\)`).WithArgs(2, "globex", "slack").
-		WillReturnRows(sqlmock.NewRows(cols).AddRow("initech", "gitlab", "Ready", 0, ""))
+		WillReturnRows(sqlmock.NewRows(cols).AddRow("initech", "gitlab", "Ready", 0, "", "", "", ""))
 	got, err = store.ListPage(ctx, &PageKey{TenantID: "globex", ConnectorID: "slack"}, 2)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
@@ -176,8 +177,8 @@ func TestStore_DatabaseFailures(t *testing.T) {
 		t.Error("ListAll: scan failure returned no error")
 	}
 	mock.ExpectQuery("SELECT tenant_id").WillReturnRows(
-		sqlmock.NewRows([]string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error"}).
-			AddRow("acme", "gitlab", "Ready", 1, "").RowError(0, errDB))
+		sqlmock.NewRows([]string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error", "endpoint", "oauth_client_id", "oauth_client_secret_name"}).
+			AddRow("acme", "gitlab", "Ready", 1, "", "", "", "").RowError(0, errDB))
 	if _, err := s.ListAll(ctx); err == nil {
 		t.Error("ListAll: row failure returned no error")
 	}
@@ -211,5 +212,34 @@ func TestStore_SetDiscoveredTools(t *testing.T) {
 	require.ErrorIs(t, store.SetDiscoveredTools(ctx, "acme", "gitlab", 7), errDB)
 
 	require.Error(t, store.SetDiscoveredTools(ctx, "", "gitlab", 7))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestStore_EnableStoresTheConfig(t *testing.T) {
+	ctx := context.Background()
+	store, mock := newMockStore(t)
+	cfg := Config{Endpoint: "https://a.example.com/mcp", OAuthClientID: "cid", OAuthClientSecretName: "name"}
+	mock.ExpectExec("INSERT INTO tenant_connectors").
+		WithArgs("acme", "okta", "https://a.example.com/mcp", "cid", "name").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	c, err := store.Enable(ctx, "acme", "okta", cfg)
+	require.NoError(t, err)
+	assert.Equal(t, cfg, c.Config)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestStore_Get(t *testing.T) {
+	ctx := context.Background()
+	store, mock := newMockStore(t)
+	cols := []string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error", "endpoint", "oauth_client_id", "oauth_client_secret_name"}
+	mock.ExpectQuery("WHERE tenant_id = \\$1 AND connector_id = \\$2").WithArgs("acme", "okta").
+		WillReturnRows(sqlmock.NewRows(cols).AddRow("acme", "okta", "Ready", 0, "", "https://a.example.com/mcp", "cid", "name"))
+	got, err := store.Get(ctx, "acme", "okta")
+	require.NoError(t, err)
+	assert.Equal(t, "cid", got.OAuthClientID)
+
+	mock.ExpectQuery("WHERE tenant_id").WillReturnRows(sqlmock.NewRows(cols))
+	_, err = store.Get(ctx, "acme", "gone")
+	require.ErrorIs(t, err, ErrNotEnabled)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

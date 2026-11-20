@@ -34,6 +34,23 @@ type Connector struct {
 	Phase           string
 	DiscoveredTools int32
 	LastError       string
+	// Config is what the tenant chose when it enabled the connector.
+	Config
+}
+
+// Config is the choice of a tenant for one connector. The daemon checked it
+// against the catalog entry before it stored it. A field is empty when the
+// tenant made no choice.
+type Config struct {
+	// Endpoint is the canonical MCP endpoint of a Remote connector
+	// (gibson#1534).
+	Endpoint string
+	// OAuthClientID is the id of the OAuth client that the tenant registered
+	// at its identity provider (gibson#1538).
+	OAuthClientID string
+	// OAuthClientSecretName is the name of the secret of the tenant that holds
+	// the client secret. The table holds the name and never the value.
+	OAuthClientSecretName string
 }
 
 // Status is a report of the connector operator about one connector. The
@@ -63,18 +80,18 @@ func required(op, tenantID, connectorID string) error {
 
 // Enable records that tenantID wants connectorID. It returns
 // ErrAlreadyEnabled when the row exists.
-func (s *Store) Enable(ctx context.Context, tenantID, connectorID string) (Connector, error) {
+func (s *Store) Enable(ctx context.Context, tenantID, connectorID string, cfg Config) (Connector, error) {
 	if err := required("Enable", tenantID, connectorID); err != nil {
 		return Connector{}, err
 	}
-	n, err := s.insert(ctx, tenantID, connectorID)
+	n, err := s.insert(ctx, tenantID, connectorID, cfg)
 	if err != nil {
 		return Connector{}, err
 	}
 	if n == 0 {
 		return Connector{}, ErrAlreadyEnabled
 	}
-	return Connector{TenantID: tenantID, ConnectorID: connectorID, Phase: PhasePending}, nil
+	return Connector{TenantID: tenantID, ConnectorID: connectorID, Phase: PhasePending, Config: cfg}, nil
 }
 
 // Adopt records a connector that exists in the cluster from the time when the
@@ -85,16 +102,17 @@ func (s *Store) Adopt(ctx context.Context, tenantID, connectorID string) error {
 	if err := required("Adopt", tenantID, connectorID); err != nil {
 		return err
 	}
-	_, err := s.insert(ctx, tenantID, connectorID)
+	_, err := s.insert(ctx, tenantID, connectorID, Config{})
 	return err
 }
 
-func (s *Store) insert(ctx context.Context, tenantID, connectorID string) (int64, error) {
+func (s *Store) insert(ctx context.Context, tenantID, connectorID string, cfg Config) (int64, error) {
 	const query = `
-INSERT INTO tenant_connectors (tenant_id, connector_id)
-VALUES ($1, $2)
+INSERT INTO tenant_connectors (tenant_id, connector_id, endpoint, oauth_client_id, oauth_client_secret_name)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (tenant_id, connector_id) DO NOTHING`
-	res, err := s.db.ExecContext(ctx, query, tenantID, connectorID)
+	res, err := s.db.ExecContext(ctx, query, tenantID, connectorID,
+		cfg.Endpoint, cfg.OAuthClientID, cfg.OAuthClientSecretName)
 	if err != nil {
 		return 0, fmt.Errorf("tenantconnector: insert %s/%s: %w", tenantID, connectorID, err)
 	}
@@ -125,7 +143,8 @@ func (s *Store) Disable(ctx context.Context, tenantID, connectorID string) error
 	return nil
 }
 
-const selectColumns = `tenant_id, connector_id, phase, discovered_tools, last_error`
+const selectColumns = `tenant_id, connector_id, phase, discovered_tools, last_error, ` +
+	`endpoint, oauth_client_id, oauth_client_secret_name`
 
 // List returns the connectors of one tenant, in connector order.
 func (s *Store) List(ctx context.Context, tenantID string) ([]Connector, error) {
@@ -134,6 +153,24 @@ func (s *Store) List(ctx context.Context, tenantID string) ([]Connector, error) 
 	}
 	return s.query(ctx, "List",
 		`SELECT `+selectColumns+` FROM tenant_connectors WHERE tenant_id = $1 ORDER BY connector_id`, tenantID)
+}
+
+// Get returns one connector of one tenant. It returns ErrNotEnabled when the
+// tenant did not enable it.
+func (s *Store) Get(ctx context.Context, tenantID, connectorID string) (Connector, error) {
+	if err := required("Get", tenantID, connectorID); err != nil {
+		return Connector{}, err
+	}
+	rows, err := s.query(ctx, "Get",
+		`SELECT `+selectColumns+` FROM tenant_connectors WHERE tenant_id = $1 AND connector_id = $2`,
+		tenantID, connectorID)
+	if err != nil {
+		return Connector{}, err
+	}
+	if len(rows) == 0 {
+		return Connector{}, ErrNotEnabled
+	}
+	return rows[0], nil
 }
 
 // ListAll returns every enabled connector of every tenant, in (tenant,
@@ -176,7 +213,8 @@ func (s *Store) query(ctx context.Context, op, query string, args ...any) ([]Con
 	var out []Connector
 	for rows.Next() {
 		var c Connector
-		if err := rows.Scan(&c.TenantID, &c.ConnectorID, &c.Phase, &c.DiscoveredTools, &c.LastError); err != nil {
+		if err := rows.Scan(&c.TenantID, &c.ConnectorID, &c.Phase, &c.DiscoveredTools, &c.LastError,
+			&c.Endpoint, &c.OAuthClientID, &c.OAuthClientSecretName); err != nil {
 			return nil, fmt.Errorf("tenantconnector: %s: scan: %w", op, err)
 		}
 		out = append(out, c)

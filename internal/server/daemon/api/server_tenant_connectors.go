@@ -76,16 +76,7 @@ func (s *DaemonServer) ListDesiredConnectors(
 		if lerr != nil {
 			continue
 		}
-		out.Connectors = append(out.Connectors, &daemonoperatorv1.DesiredConnector{
-			TenantId:    r.TenantID,
-			ConnectorId: r.ConnectorID,
-			Shape:       string(entry.Shape),
-			Image:       entry.Image,
-			Endpoint:    entry.Endpoint,
-			Transport:   string(entry.Transport),
-			Auth:        string(entry.Auth),
-			EgressAllow: entry.EgressAllow,
-		})
+		out.Connectors = append(out.Connectors, s.desiredConnector(r, entry))
 	}
 	return out, nil
 }
@@ -139,4 +130,45 @@ func (s *DaemonServer) AdoptConnector(
 		return nil, status.Errorf(codes.Internal, "adopt connector: %v", err)
 	}
 	return &daemonoperatorv1.AdoptConnectorResponse{}, nil
+}
+
+// desiredConnector is what the connector operator needs to make the
+// ConnectorInstance of one row.
+//
+// The endpoint and the egress allow-list come from ResolveEndpoint on each
+// call, so a stored tenant endpoint is checked against the manifest of this
+// release, not the manifest of the day when the tenant enabled the connector.
+// When the check fails, the connector gets no endpoint and no egress host. The
+// operator then reports it as Failed, and the connector never reaches a host
+// that the manifest does not allow.
+func (s *DaemonServer) desiredConnector(
+	r tenantconnector.Connector, entry componentcatalog.ConnectorEntry,
+) *daemonoperatorv1.DesiredConnector {
+	res, err := entry.ResolveEndpoint(r.Endpoint)
+	if err != nil {
+		s.logger.Warn("connector endpoint is outside the catalog patterns",
+			"connector", r.ConnectorID, "error", err)
+		res = componentcatalog.ResolvedEndpoint{}
+	}
+	d := &daemonoperatorv1.DesiredConnector{
+		TenantId:    r.TenantID,
+		ConnectorId: r.ConnectorID,
+		Shape:       string(entry.Shape),
+		Image:       entry.Image,
+		Endpoint:    res.Endpoint,
+		Transport:   string(entry.Transport),
+		Auth:        string(entry.Auth),
+		EgressAllow: res.EgressAllow,
+		Env:         entry.Env,
+		Args:        entry.Args,
+		Port:        int32(entry.Port), //nolint:gosec // G115: the catalog loader limits the port to 65535
+	}
+	d.CredentialHeader = entry.CredentialHeader.Name
+	d.ImagePullSecret = entry.ImagePullSecret
+	for _, c := range entry.Credentials {
+		d.Credentials = append(d.Credentials, &daemonoperatorv1.ConnectorCredentialRef{
+			Key: c.Secret, Property: c.Property, TargetEnv: c.Env,
+		})
+	}
+	return d
 }

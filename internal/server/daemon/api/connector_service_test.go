@@ -68,14 +68,14 @@ func (m *memConnectorStore) find(tenant, connector string) int {
 	return -1
 }
 
-func (m *memConnectorStore) Enable(_ context.Context, tenant, connector string) (tenantconnector.Connector, error) {
+func (m *memConnectorStore) Enable(_ context.Context, tenant, connector string, cfg tenantconnector.Config) (tenantconnector.Connector, error) {
 	if m.err != nil {
 		return tenantconnector.Connector{}, m.err
 	}
 	if m.find(tenant, connector) >= 0 {
 		return tenantconnector.Connector{}, tenantconnector.ErrAlreadyEnabled
 	}
-	c := tenantconnector.Connector{TenantID: tenant, ConnectorID: connector, Phase: tenantconnector.PhasePending}
+	c := tenantconnector.Connector{TenantID: tenant, ConnectorID: connector, Phase: tenantconnector.PhasePending, Config: cfg}
 	m.rows = append(m.rows, c)
 	return c, nil
 }
@@ -281,4 +281,73 @@ func TestListConnectors_ToolClassEmptyWhenLeftCatalog(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resp.GetConnectors(), 1)
 	assert.Empty(t, resp.GetConnectors()[0].GetToolClass())
+}
+
+// A tenant gives the endpoint of its Datadog site. The daemon keeps it only
+// when it matches a pattern of the manifest (gibson#1534).
+func TestEnableConnector_TenantEndpoint(t *testing.T) {
+	cases := map[string]struct {
+		endpoint string
+		code     codes.Code
+		stored   string
+	}{
+		"site of the tenant": {"https://mcp.datadoghq.eu/v1/mcp", codes.OK, "https://mcp.datadoghq.eu/v1/mcp"},
+		"default endpoint":   {"", codes.OK, ""},
+		"other host":         {"https://mcp.evil.example/v1/mcp", codes.InvalidArgument, ""},
+		"datadog lookalike":  {"https://mcp.datadoghq.com.evil.example/v1/mcp", codes.InvalidArgument, ""},
+		"cluster service":    {"https://gibson-daemon.gibson.svc.cluster.local/v1/mcp", codes.InvalidArgument, ""},
+		"private address":    {"https://10.0.0.7/v1/mcp", codes.InvalidArgument, ""},
+		"metadata address":   {"https://169.254.169.254/v1/mcp", codes.InvalidArgument, ""},
+		"user info":          {"https://mcp.datadoghq.com@evil.example/v1/mcp", codes.InvalidArgument, ""},
+		"plain http":         {"http://mcp.datadoghq.eu/v1/mcp", codes.InvalidArgument, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, store := newConnectorService(t)
+			_, err := s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{
+				CatalogId: "datadog", Endpoint: tc.endpoint})
+			assert.Equal(t, tc.code, grpcCode(err))
+			if tc.code == codes.OK {
+				require.Len(t, store.rows, 1)
+				assert.Equal(t, tc.stored, store.rows[0].Endpoint)
+			} else {
+				assert.Empty(t, store.rows, "a refused endpoint stores no row")
+			}
+		})
+	}
+
+	// A fixed connector takes no tenant endpoint.
+	s, store := newConnectorService(t)
+	_, err := s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{
+		CatalogId: "wiz", Endpoint: "https://mcp.app.wiz.io/"})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+	assert.Empty(t, store.rows)
+}
+
+// A connector with no dynamic client registration needs the client of the
+// tenant, and any other connector refuses one (gibson#1538).
+func TestEnableConnector_TenantOAuthClient(t *testing.T) {
+	s, store := newConnectorService(t)
+	ctx := tenantCtx("acme")
+
+	_, err := s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{CatalogId: "microsoft-sentinel"})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err), "the client is required")
+	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{
+		CatalogId: "microsoft-sentinel", OauthClientId: "cid"})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err), "the secret name is required")
+	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{
+		CatalogId: "microsoft-sentinel", OauthClientId: "cid", OauthClientSecretName: "../other-tenant"})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err), "the secret name must be valid")
+	assert.Empty(t, store.rows)
+
+	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{
+		CatalogId: "microsoft-sentinel", OauthClientId: "cid", OauthClientSecretName: "entra-client-secret"})
+	require.NoError(t, err)
+	require.Len(t, store.rows, 1)
+	assert.Equal(t, "cid", store.rows[0].OAuthClientID)
+	assert.Equal(t, "entra-client-secret", store.rows[0].OAuthClientSecretName)
+
+	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{
+		CatalogId: "gitlab", OauthClientId: "cid", OauthClientSecretName: "x"})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err), "gitlab registers its own client")
 }
