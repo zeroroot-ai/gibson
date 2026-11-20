@@ -19,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -144,7 +145,7 @@ func (s *HarnessCallbackService) serveMetaTool(ctx context.Context, req *harness
 		authorizer,
 		s.connectors,
 	)
-	handler.WithApprovalGate(s.toolApproval)
+	handler.WithApprovalGate(s.toolApproval).WithGrantLookup(s.connectorGrants)
 	if store := s.agentSkillStore(); store != nil {
 		handler.WithSkills(store, s.skillLoadHook(req.GetContext()))
 	}
@@ -203,6 +204,7 @@ func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Han
 			Connector:   c.Connector,
 			Tool:        c.Tool,
 			Description: c.Description,
+			ToolClass:   connectorToolClass(c.Connector),
 		}
 		if len(c.InputSchema) > 0 {
 			out.Candidates[i].InputSchema = json.RawMessage(c.InputSchema)
@@ -258,7 +260,8 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		// real catalog tool through the same trust boundary as a native
 		// CallToolProto call, so each call is recorded, a failed one too.
 		Recorder: func(rctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
-			callID = s.captureToolCall(rctx, contextInfo, newToolCallID(contextInfo), rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
+			callID = s.captureGrantedToolCall(rctx, contextInfo, newToolCallID(contextInfo), rec.Canonical,
+				string(rec.ArgsJSON), string(resultJSON), errText, rec.GrantID)
 			return callID
 		},
 		Observer: &harnessCallObserver{s: s},
@@ -294,6 +297,10 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		// gibson:no-tool-executed — a person has not approved the call yet.
 		return withToolCallID(metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
 			err.Error()+". Do not retry now. Call again with the same arguments after the approval."), callID), nil
+	case errors.Is(err, metatool.ErrMergeNotGranted):
+		// gibson:no-tool-executed — the merge request has no merge slot yet.
+		return withToolCallID(metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+			err.Error()+". Do not retry now. Call again after the merge slot is granted."), callID), nil
 	case errors.Is(err, metatool.ErrApprovalDenied):
 		// gibson:no-tool-executed — a person denied the call.
 		return withToolCallID(metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, err.Error()), callID), nil
@@ -395,7 +402,56 @@ func (s *HarnessCallbackService) MissionPolicyForRun(ctx context.Context, tenant
 // harness callback context, such as a connector call through
 // ComponentService.CallTool. The tenant is on ctx.
 func (s *HarnessCallbackService) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
-	return s.captureToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID}, uuid.NewString(), rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
+	return s.captureGrantedToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID},
+		uuid.NewString(), rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText, rec.GrantID)
+}
+
+// TenantGrantSubject is the FGA subject of a connector call that the daemon
+// makes for a tenant, with no agent behind it. It is the member set of the
+// tenant: the subject that the tenant enable posture grants can_execute on a
+// connector (catalogEnablePosture). A tenant kill switch on the connector
+// therefore also stops the call of the daemon.
+func TenantGrantSubject(tenant string) string { return "tenant:" + tenant + "#member" }
+
+// CallConnectorForTenant runs one connector call that the daemon makes for a
+// tenant, such as the revert of a fix after a failed health signal
+// (gibson#1465). It takes the one path of every connector call,
+// metatool.Handler.Call: the can_execute check of the tenant grant on the
+// connector, the merge slot and approval marks of the manifest, the intent and
+// result audit records, and the flight recorder record with the mission of the
+// fix. The audit records name TenantGrantSubject as the actor.
+func (s *HarnessCallbackService) CallConnectorForTenant(
+	ctx context.Context, tenant, missionID, connector, tool string, args map[string]any,
+) (any, error) {
+	if tenant == "" || connector == "" || tool == "" {
+		return nil, errors.New("a connector call of the daemon needs a tenant, a connector and a tool")
+	}
+	if s.connectors == nil || s.componentAuthorizer == nil {
+		return nil, errors.New("the connector client or the authorizer is not wired")
+	}
+	tid := toolid.ID{Source: toolid.SourceMCP, Connector: connector, Tool: tool}
+	subject := TenantGrantSubject(tenant)
+	tenantID, err := auth.NewTenantID(tenant)
+	if err != nil {
+		return nil, fmt.Errorf("connector call for tenant %q: %w", tenant, err)
+	}
+	ctx = auth.ContextWithTenantString(ctx, tenant)
+	ctx = auth.WithIdentity(ctx, auth.Identity{Subject: subject, Tenant: tenantID, CredentialType: auth.CredentialOIDCUser})
+
+	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
+	handler := metatool.NewHandler(nil, authorizer, s.connectors).WithApprovalGate(s.toolApproval)
+	result, err := handler.Call(ctx, metatool.Call{
+		Caller:    catalog.Caller{Subject: subject, Tenant: tenant, Mission: missionID},
+		ID:        tid.Canonical(),
+		Args:      args,
+		MissionID: missionID,
+		Recorder:  s.RecordToolCall,
+		Observer:  &harnessCallObserver{s: s},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("connector call %s for tenant %q: %w", tid.Canonical(), tenant, err)
+	}
+	return result, nil
 }
 
 // harnessCallObserver writes the intent and result audit records of an
@@ -479,6 +535,23 @@ type metaSearchCandidate struct {
 	Tool        string          `json:"tool,omitempty"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+	// ToolClass is the tool class of the connector of the tool (ADR-0177), for
+	// example scanner or siem. It is empty for a tool that no catalog
+	// connector serves.
+	ToolClass string `json:"tool_class,omitempty"`
+}
+
+// connectorToolClass returns the tool class that the catalog states for the
+// connector, or "" when the catalog does not list it.
+func connectorToolClass(connector string) string {
+	if connector == "" {
+		return ""
+	}
+	e, err := componentcatalog.LookupConnector(connector)
+	if err != nil {
+		return ""
+	}
+	return e.Class
 }
 
 func marshalMetaResult(s *HarnessCallbackService, v any) (*harnesspb.CallToolProtoResponse, error) {

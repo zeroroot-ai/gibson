@@ -481,3 +481,30 @@ func TestRescan_LateFindingOfRun1IsKeptWithNoScanProvenance(t *testing.T) {
 		t.Fatalf("a late finding has scan scope %q and last scan %q, want none", f.ScanScope, f.LastScan)
 	}
 }
+
+// TestRescan_ASecurityTestDoesNotVerifyBySilence: a security-test or a
+// closed-loop run that ends without a proof for a fixed finding is no rerun of
+// its check. The finding stays fixed (ADR-0178). Only the settlement of the
+// attack predicate can verify it.
+func TestRescan_ASecurityTestDoesNotVerifyBySilence(t *testing.T) {
+	for _, name := range []string{"security-test", "closed-loop"} {
+		t.Run(name, func(t *testing.T) {
+			w := NewWorld("t1")
+			w.clock = func() time.Time { return testScanTime }
+			Reduce(w, MissionProjected{ID: "red-1", RunID: "run-1", Name: name, TargetID: "target-a"})
+			Reduce(w, FindingRaised{ID: "f1", MissionID: "red-1", MissionRunID: "run-1"})
+			Reduce(w, MissionDone{ID: "red-1", RunID: "run-1", Outcome: MissionCompleted})
+			fix(w, "f1")
+
+			Reduce(w, MissionProjected{ID: "red-1", RunID: "run-2", Name: name, TargetID: "target-a"})
+			Reduce(w, MissionDone{ID: "red-1", RunID: "run-2", Outcome: MissionCompleted})
+			if evs := RescanReconciliationSystem(w); len(evs) != 0 {
+				t.Fatalf("a %s run gave %+v, want no rerun", name, evs)
+			}
+			settleRescan(w)
+			if got := findingByID(t, w, "f1").Status; got != FindingStatusFixed {
+				t.Fatalf("status = %q, want fixed", got)
+			}
+		})
+	}
+}

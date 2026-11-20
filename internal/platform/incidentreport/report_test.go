@@ -23,9 +23,9 @@ func history() []brain.Event {
 		/* 1 */ brain.EntityObserved{Label: "Alert", Key: "alert-1", MissionID: "m-1"},
 		/* 2 */ brain.EntityObserved{Label: "Incident", Key: "inc-1", MissionID: "m-1"},
 		/* 3 */ brain.EntityObserved{Label: "Host", Key: "host-9", MissionID: "m-1"},
-		/* 4 */ brain.AgentToolCallObserved{ToolCallID: "c1", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:crowdstrike:contain_host", Result: `{"accepted":true}`},
+		/* 4 */ brain.AgentToolCallObserved{ToolCallID: "c1", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:crowdstrike:contain_host", Result: `{"accepted":true}`, GrantID: "g-1"},
 		/* 5 */ brain.AgentToolCallObserved{ToolCallID: "c2", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:okta:revoke_user_sessions", Err: "permission denied: the grant does not allow this tool"},
-		/* 6 */ brain.AgentToolCallObserved{ToolCallID: "c3", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:okta:suspend_user", Err: "pending authorization"},
+		/* 6 */ brain.AgentToolCallObserved{ToolCallID: "c3", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:okta:suspend_user", Err: "pending authorization", GrantID: "g-1"},
 		/* 7 */ brain.AgentToolCallObserved{ToolCallID: "c4", MissionID: "m-1", RunID: "run-1", ToolName: "native:nmap"},
 		/* 8 */ brain.AgentToolCallObserved{ToolCallID: "c5", MissionID: "m-OTHER", RunID: "run-1", ToolName: "mcp:crowdstrike:contain_host"},
 		/* 9 */ brain.FindingRaised{ID: "f-1", Title: "Exposed token", MissionID: "m-1"},
@@ -210,9 +210,9 @@ func (f fakeHistory) History(context.Context) ([]brain.Event, error) { return f.
 
 type fakeGrants struct{ asked []string }
 
-func (f *fakeGrants) GrantFor(_ context.Context, tenant, agent, tool string) (*Grant, error) {
-	f.asked = append(f.asked, tenant+"/"+agent+"/"+tool)
-	return &Grant{ID: "g-1", Capability: "execute:tool:" + tool, GrantedBy: "user-7", GrantedAtUnix: 1700000000}, nil
+func (f *fakeGrants) GrantByID(_ context.Context, tenant, id string) (*Grant, error) {
+	f.asked = append(f.asked, tenant+"/"+id)
+	return &Grant{ID: id, Capability: "execute:tool:mcp:crowdstrike", GrantedBy: "user-7", GrantedAtUnix: 1700000000}, nil
 }
 
 func tenantCtx(t *testing.T) context.Context {
@@ -233,8 +233,9 @@ func newGraph() *fakeGraph {
 	}}
 }
 
-// The grant and the person who gave it reach each action that ran. A refused
-// action has no grant, and the resolver is not asked for it.
+// The grant that the event of the call names, and the person who gave it,
+// reach each action that ran (gibson#1478). A refused action has no grant, and
+// the resolver is not asked for it.
 func TestReader_AttachesTheGrantToEachActionThatRan(t *testing.T) {
 	grants := &fakeGrants{}
 	r, err := NewReader(newGraph(), fakeHistory{history()}, grants)
@@ -258,7 +259,7 @@ func TestReader_AttachesTheGrantToEachActionThatRan(t *testing.T) {
 		}
 	}
 	for _, asked := range grants.asked {
-		if !strings.HasPrefix(asked, "acme/incident-response/") {
+		if asked != "acme/g-1" {
 			t.Errorf("the resolver asked %q, want the tenant of the context", asked)
 		}
 	}

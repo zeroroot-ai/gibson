@@ -175,6 +175,10 @@ var coreRelationshipTypes = []string{
 	// Defensive countermeasures (v6, gibson#1487).
 	"APPLIES_COUNTERMEASURE", // MergeRequest -> Countermeasure
 	"COUNTERS",               // Countermeasure -> Technique
+
+	// Fix loop (v6, gibson#1460). The daemon reads the deploy of a merged fix
+	// from the tool of the buyer and links the merge request to it.
+	"DEPLOYED_IN", // MergeRequest -> Deployment
 }
 
 // Registry is a Taxonomy: a version plus the labels and relationship types it

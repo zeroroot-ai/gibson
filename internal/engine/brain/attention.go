@@ -127,6 +127,16 @@ type FixFacts struct {
 	RerunKind  string
 	RerunFound bool
 	RerunAt    time.Time
+	// FixMissionID is the mission of the job that opened the merge request of
+	// the fix (gibson#1465). The daemon writes each later event of the fix loop
+	// with it, so a replay of that mission shows the merge, the deploy, the
+	// health signal and the revert.
+	FixMissionID string
+	// RevertRequestedAt is when the daemon first asked the Git host to revert
+	// the fix, and RevertMergeRequest is the merge request of the revert. Both
+	// are zero until a failed health signal asks for a revert.
+	RevertRequestedAt  time.Time
+	RevertMergeRequest string
 }
 
 // Health values of FixFacts.
@@ -301,6 +311,7 @@ func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 			if e.MergeRequest != "" {
 				f.MergeRequest = e.MergeRequest
 				f.MergeRequestState = ""
+				f.FixMissionID = e.MissionID
 			}
 			if e.Status == FindingStatusOpen {
 				resetFix(f)
@@ -413,4 +424,6 @@ func resetFix(f *Finding) {
 	f.Health = ""
 	f.HealthUnavailableAt = time.Time{}
 	f.RerunKind, f.RerunFound, f.RerunAt = "", false, time.Time{}
+	f.FixMissionID = ""
+	f.RevertRequestedAt, f.RevertMergeRequest = time.Time{}, ""
 }

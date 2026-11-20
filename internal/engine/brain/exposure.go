@@ -26,7 +26,9 @@ import (
 //     read by Gibson,
 //   - the time of a refused merge, until the next report of that merge request,
 //   - the time from the deploy to the first rerun of the check on newer
-//     evidence, which is the wait for the buyer's next scan.
+//     evidence, which is the wait for the buyer's next scan,
+//   - the time from the request of a revert to the merge of the revert, which
+//     is the wait for the pipeline of the buyer. The flaw stays exposed.
 
 // ExposureWindow is the window of one Finding.
 type ExposureWindow struct {
@@ -68,6 +70,8 @@ func ExposureWindows(events []Event, now time.Time) []ExposureWindow {
 	tracks := map[string]*findingTrack{}
 	mrFindings := map[string][]string{}
 	refused := map[string][]openWait{}
+	// reverting holds the revert requests that no FixReverted has closed.
+	reverting := map[string][]openWait{}
 	track := func(id string) *findingTrack {
 		t := tracks[id]
 		if t == nil {
@@ -122,6 +126,17 @@ func ExposureWindows(events []Event, now time.Time) []ExposureWindow {
 				t := track(id)
 				t.deployAt, t.rerunAt, t.rerunClosed = e.At, time.Time{}, false
 			}
+		case RevertRequested:
+			if len(reverting[e.MergeRequest]) == 0 {
+				for _, id := range mrFindings[e.MergeRequest] {
+					reverting[e.MergeRequest] = append(reverting[e.MergeRequest], openWait{finding: id, from: e.At})
+				}
+			}
+		case FixReverted:
+			for _, w := range reverting[e.MergeRequest] {
+				track(w.finding).waits = append(track(w.finding).waits, interval{w.from, e.At})
+			}
+			reverting[e.MergeRequest] = nil
 		case CheckRerun:
 			t := track(e.ID)
 			if !t.deployAt.IsZero() && !t.rerunClosed && e.EvidenceAt.After(t.deployAt) {
@@ -140,6 +155,13 @@ func ExposureWindows(events []Event, now time.Time) []ExposureWindow {
 			end = t.verifiedAt
 		}
 		waits := t.waits
+		for _, w := range reverting { // a revert that is not merged runs to the end
+			for _, o := range w {
+				if o.finding == t.id {
+					waits = append(waits, interval{o.from, end})
+				}
+			}
+		}
 		for _, w := range refused { // a refusal that is still open runs to the end
 			for _, o := range w {
 				if o.finding == t.id {
@@ -338,6 +360,8 @@ func deref(ev Event) Event {
 	case *CheckRerun:
 		return *e
 	case *FixReverted:
+		return *e
+	case *RevertRequested:
 		return *e
 	default:
 		return ev

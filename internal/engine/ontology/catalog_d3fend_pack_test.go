@@ -81,8 +81,8 @@ func TestD3FENDPack_HoldsNoPredicate(t *testing.T) {
 // refuses it. The same predicate in a pack with another name is valid.
 func TestD3FENDPack_RefusesAPredicate(t *testing.T) {
 	fixture := d3fendPack(t)
-	fixture.Predicates = map[string]string{"prompt_injection_marker_present": `markerPresent(evidence, "X")`}
-	fixture.Techniques = map[string]string{"prompt_injection_marker_present": "prompt_injection"}
+	fixture.Predicates = map[string]string{"privileged_container_detected": `markerPresent(evidence, "X")`}
+	fixture.Techniques = map[string]string{"privileged_container_detected": "privilege_escalation"}
 
 	err := fixture.Validate()
 	require.Error(t, err)

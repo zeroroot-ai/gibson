@@ -74,6 +74,23 @@ type Handler struct {
 	// skills and onSkillLoad serve a skill: id. See WithSkills.
 	skills      SkillStore
 	onSkillLoad func(ctx context.Context, load SkillLoad) error
+
+	// grants names the capability grant behind an allowed connector call. See
+	// WithGrantLookup.
+	grants GrantLookup
+}
+
+// GrantLookup returns the id of the active capability grant that lets subject
+// execute the tools of the connector in tenant. It returns "" when no grant
+// row exists, for example for a person or for the tenant grant of the daemon.
+type GrantLookup func(ctx context.Context, tenant, subject, connector string) (string, error)
+
+// WithGrantLookup wires the read of the grant of a call. The record of each
+// allowed connector call then names its grant (gibson#1474, gibson#1478). The
+// lookup is evidence and never a gate: can_execute already decided the call.
+func (h *Handler) WithGrantLookup(g GrantLookup) *Handler {
+	h.grants = g
+	return h
 }
 
 // NewHandler constructs a Handler. Any collaborator may be nil; the dependent

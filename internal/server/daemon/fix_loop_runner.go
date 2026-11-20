@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/fixloop"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
 
@@ -45,6 +46,31 @@ func (p applicationPlacer) Application(ctx context.Context, tenant, findingID st
 		}
 	}
 	return "", nil
+}
+
+// governedRevert is the fixloop.TenantCaller of the daemon. It resolves the
+// callback manager on each call, because the daemon builds it after the fix
+// loop. With no callback manager, the revert fails and the Watcher tries it
+// again on the next pass. The call never goes around the governed path.
+type governedRevert struct {
+	callback func() *harness.CallbackManager
+}
+
+var _ fixloop.TenantCaller = governedRevert{}
+
+// CallConnectorForTenant implements fixloop.TenantCaller.
+func (g governedRevert) CallConnectorForTenant(
+	ctx context.Context, tenant, missionID, connector, tool string, args map[string]any,
+) (any, error) {
+	cb := g.callback()
+	if cb == nil {
+		return nil, errors.New("the callback manager is not wired, so no governed connector call can run")
+	}
+	out, err := cb.CallConnectorForTenant(ctx, tenant, missionID, connector, tool, args)
+	if err != nil {
+		return nil, fmt.Errorf("governed connector call: %w", err)
+	}
+	return out, nil
 }
 
 // FixLoopRunner reads the facts of the fix loop for each tenant World and

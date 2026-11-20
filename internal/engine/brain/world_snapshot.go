@@ -556,7 +556,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		Reduce(w, AgentToolCallObserved{
 			ToolCallID: c.ToolCallID, MissionID: c.MissionID, RunID: c.RunID, ScopeID: c.ScopeID,
 			ToolName: c.ToolName, Arguments: c.Arguments, Result: c.Result, Err: c.Err,
-			RecordedAtUnixNano: c.RecordedAtUnixNano,
+			GrantID: c.GrantID, RecordedAtUnixNano: c.RecordedAtUnixNano,
 		})
 	}
 

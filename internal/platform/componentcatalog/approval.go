@@ -39,6 +39,17 @@ import (
 //   - responseActions is false or absent: the tool needs only the grant. These
 //     are the connectors that read. They state no tool, and the platform has
 //     no list of the tools of a vendor to check against.
+//
+// An entry can also state the role of a tool (gibson#1458). The one role is
+// "merge": the tool merges a merge request on the Git host. The daemon runs a
+// call of that tool only when the World holds the merge slot of the merge
+// request (brain.World.MayMerge). The approval of an entry with a role can stay
+// empty when responseActions is false, and the tool then needs only the grant
+// and the slot:
+//
+//	tools:
+//	  merge_merge_request:
+//	    role: merge
 
 // Values of ConnectorTool.Approval.
 const (
@@ -48,11 +59,16 @@ const (
 	ApprovalNone = "none"
 )
 
+// ToolRoleMerge is the role of a tool that merges a merge request.
+const ToolRoleMerge = "merge"
+
 // ConnectorTool is the manifest entry of one tool of a connector.
 type ConnectorTool struct {
-	// Approval is "required" or "none". It is never empty: an entry that does
-	// not decide is a defect.
+	// Approval is "required" or "none". It is empty only on an entry that
+	// states a role, on a connector with no response actions.
 	Approval string `yaml:"approval"`
+	// Role is empty or ToolRoleMerge.
+	Role string `yaml:"role"`
 	// Undo names the tool of the same connector that undoes this tool. The
 	// approver sees the call as reversible only when the manifest names one.
 	Undo string `yaml:"undo"`
@@ -70,6 +86,9 @@ type ToolApproval struct {
 	UndoTool string
 	// BlastRadius is the text of the manifest. It can be empty.
 	BlastRadius string
+	// Merge is true when the tool merges a merge request. The call then needs
+	// the merge slot of the merge request.
+	Merge bool
 }
 
 var toolNameRE = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
@@ -78,9 +97,10 @@ var toolNameRE = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 func (e ConnectorEntry) ApprovalFor(tool string) ToolApproval {
 	if t, ok := e.Tools[tool]; ok {
 		return ToolApproval{
-			Required:    t.Approval != ApprovalNone,
+			Required:    t.Approval == ApprovalRequired,
 			UndoTool:    t.Undo,
 			BlastRadius: t.BlastRadius,
+			Merge:       t.Role == ToolRoleMerge,
 		}
 	}
 	return ToolApproval{Required: e.ResponseActions}
@@ -116,7 +136,16 @@ func validateTools(id string, s ConnectorSpec) error {
 		if !toolNameRE.MatchString(name) {
 			return fmt.Errorf("%s: tools name %q is not a valid tool name", id, name)
 		}
+		switch t.Role {
+		case "", ToolRoleMerge:
+		default:
+			return fmt.Errorf("%s: tool %q needs role %q or no role, got %q", id, name, ToolRoleMerge, t.Role)
+		}
 		switch t.Approval {
+		case "":
+			if t.Role == "" || s.ResponseActions {
+				return fmt.Errorf("%s: tool %q needs approval %q or %q, got %q", id, name, ApprovalRequired, ApprovalNone, t.Approval)
+			}
 		case ApprovalRequired:
 			required++
 		case ApprovalNone:

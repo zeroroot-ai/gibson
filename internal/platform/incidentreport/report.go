@@ -80,7 +80,10 @@ type ActionLine struct {
 	Connector string
 	Tool      string
 	AgentName string
-	Outcome   Outcome
+	// GrantID is the grant that the Timeline event of the call names. Grant
+	// holds the grant that it reads.
+	GrantID string
+	Outcome Outcome
 	// Error is the error that the call returned. It is empty for a call that
 	// the connector accepted.
 	Error string

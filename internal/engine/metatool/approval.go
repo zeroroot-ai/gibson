@@ -32,6 +32,12 @@ var ErrApprovalPending = errors.New("metatool: pending authorization: a person m
 // final. Callers map it to permission denied.
 var ErrApprovalDenied = errors.New("metatool: a person denied this call")
 
+// ErrMergeNotGranted means that the call merges a merge request and the World
+// of the tenant holds no merge slot for it yet (gibson#1458, ADR-0179). The
+// call did not reach the connector. The agent can call again after the slot is
+// granted.
+var ErrMergeNotGranted = errors.New("metatool: merge not granted yet: the merge request waits for its merge slot")
+
 // ErrApprovalUnavailable means that the tool needs approval and the daemon has
 // no approval queue for it. The call does not run (fail closed).
 var ErrApprovalUnavailable = errors.New("metatool: the tool needs approval and the approval queue is not available")
@@ -64,15 +70,23 @@ type ApprovalRequest struct {
 	Reversible bool
 }
 
-// ApprovalGate is the approval queue of one daemon. The daemon implements it
-// over the queue of ADR-0132 (brain.DestructiveAuthorizationQueue). Acquire
-// never blocks.
+// ApprovalGate is the check of the World of the tenant at tool dispatch. The
+// daemon implements it over the approval queue of ADR-0132
+// (brain.DestructiveAuthorizationQueue) and over the merge slots of
+// gibson#1466 (brain.World.MayMerge). No method blocks.
 type ApprovalGate interface {
 	// Acquire returns the state of the call and the id of its request. For
 	// ApprovalStateApproved the approval is spent: the caller must run the
 	// call now or lose the approval.
 	Acquire(ctx context.Context, req ApprovalRequest) (ApprovalState, string, error)
+	// MayMerge reports whether the merge request holds its merge slot in the
+	// World of the tenant.
+	MayMerge(ctx context.Context, tenant, mergeRequest string) (bool, error)
 }
+
+// MergeRequestArg is the argument of a merge tool that names the merge
+// request. Its value is the key that the fix job recorded.
+const MergeRequestArg = "merge_request"
 
 // ApprovalMarks returns the approval rule of one tool.
 type ApprovalMarks func(connector, tool string) componentcatalog.ToolApproval
@@ -102,6 +116,13 @@ func (h *Handler) approvalFor(connector, tool string) componentcatalog.ToolAppro
 // may reach the connector.
 func (h *Handler) gateCall(ctx context.Context, c Call, connector, tool string) error {
 	mark := h.approvalFor(connector, tool)
+	// The merge slot comes first, so a call that waits for its slot never
+	// spends an approval.
+	if mark.Merge {
+		if err := h.mergeGranted(ctx, c, connector, tool); err != nil {
+			return err
+		}
+	}
 	if !mark.Required {
 		return nil
 	}
@@ -130,6 +151,28 @@ func (h *Handler) gateCall(ctx context.Context, c Call, connector, tool string) 
 	default:
 		return fmt.Errorf("%w: unknown state %d", ErrApprovalUnavailable, state)
 	}
+}
+
+// mergeGranted returns nil when the merge request of the call holds its merge
+// slot. The daemon reads the slot from the World. The word of the agent is
+// never the source.
+func (h *Handler) mergeGranted(ctx context.Context, c Call, connector, tool string) error {
+	if h.gate == nil {
+		return fmt.Errorf("%w: %s:%s has the merge role and the daemon has no merge gate", ErrApprovalUnavailable, connector, tool)
+	}
+	mr, _ := c.Args[MergeRequestArg].(string)
+	mr = strings.TrimSpace(mr)
+	if mr == "" {
+		return fmt.Errorf("%w: the call of %s:%s names no %s", ErrMergeNotGranted, connector, tool, MergeRequestArg)
+	}
+	ok, err := h.gate.MayMerge(ctx, c.Caller.Tenant, mr)
+	if err != nil {
+		return fmt.Errorf("metatool: the merge check of %s:%s failed: %w", connector, tool, err)
+	}
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrMergeNotGranted, mr)
+	}
+	return nil
 }
 
 // ArgsHash returns the hash of the arguments of a call. It hashes the JSON

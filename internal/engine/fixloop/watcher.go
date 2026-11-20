@@ -86,6 +86,18 @@ func (w *Watcher) Step(ctx context.Context, tenant string, findings []brain.Find
 	return out
 }
 
+// fixMission returns the mission of the fix job of the merge request. Each
+// event of the fix loop carries it, so a replay of that mission shows the
+// whole loop (gibson#1465).
+func fixMission(fs []brain.FindingSnapshot) string {
+	for _, f := range fs {
+		if f.FixMissionID != "" {
+			return f.FixMissionID
+		}
+	}
+	return ""
+}
+
 func anyStatus(fs []brain.FindingSnapshot, status string) bool {
 	for _, f := range fs {
 		if f.Status == status {
@@ -111,12 +123,14 @@ func (w *Watcher) stepFixing(ctx context.Context, tenant, mr string, fs []brain.
 	switch fact.State {
 	case MRMerged, MRClosed:
 		w.forgetRefusal(mr)
-		return []brain.Event{brain.MergeRequestObserved{Key: mr, State: fact.State, At: w.stampOr(fact.At)}}, nil
+		return []brain.Event{brain.MergeRequestObserved{Key: mr, State: fact.State, At: w.stampOr(fact.At), MissionID: fixMission(fs)}}, nil
 	case MRRefused:
 		if !w.noteRefusal(mr, fact.Reason) {
 			return nil, nil
 		}
-		return []brain.Event{brain.MergeRequestObserved{Key: mr, State: brain.MergeRequestRefused, At: w.stampOr(fact.At)}}, nil
+		return []brain.Event{brain.MergeRequestObserved{
+			Key: mr, State: brain.MergeRequestRefused, At: w.stampOr(fact.At), MissionID: fixMission(fs),
+		}}, nil
 	}
 	// The merge request is open. A green pipeline asks for the slot of its
 	// Application. The queue grants one slot at a time.
@@ -130,7 +144,9 @@ func (w *Watcher) stepFixing(ctx context.Context, tenant, mr string, fs []brain.
 	if app == "" {
 		return nil, nil
 	}
-	return []brain.Event{brain.MergeRequestQueued{MergeRequest: mr, Application: app, At: w.now()}}, nil
+	return []brain.Event{brain.MergeRequestQueued{
+		MergeRequest: mr, Application: app, At: w.now(), MissionID: fixMission(fs),
+	}}, nil
 }
 
 func (w *Watcher) noteRefusal(mr, reason string) bool {
@@ -162,21 +178,68 @@ func (w *Watcher) stepFixed(ctx context.Context, tenant, mr string, fs []brain.F
 		if !d.Deployed || d.At.IsZero() {
 			return nil, nil // merged and not deployed yet
 		}
-		return []brain.Event{brain.DeployObserved{
-			MergeRequest: mr, DeploymentKey: d.DeploymentKey, ApplicationKey: d.ApplicationKey, At: d.At.UTC(),
-		}}, nil
+		return deployEvents(mr, d, f.FixMissionID), nil
 	case f.Health == brain.HealthFailed:
-		if w.reverter == nil {
-			return nil, errors.New("no reverter is wired")
-		}
-		if err := w.reverter.Revert(ctx, tenant, mr); err != nil {
-			return nil, fmt.Errorf("revert merge request: %w", err)
-		}
-		return []brain.Event{brain.FixReverted{MergeRequest: mr, At: w.now()}}, nil
+		return w.revert(ctx, tenant, mr, f)
 	case f.Health == "":
 		return w.readHealth(ctx, tenant, mr, f)
 	}
 	return nil, nil
+}
+
+// The labels and the edge of the deploy link (gibson#1460).
+const (
+	labelMergeRequest = "MergeRequest"
+	labelDeployment   = "Deployment"
+	edgeDeployedIn    = "DEPLOYED_IN"
+)
+
+// deployEvents records the deploy of a merged fix. The Timeline event holds
+// the time of the deploy. The graph gets the edge from the merge request to
+// the Deployment that carries it. A deploy with no deployment key has no node
+// to point at, so it gets the event and no edge.
+func deployEvents(mr string, d DeployFact, missionID string) []brain.Event {
+	out := []brain.Event{brain.DeployObserved{
+		MergeRequest: mr, DeploymentKey: d.DeploymentKey, ApplicationKey: d.ApplicationKey, At: d.At.UTC(),
+		MissionID: missionID,
+	}}
+	if d.DeploymentKey == "" {
+		return out
+	}
+	props := map[string]string{"deployed_at": d.At.UTC().Format(time.RFC3339)}
+	if d.ApplicationKey != "" {
+		props["application"] = d.ApplicationKey
+	}
+	return append(out,
+		brain.EntityObserved{Label: labelDeployment, Key: d.DeploymentKey, MissionID: missionID, Props: props},
+		brain.EntityObserved{
+			Label: labelMergeRequest, Key: mr, MissionID: missionID,
+			Edges: []brain.EntityEdge{{Type: edgeDeployedIn, TargetLabel: labelDeployment, TargetKey: d.DeploymentKey}},
+		},
+	)
+}
+
+// revert calls the revert tool. The Git host merges the revert only on a green
+// pipeline, so one call can leave it open. FixReverted comes only when the
+// host says that the revert is merged. Before that, the first call records
+// RevertRequested, and the wait for the pipeline is wait time.
+func (w *Watcher) revert(ctx context.Context, tenant, mr string, f brain.FindingSnapshot) ([]brain.Event, error) {
+	if w.reverter == nil {
+		return nil, errors.New("no reverter is wired")
+	}
+	fact, err := w.reverter.Revert(ctx, tenant, mr, f.FixMissionID)
+	if err != nil {
+		return nil, fmt.Errorf("revert merge request: %w", err)
+	}
+	if fact.Merged {
+		return []brain.Event{brain.FixReverted{MergeRequest: mr, At: w.now(), MissionID: f.FixMissionID}}, nil
+	}
+	if !f.RevertRequestedAt.IsZero() && (f.RevertMergeRequest != "" || fact.RevertMergeRequest == "") {
+		return nil, nil // the revert waits for its pipeline, and nothing is new
+	}
+	return []brain.Event{brain.RevertRequested{
+		MergeRequest: mr, RevertMergeRequest: fact.RevertMergeRequest, At: w.now(), MissionID: f.FixMissionID,
+	}}, nil
 }
 
 func firstWithStatus(fs []brain.FindingSnapshot, status string) brain.FindingSnapshot {
@@ -204,7 +267,9 @@ func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.Fin
 			end = w.now()
 		}
 		if pol.RestartLimit > 0 && end.Sub(d.Restart.Started) > pol.RestartLimit {
-			return []brain.Event{brain.HealthObserved{MergeRequest: mr, Held: false, At: w.now()}}, nil
+			return []brain.Event{brain.HealthObserved{
+				MergeRequest: mr, Held: false, At: w.now(), MissionID: f.FixMissionID,
+			}}, nil
 		}
 		if d.Restart.Ended.IsZero() {
 			return nil, nil // the restart still runs
@@ -230,7 +295,9 @@ func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.Fin
 	if !h.Done {
 		return nil, nil // the hold time still runs
 	}
-	return []brain.Event{brain.HealthObserved{MergeRequest: mr, Held: h.Held, At: w.stampOr(h.At)}}, nil
+	return []brain.Event{brain.HealthObserved{
+		MergeRequest: mr, Held: h.Held, At: w.stampOr(h.At), MissionID: f.FixMissionID,
+	}}, nil
 }
 
 // unavailable returns the one event that records a missing health signal. The
@@ -239,5 +306,5 @@ func (w *Watcher) unavailable(mr string, f brain.FindingSnapshot) []brain.Event 
 	if !f.HealthUnavailableAt.IsZero() {
 		return nil
 	}
-	return []brain.Event{brain.HealthUnavailable{MergeRequest: mr, At: w.now()}}
+	return []brain.Event{brain.HealthUnavailable{MergeRequest: mr, At: w.now(), MissionID: f.FixMissionID}}
 }

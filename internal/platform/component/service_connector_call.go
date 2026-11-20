@@ -41,6 +41,13 @@ func (s *ComponentServiceServer) WithToolApproval(g metatool.ApprovalGate) *Comp
 	return s
 }
 
+// WithConnectorGrants wires the read of the capability grant behind a
+// connector call, so the record of the call names it (gibson#1474).
+func (s *ComponentServiceServer) WithConnectorGrants(g metatool.GrantLookup) *ComponentServiceServer {
+	s.connectorGrants = g
+	return s
+}
+
 // WithToolCallRecorder wires the flight recorder of connector calls. A server
 // with none refuses a connector call (ADR-0131).
 func (s *ComponentServiceServer) WithToolCallRecorder(r metatool.FlightRecorder) *ComponentServiceServer {
@@ -112,7 +119,7 @@ func (s *ComponentServiceServer) callConnectorTool(
 	}
 
 	handler := metatool.NewHandler(nil, catalog.NewFGAAuthorizer(s.authorizer), s.connectorCaller).
-		WithApprovalGate(s.toolApproval)
+		WithApprovalGate(s.toolApproval).WithGrantLookup(s.connectorGrants)
 	result, err := handler.Call(ctx, call)
 	switch {
 	case err == nil:
@@ -123,6 +130,8 @@ func (s *ComponentServiceServer) callConnectorTool(
 		return &componentpb.CallToolResponse{OutputJson: string(out), ToolCallId: callID}, nil
 	case errors.Is(err, metatool.ErrApprovalPending):
 		return nil, status.Errorf(codes.FailedPrecondition, "%s. Call again with the same arguments after the approval.", err.Error())
+	case errors.Is(err, metatool.ErrMergeNotGranted):
+		return nil, status.Errorf(codes.FailedPrecondition, "%s. Call again after the merge slot is granted.", err.Error())
 	case errors.Is(err, metatool.ErrApprovalUnavailable):
 		return nil, status.Error(codes.Unavailable, err.Error())
 	case errors.Is(err, metatool.ErrApprovalDenied):

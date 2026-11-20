@@ -740,6 +740,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// same logger as the rest of the daemon.
 	if d.callback != nil {
 		d.callback.SetConnectorAudit(auditLogger)
+		// The record of each allowed connector call names the grant that
+		// allowed it, so the incident report reads it from the event
+		// (gibson#1474, gibson#1478).
+		d.callback.SetConnectorGrants(capabilitygrant.NewCapabilityGrantStore(d.platformDB).ConnectorGrantID)
 	}
 	// The record and the quota of the components that agents enroll
 	// (gibson#33). A bad quota value stops the daemon.
@@ -1952,7 +1956,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// An agent enrolls a component that it produced through the
 			// identity provisioning of the tenant-admin surface (gibson#33).
 			compSvc.WithProducedComponentEnroller(producedEnroller{srv: daemonSvc})
-			compSvc.WithConnectorTools(d.connectorMCPClient()).WithConnectorCaller(d.connectorMCPClient())
+			compSvc.WithConnectorTools(d.connectorMCPClient()).WithConnectorCaller(d.connectorMCPClient()).
+				WithConnectorGrants(capabilitygrant.NewCapabilityGrantStore(d.platformDB).ConnectorGrantID)
 			if d.brainRegistry != nil {
 				compSvc.WithToolApproval(newTenantRoutedToolApproval(d.brainRegistry))
 			}

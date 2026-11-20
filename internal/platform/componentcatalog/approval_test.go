@@ -92,7 +92,12 @@ func TestApproval_TheLoaderRefusesABadMark(t *testing.T) {
 		"response with no tools":        {"  responseActions: true\n", "needs a tools list"},
 		"response with no mark":         {"  responseActions: true\n  tools:\n    a:\n      approval: none\n", "marks no tool"},
 		"bad name":                      {"  tools:\n    \"a b\":\n      approval: required\n", "not a valid tool name"},
-		"long radius":                   {"  tools:\n    a:\n      approval: required\n      blastRadius: " + strings.Repeat("x", 201) + "\n", "blastRadius"},
+		"unknown role":                  {"  tools:\n    a:\n      role: deploy\n", `needs role "merge"`},
+		"role with no approval on a response connector": {
+			"  responseActions: true\n  tools:\n    a:\n      approval: required\n    m:\n      role: merge\n",
+			`needs approval "required" or "none"`,
+		},
+		"long radius": {"  tools:\n    a:\n      approval: required\n      blastRadius: " + strings.Repeat("x", 201) + "\n", "blastRadius"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -101,6 +106,25 @@ func TestApproval_TheLoaderRefusesABadMark(t *testing.T) {
 				t.Fatalf("want an error with %q, got %v", c.want, err)
 			}
 		})
+	}
+}
+
+// A Git host names its merge tool with the role merge (gibson#1458). The
+// entry needs no approval, and the other tools keep the open path.
+func TestApproval_AManifestMarksTheMergeTool(t *testing.T) {
+	m, err := loadOne(t, responseConnector+`  tools:
+    merge_merge_request:
+      role: merge
+`)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	e := m.toConnectorEntry()
+	if got := e.ApprovalFor("merge_merge_request"); !got.Merge || got.Required {
+		t.Errorf("merge_merge_request = %+v, want the merge role and no approval", got)
+	}
+	if got := e.ApprovalFor("list_merge_requests"); got.Merge || got.Required {
+		t.Errorf("an unnamed tool = %+v, want the grant only", got)
 	}
 }
 

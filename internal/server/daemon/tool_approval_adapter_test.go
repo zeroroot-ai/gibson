@@ -120,3 +120,56 @@ func TestToolApproval_NeedsATenant(t *testing.T) {
 		t.Fatal("a call with no tenant must fail")
 	}
 }
+
+// The merge gate reads the merge slot from the World of the real brain engine
+// (gibson#1458). A merge request with no slot gets no call. After the queue
+// grants the slot, the same call runs.
+func TestToolApproval_TheMergeGateReadsTheWorld(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory(), brain.MergeGateSystem)
+	eng := registry.For("acme")
+
+	conn := &countingConnector{}
+	h := metatool.NewHandler(nil, allowAllAuthz{}, conn).
+		WithApprovalGate(newTenantRoutedToolApproval(registry)).
+		WithApprovalMarks(func(_, tool string) componentcatalog.ToolApproval {
+			return componentcatalog.ToolApproval{Merge: tool == "merge_merge_request"}
+		})
+	merge := func(tenant string) error {
+		_, err := h.Call(ctx, metatool.Call{
+			Caller: catalog.Caller{Subject: "agent", Tenant: tenant}, ID: "mcp:forge:merge_merge_request",
+			Args: map[string]any{"merge_request": "mr-7"}, MissionID: "m1",
+			Observer: nopObserver{},
+			Recorder: func(context.Context, metatool.CallRecord, []byte, string) string { return "" },
+		})
+		return err
+	}
+
+	if err := merge("acme"); !errors.Is(err, metatool.ErrMergeNotGranted) {
+		t.Fatalf("want merge not granted, got %v", err)
+	}
+	eng.Submit(brain.MergeRequestQueued{MergeRequest: "mr-7", Application: "app-1", At: time.Now().UTC()})
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var granted bool
+		eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge("mr-7") })
+		if granted {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(conn.calls) != 0 {
+		t.Fatal("the connector got a call before the slot")
+	}
+	if err := merge("acme"); err != nil {
+		t.Fatalf("the merge with a slot: %v", err)
+	}
+	if len(conn.calls) != 1 {
+		t.Fatalf("connector calls = %d, want 1", len(conn.calls))
+	}
+	// The slot of one tenant is not the slot of another.
+	if err := merge("other"); !errors.Is(err, metatool.ErrMergeNotGranted) {
+		t.Fatalf("another tenant: want merge not granted, got %v", err)
+	}
+}

@@ -81,6 +81,9 @@ var projectedRelationshipTypes = []string{
 	// parameter of apoc.merge.relationship in upsertEntityCypher.
 	"APPLIES_COUNTERMEASURE", // MergeRequest -> Countermeasure
 	"COUNTERS",               // Countermeasure -> Technique
+	// Fix loop (gibson#1460): travels as the e.type parameter of
+	// apoc.merge.relationship in upsertEntityCypher.
+	"DEPLOYED_IN", // MergeRequest -> Deployment
 }
 
 // vocabularyDrift reports every label or relationship type in the given

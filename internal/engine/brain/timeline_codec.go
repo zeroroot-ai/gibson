@@ -104,6 +104,7 @@ func init() {
 	registerEvent("deploy.observed", func() Event { return &DeployObserved{} })
 	registerEvent("health.observed", func() Event { return &HealthObserved{} })
 	registerEvent("health.unavailable", func() Event { return &HealthUnavailable{} })
+	registerEvent("fix.revert_requested", func() Event { return &RevertRequested{} })
 	registerEvent("fix.reverted", func() Event { return &FixReverted{} })
 	registerEvent("check.rerun", func() Event { return &CheckRerun{} })
 	registerEvent("merge_request.queued", func() Event { return &MergeRequestQueued{} })

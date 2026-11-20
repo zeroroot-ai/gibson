@@ -47,10 +47,12 @@ type Grant struct {
 	GrantedAtUnix int64
 }
 
-// GrantResolver finds the grant that allowed a response action. It returns nil
-// and no error when the agent holds no grant for the tool.
+// GrantResolver reads a grant by its id. The id comes from the Timeline event
+// of the call (agent_tool_call.observed), which the daemon wrote when the
+// grant allowed the call (gibson#1474). It returns nil and no error when the
+// tenant holds no grant with the id.
 type GrantResolver interface {
-	GrantFor(ctx context.Context, tenant, agentName, toolID string) (*Grant, error)
+	GrantByID(ctx context.Context, tenant, grantID string) (*Grant, error)
 }
 
 // Reader builds incident reports.
@@ -108,10 +110,10 @@ func (r *Reader) Report(ctx context.Context, incidentKey string) (*Report, error
 	rep := Assemble(incidentKey, ix, alertRows, reachedRows, causeRows, fixRows)
 	for i := range rep.Actions {
 		a := &rep.Actions[i]
-		if a.Outcome == OutcomeRefused || a.AgentName == "" {
-			continue // a refused call has no grant, and an unnamed agent has none to find
+		if a.Outcome == OutcomeRefused || a.GrantID == "" {
+			continue // a refused call has no grant, and a call with no grant id has none to read
 		}
-		g, gerr := r.grants.GrantFor(ctx, tenant, a.AgentName, a.ToolID)
+		g, gerr := r.grants.GrantByID(ctx, tenant, a.GrantID)
 		if gerr != nil {
 			return nil, fmt.Errorf("incidentreport: read the grant of %s: %w", a.ToolID, gerr)
 		}
@@ -195,6 +197,7 @@ func (ix *Index) actions(incident string, alerts []string) []ActionLine {
 		out = append(out, ActionLine{
 			ToolID: act.ToolID, Connector: connector, Tool: tool,
 			AgentName: ix.runs[c.ev.RunID],
+			GrantID:   c.ev.GrantID,
 			Outcome:   classify(c.ev.Err, c.ev.Result),
 			Error:     c.ev.Err, Result: c.ev.Result,
 			Controls: append([]string(nil), act.Controls...),

@@ -64,3 +64,18 @@ func (a *tenantRoutedToolApproval) Acquire(
 		return 0, "", fmt.Errorf("tool approval: unknown state %d", state)
 	}
 }
+
+// MayMerge implements metatool.ApprovalGate. It reads the merge slot of the
+// merge request from the World of the tenant (gibson#1458, gibson#1466).
+func (a *tenantRoutedToolApproval) MayMerge(_ context.Context, tenant, mergeRequest string) (bool, error) {
+	if tenant == "" {
+		return false, errors.New("merge gate: the call has no tenant")
+	}
+	eng, ok := api.TenantEngine(a.registry, tenant)
+	if !ok {
+		return false, api.ErrWorldUnavailable
+	}
+	var granted bool
+	eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge(mergeRequest) })
+	return granted, nil
+}

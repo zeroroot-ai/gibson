@@ -137,6 +137,39 @@ func applyFixReverted(w *World, e FixReverted) {
 	releaseMergeSlot(w, e.MergeRequest)
 }
 
+// RevertRequested records that the daemon asked the Git host to revert the
+// merge request, and that the revert merge request is not merged yet
+// (gibson#1465). The Finding stays `fixed` and exposed. The time until
+// FixReverted is wait time: the fix waits on the pipeline of the buyer.
+type RevertRequested struct {
+	MergeRequest string
+	// RevertMergeRequest is the merge request of the revert, as the Git host
+	// names it. It can be empty when the host has not opened it yet.
+	RevertMergeRequest string
+	At                 time.Time
+	MissionID          string
+}
+
+// Kind identifies the fix.revert_requested brain event.
+func (RevertRequested) Kind() string { return "fix.revert_requested" }
+
+// applyRevertRequested records the first request on each Finding of the merge
+// request. A later request keeps the first time and takes a revert merge
+// request that the first one did not name.
+func applyRevertRequested(w *World, e RevertRequested) {
+	if e.MergeRequest == "" || e.At.IsZero() {
+		return
+	}
+	forEachFindingOfMR(w, e.MergeRequest, func(f *Finding) {
+		if f.RevertRequestedAt.IsZero() {
+			f.RevertRequestedAt = e.At
+		}
+		if f.RevertMergeRequest == "" {
+			f.RevertMergeRequest = e.RevertMergeRequest
+		}
+	})
+}
+
 // CheckRerun records that a check ran again on one Finding. Found is true when
 // the check found the flaw again. EvidenceAt is the time of the evidence that the
 // check read. The check of a scan mission and an attack predicate that settled

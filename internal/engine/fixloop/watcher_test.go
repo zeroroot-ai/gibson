@@ -34,13 +34,20 @@ func (f *fakeReader) Health(context.Context, string, string, time.Time, time.Dur
 }
 
 type fakeReverter struct {
-	calls []string
-	err   error
+	calls    []string
+	missions []string
+	err      error
+	// waiting leaves the revert merge request open: its pipeline runs.
+	waiting bool
 }
 
-func (r *fakeReverter) Revert(_ context.Context, _, mr string) error {
+func (r *fakeReverter) Revert(_ context.Context, _, mr, missionID string) (RevertFact, error) {
 	r.calls = append(r.calls, mr)
-	return r.err
+	r.missions = append(r.missions, missionID)
+	if r.err != nil {
+		return RevertFact{}, r.err
+	}
+	return RevertFact{Merged: !r.waiting, RevertMergeRequest: "mr-1-revert"}, nil
 }
 
 type fakePlacer struct{ app string }
@@ -64,7 +71,9 @@ func newRig(t *testing.T, check string) *rig {
 	rg.wt.now = func() time.Time { return rg.now }
 	brain.Reduce(rg.w, brain.FindingRaised{ID: "f1", CheckKind: check, CheckRef: "ref", At: at(0)})
 	// The fix job delivered a merge request.
-	brain.Reduce(rg.w, brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", At: at(1)})
+	brain.Reduce(rg.w, brain.FindingStatusChanged{
+		ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", MissionID: "fix-run-1", At: at(1),
+	})
 	return rg
 }
 
@@ -160,6 +169,37 @@ func TestStep_FullLoopVerifies(t *testing.T) {
 	}
 }
 
+// The deploy of a merged fix is a Timeline event with its time, and the graph
+// gets the edge from the merge request to its Deployment (gibson#1460). A fix
+// that is merged and not deployed gets neither.
+func TestStep_TheDeployLinksTheMergeRequestToItsDeployment(t *testing.T) {
+	g := newRig(t, "scan")
+	g.merged()
+	if evs := g.tick(); len(evs) != 0 {
+		t.Fatalf("merged and not deployed gave %+v", evs)
+	}
+	g.r.deploy = DeployFact{Deployed: true, DeploymentKey: "dep-1", ApplicationKey: "group/app", At: at(3)}
+	evs := g.tick()
+	var deploy *brain.DeployObserved
+	var edge *brain.EntityEdge
+	for _, e := range evs {
+		switch ev := e.(type) {
+		case brain.DeployObserved:
+			deploy = &ev
+		case brain.EntityObserved:
+			if ev.Label == "MergeRequest" && ev.Key == "mr-1" && len(ev.Edges) == 1 {
+				edge = &ev.Edges[0]
+			}
+		}
+	}
+	if deploy == nil || !deploy.At.Equal(at(3)) || deploy.MissionID != "fix-run-1" {
+		t.Fatalf("deploy event = %+v", deploy)
+	}
+	if edge == nil || edge.Type != "DEPLOYED_IN" || edge.TargetLabel != "Deployment" || edge.TargetKey != "dep-1" {
+		t.Fatalf("edge = %+v", edge)
+	}
+}
+
 // A hold time that still runs gives no event.
 func TestStep_HoldTimeStillRunningGivesNoHealthEvent(t *testing.T) {
 	g := newRig(t, "scan")
@@ -211,6 +251,48 @@ func TestStep_FailedHealthRevertsAndReopens(t *testing.T) {
 	g.tick()
 	if len(g.rv.calls) != 1 {
 		t.Fatalf("revert calls = %v after a second tick, want one", g.rv.calls)
+	}
+}
+
+// A revert whose merge request waits for its pipeline leaves the finding
+// fixed. FixReverted comes only after the host merged the revert, and each
+// event carries the mission of the fix (gibson#1465).
+func TestStep_ARevertThatWaitsKeepsTheFindingFixed(t *testing.T) {
+	g := newRig(t, "scan")
+	g.merged()
+	g.deployed()
+	g.r.health = HealthFact{Known: true, Done: true, Held: false, At: at(4)}
+	g.rv.waiting = true
+	g.tick() // records the failed signal
+	evs := g.tick()
+	if len(evs) != 1 {
+		t.Fatalf("events = %+v, want one RevertRequested", evs)
+	}
+	req, ok := evs[0].(brain.RevertRequested)
+	if !ok || req.MissionID != "fix-run-1" || req.RevertMergeRequest != "mr-1-revert" {
+		t.Fatalf("event = %+v", evs[0])
+	}
+	if got := g.status(); got != brain.FindingStatusFixed {
+		t.Fatalf("status = %q, want fixed while the revert waits", got)
+	}
+	if evs := g.tick(); len(evs) != 0 {
+		t.Fatalf("a second pass while the revert waits gave %+v", evs)
+	}
+	g.rv.waiting = false
+	evs = g.tick()
+	if len(evs) != 1 {
+		t.Fatalf("events = %+v, want one FixReverted", evs)
+	}
+	if rev, ok := evs[0].(brain.FixReverted); !ok || rev.MissionID != "fix-run-1" {
+		t.Fatalf("event = %+v", evs[0])
+	}
+	if got := g.status(); got != brain.FindingStatusOpen {
+		t.Fatalf("status = %q, want open", got)
+	}
+	for _, m := range g.rv.missions {
+		if m != "fix-run-1" {
+			t.Fatalf("revert missions = %v", g.rv.missions)
+		}
 	}
 }
 

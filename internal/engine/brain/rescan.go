@@ -53,6 +53,15 @@ import (
 // MissionCompleted reconciles; MissionFailed is marked reconciled so the System
 // stays quiescent, and emits no status change at all.
 
+// Only a scan reconciles. The `security-test` and `closed-loop` missions do not,
+// and they must not (ADR-0178). Their check is an attack predicate, the
+// strongest check. A red agent that ends a run without a proof did not show
+// that the flaw is gone: it can stop early, choose another technique, or lose
+// its budget. Only the predicate that settles false, on evidence newer than the
+// deploy, verifies an attack proof. So their silence is never a CheckRerun.
+// The producer of that CheckRerun is the settlement of the predicate, and it
+// does not exist yet (see the report of the blue team integration branch).
+
 // ScanMissionName is the name of the Scan mission definition
 // (internal/platform/missioncatalog/missions/scan.cue). A mission is a scan —
 // and so reconciles — when its Name matches.

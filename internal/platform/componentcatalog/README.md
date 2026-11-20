@@ -48,6 +48,16 @@ spec:
 
 An approval covers one call. The request key is a hash of the tenant, the mission, the connector, the tool and the canonical arguments. A call with another target, tool or mission needs its own approval. If the approval queue is not wired, a marked call is refused.
 
+**The merge tool of a Git host (gibson#1458).** A Git host connector names the tool that merges a merge request with `role: merge`. Such an entry needs no `approval` on a connector without `responseActions`.
+
+```yaml
+  tools:
+    merge_merge_request:
+      role: merge
+```
+
+The order at dispatch is then: mission policy, grant, merge slot, approval, dispatch. The call must name the merge request in the argument `merge_request`, with the key that the fix job recorded (the URL, or the ref when the URL is empty). The daemon reads the World of the tenant and runs the call only when the merge request holds its merge slot (`World.MayMerge`, ADR-0179: one fix at a time for each Application). Otherwise the call returns `merge not granted yet`, and the connector gets no call. The daemon never takes the word of the agent that a slot is granted. A Git host connector that does not name its merge tool has no merge gate, so each Git host manifest with a merge tool must name it.
+
 ## A Remote connector with an endpoint for each tenant
 
 Some vendors host one MCP server for each customer, or one for each Region or site. A manifest states `endpointPatterns` in `spec`. A tenant gives one `endpoint` when it enables the connector. The daemon accepts the endpoint only when it matches a pattern.

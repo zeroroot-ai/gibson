@@ -36,6 +36,9 @@ type AgentToolCall struct {
 	Arguments string
 	Result    string
 	Err       string
+	// GrantID is the capability grant that allowed a connector call
+	// (gibson#1474). Empty means that no grant is recorded.
+	GrantID string
 	// RecordedAtUnixNano stamps when the daemon observed this call, carried on
 	// the event rather than read from time.Now() during Reduce, so a
 	// retention sweep replays deterministically (gibson#271).
@@ -54,13 +57,16 @@ type AgentToolCallObserved struct {
 	// reducer drops the event when the mission has moved on to another run, so
 	// late evidence of run 1 cannot count for run 2 (gibson#1217). Empty means
 	// the event is not run-scoped.
-	MissionRunID       string
-	RunID              string
-	ScopeID            string
-	ToolName           string
-	Arguments          string
-	Result             string
-	Err                string
+	MissionRunID string
+	RunID        string
+	ScopeID      string
+	ToolName     string
+	Arguments    string
+	Result       string
+	Err          string
+	// GrantID is the capability grant that allowed the call. The incident
+	// report reads it from this event (gibson#1478).
+	GrantID            string
 	RecordedAtUnixNano int64
 }
 
@@ -100,6 +106,9 @@ func applyAgentToolCallObserved(w *World, e AgentToolCallObserved) {
 			if c.Err == "" && e.Err != "" {
 				c.Err = e.Err
 			}
+			if c.GrantID == "" && e.GrantID != "" {
+				c.GrantID = e.GrantID
+			}
 			if c.RecordedAtUnixNano == 0 && e.RecordedAtUnixNano != 0 {
 				c.RecordedAtUnixNano = e.RecordedAtUnixNano
 			}
@@ -116,6 +125,7 @@ func applyAgentToolCallObserved(w *World, e AgentToolCallObserved) {
 		Arguments:          redactForTenant(w, e.Arguments),
 		Result:             redactForTenant(w, e.Result),
 		Err:                e.Err,
+		GrantID:            e.GrantID,
 		RecordedAtUnixNano: e.RecordedAtUnixNano,
 	})
 }
@@ -130,6 +140,7 @@ type AgentToolCallSnapshot struct {
 	Arguments          string
 	Result             string
 	Err                string
+	GrantID            string
 	RecordedAtUnixNano int64
 }
 
@@ -148,6 +159,7 @@ func (w *World) AgentToolCallSnapshot() []AgentToolCallSnapshot {
 			Arguments:          c.Arguments,
 			Result:             c.Result,
 			Err:                c.Err,
+			GrantID:            c.GrantID,
 			RecordedAtUnixNano: c.RecordedAtUnixNano,
 		})
 	}

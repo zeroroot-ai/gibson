@@ -219,3 +219,36 @@ func TestCall_ADeniedNativeIDIsRecorded(t *testing.T) {
 		t.Fatalf("recorded = %v, events = %v", obs.recorded, obs.events)
 	}
 }
+
+// grantRecorder keeps the grant id of each record.
+type grantRecorder struct{ grants []string }
+
+func (g *grantRecorder) record(_ context.Context, rec CallRecord, _ []byte, _ string) string {
+	g.grants = append(g.grants, rec.GrantID)
+	return "rec"
+}
+
+// The record of an allowed connector call names the grant that the lookup
+// read. A refused call names none (gibson#1474).
+func TestCall_TheRecordNamesTheGrantOfTheCall(t *testing.T) {
+	obs := &seqObserver{}
+	q := &seqQuerier{obs: obs}
+	var asked []string
+	h := NewHandler(nil, allowAll("mcp:okta:suspend_user"), q).WithGrantLookup(
+		func(_ context.Context, tenant, subject, connector string) (string, error) {
+			asked = append(asked, tenant+"/"+subject+"/"+connector)
+			return "g-7", nil
+		})
+	rec := &grantRecorder{}
+	call := func(id string) {
+		_, _ = h.Call(context.Background(), Call{Caller: callerAlice, ID: id, Observer: obs, Recorder: rec.record})
+	}
+	call("mcp:okta:suspend_user")
+	call("mcp:okta:delete_user") // not allowed
+	if len(rec.grants) != 2 || rec.grants[0] != "g-7" || rec.grants[1] != "" {
+		t.Fatalf("grants = %q, want [g-7 \"\"]", rec.grants)
+	}
+	if len(asked) != 1 || asked[0] != "acme/user:alice/okta" {
+		t.Fatalf("lookups = %v", asked)
+	}
+}

@@ -10,43 +10,30 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 )
 
-// AgentGrantSource lists the grants of the agents with one name in one tenant.
+// GrantSource reads one grant of one tenant by its id.
 // *capabilitygrant.CapabilityGrantStore implements it.
-type AgentGrantSource interface {
-	GrantsByAgentName(ctx context.Context, tenantID, agentName string) ([]capabilitygrant.AgentGrant, error)
+type GrantSource interface {
+	GrantByID(ctx context.Context, tenantID, grantID string) (*capabilitygrant.AgentGrant, error)
 }
 
 // StoreGrants resolves the grant of a response action from the grant store.
 type StoreGrants struct {
-	Source AgentGrantSource
+	Source GrantSource
 }
 
-// GrantFor returns the active grant that covers toolID for the agent, or nil.
-//
-// A grant covers a tool when its component reference is the tool id, or when
-// its capability name is "execute:tool:" followed by the tool id or by the
-// connector prefix "mcp:<connector>". The name form follows the capability
-// names of fga_bridge.go. A connector tool is not an FGA component today, so
-// the match on the exact tool id is the one that the gate of gibson#1474 is
-// expected to write.
-func (g StoreGrants) GrantFor(ctx context.Context, tenant, agentName, toolID string) (*Grant, error) {
-	grants, err := g.Source.GrantsByAgentName(ctx, tenant, agentName)
+// GrantByID returns the grant with the id, or nil when the tenant holds none.
+// The id comes from the event of the call, so the report never guesses a grant
+// from the name of an agent.
+func (g StoreGrants) GrantByID(ctx context.Context, tenant, grantID string) (*Grant, error) {
+	gr, err := g.Source.GrantByID(ctx, tenant, grantID)
 	if err != nil {
-		return nil, fmt.Errorf("incidentreport: grants of agent %q: %w", agentName, err)
+		return nil, fmt.Errorf("incidentreport: grant %q: %w", grantID, err)
 	}
-	connector, _ := splitToolID(toolID)
-	for _, gr := range grants {
-		if gr.Status != "active" {
-			continue
-		}
-		if gr.ComponentRef == toolID || gr.ComponentRef == "component:"+toolID ||
-			gr.CapabilityName == "execute:tool:"+toolID ||
-			gr.CapabilityName == "execute:tool:mcp:"+connector {
-			return &Grant{
-				ID: gr.ID, Capability: gr.CapabilityName,
-				GrantedBy: gr.OwnerUserID, GrantedAtUnix: gr.GrantedAt.Unix(),
-			}, nil
-		}
+	if gr == nil {
+		return nil, nil //nolint:nilnil // nil means that the tenant holds no grant with the id
 	}
-	return nil, nil //nolint:nilnil // nil means that no grant is recorded for the tool
+	return &Grant{
+		ID: gr.ID, Capability: gr.CapabilityName,
+		GrantedBy: gr.OwnerUserID, GrantedAtUnix: gr.GrantedAt.Unix(),
+	}, nil
 }

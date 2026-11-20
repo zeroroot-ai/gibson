@@ -312,7 +312,7 @@ func TestIncidentResponseVocabulary(t *testing.T) {
 			t.Errorf("ClassifyNode(%q) = %+v, want the label in the Taxonomy", label, c)
 		}
 	}
-	for _, relType := range []string{"CAUSED_BY", "PART_OF", "AFFECTS", "APPLIES_COUNTERMEASURE", "COUNTERS"} {
+	for _, relType := range []string{"CAUSED_BY", "PART_OF", "AFFECTS", "APPLIES_COUNTERMEASURE", "COUNTERS", "DEPLOYED_IN"} {
 		if !Global.ClassifyRelationship(relType).InTaxonomy {
 			t.Errorf("relationship type %q is not in the Taxonomy", relType)
 		}

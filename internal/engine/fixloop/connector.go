@@ -41,22 +41,40 @@ type ConnectorCaller interface {
 	CallConnectorTool(ctx context.Context, tenant, connector, tool string, args map[string]any) (any, error)
 }
 
+// TenantCaller makes a connector call for a tenant on the one governed path of
+// a connector call: the can_execute check of the grant of the tenant on the
+// connector, the audit records and the flight recorder (gibson#1465).
+// harness.CallbackManager satisfies it.
+type TenantCaller interface {
+	CallConnectorForTenant(ctx context.Context, tenant, missionID, connector, tool string, args map[string]any) (any, error)
+}
+
 // ConnectorReader reads the facts of the fix loop through the connectors of
-// the tenant. It implements Reader and Reverter.
-type ConnectorReader struct{ c ConnectorCaller }
+// the tenant. It implements Reader and Reverter. A read goes through the MCP
+// client of the daemon. The revert changes the code of the buyer, so it goes
+// through the TenantCaller.
+type ConnectorReader struct {
+	c ConnectorCaller
+	w TenantCaller
+}
 
 var (
 	_ Reader   = (*ConnectorReader)(nil)
 	_ Reverter = (*ConnectorReader)(nil)
 )
 
-// NewConnectorReader builds the reader over the MCP client of the daemon.
-func NewConnectorReader(c ConnectorCaller) *ConnectorReader { return &ConnectorReader{c: c} }
+// NewConnectorReader builds the reader over the MCP client of the daemon and
+// the governed caller of the revert.
+func NewConnectorReader(c ConnectorCaller, w TenantCaller) *ConnectorReader {
+	return &ConnectorReader{c: c, w: w}
+}
 
-func (r *ConnectorReader) call(ctx context.Context, tenant, tool string, args map[string]any) (map[string]any, error) {
+// connectorFor returns the connector of the tenant that serves the tool. With
+// more than one, it takes the first name in order, so the choice is stable.
+func (r *ConnectorReader) connectorFor(ctx context.Context, tenant, tool string) (string, error) {
 	tools, err := r.c.ListConnectorTools(ctx, tenant)
 	if err != nil {
-		return nil, fmt.Errorf("list connector tools: %w", err)
+		return "", fmt.Errorf("list connector tools: %w", err)
 	}
 	var names []string
 	for _, t := range tools {
@@ -65,13 +83,25 @@ func (r *ConnectorReader) call(ctx context.Context, tenant, tool string, args ma
 		}
 	}
 	if len(names) == 0 {
-		return nil, fmt.Errorf("%w: %s", ErrNoConnector, tool)
+		return "", fmt.Errorf("%w: %s", ErrNoConnector, tool)
 	}
 	sort.Strings(names)
-	res, err := r.c.CallConnectorTool(ctx, tenant, names[0], tool, args)
+	return names[0], nil
+}
+
+func (r *ConnectorReader) call(ctx context.Context, tenant, tool string, args map[string]any) (map[string]any, error) {
+	conn, err := r.connectorFor(ctx, tenant, tool)
+	if err != nil {
+		return nil, err
+	}
+	res, err := r.c.CallConnectorTool(ctx, tenant, conn, tool, args)
 	if err != nil {
 		return nil, fmt.Errorf("call %s: %w", tool, err)
 	}
+	return object(tool, res)
+}
+
+func object(tool string, res any) (map[string]any, error) {
 	m, ok := res.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("call %s: the result is %T, not an object", tool, res)
@@ -120,10 +150,26 @@ func (r *ConnectorReader) Health(ctx context.Context, tenant, application string
 	return HealthFact{Known: boolean(m, "known"), Done: boolean(m, "done"), Held: boolean(m, "held"), At: when(m, "at")}, nil
 }
 
-// Revert implements Reverter.
-func (r *ConnectorReader) Revert(ctx context.Context, tenant, mergeRequest string) error {
-	_, err := r.call(ctx, tenant, ToolRevertMergeRequest, map[string]any{"merge_request": mergeRequest})
-	return err
+// Revert implements Reverter. The result of the tool holds merged and
+// revert_merge_request (zeroroot-ai/connectors, internal/fixloop RevertResult).
+func (r *ConnectorReader) Revert(ctx context.Context, tenant, mergeRequest, missionID string) (RevertFact, error) {
+	if r.w == nil {
+		return RevertFact{}, errors.New("fixloop: no governed caller is wired for the revert")
+	}
+	conn, err := r.connectorFor(ctx, tenant, ToolRevertMergeRequest)
+	if err != nil {
+		return RevertFact{}, err
+	}
+	res, err := r.w.CallConnectorForTenant(ctx, tenant, missionID, conn, ToolRevertMergeRequest,
+		map[string]any{"merge_request": mergeRequest})
+	if err != nil {
+		return RevertFact{}, fmt.Errorf("call %s: %w", ToolRevertMergeRequest, err)
+	}
+	m, err := object(ToolRevertMergeRequest, res)
+	if err != nil {
+		return RevertFact{}, err
+	}
+	return RevertFact{Merged: boolean(m, "merged"), RevertMergeRequest: str(m, "revert_merge_request")}, nil
 }
 
 func str(m map[string]any, k string) string { s, _ := m[k].(string); return s }

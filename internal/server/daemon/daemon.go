@@ -1106,7 +1106,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 	// The fix loop reads the merge, the deploy and the health signal from the
 	// tools of the tenant. The daemon reads them and no agent states them.
-	connectors := fixloop.NewConnectorReader(d.connectorMCPClient())
+	// The revert changes the code of the buyer, so it takes the governed path
+	// of every connector call: the grant, the audit records and the flight
+	// recorder (gibson#1465).
+	connectors := fixloop.NewConnectorReader(d.connectorMCPClient(),
+		governedRevert{callback: func() *harness.CallbackManager { return d.callback }})
 	go NewFixLoopRunner(
 		d.brainRegistry,
 		fixloop.NewWatcher(
@@ -1434,9 +1438,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			// came to answer "no vector collection provisioned" on a cluster
 			// whose index existed.
 			//
-			// Without this, `recall`, QueryNodes, FindSimilarAttacks,
-			// FindSimilarFindings, GetRelatedFindings and GetAttackChains refuse
-			// for every tenant, so an agent can write a memory and never read
+			// Without this, `recall`, QueryNodes, FindSimilarFindings and
+			// GetRelatedFindings refuse for every tenant, so an agent can write a memory and never read
 			// one back.
 			// The XOR rule lives in wireVectorStore so it is testable.
 			if !wireVectorStore(&poolCfg, d.vectorIndexResolver()) {

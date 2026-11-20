@@ -18,6 +18,17 @@ type fakeGate struct {
 	denied   map[string]bool
 	asked    []ApprovalRequest
 	err      error
+	// granted holds the merge requests with a merge slot, by tenant and key.
+	granted map[string]bool
+	merges  []string
+}
+
+func (g *fakeGate) MayMerge(_ context.Context, tenant, mr string) (bool, error) {
+	g.merges = append(g.merges, tenant+"/"+mr)
+	if g.err != nil {
+		return false, g.err
+	}
+	return g.granted[tenant+"/"+mr], nil
 }
 
 func (g *fakeGate) Acquire(_ context.Context, r ApprovalRequest) (ApprovalState, string, error) {
@@ -47,6 +58,93 @@ func responseMarks(connector, tool string) componentcatalog.ToolApproval {
 		return componentcatalog.ToolApproval{Required: true, UndoTool: "release_host", BlastRadius: "one host"}
 	}
 	return componentcatalog.ToolApproval{Required: true}
+}
+
+// mergeMarks gives the merge role to forge:merge_merge_request. The second
+// marked tool needs the role and an approval.
+func mergeMarks(connector, tool string) componentcatalog.ToolApproval {
+	if connector != "forge" {
+		return componentcatalog.ToolApproval{}
+	}
+	switch tool {
+	case "merge_merge_request":
+		return componentcatalog.ToolApproval{Merge: true}
+	case "force_merge":
+		return componentcatalog.ToolApproval{Merge: true, Required: true}
+	}
+	return componentcatalog.ToolApproval{}
+}
+
+func newMergeHandler(q *seqQuerier, gate ApprovalGate) *Handler {
+	return NewHandler(nil, allowAll("mcp:forge:merge_merge_request", "mcp:forge:force_merge", "mcp:forge:get_mr"), q).
+		WithApprovalGate(gate).WithApprovalMarks(mergeMarks)
+}
+
+// A merge with no slot in the World never reaches the connector, whatever the
+// agent says (gibson#1458).
+func TestCall_AMergeWithNoSlotNeverReachesTheConnector(t *testing.T) {
+	obs := &seqObserver{}
+	q := &seqQuerier{obs: obs}
+	gate := &fakeGate{granted: map[string]bool{"other/mr-1": true}}
+	h := newMergeHandler(q, gate)
+	cases := map[string]map[string]any{
+		"no slot":               {"merge_request": "mr-1", "granted": true},
+		"no merge request":      {"granted": true},
+		"merge request no text": {"merge_request": 7},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := gatedCall(h, obs, "mcp:forge:merge_merge_request", args)
+			if !errors.Is(err, ErrMergeNotGranted) {
+				t.Fatalf("want merge not granted, got %v", err)
+			}
+		})
+	}
+	if q.calls != 0 {
+		t.Fatalf("the connector got %d calls", q.calls)
+	}
+	// The slot of another tenant is not the slot of this one.
+	if len(gate.merges) != 1 || gate.merges[0] != "acme/mr-1" {
+		t.Fatalf("the gate was asked %v", gate.merges)
+	}
+}
+
+// A merge with a slot runs, and a tool with no role needs only the grant.
+func TestCall_AMergeWithASlotRuns(t *testing.T) {
+	obs := &seqObserver{}
+	q := &seqQuerier{obs: obs}
+	gate := &fakeGate{granted: map[string]bool{"acme/mr-1": true}}
+	h := newMergeHandler(q, gate)
+	if _, err := gatedCall(h, obs, "mcp:forge:merge_merge_request", map[string]any{"merge_request": " mr-1 "}); err != nil {
+		t.Fatalf("a merge with a slot: %v", err)
+	}
+	if _, err := gatedCall(h, obs, "mcp:forge:get_mr", nil); err != nil {
+		t.Fatalf("a tool with no role: %v", err)
+	}
+	if q.calls != 2 || len(gate.merges) != 1 {
+		t.Fatalf("calls = %d, merge checks = %v", q.calls, gate.merges)
+	}
+}
+
+// A merge that waits for its slot does not spend an approval, and the merge
+// role with no gate is refused (fail closed).
+func TestCall_TheMergeSlotComesBeforeTheApproval(t *testing.T) {
+	obs := &seqObserver{}
+	q := &seqQuerier{obs: obs}
+	gate := &fakeGate{approved: map[string]bool{}}
+	h := newMergeHandler(q, gate)
+	if _, err := gatedCall(h, obs, "mcp:forge:force_merge", map[string]any{"merge_request": "mr-1"}); !errors.Is(err, ErrMergeNotGranted) {
+		t.Fatalf("want merge not granted, got %v", err)
+	}
+	if len(gate.asked) != 0 {
+		t.Fatalf("the approval queue was asked before the slot: %+v", gate.asked)
+	}
+	if _, err := gatedCall(newMergeHandler(q, nil), obs, "mcp:forge:merge_merge_request", map[string]any{"merge_request": "mr-1"}); !errors.Is(err, ErrApprovalUnavailable) {
+		t.Fatalf("want a refusal with no gate, got %v", err)
+	}
+	if q.calls != 0 {
+		t.Fatalf("the connector got %d calls", q.calls)
+	}
 }
 
 func gatedCall(h *Handler, obs *seqObserver, id string, args map[string]any) (any, error) {

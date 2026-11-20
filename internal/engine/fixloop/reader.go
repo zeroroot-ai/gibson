@@ -69,10 +69,23 @@ type Reader interface {
 	Health(ctx context.Context, tenant, application string, since time.Time, hold time.Duration) (HealthFact, error)
 }
 
+// RevertFact is what the Git host says after one call of the revert tool.
+type RevertFact struct {
+	// Merged is true when the revert merge request is merged. Until then the
+	// fix is still in the code.
+	Merged bool
+	// RevertMergeRequest is the merge request of the revert. It can be empty
+	// when the host has not opened it yet.
+	RevertMergeRequest string
+}
+
 // Reverter reverts a merged merge request with a new merge request, and merges
-// the revert.
+// the revert. One call opens the revert merge request or reads it again, and
+// merges it when its pipeline is green. The caller calls again until the fact
+// says Merged. missionID is the mission of the fix, for the audit record and
+// the flight recorder.
 type Reverter interface {
-	Revert(ctx context.Context, tenant, mergeRequest string) error
+	Revert(ctx context.Context, tenant, mergeRequest, missionID string) (RevertFact, error)
 }
 
 // Placer returns the Application or the Host that a finding touches.

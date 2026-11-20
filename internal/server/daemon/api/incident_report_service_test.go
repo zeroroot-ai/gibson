@@ -91,8 +91,8 @@ func (h irHistory) History(context.Context) ([]brain.Event, error) { return h.ev
 
 type irGrants struct{}
 
-func (irGrants) GrantFor(_ context.Context, _, _, tool string) (*incidentreport.Grant, error) {
-	return &incidentreport.Grant{ID: "g1", Capability: "execute:tool:" + tool, GrantedBy: "user-7"}, nil
+func (irGrants) GrantByID(_ context.Context, _, id string) (*incidentreport.Grant, error) {
+	return &incidentreport.Grant{ID: id, Capability: "execute:tool:mcp:crowdstrike", GrantedBy: "user-7"}, nil
 }
 
 func irService(t *testing.T, rows map[string][]map[string]any) *IncidentReportService {
@@ -100,7 +100,9 @@ func irService(t *testing.T, rows map[string][]map[string]any) *IncidentReportSe
 	reader, err := incidentreport.NewReader(irGraph{rows}, irHistory{[]brain.Event{
 		brain.AgentRunObserved{RunID: "r1", AgentName: "incident-response"},
 		brain.EntityObserved{Label: "Incident", Key: "inc-1", MissionID: "m1"},
-		brain.AgentToolCallObserved{ToolCallID: "c1", MissionID: "m1", RunID: "r1", ToolName: "mcp:okta:suspend_user"},
+		brain.AgentToolCallObserved{
+			ToolCallID: "c1", MissionID: "m1", RunID: "r1", ToolName: "mcp:okta:suspend_user", GrantID: "g1",
+		},
 	}}, irGrants{})
 	if err != nil {
 		t.Fatal(err)

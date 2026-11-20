@@ -243,6 +243,9 @@ type HarnessCallbackService struct {
 	// connectorAudit records each connector call of invoke_tool. Nil refuses a
 	// connector call.
 	connectorAudit *audit.AuditLogger
+	// connectorGrants names the grant of a connector call in its record. Nil
+	// records no grant.
+	connectorGrants metatool.GrantLookup
 
 	// missionBlockedTools reads the deny list of a mission from its stored
 	// definition. Nil refuses a connector call.
@@ -507,6 +510,9 @@ type ToolCallRecord struct {
 	Result    string
 	// Err is set instead of Result when the tool call failed.
 	Err string
+	// GrantID is the capability grant that allowed a connector call. It is
+	// empty for a native tool and for a call with no grant row.
+	GrantID string
 	// RecordedAtUnixNano stamps when the daemon observed this call, so a
 	// tenant's retention policy can be swept deterministically later.
 	RecordedAtUnixNano int64
@@ -809,6 +815,15 @@ func newToolCallID(contextInfo *harnesspb.ContextInfo) string {
 // recorded. The tool call reply carries this id as tool_call_id, so a finding
 // can cite the call.
 func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, toolCallID, toolName, argumentsJSON, resultJSON, callErr string) string {
+	return s.captureGrantedToolCall(ctx, contextInfo, toolCallID, toolName, argumentsJSON, resultJSON, callErr, "")
+}
+
+// captureGrantedToolCall is captureToolCall for a connector call, with the
+// capability grant that allowed it.
+func (s *HarnessCallbackService) captureGrantedToolCall(
+	ctx context.Context, contextInfo *harnesspb.ContextInfo,
+	toolCallID, toolName, argumentsJSON, resultJSON, callErr, grantID string,
+) string {
 	if s.toolCallSink == nil || contextInfo == nil {
 		return ""
 	}
@@ -829,6 +844,7 @@ func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInf
 		Arguments:          argumentsJSON,
 		Result:             resultJSON,
 		Err:                callErr,
+		GrantID:            grantID,
 		RecordedAtUnixNano: time.Now().UnixNano(),
 	})
 	return toolCallID
@@ -1453,6 +1469,14 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 
 	// Convert proto Finding to internal Finding
 	finding := protoFindingToFinding(req.Finding)
+	// A finding with an idempotency key has a stable identity: the same key
+	// from the same agent in the same tenant names the same finding, so a
+	// second read of one result of a tool of the buyer updates it
+	// (gibson#1448). The daemon still authors the name: it is a hash, and the
+	// agent cannot pick the id of a finding of another agent.
+	if key := req.GetIdempotencyKey(); key != "" {
+		finding.ID = resultFindingID(auth.TenantStringFromContext(ctx), req.GetContext().GetAgentName(), key)
+	}
 
 	// Tier 1 evidence comes from the record of each tool call that the agent
 	// names. An ID that names no record of this mission and tenant fails the
@@ -2999,4 +3023,14 @@ func callToolDiscoveryScope(ctx context.Context, info *harnesspb.ContextInfo) in
 		ec.TenantID = tenant
 	}
 	return ec
+}
+
+// resultFindingNamespace is the UUID namespace of a finding id that comes from
+// an idempotency key.
+var resultFindingNamespace = uuid.MustParse("6f1d3c2a-5b7e-4f10-9a8c-2d4e6b8f0a13")
+
+// resultFindingID derives the id of a finding from the tenant, the agent and
+// the idempotency key of the submit.
+func resultFindingID(tenant, agentName, key string) types.ID {
+	return types.ID(uuid.NewSHA1(resultFindingNamespace, []byte(tenant+"\x00"+agentName+"\x00"+key)).String())
 }
