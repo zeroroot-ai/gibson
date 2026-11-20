@@ -799,19 +799,30 @@ func TestApplicationFindingsToProto_CarriesThePriorityTriple(t *testing.T) {
 	}
 }
 
-// TestFindSimilarAttacks_IsUnimplemented: the read of attack patterns is gone
-// (gibson#1521). The pinned SDK still declares the RPC, so the embedded
-// UnimplementedHarnessCallbackServiceServer answers it until the SDK bump
-// (zeroroot-ai/sdk#359) deletes the RPC.
+// The pinned SDK still declares the reads of attack patterns and attack
+// chains (gibson#1521). The daemon serves neither, so the embedded
+// UnimplementedHarnessCallbackServiceServer answers them. The tests reach the
+// RPC by its name through the service descriptor, so they compile against the
+// pinned SDK and against the SDK of zeroroot-ai/sdk#359, which deletes both.
+// After the SDK bump the descriptor holds neither, and both tests go.
+
 func TestFindSimilarAttacks_IsUnimplemented(t *testing.T) {
-	svc, _ := knowledgeService(t, &stubQuerier{})
-	_, err := svc.FindSimilarAttacks(acmeCtx(), &harnesspb.FindSimilarAttacksRequest{})
-	require.Equal(t, codes.Unimplemented, status.Code(err))
+	assertRetiredRPCIsUnimplemented(t, "FindSimilarAttacks")
 }
 
-// TestGetAttackChains_IsUnimplemented: see TestFindSimilarAttacks_IsUnimplemented.
 func TestGetAttackChains_IsUnimplemented(t *testing.T) {
+	assertRetiredRPCIsUnimplemented(t, "GetAttackChains")
+}
+
+func assertRetiredRPCIsUnimplemented(t *testing.T, name string) {
+	t.Helper()
 	svc, _ := knowledgeService(t, &stubQuerier{})
-	_, err := svc.GetAttackChains(acmeCtx(), &harnesspb.GetAttackChainsRequest{})
-	require.Equal(t, codes.Unimplemented, status.Code(err))
+	for _, m := range harnesspb.HarnessCallbackService_ServiceDesc.Methods {
+		if m.MethodName != name {
+			continue
+		}
+		_, err := m.Handler(svc, acmeCtx(), func(any) error { return nil }, nil)
+		require.Equal(t, codes.Unimplemented, status.Code(err))
+		return
+	}
 }
