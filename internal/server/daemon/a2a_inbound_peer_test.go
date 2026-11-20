@@ -134,3 +134,39 @@ func TestInboundListener_RefusesAPeerThatIsNotTheEdge(t *testing.T) {
 	require.Error(t, get(gateway), "another peer of the trust domain is refused")
 	assert.Len(t, reached, 1, "the refused peer reached no handler")
 }
+
+// The Edge is an Envoy. An Envoy upstream with no tls_params offers TLS 1.2 at most, and
+// the handshake with the inbound listener must still finish. A listener that required
+// TLS 1.3 answered every call of the exit test with a handshake failure.
+func TestInboundListener_AcceptsTheEdgeThatOffersTLS12AtMost(t *testing.T) {
+	pki := newTestPKI(t)
+	edge := spiffeid.RequireFromPath(pki.td, "/platform/envoy")
+	server := spiffeid.RequireFromPath(pki.td, "/gibson/daemon")
+	d := a2aListenerDaemon(t, func(d *daemonImpl) {
+		d.spiffeX509Source = pkiSource{svid: pki.svid(t, server), bundle: pki.bundle}
+	})
+	cfg, err := d.peerTLSConfig("A2A inbound listener", edge)
+	require.NoError(t, err)
+	lis, err := tls.Listen("tcp", "127.0.0.1:0", cfg)
+	require.NoError(t, err)
+	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})}
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	client := pkiSource{svid: pki.svid(t, edge), bundle: pki.bundle}
+	cc := tlsconfig.MTLSClientConfig(client, client, tlsconfig.AuthorizeID(server))
+	cc.MaxVersion = tls.VersionTLS12
+	hc := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+		TLSClientConfig: cc,
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, lis.Addr().String())
+		},
+	}}
+	req, rerr := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://daemon.invalid/", http.NoBody)
+	require.NoError(t, rerr)
+	resp, derr := hc.Do(req)
+	require.NoError(t, derr, "the handshake finishes with a client that offers TLS 1.2 at most")
+	_ = resp.Body.Close()
+}

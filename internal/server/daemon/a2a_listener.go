@@ -174,9 +174,12 @@ func (d *daemonImpl) peerTLSConfig(label string, peer spiffeid.ID) (*tls.Config,
 	if !ok || x509Source == nil || isNilWorkloadSource(d.spiffeX509Source) {
 		return nil, fmt.Errorf("%s: the SPIFFE X.509 source is not open (got %T)", label, d.spiffeX509Source)
 	}
-	cfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(peer))
-	cfg.MinVersion = tls.VersionTLS13
-	return cfg, nil
+	// The minimum version is the one of go-spiffe (TLS 1.2), as on the daemon gRPC
+	// listener. The Edge is an Envoy, and an Envoy upstream offers TLS 1.2 at most when
+	// its cluster sets no tls_params. A minimum of TLS 1.3 here made every Edge call
+	// fail the handshake (exit test run 44638502554). The peer is pinned by SPIFFE ID
+	// on mutual TLS, so the version is not what keeps another peer out.
+	return tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(peer)), nil
 }
 
 // x509Source is the SVID and the trust bundles that an A2A listener serves with.
