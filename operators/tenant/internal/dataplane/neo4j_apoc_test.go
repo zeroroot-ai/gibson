@@ -320,7 +320,7 @@ func TestTenantNeo4jAPOCReachesAlreadyProvisionedTenants(t *testing.T) {
 	}}
 	ctx := context.Background()
 
-	if err := n.applyResources(ctx, testTenantID, testTenantID, "team", testTenantNS, "pw"); err != nil {
+	if err := n.applyResources(ctx, testTenantID, testTenantNS, "pw", nil); err != nil {
 		t.Fatalf("applyResources over an existing StatefulSet: %v", err)
 	}
 

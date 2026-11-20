@@ -13,6 +13,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	dpclient "github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane/client"
@@ -34,6 +35,7 @@ func TestNewNeo4jProvisioner_ImageNeedsADigest(t *testing.T) {
 	} {
 		_, err := NewNeo4jProvisioner(Neo4jConfig{
 			K8sClient: dpclient.New(k8s, ""), VaultClient: newRecordingVaultAdmin(), Image: image,
+			Recorder: events.NewFakeRecorder(1),
 		})
 		if err == nil {
 			t.Errorf("image %q: accepted, want an error", image)
@@ -41,8 +43,14 @@ func TestNewNeo4jProvisioner_ImageNeedsADigest(t *testing.T) {
 	}
 	if _, err := NewNeo4jProvisioner(Neo4jConfig{
 		K8sClient: dpclient.New(k8s, ""), VaultClient: newRecordingVaultAdmin(), Image: testNeo4jImage,
+		Recorder: events.NewFakeRecorder(1),
 	}); err != nil {
 		t.Fatalf("image with a digest: %v", err)
+	}
+	if _, err := NewNeo4jProvisioner(Neo4jConfig{
+		K8sClient: dpclient.New(k8s, ""), VaultClient: newRecordingVaultAdmin(), Image: testNeo4jImage,
+	}); err == nil {
+		t.Fatal("no Recorder: accepted, want an error")
 	}
 }
 
@@ -69,7 +77,7 @@ func TestNeo4jStatefulSet_RunsTheConfiguredImage(t *testing.T) {
 		Image:             testNeo4jImage,
 	}}
 	ctx := context.Background()
-	if err := n.applyResources(ctx, testTenantID, testTenantID, "team", testTenantNS, "pw"); err != nil {
+	if err := n.applyResources(ctx, testTenantID, testTenantNS, "pw", nil); err != nil {
 		t.Fatalf("applyResources: %v", err)
 	}
 	got := &appsv1.StatefulSet{}

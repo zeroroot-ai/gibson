@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -23,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
@@ -41,16 +41,23 @@ const (
 	// neo4jPollInterval is how frequently the provisioner checks pod readiness.
 	neo4jPollInterval = 5 * time.Second
 
-	// neo4jTemplateConfigMapName is the ConfigMap the Helm chart renders into
-	// the platform namespace carrying the per-tier sizing for per-tenant
-	// Neo4j. The chart owns the numbers; this operator owns the shape.
-	neo4jTemplateConfigMapName = "tenant-neo4j-template"
+	// neo4jSizeConfigMapName is the ConfigMap that the Helm chart renders into
+	// the platform namespace. It holds the default size of a tenant Neo4j in
+	// three keys: storage, cpu and memory. The chart owns the numbers and
+	// this operator owns the shape.
+	neo4jSizeConfigMapName = "tenant-neo4j-size"
 
-	// neo4jTiersKey is the key in that ConfigMap holding the tier table.
-	neo4jTiersKey = "tiers.yaml"
+	// The keys of that ConfigMap.
+	neo4jSizeStorageKey = "storage"
+	neo4jSizeCPUKey     = "cpu"
+	neo4jSizeMemoryKey  = "memory"
 
-	// neo4jTemplateNamespace is the namespace where the template ConfigMap lives.
+	// neo4jTemplateNamespace is the namespace where the size ConfigMap lives.
 	neo4jTemplateNamespace = "gibson"
+
+	// neo4jContainerName is the name of the database container in the
+	// StatefulSet of a tenant.
+	neo4jContainerName = "neo4j"
 
 	// neo4jBoltPort is the Bolt protocol port exposed by Neo4j.
 	neo4jBoltPort = 7687
@@ -86,6 +93,10 @@ type Neo4jConfig struct {
 	// chart sets it from the mirror (TENANT_NEO4J_IMAGE), so an air-gapped
 	// install pulls it from its own registry (gibson#1051). Required.
 	Image string
+
+	// Recorder emits a Kubernetes event on the Tenant when the operator does
+	// not apply a size that the Tenant sets. Required.
+	Recorder events.EventRecorder
 }
 
 // Neo4jProvisioner provisions per-tenant Neo4j instances as K8s resources
@@ -106,6 +117,9 @@ func NewNeo4jProvisioner(cfg Neo4jConfig) (*Neo4jProvisioner, error) {
 	if err := validateNeo4jImage(cfg.Image); err != nil {
 		return nil, err
 	}
+	if cfg.Recorder == nil {
+		return nil, errors.New("dataplane/neo4j: Recorder required")
+	}
 	return &Neo4jProvisioner{cfg: cfg}, nil
 }
 
@@ -123,29 +137,20 @@ func validateNeo4jImage(image string) error {
 }
 
 // Provision creates the per-tenant Neo4j instance (StatefulSet, Service, PVC,
-// Secret), waits up to 5 minutes for the pod to reach Ready, and then writes
-// the endpoint into the tenant_neo4j_endpoints registry table.
+// Secret, NetworkPolicy), waits for the pod to reach Ready, and then writes
+// the credentials to the secret store.
 //
-// The method reads the tenant-neo4j-template ConfigMap from the gibson
-// namespace (created by the Helm chart, Task 22) and substitutes the
-// placeholders {{tenantID}}, {{tier}}, {{namespace}}, {{neo4jPassword}}
-// before applying each resource.
+// The size of the instance is the default size of the chart (the
+// tenant-neo4j-size ConfigMap). A field that limits.Neo4j sets replaces the
+// same field of the default. No plan sets the size.
 //
 // Idempotent: resources are applied with CreateOrUpdate semantics; a second
 // call on an already-provisioned tenant is safe.
-func (n *Neo4jProvisioner) Provision(ctx context.Context, tenantID string) error {
+func (n *Neo4jProvisioner) Provision(ctx context.Context, tenantID string, limits Limits) error {
 	names, err := tenantNames(tenantID)
 	if err != nil {
 		return err
 	}
-	safe := names.Slug()
-
-	// Resolve the Tenant CRD to get the tier and namespace.
-	var tenant gibsonv1alpha1.Tenant
-	if err := n.cfg.K8sClient.Get(ctx, types.NamespacedName{Name: tenantID}, &tenant); err != nil {
-		return fmt.Errorf("dataplane/neo4j: get tenant %q: %w", tenantID, err)
-	}
-	tier := string(tenant.Spec.Tier)
 	tenantNS, err := tenantns.NamespaceFor(ctx, n.cfg.K8sClient, tenantID)
 	if err != nil {
 		return fmt.Errorf("dataplane/neo4j: resolve namespace: %w", err)
@@ -159,7 +164,7 @@ func (n *Neo4jProvisioner) Provision(ctx context.Context, tenantID string) error
 
 	// Apply the four K8s resources first so we have a definitive bolt URI
 	// to write to Vault.
-	if err := n.applyResources(ctx, safe, tenantID, tier, tenantNS, neo4jPassword); err != nil {
+	if err := n.applyResources(ctx, tenantID, tenantNS, neo4jPassword, limits.Neo4j); err != nil {
 		return err
 	}
 
@@ -250,12 +255,48 @@ func (n *Neo4jProvisioner) Deprovision(ctx context.Context, tenantID string) err
 	return errors.Join(errs...)
 }
 
-// applyResources reads the template ConfigMap and applies the four K8s resources.
-func (n *Neo4jProvisioner) applyResources(ctx context.Context, safe, tenantID, tier, tenantNS, neo4jPassword string) error {
-	sts, svc, pvc, secret, np, err := n.buildResources(ctx, safe, tenantID, tier, tenantNS, neo4jPassword)
+// sizeFor resolves the size of the instance of one tenant: the default of the
+// chart, then the size on the Tenant, then the floor of an instance that runs.
+// It returns the StatefulSet that exists, or nil when there is none.
+func (n *Neo4jProvisioner) sizeFor(
+	ctx context.Context, tenantID, tenantNS string, override *gibsonv1alpha1.TenantNeo4jResources,
+) (neo4jSize, *appsv1.StatefulSet, error) {
+	names, err := tenantNames(tenantID)
+	if err != nil {
+		return neo4jSize{}, nil, err
+	}
+	chartDefault, err := n.defaultSize(ctx)
+	if err != nil {
+		return neo4jSize{}, nil, fmt.Errorf("dataplane/neo4j: tenant %q: %w", tenantID, err)
+	}
+	size, err := resolveNeo4jSize(chartDefault, override)
+	if err != nil {
+		return neo4jSize{}, nil, fmt.Errorf("dataplane/neo4j: tenant %q: %w", tenantID, err)
+	}
+
+	// Read the StatefulSet before the build. An instance that runs keeps the
+	// CPU and the memory it has when only the default is smaller.
+	existingSTS := &appsv1.StatefulSet{}
+	stsKey := types.NamespacedName{Name: names.Neo4jStatefulSet(), Namespace: tenantNS}
+	if getErr := n.cfg.K8sClient.Get(ctx, stsKey, existingSTS); getErr != nil {
+		if apierrors.IsNotFound(getErr) {
+			return size, nil, nil
+		}
+		return neo4jSize{}, nil, fmt.Errorf("dataplane/neo4j: get StatefulSet: %w", getErr)
+	}
+	return size.notBelowRunning(existingSTS, override), existingSTS, nil
+}
+
+// applyResources resolves the size of the instance and applies the five K8s
+// resources.
+func (n *Neo4jProvisioner) applyResources(
+	ctx context.Context, tenantID, tenantNS, neo4jPassword string, override *gibsonv1alpha1.TenantNeo4jResources,
+) error {
+	size, existingSTS, err := n.sizeFor(ctx, tenantID, tenantNS, override)
 	if err != nil {
 		return err
 	}
+	sts, svc, pvc, secret, np := n.buildResources(tenantID, tenantNS, neo4jPassword, size)
 
 	// Apply NetworkPolicy FIRST — before the StatefulSet that creates the
 	// pod — so there is no window in which a tenant's Neo4j is running
@@ -290,7 +331,9 @@ func (n *Neo4jProvisioner) applyResources(ctx context.Context, safe, tenantID, t
 		return fmt.Errorf("dataplane/neo4j: get Secret: %w", err)
 	}
 
-	// Apply PVC (idempotent create — do not resize existing).
+	// Apply PVC (idempotent create). An existing PVC keeps its size:
+	// Kubernetes refuses a smaller request, and this operator does not grow
+	// a volume. The storage size applies only when the PVC is created.
 	existingPVC := &corev1.PersistentVolumeClaim{}
 	err = n.cfg.K8sClient.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, existingPVC)
 	if apierrors.IsNotFound(err) {
@@ -299,6 +342,8 @@ func (n *Neo4jProvisioner) applyResources(ctx context.Context, safe, tenantID, t
 		}
 	} else if err != nil {
 		return fmt.Errorf("dataplane/neo4j: get PVC: %w", err)
+	} else {
+		n.reportStorageNotChanged(ctx, tenantID, existingPVC, override)
 	}
 
 	// Apply Service.
@@ -312,17 +357,48 @@ func (n *Neo4jProvisioner) applyResources(ctx context.Context, safe, tenantID, t
 		return fmt.Errorf("dataplane/neo4j: get Service: %w", err)
 	}
 
-	// Apply StatefulSet (create-or-update).
-	existingSTS := &appsv1.StatefulSet{}
-	err = n.cfg.K8sClient.Get(ctx, types.NamespacedName{Name: sts.Name, Namespace: sts.Namespace}, existingSTS)
-	switch {
-	case apierrors.IsNotFound(err):
+	return n.applyStatefulSet(ctx, sts, existingSTS)
+}
+
+// neo4jStorageNotChangedReason is the reason of the event that says the
+// operator did not apply the storage size of a Tenant.
+const neo4jStorageNotChangedReason = "Neo4jStorageNotChanged"
+
+// reportStorageNotChanged emits a Warning event on the Tenant when the Tenant
+// sets a storage size that differs from the volume of its running instance.
+// The operator does not resize a volume, so without the event the edit would
+// do nothing and say nothing. The event is only a report: a failure to read
+// the Tenant does not fail the provision.
+func (n *Neo4jProvisioner) reportStorageNotChanged(
+	ctx context.Context,
+	tenantID string,
+	pvc *corev1.PersistentVolumeClaim,
+	override *gibsonv1alpha1.TenantNeo4jResources,
+) {
+	have := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+	differs := override != nil && override.Storage != nil && have.Cmp(*override.Storage) != 0
+	if !differs {
+		return
+	}
+	var tenant gibsonv1alpha1.Tenant
+	if err := n.cfg.K8sClient.Get(ctx, types.NamespacedName{Name: tenantID}, &tenant); err != nil {
+		return
+	}
+	n.cfg.Recorder.Eventf(&tenant, nil, corev1.EventTypeWarning,
+		neo4jStorageNotChangedReason, neo4jStorageNotChangedReason,
+		"spec.resources.neo4j.storage is %s and the volume of the running Neo4j instance is %s. "+
+			"The operator does not resize a volume that exists, so the storage does not change.",
+		override.Storage.String(), have.String())
+}
+
+// applyStatefulSet creates the StatefulSet, or reconciles the pod template of
+// the StatefulSet that exists.
+func (n *Neo4jProvisioner) applyStatefulSet(ctx context.Context, sts, existingSTS *appsv1.StatefulSet) error {
+	if existingSTS == nil {
 		if err := n.cfg.K8sClient.Create(ctx, sts); err != nil {
 			return fmt.Errorf("dataplane/neo4j: create StatefulSet: %w", err)
 		}
-	case err != nil:
-		return fmt.Errorf("dataplane/neo4j: get StatefulSet: %w", err)
-	default:
+	} else {
 		// The StatefulSet already exists. Reconcile its pod template so a
 		// tenant provisioned before APOC Core was required picks the plugin
 		// and the procedure allowlist up on the next reconcile — otherwise
@@ -333,7 +409,9 @@ func (n *Neo4jProvisioner) applyResources(ctx context.Context, safe, tenantID, t
 		//
 		// Only spec.template is reconciled. spec.volumeClaimTemplates,
 		// spec.selector and spec.serviceName are immutable on a StatefulSet
-		// and an update that touched them would be rejected outright.
+		// and an update that touched them would be rejected outright. So a
+		// storage size that differs from the claim template of a running
+		// instance changes nothing, and Kubernetes refuses nothing.
 		//
 		// DeepDerivative treats fields we do not set as "don't care", so
 		// server-side defaults (terminationMessagePath, dnsPolicy, …) do not
@@ -350,22 +428,15 @@ func (n *Neo4jProvisioner) applyResources(ctx context.Context, safe, tenantID, t
 	return nil
 }
 
-// buildResources constructs the K8s objects for a tenant Neo4j instance.
-// It first tries to read the tenant-neo4j-template ConfigMap (created by Helm
-// chart Task 22) and substitute placeholders. If the ConfigMap does not exist
-// yet (pre-chart bootstrap), inline defaults are used so the operator remains
-// independently testable.
-//
-// Tier-based resource sizing follows D7: the ConfigMap contains the right
-// values from chart values (e.g. tiers.small.resources). The inline fallback
-// here is only for pre-chart environments.
-func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, tier, tenantNS, neo4jPassword string) (
+// buildResources constructs the K8s objects for a tenant Neo4j instance of the
+// given size. The memory of the size is the request and the limit of the
+// container, and neo4jMemoryEnv pins the JVM heap and the page cache from it.
+func (n *Neo4jProvisioner) buildResources(tenantID, tenantNS, neo4jPassword string, size neo4jSize) (
 	sts *appsv1.StatefulSet,
 	svc *corev1.Service,
 	pvc *corev1.PersistentVolumeClaim,
 	secret *corev1.Secret,
 	np *networkingv1.NetworkPolicy,
-	err error,
 ) {
 	// tenantID is already validated upstream (Provision called sanitize); the
 	// only failure mode here is a programmer-bug call from a test that bypassed
@@ -373,52 +444,6 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 	names, _ := tenantNames(tenantID)
 	name := names.Neo4jStatefulSet()
 	authSecretName := names.Neo4jSecret()
-
-	// Attempt to read the operator template ConfigMap to get chart-managed
-	// tier→resource values (D7). The result is currently used for placeholder
-	// substitution; full YAML parsing is deferred to Task 22 chart delivery.
-	//
-	// Unscoped(): this ConfigMap legitimately lives in the operator's
-	// release namespace (neo4jTemplateNamespace = "gibson"), chart-mounted
-	// by helm/gibson-operators. The per-tenant-kind guard would otherwise
-	// reject the read; using Unscoped() with this comment is the
-	// documented escape hatch.
-	var cm corev1.ConfigMap
-	templateAvailable := false
-	if getErr := n.cfg.K8sClient.Unscoped().Get(ctx, types.NamespacedName{
-		Name:      neo4jTemplateConfigMapName,
-		Namespace: neo4jTemplateNamespace,
-	}, &cm); getErr == nil {
-		templateAvailable = true
-	}
-
-	// The inline table, which is the sizing for a cluster with no chart.
-	storageRequest, cpuRequest, memRequest := tierDefaults(tier)
-
-	// THE CHART'S SIZES WIN WHEN THE CHART SHIPPED THEM.
-	//
-	// Until this existed, the inline table was not a fallback — it was the
-	// only path. The ConfigMap was read and its content thrown away, so
-	// STAGING AND PRODUCTION ran the dev-shaped team sizing while the comment
-	// above and the chart's own values both said otherwise. The chart carried
-	// a tier table that nothing rendered and nothing read.
-	//
-	// A malformed table is an ERROR rather than a fall-through. Falling back
-	// would reproduce the exact defect this closes: production quietly running
-	// dev sizes while everything reports healthy.
-	if templateAvailable {
-		tiers, parseErr := parseTierSizes(cm.Data[neo4jTiersKey])
-		if parseErr != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf(
-				"the %s ConfigMap in %s is present but unusable (%w). It is rendered by the chart, so this is a chart defect; refusing to size tenant %q from the dev defaults instead",
-				neo4jTemplateConfigMapName, neo4jTemplateNamespace, parseErr, tenantID)
-		}
-		// A tier the chart does not name — a legacy id the migrate job will
-		// rewrite — keeps the inline aliasing above.
-		if size, ok := tiers[tier]; ok {
-			storageRequest, cpuRequest, memRequest = size.Storage, size.CPU, size.Memory
-		}
-	}
 
 	// Shared with buildNeo4jNetworkPolicy's podSelector — see
 	// neo4j_networkpolicy.go. Keeping one constructor is what stops the
@@ -457,7 +482,7 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse(storageRequest),
+					corev1.ResourceStorage: size.Storage,
 				},
 			},
 		},
@@ -513,10 +538,10 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 					Volumes:         []corev1.Volume{apocPluginVolume()},
 					Containers: []corev1.Container{
 						{
-							Name:            "neo4j",
+							Name:            neo4jContainerName,
 							Image:           n.cfg.Image,
 							SecurityContext: neo4jContainerSecurityContext(),
-							Env:             append(neo4jSecurityEnv(), neo4jMemoryEnv(memRequest)...),
+							Env:             append(neo4jSecurityEnv(), neo4jMemoryEnv(size.Memory)...),
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "bolt",
@@ -535,18 +560,17 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 							},
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse(cpuRequest),
-									corev1.ResourceMemory: resource.MustParse(memRequest),
+									corev1.ResourceCPU:    size.CPU,
+									corev1.ResourceMemory: size.Memory,
 								},
 								// Memory limit prevents OOM/eviction; the CPU
 								// limit is intentionally omitted so the Neo4j
 								// JVM can burst against the cluster's spare
-								// CPU during its ~30-60s startup window. Tier
-								// quotas constrain aggregate spend at the
-								// platform level; per-pod CPU caps would only
-								// slow startup without improving fairness.
+								// CPU during its ~30-60s startup window. A
+								// CPU limit on the pod would only slow the
+								// start.
 								Limits: corev1.ResourceList{
-									corev1.ResourceMemory: resource.MustParse(memRequest),
+									corev1.ResourceMemory: size.Memory,
 								},
 							},
 							ReadinessProbe: &corev1.Probe{
@@ -577,7 +601,7 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 						Resources: corev1.VolumeResourceRequirements{
 							Requests: corev1.ResourceList{
-								corev1.ResourceStorage: resource.MustParse(storageRequest),
+								corev1.ResourceStorage: size.Storage,
 							},
 						},
 					},
@@ -591,12 +615,7 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 	// gibson#1255); INERT until the CNI enforces NetworkPolicy.
 	np = buildNeo4jNetworkPolicy(names, tenantID, tenantNS, n.cfg.PlatformNamespace)
 
-	return sts,
-		svc,
-		pvc,
-		secret,
-		np,
-		nil
+	return sts, svc, pvc, secret, np
 }
 
 // waitForReady polls the StatefulSet's ReadyReplicas until it reaches 1 or
@@ -686,88 +705,170 @@ func (n *Neo4jProvisioner) deriveNeo4jPassword(ctx context.Context, tenantID, te
 	return "P" + base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-// neo4jTierSize is one tier's sizing, in the shape this operator applies it:
-// one storage request, one CPU request, and one memory number used for BOTH
-// the request and the limit (neo4jMemoryEnv pins the JVM heap and page cache
-// from it, so request and limit must agree or the JVM is sized against a
+// neo4jSize is the size of one tenant Neo4j, in the shape this operator
+// applies it: one storage request, one CPU request, and one memory number used
+// for BOTH the request and the limit (neo4jMemoryEnv pins the JVM heap and page
+// cache from it, so request and limit must agree or the JVM is sized against a
 // number the container may not get).
-type neo4jTierSize struct {
-	Storage string `yaml:"storage"`
-	CPU     string `yaml:"cpu"`
-	Memory  string `yaml:"memory"`
+type neo4jSize struct {
+	Storage resource.Quantity
+	CPU     resource.Quantity
+	Memory  resource.Quantity
 }
 
-// canonicalTiers are the tiers the chart must size. A rendered table missing
-// one of them is a chart defect, not a reason to quietly use dev sizes: that
-// is precisely the failure this whole path exists to end.
-//
-// enterprise-deploy is the plan of the first tenant every self-hosted install
-// seeds. It was missing here, so when the chart shipped no row for it
-// (charts#180) this check passed, the tenant fell through to the inline
-// 1 CPU / 8Gi, and the pod never scheduled on a small node.
-var canonicalTiers = []string{"team", "org", "enterprise", "enterprise-deploy"}
-
-// parseTierSizes reads the chart-rendered tier table.
-//
-// Every quantity is parsed here rather than where it is used. The apply path
-// calls resource.MustParse, which PANICS on a bad string, so an operator that
-// trusted this data would crash on a typo in a values file instead of
-// reporting it.
-func parseTierSizes(data string) (map[string]neo4jTierSize, error) {
-	if strings.TrimSpace(data) == "" {
-		return nil, fmt.Errorf("the %s key is empty", neo4jTiersKey)
+// builtInNeo4jSize is the size for a cluster with no chart, where the
+// tenant-neo4j-size ConfigMap does not exist. It equals the default of the
+// chart: the smallest size at which a tenant Neo4j with a pinned heap is
+// measured to run, and a size that schedules on a single-node kind cluster.
+func builtInNeo4jSize() neo4jSize {
+	return neo4jSize{
+		Storage: resource.MustParse("10Gi"),
+		CPU:     resource.MustParse("100m"),
+		Memory:  resource.MustParse("1Gi"),
 	}
-	var tiers map[string]neo4jTierSize
-	if err := yaml.Unmarshal([]byte(data), &tiers); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", neo4jTiersKey, err)
-	}
-	for _, name := range canonicalTiers {
-		if _, ok := tiers[name]; !ok {
-			return nil, fmt.Errorf("tier %q is missing; the chart must size every one of %v", name, canonicalTiers)
-		}
-	}
-	for name, t := range tiers {
-		for field, value := range map[string]string{"storage": t.Storage, "cpu": t.CPU, "memory": t.Memory} {
-			if value == "" {
-				return nil, fmt.Errorf("tier %q has no %s", name, field)
-			}
-			if _, err := resource.ParseQuantity(value); err != nil {
-				return nil, fmt.Errorf("tier %q has an unparseable %s %q: %w", name, field, value, err)
-			}
-		}
-	}
-	return tiers, nil
 }
 
-// tierDefaults returns (storage, cpu, memory) resource request strings for
-// the given plan tier. These are used only when the tenant-neo4j-template
-// ConfigMap (Task 22) is absent. Production values are governed by Helm chart
-// values per D7 — the operator never hardcodes tier→resource mapping for
-// production use.
+// defaultSize returns the default size of a tenant Neo4j. The chart renders it
+// into the tenant-neo4j-size ConfigMap. When the ConfigMap does not exist, the
+// built-in size applies.
 //
-// CPU requests are sized so the team tier can schedule on a single-node
-// kind dev cluster without crowding out the rest of the platform (Zitadel,
-// CNPG, Vault, Envoy, daemon, dashboard, ext-authz, …). Neo4j is a JVM
-// workload that bursts at startup and is mostly idle afterward, so setting
-// the request low and letting it burst against the cluster's spare CPU is
-// the right shape for dev. Production environments override these via the
-// chart-rendered tenant-neo4j-template ConfigMap (see tenant-operator#61).
-func tierDefaults(tier string) (storage, cpu, memory string) {
-	switch tier {
-	case "enterprise", "enterprise-deploy",
-		// legacy ids the migrate job will rewrite, included for completeness
-		"platform", "enterprise-cloud", "enterprise-onprem", "public-sector":
-		return "200Gi", "1", "8Gi"
-	case "org":
-		return "50Gi", "500m", "4Gi"
-	default:
-		// team (and any legacy solo/squad/free/pro pending migration) → small
-		return "10Gi", "100m", "1Gi"
+// A ConfigMap that is present and wrong is an ERROR, not a reason to use the
+// built-in size. A fall-through would let an install run the built-in size
+// while its values say a different size and everything reports healthy.
+func (n *Neo4jProvisioner) defaultSize(ctx context.Context) (neo4jSize, error) {
+	// Unscoped(): this ConfigMap lives in the release namespace of the
+	// operator, not in a tenant namespace. The per-tenant-kind guard would
+	// refuse the read, and Unscoped() with this comment is the documented
+	// exception.
+	var cm corev1.ConfigMap
+	err := n.cfg.K8sClient.Unscoped().Get(ctx, types.NamespacedName{
+		Name:      neo4jSizeConfigMapName,
+		Namespace: neo4jTemplateNamespace,
+	}, &cm)
+	if apierrors.IsNotFound(err) {
+		return builtInNeo4jSize(), nil
 	}
+	if err != nil {
+		return neo4jSize{}, fmt.Errorf(
+			"get the %s ConfigMap in %s: %w", neo4jSizeConfigMapName, neo4jTemplateNamespace, err)
+	}
+	size, err := parseNeo4jSize(cm.Data)
+	if err != nil {
+		return neo4jSize{}, fmt.Errorf(
+			"the %s ConfigMap in %s is present but unusable (%w). The chart renders it, so this is a chart defect",
+			neo4jSizeConfigMapName, neo4jTemplateNamespace, err)
+	}
+	return size, nil
+}
+
+// parseNeo4jSize reads the three keys of the tenant-neo4j-size ConfigMap.
+//
+// Each quantity is parsed here and not where it is used, so a typo in a values
+// file is a reported error and never a panic in the apply path.
+func parseNeo4jSize(data map[string]string) (neo4jSize, error) {
+	var size neo4jSize
+	for _, field := range []struct {
+		key string
+		dst *resource.Quantity
+	}{
+		{neo4jSizeStorageKey, &size.Storage},
+		{neo4jSizeCPUKey, &size.CPU},
+		{neo4jSizeMemoryKey, &size.Memory},
+	} {
+		value := strings.TrimSpace(data[field.key])
+		if value == "" {
+			return neo4jSize{}, fmt.Errorf("the %s key is missing or empty", field.key)
+		}
+		q, err := resource.ParseQuantity(value)
+		if err != nil {
+			return neo4jSize{}, fmt.Errorf("the %s key has an unparseable quantity %q: %w", field.key, value, err)
+		}
+		*field.dst = q
+	}
+	if err := size.validate(); err != nil {
+		return neo4jSize{}, err
+	}
+	return size, nil
+}
+
+// resolveNeo4jSize applies the size a Tenant sets (spec.resources.neo4j) to
+// the default of the chart. A field the Tenant does not set keeps the default.
+func resolveNeo4jSize(chartDefault neo4jSize, override *gibsonv1alpha1.TenantNeo4jResources) (neo4jSize, error) {
+	size := chartDefault
+	if override == nil {
+		return size, nil
+	}
+	if err := override.Validate(); err != nil {
+		return neo4jSize{}, fmt.Errorf("spec.resources.neo4j: %w", err)
+	}
+	if override.Storage != nil {
+		size.Storage = override.Storage.DeepCopy()
+	}
+	if override.CPU != nil {
+		size.CPU = override.CPU.DeepCopy()
+	}
+	if override.Memory != nil {
+		size.Memory = override.Memory.DeepCopy()
+	}
+	return size, nil
+}
+
+// validate applies to a size the same rules that a Tenant size obeys.
+func (s neo4jSize) validate() error {
+	res := &gibsonv1alpha1.TenantNeo4jResources{Storage: &s.Storage, CPU: &s.CPU, Memory: &s.Memory}
+	if err := res.Validate(); err != nil {
+		return fmt.Errorf("the size is not usable: %w", err)
+	}
+	return nil
+}
+
+// notBelowRunning keeps the CPU and the memory of an instance that runs when
+// the size is smaller and the Tenant did not set that field.
+//
+// The default of the chart is the size of a NEW instance. A default that is
+// smaller than a running instance must not take resources away from it: the
+// heap and the page cache follow the memory, so a smaller default would
+// restart the database with a fraction of its memory. This is what keeps a
+// tenant that was sized by a plan (4Gi or 8Gi) at its size after the plan
+// stopped being the input. A default that is larger still raises the
+// instance, and a field the Tenant sets always applies as written, so a
+// deliberate reduction stays possible.
+//
+// THE FLOOR ONLY RAISES. The operator keeps no record of where a size came
+// from, so the CPU and the memory of a running instance are its floor from
+// then on. Two results follow, and both are intended:
+//
+//   - A default that was raised and then lowered again leaves each running
+//     instance at the raised size.
+//   - A Tenant that sets a size and then removes it keeps that size when it
+//     is larger than the default.
+//
+// In both cases, set the smaller size on the Tenant to reduce the instance.
+//
+// Storage is not handled here. The PVC of a running instance is never
+// rewritten, so its storage cannot shrink.
+func (s neo4jSize) notBelowRunning(
+	running *appsv1.StatefulSet, override *gibsonv1alpha1.TenantNeo4jResources,
+) neo4jSize {
+	for i := range running.Spec.Template.Spec.Containers {
+		c := &running.Spec.Template.Spec.Containers[i]
+		if c.Name != neo4jContainerName {
+			continue
+		}
+		if cpu, ok := c.Resources.Requests[corev1.ResourceCPU]; ok &&
+			(override == nil || override.CPU == nil) && cpu.Cmp(s.CPU) > 0 {
+			s.CPU = cpu
+		}
+		if mem, ok := c.Resources.Requests[corev1.ResourceMemory]; ok &&
+			(override == nil || override.Memory == nil) && mem.Cmp(s.Memory) > 0 {
+			s.Memory = mem
+		}
+	}
+	return s
 }
 
 // neo4jMemoryEnv pins Neo4j's heap and page cache to sizes derived from the
-// tier's memory limit, instead of letting Neo4j size itself from detected
+// memory limit of the instance, instead of letting Neo4j size itself from detected
 // memory. Left unset, Neo4j computes both from what it detects, and inside a
 // kind node on a GitHub-hosted runner that detection lies: the computed sizes
 // exceeded the container limit and every start failed with "Invalid memory
@@ -780,9 +881,8 @@ func tierDefaults(tier string) (storage, cpu, memory string) {
 // over half for JVM native overhead and APOC: 1Gi -> 256m heap + 128m cache,
 // 8Gi -> 2g heap + 1g cache. Initial heap equals max heap so the JVM never
 // grows into a limit-crossing resize.
-func neo4jMemoryEnv(memLimit string) []corev1.EnvVar {
-	q := resource.MustParse(memLimit)
-	mib := q.Value() / (1024 * 1024)
+func neo4jMemoryEnv(memLimit resource.Quantity) []corev1.EnvVar {
+	mib := memLimit.Value() / (1024 * 1024)
 	heap := fmt.Sprintf("%dm", mib/4)
 	cache := fmt.Sprintf("%dm", mib/8)
 	return []corev1.EnvVar{

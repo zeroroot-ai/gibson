@@ -8,6 +8,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 )
 
@@ -19,14 +20,13 @@ import (
 // exceeds physical memory", the data plane stayed Failed, and the Tenant CR
 // never reached Ready (deploy#1766).
 //
-// The env values must fit the tier limit with more than half left for JVM
-// native overhead and APOC, on every tier.
+// The env values must fit the memory limit with more than half left for JVM
+// native overhead and APOC, at each size.
 func TestNeo4jMemoryEnv_PinsHeapAndPageCacheInsideTheLimit(t *testing.T) {
-	for _, tier := range []string{"team", "org", "enterprise"} {
-		_, _, mem := tierDefaults(tier)
-		env := neo4jMemoryEnv(mem)
+	for _, mem := range []string{gibsonv1alpha1.MinNeo4jMemory, "2Gi", "4Gi", "8Gi"} {
+		env := neo4jMemoryEnv(resource.MustParse(mem))
 		if len(env) != 3 {
-			t.Fatalf("tier %s: want 3 memory env vars, got %d", tier, len(env))
+			t.Fatalf("memory %s: want 3 memory env vars, got %d", mem, len(env))
 		}
 		byName := map[string]string{}
 		for _, e := range env {
@@ -39,20 +39,23 @@ func TestNeo4jMemoryEnv_PinsHeapAndPageCacheInsideTheLimit(t *testing.T) {
 		} {
 			name := pdataplane.Neo4jSettingEnvVar(setting)
 			if byName[name] == "" {
-				t.Fatalf("tier %s: env %s (setting %s) is missing or empty", tier, name, setting)
+				t.Fatalf("memory %s: env %s (setting %s) is missing or empty", mem, name, setting)
 			}
 		}
 		limitQ := resource.MustParse(mem)
 		limit := limitQ.Value()
 		heap := mustNeo4jBytes(t, byName[pdataplane.Neo4jSettingEnvVar("server.memory.heap.max_size")])
 		cache := mustNeo4jBytes(t, byName[pdataplane.Neo4jSettingEnvVar("server.memory.pagecache.size")])
+		if heap <= 0 || cache <= 0 {
+			t.Fatalf("memory %s: heap(%d) and pagecache(%d) must be more than zero", mem, heap, cache)
+		}
 		if heap+cache >= limit/2 {
-			t.Fatalf("tier %s: heap(%d)+pagecache(%d) take %d of the %d limit — less than half must be used, the rest is JVM native overhead", tier, heap, cache, heap+cache, limit)
+			t.Fatalf("memory %s: heap(%d)+pagecache(%d) take %d of the %d limit — less than half must be used, the rest is JVM native overhead", mem, heap, cache, heap+cache, limit)
 		}
 		initialHeap := byName[pdataplane.Neo4jSettingEnvVar("server.memory.heap.initial_size")]
 		maxHeap := byName[pdataplane.Neo4jSettingEnvVar("server.memory.heap.max_size")]
 		if initialHeap != maxHeap {
-			t.Fatalf("tier %s: initial heap %q must equal max heap %q so the JVM never resizes across the limit", tier, initialHeap, maxHeap)
+			t.Fatalf("memory %s: initial heap %q must equal max heap %q so the JVM never resizes across the limit", mem, initialHeap, maxHeap)
 		}
 	}
 }

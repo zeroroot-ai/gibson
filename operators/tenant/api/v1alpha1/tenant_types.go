@@ -4,6 +4,9 @@
 package v1alpha1
 
 import (
+	"fmt"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -47,6 +50,70 @@ type TenantDataPlaneResources struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	PostgresConnectionLimit int `json:"postgresConnectionLimit,omitempty"`
+
+	// Neo4j overrides the default size of the Neo4j instance of the tenant.
+	// The chart sets the default size (tenantNeo4j.size). A field that is
+	// not set keeps the default.
+	//
+	// The CPU and the memory of a running instance only go down when this
+	// block sets a smaller value. If you remove a value from this block, the
+	// running instance keeps it when it is larger than the default.
+	// +optional
+	Neo4j *TenantNeo4jResources `json:"neo4j,omitempty"`
+}
+
+// TenantNeo4jResources is the size of the Neo4j instance of one tenant. Each
+// field is optional and replaces the same field of the default size.
+type TenantNeo4jResources struct {
+	// Storage is the storage request of the data volume. It applies when the
+	// operator creates the volume. The operator does not resize a volume that
+	// exists. When this value differs from that volume, the operator emits
+	// the Warning event Neo4jStorageNotChanged on the Tenant.
+	// +optional
+	Storage *resource.Quantity `json:"storage,omitempty"`
+
+	// CPU is the CPU request of the Neo4j container. The container has no
+	// CPU limit.
+	// +optional
+	CPU *resource.Quantity `json:"cpu,omitempty"`
+
+	// Memory is the memory request and the memory limit of the Neo4j
+	// container. The operator sets the JVM heap to a quarter of it and the
+	// page cache to an eighth of it. The minimum is 1Gi (a 256 MiB heap and a
+	// 128 MiB page cache). That is the smallest size at which the exit tests
+	// start a tenant Neo4j. It is already below the 2Gi that Neo4j states as
+	// its minimum, and no smaller size is measured to start.
+	// +optional
+	Memory *resource.Quantity `json:"memory,omitempty"`
+}
+
+// MinNeo4jMemory is the smallest memory a tenant Neo4j accepts. The operator
+// sets the JVM heap to a quarter of the memory and the page cache to an
+// eighth, so 1Gi gives a 256 MiB heap and a 128 MiB page cache. Each exit test
+// starts a tenant Neo4j at this size, and no smaller size is measured to
+// start. Neo4j states 2Gi as its own minimum.
+const MinNeo4jMemory = "1Gi"
+
+// Validate refuses a size that the operator cannot apply: a quantity that is
+// zero or negative, and a memory below MinNeo4jMemory. The admission webhook
+// calls it for a Tenant, and the data-plane provisioner calls it again,
+// because a TenantDataPlane does not pass through that webhook.
+func (r *TenantNeo4jResources) Validate() error {
+	if r == nil {
+		return nil
+	}
+	for _, f := range []struct {
+		name string
+		q    *resource.Quantity
+	}{{"storage", r.Storage}, {"cpu", r.CPU}, {"memory", r.Memory}} {
+		if f.q != nil && f.q.Sign() <= 0 {
+			return fmt.Errorf("%s %q must be more than zero", f.name, f.q.String())
+		}
+	}
+	if minMemory := resource.MustParse(MinNeo4jMemory); r.Memory != nil && r.Memory.Cmp(minMemory) < 0 {
+		return fmt.Errorf("memory %q must be at least %s", r.Memory.String(), MinNeo4jMemory)
+	}
+	return nil
 }
 
 // TenantSpec defines the desired state of a Tenant.

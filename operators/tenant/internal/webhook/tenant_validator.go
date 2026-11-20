@@ -175,6 +175,11 @@ func validateTenantFields(t *gibsonv1alpha1.Tenant) error {
 	if err := validateDisplayName(t.Spec.DisplayName); err != nil {
 		return err
 	}
+	if t.Spec.Resources != nil {
+		if err := t.Spec.Resources.Neo4j.Validate(); err != nil {
+			return fmt.Errorf("spec.resources.neo4j: %w", err)
+		}
+	}
 	return nil
 }
 
