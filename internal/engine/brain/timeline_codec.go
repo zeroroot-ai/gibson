@@ -100,6 +100,9 @@ func init() {
 	registerEvent("finding.raised", func() Event { return &FindingRaised{} })
 	registerEvent("finding.status_changed", func() Event { return &FindingStatusChanged{} })
 
+	// priority.go
+	registerEvent("finding.prioritized", func() Event { return &FindingPrioritized{} })
+
 	// mergerequest.go
 	registerEvent("merge_request.observed", func() Event { return &MergeRequestObserved{} })
 

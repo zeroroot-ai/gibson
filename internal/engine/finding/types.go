@@ -85,6 +85,12 @@ type EnhancedFinding struct {
 	// verifies the fix. The store refuses a finding with no valid check.
 	Check Check `json:"check"`
 
+	// Priority is the rank that cve-triage gave, and PriorityRule is the rule
+	// that gave it. Priority is empty until a triage pass decides. The store
+	// refuses a priority outside P1 to P4.
+	Priority     Priority `json:"priority,omitempty"`
+	PriorityRule string   `json:"priority_rule,omitempty"`
+
 	// Classification
 	Subcategory string        `json:"subcategory"`
 	Status      FindingStatus `json:"status"`

@@ -81,6 +81,13 @@ type Finding struct {
 	MergeRequest      string
 	MergeRequestState string
 
+	// Priority, PriorityRule and PriorityReason are what the last triage pass
+	// decided (gibson#1522). Priority is P1 to P4 and is empty until a pass
+	// decides. Empty is a fact about the Finding and never a default.
+	Priority       string
+	PriorityRule   string
+	PriorityReason string
+
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208). See FindingRaised.
 	SubmittedBy string
@@ -251,6 +258,10 @@ type FindingSnapshot struct {
 	// MergeRequest and MergeRequestState: see Finding (gibson#1505).
 	MergeRequest      string
 	MergeRequestState string
+	// Priority, PriorityRule and PriorityReason: see Finding (gibson#1522).
+	Priority       string
+	PriorityRule   string
+	PriorityReason string
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208). See FindingRaised.
 	SubmittedBy string
@@ -308,6 +319,7 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 			Address: f.Address, Severity: f.Severity, Status: f.Status, VulnerabilityID: f.VulnerabilityID,
 			ScanScope: f.ScanScope, LastScan: f.LastScan,
 			MergeRequest: f.MergeRequest, MergeRequestState: f.MergeRequestState,
+			Priority: f.Priority, PriorityRule: f.PriorityRule, PriorityReason: f.PriorityReason,
 			SubmittedBy: f.SubmittedBy, AgentName: f.AgentName, EnrolledBy: f.EnrolledBy,
 		})
 	}

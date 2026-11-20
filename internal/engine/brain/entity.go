@@ -71,6 +71,9 @@ func applyEntityObserved(w *World, e EntityObserved) {
 	if e.Label == "" || e.Key == "" {
 		return
 	}
+	// The priority of a Finding is typed. It goes to the Finding and never
+	// stays a free property of the node (gibson#1522).
+	e = foldFindingPriority(w, e)
 
 	q := ecs.NewFilter1[Entity](w.ecs).Query()
 	for q.Next() {

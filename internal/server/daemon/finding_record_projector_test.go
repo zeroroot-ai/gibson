@@ -15,19 +15,26 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-type fakeStatusSetter struct {
+type fakeRecordSetter struct {
 	calls []string
 	err   error
 }
 
-func (f *fakeStatusSetter) SetStatus(
+func (f *fakeRecordSetter) SetPriority(
+	_ context.Context, tenant string, id types.ID, p finding.Priority, rule string,
+) (bool, error) {
+	f.calls = append(f.calls, tenant+"/"+id.String()+" priority="+string(p)+" rule="+rule)
+	return true, f.err
+}
+
+func (f *fakeRecordSetter) SetStatus(
 	_ context.Context, tenant string, id types.ID, status finding.FindingStatus,
 ) (bool, error) {
 	f.calls = append(f.calls, tenant+"/"+id.String()+"="+string(status))
 	return true, f.err
 }
 
-func TestFindingStatusProjector_WritesAChangeOnce(t *testing.T) {
+func TestFindingRecordProjector_WritesAChangeOnce(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
@@ -39,8 +46,8 @@ func TestFindingStatusProjector_WritesAChangeOnce(t *testing.T) {
 		brain.FindingRaised{ID: "anomaly-host-3", ScopeID: "t", Title: "y"},
 	)
 
-	set := &fakeStatusSetter{}
-	p := NewFindingStatusProjector(reg, set, 0, nil)
+	set := &fakeRecordSetter{}
+	p := NewFindingRecordProjector(reg, set, 0, nil)
 	p.project(ctx)
 	p.project(ctx) // the second pass has nothing new
 	if want := "acme/" + id + "=fixing"; len(set.calls) != 1 || set.calls[0] != want {
@@ -55,7 +62,7 @@ func TestFindingStatusProjector_WritesAChangeOnce(t *testing.T) {
 	}
 }
 
-func TestFindingStatusProjector_RetriesAFailedWrite(t *testing.T) {
+func TestFindingRecordProjector_RetriesAFailedWrite(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
@@ -64,8 +71,8 @@ func TestFindingStatusProjector_RetriesAFailedWrite(t *testing.T) {
 		brain.MissionCreated{ID: "run-1", TenantID: "acme", TargetID: "t"},
 		brain.FindingRaised{ID: id, ScopeID: "t", Title: "x"},
 	)
-	set := &fakeStatusSetter{err: errors.New("db down")}
-	p := NewFindingStatusProjector(reg, set, 0, nil)
+	set := &fakeRecordSetter{err: errors.New("db down")}
+	p := NewFindingRecordProjector(reg, set, 0, nil)
 	p.project(ctx)
 	set.err = nil
 	p.project(ctx)
@@ -85,4 +92,35 @@ func waitStatus(t *testing.T, eng *brain.Engine, id, status string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("finding %s did not reach %s", id, status)
+}
+
+func TestFindingRecordProjector_WritesPriorityOnlyWhenSet(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	id := types.NewID().String()
+	seedFindingsWorld(t, eng, 1,
+		brain.MissionCreated{ID: "run-1", TenantID: "acme", TargetID: "t"},
+		brain.FindingRaised{ID: id, ScopeID: "t", Title: "x"},
+	)
+	set := &fakeRecordSetter{}
+	p := NewFindingRecordProjector(reg, set, 0, nil)
+	p.project(ctx)
+	if len(set.calls) != 1 { // the status only
+		t.Fatalf("writes = %v, want the status write only", set.calls)
+	}
+	eng.Submit(brain.FindingPrioritized{ID: id, Priority: "P1", Rule: "kev"})
+	for i := 0; i < 400; i++ {
+		if eng.Findings()[0].Priority == "P1" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	p.project(ctx)
+	p.project(ctx)
+	want := "acme/" + id + " priority=P1 rule=kev"
+	if len(set.calls) != 2 || set.calls[1] != want {
+		t.Fatalf("writes = %v, want the priority written once as %q", set.calls, want)
+	}
 }
