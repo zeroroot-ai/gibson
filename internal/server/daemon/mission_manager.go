@@ -1236,6 +1236,9 @@ func (m *missionManager) reserveChildBudget(ctx context.Context, poolConn *datap
 // World and retires the run before it, if the mission ran before. The
 // Started/Done pair then encodes exactly what happened (gibson#1217).
 func (m *missionManager) failBeforeStart(tenantID auth.TenantID, missionID, runID, name, reason string) {
+	// The reason reaches the Task and the World. It is logged too, because a mission
+	// that fails here leaves no other line in the daemon log.
+	m.logger.Error("mission failed before it started", "mission_id", missionID, "reason", reason)
 	eng := m.brainRegistry.For(tenantID.String())
 	eng.Submit(brain.MissionProjected{ID: missionID, RunID: runID, Name: name})
 	eng.Submit(brain.MissionStarted{ID: missionID, RunID: runID, Name: name})

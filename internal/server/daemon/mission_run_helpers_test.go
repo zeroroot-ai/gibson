@@ -4,8 +4,10 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"github.com/stretchr/testify/assert"
 	"log/slog"
 	"strings"
 	"testing"
@@ -435,6 +437,23 @@ func TestFailBeforeStart_ProjectsStartedThenFailed(t *testing.T) {
 	mm.failBeforeStart(acme, "m-preflight", "run-1", "recon", "pool not configured")
 
 	waitWorldStatus(t, mm.brainRegistry.For(acme.String()), "m-preflight", string(brain.MissionFailed))
+}
+
+// A mission that fails before it starts leaves no other line in the daemon log, so the
+// reason is logged. Without it, the A2A inbound exit test read a mission that never
+// dispatched as a timeout with no reason.
+func TestFailBeforeStart_LogsTheReason(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var buf bytes.Buffer
+	mm := helperMM()
+	mm.logger = slog.New(slog.NewTextHandler(&buf, nil))
+	mm.brainRegistry = brain.NewRegistry(ctx, braintest.StoreFactory())
+
+	mm.failBeforeStart(auth.MustNewTenantID("acme"), "m-log", "run-1", "recon", "target t-2 is not found")
+
+	assert.Contains(t, buf.String(), "mission failed before it started")
+	assert.Contains(t, buf.String(), "target t-2 is not found")
 }
 
 // ---- executeMission pre-flight failure paths ------------------------------
