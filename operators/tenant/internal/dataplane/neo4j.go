@@ -118,7 +118,7 @@ func NewNeo4jProvisioner(cfg Neo4jConfig) (*Neo4jProvisioner, error) {
 		return nil, err
 	}
 	if cfg.Recorder == nil {
-		return nil, fmt.Errorf("dataplane/neo4j: Recorder required")
+		return nil, errors.New("dataplane/neo4j: Recorder required")
 	}
 	return &Neo4jProvisioner{cfg: cfg}, nil
 }
@@ -375,11 +375,9 @@ func (n *Neo4jProvisioner) reportStorageNotChanged(
 	pvc *corev1.PersistentVolumeClaim,
 	override *gibsonv1alpha1.TenantNeo4jResources,
 ) {
-	if override == nil || override.Storage == nil {
-		return
-	}
 	have := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
-	if have.Cmp(*override.Storage) == 0 {
+	differs := override != nil && override.Storage != nil && have.Cmp(*override.Storage) != 0
+	if !differs {
 		return
 	}
 	var tenant gibsonv1alpha1.Tenant
