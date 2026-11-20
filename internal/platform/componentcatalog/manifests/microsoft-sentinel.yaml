@@ -1,0 +1,23 @@
+# Microsoft Sentinel connector. Microsoft runs the MCP server (ADR-0114, ADR-0177).
+# Source of the endpoint: https://learn.microsoft.com/en-us/azure/sentinel/datalake/sentinel-mcp-tools-overview
+# Source of the auth and the scope:
+#   https://sentinel.microsoft.com/.well-known/oauth-protected-resource/mcp/data-exploration
+# The authorization server is Microsoft Entra ID. Entra ID has no dynamic client
+# registration (RFC 7591), so the tenant needs an app registration.
+id: microsoft-sentinel
+kind: connector
+displayName: Microsoft Sentinel
+description: >-
+  The data exploration tools of the Microsoft Sentinel MCP server. They find
+  tables and query the Sentinel data lake of the customer.
+egressAllow:
+  - sentinel.microsoft.com:443
+spec:
+  vendor: microsoft
+  class: siem
+  shape: Remote
+  endpoint: https://sentinel.microsoft.com/mcp/data-exploration
+  transport: streamable-http
+  auth: oauth
+  oauthScope: 4500ebfb-89b6-4b14-a480-7f749797bfcd/.default
+  defaultInstanceUrl: https://sentinel.microsoft.com/mcp/data-exploration

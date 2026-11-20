@@ -1,0 +1,24 @@
+# Microsoft Entra ID connector. Microsoft runs the MCP server (ADR-0114, ADR-0177).
+# Source of the endpoint and the tools: https://learn.microsoft.com/en-us/graph/mcp-server/overview
+# Source of the auth and the scope:
+#   https://mcp.svc.cloud.microsoft/.well-known/oauth-protected-resource/enterprise
+# The authorization server is Microsoft Entra ID. Entra ID has no dynamic client
+# registration (RFC 7591), so the tenant needs an app registration.
+# The server is in preview and it only reads. No tool revokes a session.
+id: microsoft-entra
+kind: connector
+displayName: Microsoft Entra ID
+description: >-
+  The Microsoft MCP Server for Enterprise. It reads users, groups, applications
+  and devices of the Entra tenant of the customer through Microsoft Graph.
+egressAllow:
+  - mcp.svc.cloud.microsoft:443
+spec:
+  vendor: microsoft
+  class: identity
+  shape: Remote
+  endpoint: https://mcp.svc.cloud.microsoft/enterprise
+  transport: streamable-http
+  auth: oauth
+  oauthScope: api://e8c77dc2-69b3-43f4-bc51-3213c9d915b4/.default
+  defaultInstanceUrl: https://mcp.svc.cloud.microsoft/enterprise
