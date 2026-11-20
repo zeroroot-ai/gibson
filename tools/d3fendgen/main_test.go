@@ -165,7 +165,7 @@ func TestRun_ChecksWritesAndRefuses(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(tree, ExtractFile), raw, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Clean(filepath.Join(tree, ExtractFile)), raw, 0o600); err != nil { //nolint:gosec // G703: a path under t.TempDir and a constant
 		t.Fatal(err)
 	}
 	if code := run([]string{"-dir", tree, "-check"}, &stderr); code != 1 {
