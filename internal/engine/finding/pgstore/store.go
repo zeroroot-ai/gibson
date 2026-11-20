@@ -126,6 +126,12 @@ func newFindingRow(f finding.EnhancedFinding) (findingRow, error) {
 	}, nil
 }
 
+// upsertFindingSQL writes a finding. A second submit of one finding, such as a
+// second read of one result of a tool of the buyer (gibson#1448), updates the
+// fields of the submitter. The daemon alone owns the status, the check and
+// the priority (ADR-0178), so the update keeps the stored values of these
+// keys. jsonb_strip_nulls drops a key that the stored document lacks, so the
+// value of the submit stays then.
 const upsertFindingSQL = `
 INSERT INTO findings (id, mission_id, severity, title, document, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -133,8 +139,15 @@ ON CONFLICT (id) DO UPDATE SET
 	mission_id = EXCLUDED.mission_id,
 	severity   = EXCLUDED.severity,
 	title      = EXCLUDED.title,
-	document   = EXCLUDED.document,
+	document   = EXCLUDED.document || jsonb_strip_nulls(jsonb_build_object(
+		'status',        findings.document->'status',
+		'check',         findings.document->'check',
+		'priority',      findings.document->'priority',
+		'priority_rule', findings.document->'priority_rule')),
 	updated_at = EXCLUDED.updated_at`
+
+// daemonOwnedKeys are the keys of the document that a second submit keeps.
+var daemonOwnedKeys = []string{"status", "check", "priority", "priority_rule"}
 
 const deleteEvidenceSQL = `DELETE FROM finding_evidence WHERE finding_id = $1`
 

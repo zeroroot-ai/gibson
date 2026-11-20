@@ -146,14 +146,40 @@ func (d *fakeDB) Exec(_ context.Context, sql string, args ...any) (int64, error)
 		return 1, nil
 	}
 	id := args[0].(string)
+	doc := args[4].([]byte)
+	if old, ok := d.rows[id]; ok {
+		doc = keepDaemonKeys(sql, old.document, doc)
+	}
 	d.rows[id] = fakeRow{
 		missionID: args[1].(*string),
 		severity:  args[2].(string),
 		title:     args[3].(string),
-		document:  args[4].([]byte),
+		document:  doc,
 		createdAt: args[5].(time.Time),
 	}
 	return 1, nil
+}
+
+// keepDaemonKeys does what the conflict clause of the upsert does, for each
+// key that the statement names: the stored value wins.
+func keepDaemonKeys(sql string, stored, submitted []byte) []byte {
+	var oldDoc, newDoc map[string]any
+	if json.Unmarshal(stored, &oldDoc) != nil || json.Unmarshal(submitted, &newDoc) != nil {
+		return submitted
+	}
+	for _, k := range daemonOwnedKeys {
+		if !contains(sql, "findings.document->'"+k+"'") {
+			continue
+		}
+		if v, ok := oldDoc[k]; ok && v != nil {
+			newDoc[k] = v
+		}
+	}
+	out, err := json.Marshal(newDoc)
+	if err != nil {
+		return submitted
+	}
+	return out
 }
 
 type fakeScanRow struct {
@@ -655,4 +681,37 @@ func TestSetPriority_WritesPriorityAndRule(t *testing.T) {
 
 	_, err = s.SetPriority(ctx, "acme", f.ID, finding.Priority("P5"), "x")
 	require.ErrorIs(t, err, finding.ErrInvalidPriority)
+}
+
+// A second submit of one finding updates the fields of the submitter and
+// keeps the status, the check and the priority that the daemon set
+// (gibson#1448, ADR-0178). A second read of one result of a tool must not move
+// a finding in `fixing` back to `open`.
+func TestStore_ASecondSubmitKeepsTheFieldsOfTheDaemon(t *testing.T) {
+	db := newFakeDB()
+	s := newTestStore(db)
+	ctx := context.Background()
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+	f.Check = finding.Check{Kind: finding.CheckTool, Ref: "wiz/r-1"}
+	require.NoError(t, s.Store(ctx, "acme", f))
+	_, err := s.SetStatus(ctx, "acme", f.ID, finding.StatusFixing)
+	require.NoError(t, err)
+	_, err = s.SetPriority(ctx, "acme", f.ID, finding.PriorityP1, "kev")
+	require.NoError(t, err)
+
+	again := f
+	again.Title = "open port 22"
+	again.Status = finding.StatusOpen
+	again.Check = finding.Check{Kind: finding.CheckScan}
+	again.Priority, again.PriorityRule = "", ""
+	require.NoError(t, s.Store(ctx, "acme", again))
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(db.rows[f.ID.String()].document, &doc))
+	assert.Equal(t, "open port 22", db.rows[f.ID.String()].title, "the field of the submitter is updated")
+	assert.Equal(t, string(finding.StatusFixing), doc["status"])
+	assert.Equal(t, string(finding.PriorityP1), doc["priority"])
+	assert.Equal(t, "kev", doc["priority_rule"])
+	check, _ := doc["check"].(map[string]any)
+	assert.Equal(t, string(finding.CheckTool), check["kind"])
 }

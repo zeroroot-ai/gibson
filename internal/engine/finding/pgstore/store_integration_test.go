@@ -356,3 +356,30 @@ func TestStore_Integration_CountsAndDailyCounts(t *testing.T) {
 	}
 	assert.Equal(t, uint64(2), sum, "the finding of ten days ago is outside five days")
 }
+
+// A second submit of one finding keeps the status, the check and the priority
+// that the daemon set, on a real Postgres (gibson#1448, ADR-0178).
+func TestStore_Integration_ASecondSubmitKeepsTheFieldsOfTheDaemon(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("open port", "d", agent.SeverityHigh), types.NewID(), "intake")
+	f.Check = finding.Check{Kind: finding.CheckTool, Ref: "wiz/r-1"}
+	require.NoError(t, s.Store(ctx, "acme", f))
+	_, err := s.SetStatus(ctx, "acme", f.ID, finding.StatusFixing)
+	require.NoError(t, err)
+	_, err = s.SetPriority(ctx, "acme", f.ID, finding.PriorityP1, "kev")
+	require.NoError(t, err)
+
+	again := f
+	again.Title = "open port 22"
+	again.Status = finding.StatusOpen
+	again.Priority, again.PriorityRule = "", ""
+	require.NoError(t, s.Store(ctx, "acme", again))
+
+	got, err := s.Get(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open port 22", got.Title)
+	assert.Equal(t, finding.StatusFixing, got.Status)
+	assert.Equal(t, finding.PriorityP1, got.Priority)
+	assert.Equal(t, finding.CheckTool, got.Check.Kind)
+}
