@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -61,7 +62,10 @@ func TestToolApproval_InvokeToolThroughTheRealQueue(t *testing.T) {
 			Observer:  nopObserver{},
 			Recorder:  func(context.Context, metatool.CallRecord, []byte, string) string { return "" },
 		})
-		return err
+		if err != nil {
+			return fmt.Errorf("call %s: %w", tool, err)
+		}
+		return nil
 	}
 	isolateA := map[string]any{"host": "a"}
 
@@ -143,7 +147,10 @@ func TestToolApproval_TheMergeGateReadsTheWorld(t *testing.T) {
 			Observer: nopObserver{},
 			Recorder: func(context.Context, metatool.CallRecord, []byte, string) string { return "" },
 		})
-		return err
+		if err != nil {
+			return fmt.Errorf("merge for %s: %w", tenant, err)
+		}
+		return nil
 	}
 
 	if err := merge("acme"); !errors.Is(err, metatool.ErrMergeNotGranted) {

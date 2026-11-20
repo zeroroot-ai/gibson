@@ -340,7 +340,7 @@ func TestEnableConnector_TenantOAuthClient(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err), "the secret name must be valid")
 	assert.Empty(t, store.rows)
 
-	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{
+	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{ //nolint:gosec // G101: the name of a secret, not a credential
 		CatalogId: "microsoft-sentinel", OauthClientId: "cid", OauthClientSecretName: "entra-client-secret"})
 	require.NoError(t, err)
 	require.Len(t, store.rows, 1)

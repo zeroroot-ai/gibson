@@ -1111,14 +1111,19 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// recorder (gibson#1465).
 	connectors := fixloop.NewConnectorReader(d.connectorMCPClient(),
 		governedRevert{callback: func() *harness.CallbackManager { return d.callback }})
+	fixWatcher, err := fixloop.NewWatcher(
+		connectors, connectors,
+		applicationPlacer{querier: func() any { return d.graphragQuerier }},
+		nil, // the default policy until the constraints carry the hold time
+		d.logger.WithComponent("fix-loop").Slog(),
+	)
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("fix loop: %w", err)
+	}
 	go NewFixLoopRunner(
 		d.brainRegistry,
-		fixloop.NewWatcher(
-			connectors, connectors,
-			applicationPlacer{querier: func() any { return d.graphragQuerier }},
-			nil, // the default policy until the constraints carry the hold time
-			d.logger.WithComponent("fix-loop").Slog(),
-		),
+		fixWatcher,
 		0, // default interval
 		d.logger.WithComponent("fix-loop").Slog(),
 	).Run(ctx)

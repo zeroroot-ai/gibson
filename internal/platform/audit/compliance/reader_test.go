@@ -292,7 +292,7 @@ func TestEvidence_NamesTheCountermeasureNextToTheControl(t *testing.T) {
 
 	rep := run(t, enabledSet{"acme/nist-800-53-r5": true, "acme/mitre-d3fend": true})
 	si3 := byID(rep, "si-3")
-	var ids []string
+	ids := make([]string, 0, len(si3.Countermeasures))
 	for _, cm := range si3.Countermeasures {
 		ids = append(ids, cm.ID)
 	}

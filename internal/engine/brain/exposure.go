@@ -64,125 +64,161 @@ type openWait struct {
 	from    time.Time
 }
 
+// exposureFold holds the state of one fold of the Timeline.
+type exposureFold struct {
+	tracks     map[string]*findingTrack
+	mrFindings map[string][]string
+	// refused holds the refused merges that no later report has closed.
+	refused map[string][]openWait
+	// reverting holds the revert requests that no FixReverted has closed.
+	reverting map[string][]openWait
+}
+
+func (x *exposureFold) track(id string) *findingTrack {
+	t := x.tracks[id]
+	if t == nil {
+		t = &findingTrack{id: id}
+		x.tracks[id] = t
+	}
+	return t
+}
+
+// closeWaits ends each open wait of the merge request at `at`.
+func (x *exposureFold) closeWaits(open map[string][]openWait, mr string, at time.Time) {
+	for _, w := range open[mr] {
+		t := x.track(w.finding)
+		t.waits = append(t.waits, interval{w.from, at})
+	}
+	open[mr] = nil
+}
+
+// openWaits starts a wait for each finding of the merge request.
+func (x *exposureFold) openWaits(open map[string][]openWait, mr string, at time.Time) {
+	for _, id := range x.mrFindings[mr] {
+		open[mr] = append(open[mr], openWait{finding: id, from: at})
+	}
+}
+
+func (x *exposureFold) raised(e FindingRaised) {
+	t := x.track(e.ID)
+	first := firstSeen(e)
+	if t.start.IsZero() || (!first.IsZero() && first.Before(t.start)) {
+		t.start = first
+	}
+	if t.raisedAt.IsZero() {
+		t.raisedAt = e.At
+		if !e.FirstSeenAt.IsZero() && e.FirstSeenAt.Before(e.At) {
+			t.waits = append(t.waits, interval{e.FirstSeenAt, e.At})
+		}
+	}
+}
+
+func (x *exposureFold) statusChanged(e FindingStatusChanged) {
+	t := x.track(e.ID)
+	if e.MergeRequest != "" {
+		t.lastMR = e.MergeRequest
+		x.mrFindings[e.MergeRequest] = appendOnce(x.mrFindings[e.MergeRequest], e.ID)
+	}
+	switch e.Status {
+	case FindingStatusVerified:
+		if !t.verified {
+			t.verified, t.verifiedAt = true, e.At
+		}
+	case FindingStatusOpen:
+		t.verified, t.verifiedAt = false, time.Time{}
+		t.deployAt, t.rerunAt, t.rerunClosed = time.Time{}, time.Time{}, false
+	}
+}
+
+func (x *exposureFold) apply(raw Event) {
+	switch e := deref(raw).(type) {
+	case FindingRaised:
+		x.raised(e)
+	case FindingStatusChanged:
+		x.statusChanged(e)
+	case MergeRequestObserved:
+		// Any report closes the open refusals of the merge request.
+		x.closeWaits(x.refused, e.Key, e.At)
+		if e.State == MergeRequestRefused {
+			x.openWaits(x.refused, e.Key, e.At)
+		}
+	case DeployObserved:
+		for _, id := range x.mrFindings[e.MergeRequest] {
+			t := x.track(id)
+			t.deployAt, t.rerunAt, t.rerunClosed = e.At, time.Time{}, false
+		}
+	case RevertRequested:
+		if len(x.reverting[e.MergeRequest]) == 0 {
+			x.openWaits(x.reverting, e.MergeRequest, e.At)
+		}
+	case FixReverted:
+		x.closeWaits(x.reverting, e.MergeRequest, e.At)
+	case CheckRerun:
+		t := x.track(e.ID)
+		if !t.deployAt.IsZero() && !t.rerunClosed && e.EvidenceAt.After(t.deployAt) {
+			t.rerunAt, t.rerunClosed = e.EvidenceAt, true
+		}
+	}
+}
+
+// stillOpen returns the waits of the finding that no event closed. Each one
+// runs to end.
+func stillOpen(open map[string][]openWait, finding string, end time.Time) []interval {
+	var out []interval
+	for _, w := range open {
+		for _, o := range w {
+			if o.finding == finding {
+				out = append(out, interval{o.from, end})
+			}
+		}
+	}
+	return out
+}
+
+// window computes the window of one track. ok is false for a track with no
+// first evidence.
+func (x *exposureFold) window(t *findingTrack, now time.Time) (ExposureWindow, bool) {
+	if t.start.IsZero() {
+		return ExposureWindow{}, false // no first evidence has a time, so there is no window
+	}
+	end := now
+	if t.verified {
+		end = t.verifiedAt
+	}
+	waits := append([]interval(nil), t.waits...)
+	waits = append(waits, stillOpen(x.reverting, t.id, end)...) // a revert that is not merged
+	waits = append(waits, stillOpen(x.refused, t.id, end)...)   // a refusal that is still open
+	if !t.deployAt.IsZero() {
+		to := end
+		if t.rerunClosed {
+			to = t.rerunAt
+		}
+		waits = append(waits, interval{t.deployAt, to})
+	}
+	win := ExposureWindow{FindingID: t.id, Start: t.start, End: end, Verified: t.verified}
+	if end.After(t.start) {
+		win.Total = end.Sub(t.start)
+	}
+	win.Wait = unionLength(waits, t.start, end)
+	win.Agent = win.Total - win.Wait
+	return win, true
+}
+
 // ExposureWindows folds the events into one window for each Finding. now ends
 // the window of a Finding that is not verified. The result is sorted by ID.
 func ExposureWindows(events []Event, now time.Time) []ExposureWindow {
-	tracks := map[string]*findingTrack{}
-	mrFindings := map[string][]string{}
-	refused := map[string][]openWait{}
-	// reverting holds the revert requests that no FixReverted has closed.
-	reverting := map[string][]openWait{}
-	track := func(id string) *findingTrack {
-		t := tracks[id]
-		if t == nil {
-			t = &findingTrack{id: id}
-			tracks[id] = t
-		}
-		return t
+	x := &exposureFold{
+		tracks: map[string]*findingTrack{}, mrFindings: map[string][]string{},
+		refused: map[string][]openWait{}, reverting: map[string][]openWait{},
 	}
-
 	for _, raw := range events {
-		switch e := deref(raw).(type) {
-		case FindingRaised:
-			t := track(e.ID)
-			first := firstSeen(e)
-			if t.start.IsZero() || (!first.IsZero() && first.Before(t.start)) {
-				t.start = first
-			}
-			if t.raisedAt.IsZero() {
-				t.raisedAt = e.At
-				if !e.FirstSeenAt.IsZero() && e.FirstSeenAt.Before(e.At) {
-					t.waits = append(t.waits, interval{e.FirstSeenAt, e.At})
-				}
-			}
-		case FindingStatusChanged:
-			t := track(e.ID)
-			if e.MergeRequest != "" {
-				t.lastMR = e.MergeRequest
-				mrFindings[e.MergeRequest] = appendOnce(mrFindings[e.MergeRequest], e.ID)
-			}
-			switch e.Status {
-			case FindingStatusVerified:
-				if !t.verified {
-					t.verified, t.verifiedAt = true, e.At
-				}
-			case FindingStatusOpen:
-				t.verified, t.verifiedAt = false, time.Time{}
-				t.deployAt, t.rerunAt, t.rerunClosed = time.Time{}, time.Time{}, false
-			}
-		case MergeRequestObserved:
-			// Any report closes the open refusals of the merge request.
-			for _, w := range refused[e.Key] {
-				track(w.finding).waits = append(track(w.finding).waits, interval{w.from, e.At})
-			}
-			refused[e.Key] = nil
-			if e.State == MergeRequestRefused {
-				for _, id := range mrFindings[e.Key] {
-					refused[e.Key] = append(refused[e.Key], openWait{finding: id, from: e.At})
-				}
-			}
-		case DeployObserved:
-			for _, id := range mrFindings[e.MergeRequest] {
-				t := track(id)
-				t.deployAt, t.rerunAt, t.rerunClosed = e.At, time.Time{}, false
-			}
-		case RevertRequested:
-			if len(reverting[e.MergeRequest]) == 0 {
-				for _, id := range mrFindings[e.MergeRequest] {
-					reverting[e.MergeRequest] = append(reverting[e.MergeRequest], openWait{finding: id, from: e.At})
-				}
-			}
-		case FixReverted:
-			for _, w := range reverting[e.MergeRequest] {
-				track(w.finding).waits = append(track(w.finding).waits, interval{w.from, e.At})
-			}
-			reverting[e.MergeRequest] = nil
-		case CheckRerun:
-			t := track(e.ID)
-			if !t.deployAt.IsZero() && !t.rerunClosed && e.EvidenceAt.After(t.deployAt) {
-				t.rerunAt, t.rerunClosed = e.EvidenceAt, true
-			}
-		}
+		x.apply(raw)
 	}
-
-	out := make([]ExposureWindow, 0, len(tracks))
-	for _, t := range tracks {
-		if t.start.IsZero() {
-			continue // no first evidence has a time, so there is no window
+	out := make([]ExposureWindow, 0, len(x.tracks))
+	for _, t := range x.tracks {
+		if win, ok := x.window(t, now); ok {
+			out = append(out, win)
 		}
-		end := now
-		if t.verified {
-			end = t.verifiedAt
-		}
-		waits := t.waits
-		for _, w := range reverting { // a revert that is not merged runs to the end
-			for _, o := range w {
-				if o.finding == t.id {
-					waits = append(waits, interval{o.from, end})
-				}
-			}
-		}
-		for _, w := range refused { // a refusal that is still open runs to the end
-			for _, o := range w {
-				if o.finding == t.id {
-					waits = append(waits, interval{o.from, end})
-				}
-			}
-		}
-		if !t.deployAt.IsZero() {
-			to := end
-			if t.rerunClosed {
-				to = t.rerunAt
-			}
-			waits = append(waits, interval{t.deployAt, to})
-		}
-		win := ExposureWindow{FindingID: t.id, Start: t.start, End: end, Verified: t.verified}
-		if end.After(t.start) {
-			win.Total = end.Sub(t.start)
-		}
-		win.Wait = unionLength(waits, t.start, end)
-		win.Agent = win.Total - win.Wait
-		out = append(out, win)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].FindingID < out[j].FindingID })
 	return out

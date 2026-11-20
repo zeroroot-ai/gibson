@@ -36,15 +36,6 @@ var responseActions = []ResponseAction{
 	{"mcp:sentinelone:reconnect_to_network", []string{"sc-7", "ir-4"}},
 }
 
-// ResponseActions returns a copy of the set of response actions.
-func ResponseActions() []ResponseAction {
-	out := make([]ResponseAction, len(responseActions))
-	for i, a := range responseActions {
-		out[i] = ResponseAction{ToolID: a.ToolID, Controls: append([]string(nil), a.Controls...)}
-	}
-	return out
-}
-
 // lookupAction returns the response action for a tool id.
 func lookupAction(toolID string) (ResponseAction, bool) {
 	for _, a := range responseActions {

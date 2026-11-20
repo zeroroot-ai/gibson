@@ -183,10 +183,10 @@ func TestEnhancedFinding_JSONSerialization(t *testing.T) {
 }
 
 func TestFindingStatus_Values(t *testing.T) {
-	assert.Equal(t, FindingStatus("open"), StatusOpen)
-	assert.Equal(t, FindingStatus("fixing"), StatusFixing)
-	assert.Equal(t, FindingStatus("fixed"), StatusFixed)
-	assert.Equal(t, FindingStatus("verified"), StatusVerified)
+	assert.Equal(t, StatusOpen, FindingStatus("open"))
+	assert.Equal(t, StatusFixing, FindingStatus("fixing"))
+	assert.Equal(t, StatusFixed, FindingStatus("fixed"))
+	assert.Equal(t, StatusVerified, FindingStatus("verified"))
 	assert.False(t, FindingStatus("resolved").IsValid())
 }
 

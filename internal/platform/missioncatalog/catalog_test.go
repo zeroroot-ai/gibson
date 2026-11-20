@@ -762,7 +762,7 @@ func TestRender_AttackMissionsAllowOnlyTheTechniquesOfThePack(t *testing.T) {
 			t.Fatalf("Render(%s): %v", mission, err)
 		}
 		got := def.GetConstraints().GetAllowedTechniques()
-		var want []string
+		want := make([]string, 0, len(pack.Predicates))
 		for name := range pack.Predicates {
 			want = append(want, name)
 		}
@@ -822,10 +822,8 @@ func TestRender_SecurityTestAttacksAndReportsAndNeverFixes(t *testing.T) {
 	}
 	nodes := def.GetNodes()
 	for id, n := range nodes {
-		switch n.GetType() {
-		case missionv1.NodeType_NODE_TYPE_AGENT, missionv1.NodeType_NODE_TYPE_JOIN:
-		default:
-			t.Errorf("node %q has type %v; the security test has an agent and a join only", id, n.GetType())
+		if typ := n.GetType(); typ != missionv1.NodeType_NODE_TYPE_AGENT && typ != missionv1.NodeType_NODE_TYPE_JOIN {
+			t.Errorf("node %q has type %v; the security test has an agent and a join only", id, typ)
 		}
 	}
 	if got := nodes["attack"].GetAgentConfig().GetAgentName(); got != redAgent {

@@ -294,7 +294,7 @@ func auditActionReader(q *audit.Query) ActionAuditFunc {
 		var truncated bool
 		read := func(f audit.Filters) ([]audit.PgEntry, error) {
 			var all []audit.PgEntry
-			for page := 0; page < auditMaxPages; page++ {
+			for page := range auditMaxPages {
 				got, total, err := q.List(ctx, tenant, f, auditPageSize, page*auditPageSize)
 				if err != nil {
 					return nil, fmt.Errorf("audit list: %w", err)
@@ -340,8 +340,11 @@ func (d *daemonImpl) blueTeamWorldServer(s *worldServer) *worldServer {
 			return 0, false, nil // a World finding with no UUID has no row
 		}
 		rec, err := pgstore.New(func() datapool.Pool { return d.pool }).Get(ctx, tenant, fid)
-		if err != nil || rec == nil {
-			return 0, false, err
+		if err != nil {
+			return 0, false, fmt.Errorf("read the finding record: %w", err)
+		}
+		if rec == nil {
+			return 0, false, nil
 		}
 		return rec.Confidence, true, nil
 	}

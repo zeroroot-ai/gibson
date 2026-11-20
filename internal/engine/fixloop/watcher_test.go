@@ -67,7 +67,11 @@ type rig struct {
 func newRig(t *testing.T, check string) *rig {
 	t.Helper()
 	rg := &rig{t: t, w: brain.NewWorld("t1"), r: &fakeReader{}, rv: &fakeReverter{}, now: at(5)}
-	rg.wt = NewWatcher(rg.r, rg.rv, fakePlacer{app: "app-1"}, nil, nil)
+	wt, err := NewWatcher(rg.r, rg.rv, fakePlacer{app: "app-1"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rg.wt = wt
 	rg.wt.now = func() time.Time { return rg.now }
 	brain.Reduce(rg.w, brain.FindingRaised{ID: "f1", CheckKind: check, CheckRef: "ref", At: at(0)})
 	// The fix job delivered a merge request.

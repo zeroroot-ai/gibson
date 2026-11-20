@@ -61,7 +61,7 @@ var countermeasureID = regexp.MustCompile(`^D3-[A-Z0-9]{1,16}$`)
 
 // attackTechniqueID is the form of an ATT&CK technique id, for example
 // "T1059" or "T1059.001".
-var attackTechniqueID = regexp.MustCompile(`^T[0-9]{4}(\.[0-9]{3})?$`)
+var attackTechniqueID = regexp.MustCompile(`^T\d{4}(\.\d{3})?$`)
 
 // Countermeasure is one defensive technique.
 type Countermeasure struct {

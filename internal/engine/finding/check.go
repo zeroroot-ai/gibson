@@ -72,18 +72,8 @@ func (c Check) CanVerify(other Check) bool {
 	return c.Kind.strength() >= other.Kind.strength() && other.Kind.IsValid()
 }
 
-// PredicateCheck is the check of a finding that an attack predicate proved.
-func PredicateCheck(predicateType string) Check {
-	return Check{Kind: CheckPredicate, Ref: predicateType}
-}
-
 // ScanCheck is the check of a finding that a scan, or a mission run, raised.
 // The ref is the mission ID, and it may be empty.
 func ScanCheck(missionID types.ID) Check {
 	return Check{Kind: CheckScan, Ref: missionID.String()}
-}
-
-// ToolCheck is the check of a finding that a read of a tool of the buyer raised.
-func ToolCheck(toolRef string) Check {
-	return Check{Kind: CheckTool, Ref: toolRef}
 }

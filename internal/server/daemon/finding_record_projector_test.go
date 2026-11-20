@@ -83,7 +83,7 @@ func TestFindingRecordProjector_RetriesAFailedWrite(t *testing.T) {
 
 func waitStatus(t *testing.T, eng *brain.Engine, id, status string) {
 	t.Helper()
-	for i := 0; i < 400; i++ {
+	for range 400 {
 		for _, f := range eng.Findings() {
 			if f.ID == id && f.Status == status {
 				return
@@ -111,7 +111,7 @@ func TestFindingRecordProjector_WritesPriorityOnlyWhenSet(t *testing.T) {
 		t.Fatalf("writes = %v, want the status write only", set.calls)
 	}
 	eng.Submit(brain.FindingPrioritized{ID: id, Priority: "P1", Rule: "kev"})
-	for i := 0; i < 400; i++ {
+	for range 400 {
 		if eng.Findings()[0].Priority == "P1" {
 			break
 		}

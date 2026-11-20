@@ -48,7 +48,7 @@ func TestResolveEndpoint_Accepts(t *testing.T) {
 // address of the cluster, or at a private address.
 func TestResolveEndpoint_Refuses(t *testing.T) {
 	e := remoteEntry("https://*.service-now.com/mcp/*")
-	for name, ep := range map[string]string{
+	for name, ep := range map[string]string{ //nolint:gosec // G101: a URL with a fake user that the guard must refuse
 		"other domain":         "https://acme.evil.com/mcp/x",
 		"suffix trick":         "https://acme.service-now.com.evil.com/mcp/x",
 		"prefix trick":         "https://evilservice-now.com/mcp/x",

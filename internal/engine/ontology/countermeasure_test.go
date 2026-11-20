@@ -4,7 +4,6 @@
 package ontology
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -84,7 +83,7 @@ func TestCountermeasure_Refusals(t *testing.T) {
 			tc.mutate(&p)
 			err := p.Validate()
 			require.Error(t, err)
-			assert.True(t, strings.Contains(err.Error(), tc.want), "error %q lacks %q", err, tc.want)
+			assert.Contains(t, err.Error(), tc.want)
 		})
 	}
 }

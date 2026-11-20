@@ -65,18 +65,9 @@ type grantEvent struct {
 	grantor string
 }
 
-type groupKey struct {
-	grant   Grant
-	grantor string
-	refused bool
-}
-
-// GroupActions groups the connector calls of the agents in [from, to] by the
-// grant that allowed each one and by the person who gave that grant. calls and
-// changes are audit records of one tenant. changes must reach back far enough to
-// hold the grants that are still active, so the caller passes every change up
-// to `to`.
-func GroupActions(calls, changes []audit.PgEntry, from, to time.Time) []ActionGroup {
+// grantEvents indexes the grant changes of the execute relation by agent
+// principal and by object.
+func grantEvents(changes []audit.PgEntry) map[string]map[string][]grantEvent {
 	byAgent := map[string]map[string][]grantEvent{} // principal -> object -> events
 	for _, c := range changes {
 		if c.Action != grantAdded && c.Action != grantRemoved {
@@ -92,7 +83,56 @@ func GroupActions(calls, changes []audit.PgEntry, from, to time.Time) []ActionGr
 		byAgent[c.TargetID][md.Object] = append(byAgent[c.TargetID][md.Object],
 			grantEvent{at: c.CreatedAt, added: c.Action == grantAdded, grantor: c.ActorID})
 	}
+	return byAgent
+}
 
+// callKey returns the group of one call record and its tool. ok is false for
+// a record that is no result of a call.
+func callKey(c audit.PgEntry, byAgent map[string]map[string][]grantEvent) (key groupKey, tool string, ok bool) {
+	var md struct {
+		Result  string
+		Details struct{ Tool, Error string }
+	}
+	if json.Unmarshal(c.Metadata, &md) != nil || md.Result == resultIntent || md.Result == "" {
+		return groupKey{}, "", false
+	}
+	grant := Grant{Object: authz.ConnectorComponentObject(c.TargetID), Relation: relationExecute}
+	key = groupKey{grant: grant}
+	if md.Result == resultFailed && md.Details.Error == errUnauthorized {
+		key.refused = true
+	} else {
+		key.grantor = grantorAt(byAgent[c.ActorID][grant.Object], c.CreatedAt)
+	}
+	return key, md.Details.Tool, true
+}
+
+// add counts one call record in the group.
+func (g *ActionGroup) add(c audit.PgEntry) {
+	g.Count++
+	if c.ID != "" {
+		g.RecordIDs = append(g.RecordIDs, c.ID)
+	}
+	if c.CreatedAt.Before(g.First) {
+		g.First = c.CreatedAt
+	}
+	if c.CreatedAt.After(g.Last) {
+		g.Last = c.CreatedAt
+	}
+}
+
+type groupKey struct {
+	grant   Grant
+	grantor string
+	refused bool
+}
+
+// GroupActions groups the connector calls of the agents in [from, to] by the
+// grant that allowed each one and by the person who gave that grant. calls and
+// changes are audit records of one tenant. changes must reach back far enough to
+// hold the grants that are still active, so the caller passes every change up
+// to `to`.
+func GroupActions(calls, changes []audit.PgEntry, from, to time.Time) []ActionGroup {
+	byAgent := grantEvents(changes)
 	groups := map[groupKey]*ActionGroup{}
 	agents := map[groupKey]map[string]bool{}
 	tools := map[groupKey]map[string]bool{}
@@ -100,38 +140,19 @@ func GroupActions(calls, changes []audit.PgEntry, from, to time.Time) []ActionGr
 		if c.Action != actionToolCall || c.CreatedAt.Before(from) || c.CreatedAt.After(to) {
 			continue
 		}
-		var md struct {
-			Result  string
-			Details struct{ Tool, Error string }
-		}
-		if json.Unmarshal(c.Metadata, &md) != nil || md.Result == resultIntent || md.Result == "" {
+		key, tool, ok := callKey(c, byAgent)
+		if !ok {
 			continue
-		}
-		grant := Grant{Object: authz.ConnectorComponentObject(c.TargetID), Relation: relationExecute}
-		key := groupKey{grant: grant}
-		if md.Result == resultFailed && md.Details.Error == errUnauthorized {
-			key.refused = true
-		} else {
-			key.grantor = grantorAt(byAgent[c.ActorID][grant.Object], c.CreatedAt)
 		}
 		g := groups[key]
 		if g == nil {
 			g = &ActionGroup{Grant: key.grant, Grantor: key.grantor, Refused: key.refused, First: c.CreatedAt}
 			groups[key], agents[key], tools[key] = g, map[string]bool{}, map[string]bool{}
 		}
-		g.Count++
-		if c.ID != "" {
-			g.RecordIDs = append(g.RecordIDs, c.ID)
-		}
-		if c.CreatedAt.Before(g.First) {
-			g.First = c.CreatedAt
-		}
-		if c.CreatedAt.After(g.Last) {
-			g.Last = c.CreatedAt
-		}
+		g.add(c)
 		agents[key][c.ActorID] = true
-		if md.Details.Tool != "" {
-			tools[key][md.Details.Tool] = true
+		if tool != "" {
+			tools[key][tool] = true
 		}
 	}
 

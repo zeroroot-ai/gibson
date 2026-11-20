@@ -114,7 +114,7 @@ func (ix *Index) findingFrame(id string) Frame {
 
 // statusHistory returns the changes of the status of a finding, in order.
 func (ix *Index) statusHistory(id string) []StatusLine {
-	var out []StatusLine
+	out := make([]StatusLine, 0, len(ix.status[id]))
 	for _, s := range ix.status[id] {
 		out = append(out, StatusLine{Status: s.status, Frame: frameAt(s.seq)})
 	}

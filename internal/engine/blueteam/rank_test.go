@@ -20,7 +20,7 @@ func host(addr string, juicy float64) brain.HostSnapshot {
 
 func order(rs []Ranked) []string {
 	sort.Slice(rs, func(i, j int) bool { return Key(rs[i]) < Key(rs[j]) })
-	var ids []string
+	ids := make([]string, 0, len(rs))
 	for _, r := range rs {
 		ids = append(ids, r.ID)
 	}

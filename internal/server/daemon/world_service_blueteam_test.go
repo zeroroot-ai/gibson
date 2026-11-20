@@ -118,7 +118,7 @@ func TestGetExposure(t *testing.T) {
 	require.True(t, one.Found)
 	require.True(t, one.Verified)
 	require.EqualValues(t, 4*3600, one.TotalSeconds)
-	require.EqualValues(t, one.TotalSeconds, one.WaitSeconds+one.AgentSeconds)
+	require.Equal(t, one.TotalSeconds, one.WaitSeconds+one.AgentSeconds)
 
 	missing, err := srv.GetExposure(ctx, &worldpb.GetExposureRequest{FindingId: "nope"})
 	require.NoError(t, err)

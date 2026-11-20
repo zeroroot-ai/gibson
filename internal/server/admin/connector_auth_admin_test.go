@@ -1239,15 +1239,15 @@ func TestTenantOAuthClient_MicrosoftEntriesCompleteAuthorization(t *testing.T) {
 	for _, id := range []string{"microsoft-sentinel", "microsoft-defender-endpoint", "microsoft-entra"} {
 		t.Run(id, func(t *testing.T) {
 			vendor := noRegistrationVendor(t)
-			real, err := componentcatalog.LookupConnector(id)
+			entry, err := componentcatalog.LookupConnector(id)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if real.OAuthClient != componentcatalog.OAuthClientTenant || real.OAuthScope == "" {
-				t.Fatalf("entry %s: client %q scope %q", id, real.OAuthClient, real.OAuthScope)
+			if entry.OAuthClient != componentcatalog.OAuthClientTenant || entry.OAuthScope == "" {
+				t.Fatalf("entry %s: client %q scope %q", id, entry.OAuthClient, entry.OAuthScope)
 			}
 			// The mock stands in for the host of the vendor.
-			mocked := real
+			mocked := entry
 			mocked.Endpoint, mocked.DefaultInstanceURL = vendor.URL, vendor.URL
 
 			store := newFakeConnectorSecrets()
@@ -1262,7 +1262,7 @@ func TestTenantOAuthClient_MicrosoftEntriesCompleteAuthorization(t *testing.T) {
 				Now: func() time.Time { return fixedNow },
 				Connectors: fakeTenantConnectors{row: tenantconnector.Connector{
 					TenantID: "acme", ConnectorID: id,
-					Config: tenantconnector.Config{OAuthClientID: "tenant-cid", OAuthClientSecretName: "entra-client-secret"},
+					Config: tenantconnector.Config{OAuthClientID: "tenant-cid", OAuthClientSecretName: "entra-client-secret"}, //nolint:gosec // G101: the name of a secret, not a credential
 				}},
 				Catalog: func(string) (componentcatalog.ConnectorEntry, error) { return mocked, nil },
 			})
@@ -1276,8 +1276,8 @@ func TestTenantOAuthClient_MicrosoftEntriesCompleteAuthorization(t *testing.T) {
 				t.Fatal(err)
 			}
 			u, _ := url.Parse(resp.GetAuthorizeUrl())
-			if q := u.Query(); q.Get("client_id") != "tenant-cid" || q.Get("scope") != real.OAuthScope {
-				t.Errorf("authorize url query = %v, want client tenant-cid and scope %q", q, real.OAuthScope)
+			if q := u.Query(); q.Get("client_id") != "tenant-cid" || q.Get("scope") != entry.OAuthScope {
+				t.Errorf("authorize url query = %v, want client tenant-cid and scope %q", q, entry.OAuthScope)
 			}
 			if strings.Contains(resp.GetAuthorizeUrl(), "the-client-secret") {
 				t.Error("the authorize URL holds the client secret")
@@ -1300,8 +1300,8 @@ func TestTenantOAuthClient_MicrosoftEntriesCompleteAuthorization(t *testing.T) {
 
 func TestTenantOAuthClient_Refusals(t *testing.T) {
 	vendor := noRegistrationVendor(t)
-	real, _ := componentcatalog.LookupConnector("microsoft-sentinel")
-	mocked := real
+	entry, _ := componentcatalog.LookupConnector("microsoft-sentinel")
+	mocked := entry
 	mocked.Endpoint, mocked.DefaultInstanceURL = vendor.URL, vendor.URL
 	row := tenantconnector.Connector{TenantID: "acme", ConnectorID: "microsoft-sentinel",
 		Config: tenantconnector.Config{OAuthClientID: "cid", OAuthClientSecretName: "name"}}
@@ -1351,8 +1351,8 @@ func TestTenantOAuthClient_Refusals(t *testing.T) {
 // URL: oauthScope has a reader.
 func TestStartConnectorAuthorization_ReadsTheManifestScope(t *testing.T) {
 	vendor := fakeVendor(t)
-	real, _ := componentcatalog.LookupConnector("datadog")
-	mocked := real
+	entry, _ := componentcatalog.LookupConnector("datadog")
+	mocked := entry
 	store := newFakeConnectorSecrets()
 	pending := connectorauth.NewPendingStore(5*time.Minute, func() time.Time { return fixedNow })
 	srv, err := NewConnectorAuthAdminServer(ConnectorAuthAdminConfig{

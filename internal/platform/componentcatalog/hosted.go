@@ -190,30 +190,29 @@ type ConnectorCredential struct {
 	Env      string `yaml:"env"`
 }
 
-// validateHostedConfig checks the five kinds of Hosted configuration. A
-// Remote connector states none of them.
-func validateHostedConfig(id string, s ConnectorSpec) error {
-	hasConfig := len(s.Credentials) > 0 || len(s.Env) > 0 || len(s.Args) > 0 || s.Port != 0 || s.ImagePullSecret != ""
-	if s.Shape != connectorv1alpha1.ConnectorShapeHosted {
-		if hasConfig {
-			return fmt.Errorf("%s: credentials, env, args, port and imagePullSecret need a Hosted connector", id)
-		}
-		return nil
-	}
+// validateHostedCredentials checks the credentials of a Hosted connector and
+// returns the variable names that they set.
+func validateHostedCredentials(id string, creds []ConnectorCredential) (map[string]bool, error) {
 	seen := map[string]bool{}
-	for _, c := range s.Credentials {
+	for _, c := range creds {
 		if !ValidSecretName(c.Secret) {
-			return fmt.Errorf("%s: credentials secret %q is not a valid secret name", id, c.Secret)
+			return nil, fmt.Errorf("%s: credentials secret %q is not a valid secret name", id, c.Secret)
 		}
 		if !envNameRE.MatchString(c.Env) {
-			return fmt.Errorf("%s: credentials env %q is not a valid variable name", id, c.Env)
+			return nil, fmt.Errorf("%s: credentials env %q is not a valid variable name", id, c.Env)
 		}
 		if seen[c.Env] {
-			return fmt.Errorf("%s: variable %q is set twice", id, c.Env)
+			return nil, fmt.Errorf("%s: variable %q is set twice", id, c.Env)
 		}
 		seen[c.Env] = true
 	}
-	for name, value := range s.Env {
+	return seen, nil
+}
+
+// validateHostedEnv checks the plain variables of a Hosted connector. seen
+// holds the names that the credentials set.
+func validateHostedEnv(id string, env map[string]string, seen map[string]bool) error {
+	for name, value := range env {
 		if !envNameRE.MatchString(name) {
 			return fmt.Errorf("%s: env %q is not a valid variable name", id, name)
 		}
@@ -226,6 +225,26 @@ func validateHostedConfig(id string, s ConnectorSpec) error {
 		if len(value) > 1024 || strings.ContainsAny(value, "\r\n\x00") {
 			return fmt.Errorf("%s: env %q has a value that is too long or holds a control character", id, name)
 		}
+	}
+	return nil
+}
+
+// validateHostedConfig checks the five kinds of Hosted configuration. A
+// Remote connector states none of them.
+func validateHostedConfig(id string, s ConnectorSpec) error {
+	hasConfig := len(s.Credentials) > 0 || len(s.Env) > 0 || len(s.Args) > 0 || s.Port != 0 || s.ImagePullSecret != ""
+	if s.Shape != connectorv1alpha1.ConnectorShapeHosted {
+		if hasConfig {
+			return fmt.Errorf("%s: credentials, env, args, port and imagePullSecret need a Hosted connector", id)
+		}
+		return nil
+	}
+	seen, err := validateHostedCredentials(id, s.Credentials)
+	if err != nil {
+		return err
+	}
+	if err = validateHostedEnv(id, s.Env, seen); err != nil {
+		return err
 	}
 	for _, a := range s.Args {
 		if a == "" || len(a) > 256 || strings.ContainsAny(a, "\r\n\x00") {

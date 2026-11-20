@@ -27,7 +27,10 @@ func fixedFinding(t *testing.T, checkKind string) *World {
 
 func verify(w *World) { applyAll(w, VerificationSystem(w)) }
 
-func status(t *testing.T, w *World) string { return findingByID(t, w, "f1").Status }
+func status(t *testing.T, w *World) string {
+	t.Helper()
+	return findingByID(t, w, "f1").Status
+}
 
 // A scan finding is verified after a clean scan that is newer than the deploy.
 func TestVerify_CleanScanNewerThanDeployVerifies(t *testing.T) {

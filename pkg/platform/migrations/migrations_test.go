@@ -49,15 +49,17 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// decision 4, hosted#195), 028 drops connector_sandbox and
 	// webhook_idempotency, which no Go code read (gibson#506), 041 drops
 	// the three component_install columns the plugin manifest fed (sdk#129),
-	// and 049 drops tenant_quotas, which no code reads (gibson#1530).
+	// 049 drops tenant_quotas, which no code reads (gibson#1530), and 050 and
+	// 051 add the endpoint, the OAuth client and the variables that a tenant
+	// gives for a connector (gibson#1534, gibson#1538, gibson#1508).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 49 {
-		t.Errorf("platform: expected 49 up.sql files, got %d", upCount)
+	if upCount != 51 {
+		t.Errorf("platform: expected 51 up.sql files, got %d", upCount)
 	}
-	if downCount != 49 {
-		t.Errorf("platform: expected 49 down.sql files, got %d", downCount)
+	if downCount != 51 {
+		t.Errorf("platform: expected 51 down.sql files, got %d", downCount)
 	}
 }
 
@@ -151,6 +153,8 @@ func TestTenantMaxVersion(t *testing.T) {
 //	      decision 4, hosted#195)
 //	...
 //	049 — drop_tenant_quotas (no code reads the plan quotas, gibson#1530)
+//	050 — tenant_connector_config (endpoint and OAuth client of a tenant, gibson#1534)
+//	051 — tenant_connector_variables (variables of a Hosted connector, gibson#1508)
 //
 // The sequence must stay CONTIGUOUS. golang-migrate records a single integer
 // version, and `up` only ever moves forward from it — so a migration that lands
@@ -164,8 +168,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 49 {
-		t.Errorf("PlatformMaxVersion: got %d, want 49", v)
+	if v != 51 {
+		t.Errorf("PlatformMaxVersion: got %d, want 51", v)
 	}
 }
 

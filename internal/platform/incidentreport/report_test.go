@@ -72,7 +72,7 @@ func TestAssemble_EachLineHasItsReplayFrame(t *testing.T) {
 	if rep.TimelineTotal != 14 {
 		t.Errorf("total = %d", rep.TimelineTotal)
 	}
-	var seqs []uint64
+	seqs := make([]uint64, 0, len(rep.Causes[0].History))
 	for _, h := range rep.Causes[0].History {
 		seqs = append(seqs, h.Frame.TimelineSeq)
 	}
@@ -85,7 +85,7 @@ func TestAssemble_EachLineHasItsReplayFrame(t *testing.T) {
 // tool, and not a call of another mission.
 func TestAssemble_ListsOnlyTheResponseActionsOfTheIncident(t *testing.T) {
 	rep := sampleReport()
-	var got []string
+	got := make([]string, 0, len(rep.Actions))
 	for _, a := range rep.Actions {
 		got = append(got, a.ToolID+"@"+string(a.Outcome))
 	}
@@ -167,7 +167,7 @@ func TestResponseActions_ControlsAreInThePack(t *testing.T) {
 	for _, c := range pack.Controls {
 		known[c.ID] = true
 	}
-	for _, a := range ResponseActions() {
+	for _, a := range responseActions {
 		if !strings.HasPrefix(a.ToolID, "mcp:") {
 			t.Errorf("tool id %q is not a canonical connector tool id", a.ToolID)
 		}
@@ -252,7 +252,7 @@ func TestReader_AttachesTheGrantToEachActionThatRan(t *testing.T) {
 			if a.Grant != nil {
 				t.Errorf("a refused action has a grant: %+v", a)
 			}
-		default:
+		case OutcomeDone, OutcomePending, OutcomeFailed:
 			if a.Grant == nil || a.Grant.GrantedBy != "user-7" {
 				t.Errorf("action %s has no person who gave the grant: %+v", a.ToolID, a.Grant)
 			}

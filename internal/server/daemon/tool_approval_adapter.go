@@ -28,6 +28,11 @@ func newTenantRoutedToolApproval(registry *brain.Registry) *tenantRoutedToolAppr
 }
 
 // Acquire implements metatool.ApprovalGate.
+//
+// gibsoncheck:allow tenant-from-request. req is no request body: metatool
+// builds it from Call.Caller, which the dispatch path resolved from the
+// verified identity of the caller. The tenant only routes to the queue of
+// that tenant.
 func (a *tenantRoutedToolApproval) Acquire(
 	ctx context.Context, req metatool.ApprovalRequest,
 ) (metatool.ApprovalState, string, error) {

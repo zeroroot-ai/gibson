@@ -74,9 +74,10 @@ func TestGroupActions_RemovedGrantAndRange(t *testing.T) {
 	}
 	var withGrantor, without int
 	for _, g := range got {
-		if g.Grantor == "user:ann" {
+		switch g.Grantor {
+		case "user:ann":
 			withGrantor += g.Count
-		} else if g.Grantor == "" {
+		case "":
 			without += g.Count
 		}
 	}

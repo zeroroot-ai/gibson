@@ -8,6 +8,7 @@
 package referenceenv
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -115,8 +116,7 @@ func ParseDocs(file string, data []byte) ([]Doc, error) {
 
 // Validate returns each defect of the environment. An empty result is a pass.
 func Validate(docs []Doc, flaws []Flaw) []error {
-	var errs []error
-	errs = append(errs, checkImages(docs)...)
+	errs := checkImages(docs)
 	errs = append(errs, checkHealth(docs)...)
 	errs = append(errs, checkFlaws(docs, flaws)...)
 	return errs
@@ -151,7 +151,7 @@ func checkHealth(docs []Doc) []error {
 		}
 	}
 	if prom == "" {
-		errs = append(errs, fmt.Errorf("the ConfigMap prometheus-config holds no prometheus.yml"))
+		errs = append(errs, errors.New("the ConfigMap prometheus-config holds no prometheus.yml"))
 	}
 	for _, d := range docs {
 		if d.Kind != "Deployment" {
@@ -160,14 +160,14 @@ func checkHealth(docs []Doc) []error {
 		raw, _ := get(d.Obj, "metadata", "annotations", HealthAnnotation).(string)
 		u, err := url.Parse(raw)
 		if raw == "" || err != nil {
-			errs = append(errs, fmt.Errorf("Deployment %s: the annotation %s is missing or invalid", d.Name, HealthAnnotation))
+			errs = append(errs, fmt.Errorf("deployment %s: the annotation %s is missing or invalid", d.Name, HealthAnnotation))
 			continue
 		}
 		if !services[d.Name] {
-			errs = append(errs, fmt.Errorf("Deployment %s: no Service of the same name", d.Name))
+			errs = append(errs, fmt.Errorf("deployment %s: no Service of the same name", d.Name))
 		}
 		if !strings.Contains(prom, `"`+raw+`"`) {
-			errs = append(errs, fmt.Errorf("Deployment %s: the health URL %s is not a target of prometheus-config", d.Name, raw))
+			errs = append(errs, fmt.Errorf("deployment %s: the health URL %s is not a target of prometheus-config", d.Name, raw))
 		}
 		probe := ""
 		for _, c := range containers(d) {
@@ -176,7 +176,7 @@ func checkHealth(docs []Doc) []error {
 			}
 		}
 		if probe != u.Path {
-			errs = append(errs, fmt.Errorf("Deployment %s: the readiness probe path %q differs from the health URL path %q",
+			errs = append(errs, fmt.Errorf("deployment %s: the readiness probe path %q differs from the health URL path %q",
 				d.Name, probe, u.Path))
 		}
 	}

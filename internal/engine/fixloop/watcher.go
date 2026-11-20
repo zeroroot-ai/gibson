@@ -32,8 +32,12 @@ type Watcher struct {
 	refused map[string]string
 }
 
-// NewWatcher builds a Watcher. A nil policy source means DefaultPolicy.
-func NewWatcher(r Reader, rv Reverter, p Placer, policy PolicySource, logger *slog.Logger) *Watcher {
+// NewWatcher builds a Watcher. The reader, the reverter and the placer are
+// required. A nil policy source means DefaultPolicy.
+func NewWatcher(r Reader, rv Reverter, p Placer, policy PolicySource, logger *slog.Logger) (*Watcher, error) {
+	if r == nil || rv == nil || p == nil {
+		return nil, errors.New("fixloop: a watcher needs a reader, a reverter and a placer")
+	}
 	if policy == nil {
 		policy = func(string) Policy { return DefaultPolicy() }
 	}
@@ -44,7 +48,7 @@ func NewWatcher(r Reader, rv Reverter, p Placer, policy PolicySource, logger *sl
 		reader: r, reverter: rv, placer: p, policy: policy,
 		now: func() time.Time { return time.Now().UTC() }, logger: logger,
 		refused: map[string]string{},
-	}
+	}, nil
 }
 
 // Step reads the facts for each finding that has a merge request and returns
@@ -134,7 +138,7 @@ func (w *Watcher) stepFixing(ctx context.Context, tenant, mr string, fs []brain.
 	}
 	// The merge request is open. A green pipeline asks for the slot of its
 	// Application. The queue grants one slot at a time.
-	if hasSlot || !fact.PipelineGreen || w.placer == nil {
+	if hasSlot || !fact.PipelineGreen {
 		return nil, nil
 	}
 	app, err := w.placer.Application(ctx, tenant, fs[0].ID)
@@ -199,10 +203,11 @@ const (
 // the Deployment that carries it. A deploy with no deployment key has no node
 // to point at, so it gets the event and no edge.
 func deployEvents(mr string, d DeployFact, missionID string) []brain.Event {
-	out := []brain.Event{brain.DeployObserved{
+	out := make([]brain.Event, 0, 3)
+	out = append(out, brain.DeployObserved{
 		MergeRequest: mr, DeploymentKey: d.DeploymentKey, ApplicationKey: d.ApplicationKey, At: d.At.UTC(),
 		MissionID: missionID,
-	}}
+	})
 	if d.DeploymentKey == "" {
 		return out
 	}
@@ -224,9 +229,6 @@ func deployEvents(mr string, d DeployFact, missionID string) []brain.Event {
 // host says that the revert is merged. Before that, the first call records
 // RevertRequested, and the wait for the pipeline is wait time.
 func (w *Watcher) revert(ctx context.Context, tenant, mr string, f brain.FindingSnapshot) ([]brain.Event, error) {
-	if w.reverter == nil {
-		return nil, errors.New("no reverter is wired")
-	}
 	fact, err := w.reverter.Revert(ctx, tenant, mr, f.FixMissionID)
 	if err != nil {
 		return nil, fmt.Errorf("revert merge request: %w", err)
@@ -277,7 +279,7 @@ func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.Fin
 		since = d.Restart.Ended
 	}
 	app := d.ApplicationKey
-	if app == "" && w.placer != nil {
+	if app == "" {
 		if app, err = w.placer.Application(ctx, tenant, f.ID); err != nil {
 			return nil, fmt.Errorf("place finding: %w", err)
 		}

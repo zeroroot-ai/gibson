@@ -102,7 +102,7 @@ func (d *fakeDB) Exec(_ context.Context, sql string, args ...any) (int64, error)
 		}
 		var doc map[string]any
 		if err := json.Unmarshal(row.document, &doc); err != nil {
-			return 0, err
+			return 0, fmt.Errorf("decode the document: %w", err)
 		}
 		if doc["priority"] == args[1].(string) && doc["priority_rule"] == args[2].(string) {
 			return 0, nil
@@ -119,7 +119,7 @@ func (d *fakeDB) Exec(_ context.Context, sql string, args ...any) (int64, error)
 		}
 		var doc map[string]any
 		if err := json.Unmarshal(row.document, &doc); err != nil {
-			return 0, err
+			return 0, fmt.Errorf("decode the document: %w", err)
 		}
 		if doc["status"] == args[1].(string) {
 			return 0, nil

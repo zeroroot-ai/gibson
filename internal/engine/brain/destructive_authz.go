@@ -612,7 +612,7 @@ const toolCallIDPrefix = "tool-call:"
 func ToolCallKey(tenant, missionID, connector, tool, argsHash string) string {
 	h := sha256.New()
 	for _, part := range []string{tenant, missionID, connector, tool, argsHash} {
-		fmt.Fprintf(h, "%d:%s|", len(part), part)
+		_, _ = fmt.Fprintf(h, "%d:%s|", len(part), part) // a hash never fails a write
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

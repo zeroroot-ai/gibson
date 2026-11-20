@@ -95,7 +95,7 @@ func TestNewTechniqueHierarchyValidatesTechniqueID(t *testing.T) {
 func TestNewTechniqueHierarchyValidatesRollupCategory(t *testing.T) {
 	_, err := NewTechniqueHierarchy(
 		[]CategoryID{"initial_access"},
-		map[TechniqueID]CategoryID{"default_credentials": "not a valid id"},
+		map[TechniqueID]CategoryID{"default_credentials": "not a valid id"}, //nolint:gosec // G101: a technique name, not a credential
 	)
 	require.Error(t, err)
 }
@@ -105,7 +105,7 @@ func TestNewTechniqueHierarchyRejectsUnadmittedCategoryInRollup(t *testing.T) {
 	// nothing.
 	_, err := NewTechniqueHierarchy(
 		[]CategoryID{"initial_access"},
-		map[TechniqueID]CategoryID{"default_credentials": "credential_access"},
+		map[TechniqueID]CategoryID{"default_credentials": "credential_access"}, //nolint:gosec // G101: a technique name, not a credential
 	)
 	require.Error(t, err)
 }

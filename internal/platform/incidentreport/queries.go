@@ -62,7 +62,3 @@ LIMIT $limit`
 // maxLines bounds each query. An incident has tens of lines. The cap keeps one
 // call from walking a graph that grew by mistake.
 const maxLines = 500
-
-// AlertsQuery returns the text of the alerts query. A test of another package
-// uses it to key a fake graph.
-func AlertsQuery() string { return alertsCypher }

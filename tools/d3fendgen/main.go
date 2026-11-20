@@ -129,7 +129,7 @@ func BuildPack(ex *extract) (ontology.DomainPack, error) {
 // controlIDs turns the control labels of D3FEND into the control ids of the
 // pack nist-800-53-r5: "AC-17(8)" becomes "ac-17.8".
 func controlIDs(labels []string) []string {
-	var out []string
+	out := make([]string, 0, len(labels))
 	for _, l := range labels {
 		id := strings.ToLower(strings.TrimSpace(l))
 		id = strings.ReplaceAll(id, "(", ".")

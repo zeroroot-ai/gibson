@@ -39,8 +39,9 @@ func TestD3FENDPack_IsValidAndNamesItsRelease(t *testing.T) {
 // Command and Scripting Interpreter. D3FEND maps File Analysis to it.
 func TestD3FENDPack_AQueryReturnsTheCountermeasuresOfATechnique(t *testing.T) {
 	p := d3fendPack(t)
-	var ids []string
-	for _, c := range p.CountermeasuresFor("T1059") {
+	cms := p.CountermeasuresFor("T1059")
+	ids := make([]string, 0, len(cms))
+	for _, c := range cms {
 		ids = append(ids, c.ID)
 	}
 	assert.Contains(t, ids, "D3-FA")
@@ -91,7 +92,7 @@ func TestD3FENDPack_RefusesAPredicate(t *testing.T) {
 
 	other := fixture
 	other.Name = "other-pack"
-	assert.NoError(t, other.Validate(), "the guard keys on the pack name")
+	require.NoError(t, other.Validate(), "the guard keys on the pack name")
 
 	listed := d3fendPack(t)
 	listed.NonDestructivePredicates = []string{"x"}

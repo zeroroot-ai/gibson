@@ -213,7 +213,7 @@ func blastRadiusText(manifest string, args map[string]any) string {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		var kv []string
+		kv := make([]string, 0, len(keys))
 		for _, k := range keys {
 			v := fmt.Sprint(args[k])
 			if len(v) > maxArgValueText {

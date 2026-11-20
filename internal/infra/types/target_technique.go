@@ -6,11 +6,12 @@ package types
 // TechniqueType represents an attack technique category
 type TechniqueType string
 
+// The technique categories of a target.
 const (
 	TechniqueDoS                 TechniqueType = "dos"
 	TechniqueReconnaissance      TechniqueType = "reconnaissance"
 	TechniqueInitialAccess       TechniqueType = "initial_access"
-	TechniqueCredentialAccess    TechniqueType = "credential_access"
+	TechniqueCredentialAccess    TechniqueType = "credential_access" //nolint:gosec // G101: a technique name, not a credential
 	TechniquePrivilegeEscalation TechniqueType = "privilege_escalation"
 	TechniqueCustom              TechniqueType = "custom"
 )

@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -81,8 +82,15 @@ func TestIncidentReportStatus_MapsEachErrorToACode(t *testing.T) {
 
 type irGraph struct{ rows map[string][]map[string]any }
 
+// Read returns the rows of the first key that the query holds. The keys are
+// parts of the query text, so the test does not need the text of a query.
 func (g irGraph) Read(_ context.Context, cypher string, _ map[string]any) ([]map[string]any, error) {
-	return g.rows[cypher], nil
+	for part, rows := range g.rows {
+		if strings.Contains(cypher, part) {
+			return rows, nil
+		}
+	}
+	return nil, nil
 }
 
 type irHistory struct{ evs []brain.Event }
@@ -121,7 +129,7 @@ func irContext(t *testing.T) context.Context {
 
 func TestGetIncidentReport_Success(t *testing.T) {
 	s := irService(t, map[string][]map[string]any{
-		incidentreport.AlertsQuery(): {{"alert_key": "a1"}},
+		"OPTIONAL MATCH (a:Alert)-[:PART_OF]->(i)": {{"alert_key": "a1"}},
 	})
 	resp, err := s.GetIncidentReport(irContext(t), &tenantv1.GetIncidentReportRequest{IncidentKey: "inc-1"})
 	if err != nil {

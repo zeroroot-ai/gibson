@@ -6,8 +6,6 @@ package finding
 import (
 	"errors"
 	"fmt"
-
-	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 )
 
 // Priority is the rank of a finding, from P1 (first) to P4 (last). The
@@ -15,6 +13,7 @@ import (
 // belief of its target second (gibson#1522).
 type Priority string
 
+// The four priorities. P1 is fixed first.
 const (
 	PriorityP1 Priority = "P1"
 	PriorityP2 Priority = "P2"
@@ -52,23 +51,4 @@ func (p Priority) Validate() error {
 		return nil
 	}
 	return fmt.Errorf("%w: %q", ErrInvalidPriority, string(p))
-}
-
-// RankOf is the sort rank of a finding: 1 first, 4 last. A finding that has no
-// priority yet ranks by its severity until cve-triage sets one: critical is 1,
-// high is 2, medium is 3, and low or info is 4.
-func RankOf(p Priority, severity agent.FindingSeverity) int {
-	if r := p.Rank(); r > 0 {
-		return r
-	}
-	switch severity {
-	case agent.SeverityCritical:
-		return 1
-	case agent.SeverityHigh:
-		return 2
-	case agent.SeverityMedium:
-		return 3
-	default:
-		return 4
-	}
 }

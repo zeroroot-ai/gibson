@@ -7,20 +7,21 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCheck_Validate(t *testing.T) {
-	assert.NoError(t, PredicateCheck("rce").Validate())
-	assert.NoError(t, ToolCheck("tool-1").Validate())
-	assert.NoError(t, Check{Kind: CheckScan}.Validate())
-	assert.ErrorIs(t, Check{}.Validate(), ErrNoCheck)
-	assert.ErrorIs(t, Check{Kind: "guess", Ref: "x"}.Validate(), ErrNoCheck)
-	assert.ErrorIs(t, Check{Kind: CheckTool}.Validate(), ErrNoCheck)
+	require.NoError(t, Check{Kind: CheckPredicate, Ref: "rce"}.Validate())
+	require.NoError(t, Check{Kind: CheckTool, Ref: "tool-1"}.Validate())
+	require.NoError(t, Check{Kind: CheckScan}.Validate())
+	require.ErrorIs(t, Check{}.Validate(), ErrNoCheck)
+	require.ErrorIs(t, Check{Kind: "guess", Ref: "x"}.Validate(), ErrNoCheck)
+	require.ErrorIs(t, Check{Kind: CheckTool}.Validate(), ErrNoCheck)
 }
 
 // A stronger check can verify and a weaker check cannot (ADR-0178).
 func TestCheck_CanVerify(t *testing.T) {
-	p, s, tool := PredicateCheck("rce"), Check{Kind: CheckScan, Ref: "m"}, ToolCheck("t")
+	p, s, tool := Check{Kind: CheckPredicate, Ref: "rce"}, Check{Kind: CheckScan, Ref: "m"}, Check{Kind: CheckTool, Ref: "t"}
 	assert.True(t, p.CanVerify(s))
 	assert.True(t, p.CanVerify(tool))
 	assert.True(t, s.CanVerify(tool))

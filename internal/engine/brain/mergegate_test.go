@@ -6,8 +6,9 @@ package brain
 import "testing"
 
 func grants(w *World) []MergeGranted {
-	var out []MergeGranted
-	for _, ev := range MergeGateSystem(w) {
+	evs := MergeGateSystem(w)
+	out := make([]MergeGranted, 0, len(evs))
+	for _, ev := range evs {
 		out = append(out, ev.(MergeGranted))
 	}
 	return out
@@ -25,7 +26,7 @@ func TestMergeGate_OneFixAtATimeForOneApplication(t *testing.T) {
 		t.Fatalf("grants = %+v, want only mr-1", first)
 	}
 	Reduce(w, first[0])
-	if grants(w) != nil {
+	if len(grants(w)) != 0 {
 		t.Fatal("mr-2 was granted while mr-1 has no health result")
 	}
 	if w.MayMerge("mr-2") || !w.MayMerge("mr-1") {
@@ -74,7 +75,7 @@ func TestMergeGate_IsQuiescentAndIgnoresADuplicateRequest(t *testing.T) {
 		t.Fatalf("slots = %d, want 1", n)
 	}
 	Reduce(w, grants(w)[0])
-	if grants(w) != nil {
+	if len(grants(w)) != 0 {
 		t.Fatal("not quiescent")
 	}
 }

@@ -113,7 +113,7 @@ func TestExposure_ReplayGivesTheSameNumbers(t *testing.T) {
 		CheckRerun{ID: "f1", CheckKind: "scan", EvidenceAt: at(7)},
 		FindingStatusChanged{ID: "f1", Status: FindingStatusVerified, At: at(8)},
 	}
-	var decoded []Event
+	decoded := make([]Event, 0, len(events))
 	for _, ev := range events {
 		data, err := EncodeEvent(ev)
 		if err != nil {
@@ -155,12 +155,14 @@ func TestMedianExposure_UsesVerifiedWindowsOfThePeriod(t *testing.T) {
 
 // A tenant with ten merged fixes and one revert has a revert rate of 10 percent.
 func TestRevertRate_TenMergedOneReverted(t *testing.T) {
-	var events []Event
-	for i := 0; i < 10; i++ {
+	events := make([]Event, 0, 12)
+	for i := range 10 {
 		events = append(events, MergeRequestObserved{Key: string(rune('a' + i)), State: MergeRequestMerged, At: at(i)})
 	}
-	events = append(events, FixReverted{MergeRequest: "c", At: at(12)})
-	events = append(events, FixReverted{MergeRequest: "c", At: at(13)}) // one merge request counts once
+	events = append(events,
+		FixReverted{MergeRequest: "c", At: at(12)},
+		FixReverted{MergeRequest: "c", At: at(13)}, // one merge request counts once
+	)
 	got := RevertRate(events, at(0), at(24))
 	if got.Merged != 10 || got.Reverted != 1 || got.Rate != 0.1 {
 		t.Fatalf("stats = %+v, want 10 merged, 1 reverted, 0.1", got)
@@ -177,7 +179,7 @@ func TestRevertRate_ReplayAndTrend(t *testing.T) {
 		MergeRequestObserved{Key: "new-3", State: MergeRequestMerged, At: at(32)},
 		MergeRequestObserved{Key: "new-4", State: MergeRequestMerged, At: at(33)},
 	}
-	var decoded []Event
+	decoded := make([]Event, 0, len(events))
 	for _, ev := range events {
 		data, _ := EncodeEvent(ev)
 		got, err := DecodeEvent(data)

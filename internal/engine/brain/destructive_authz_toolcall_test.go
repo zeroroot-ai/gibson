@@ -29,13 +29,13 @@ func decideAndWait(t *testing.T, e *Engine, q *DestructiveAuthorizationQueue, id
 	awaitDestructiveActionDecided(t, e, id)
 }
 
-func mustAuthorize(t *testing.T, q *DestructiveAuthorizationQueue, req ToolCallRequest) (ToolCallState, string) {
+func mustAuthorize(t *testing.T, q *DestructiveAuthorizationQueue, req ToolCallRequest) (state ToolCallState, id string) {
 	t.Helper()
-	st, id, err := q.AuthorizeToolCall(context.Background(), "acme", req)
+	state, id, err := q.AuthorizeToolCall(context.Background(), "acme", req)
 	if err != nil {
 		t.Fatalf("AuthorizeToolCall: %v", err)
 	}
-	return st, id
+	return state, id
 }
 
 // A call with no decision records one request, however often it repeats.
@@ -120,7 +120,7 @@ func TestAuthorizeToolCall_ADenialIsFinal(t *testing.T) {
 	q := e.DestructiveAuthorizationQueue()
 	_, id := mustAuthorize(t, q, toolReq("m1", "h1"))
 	decideAndWait(t, e, q, id, false)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if st, _ := mustAuthorize(t, q, toolReq("m1", "h1")); st != ToolCallDenied {
 			t.Fatalf("want denied, got %v", st)
 		}
@@ -140,7 +140,7 @@ func TestAuthorizeToolCall_ConcurrentCallsSpendOneApprovalOnce(t *testing.T) {
 	var mu sync.Mutex
 	approved := 0
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for range n {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
