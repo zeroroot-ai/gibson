@@ -9,7 +9,7 @@
   "COUNTERS"
  ],
  "taxonomy_node_identity": {
-  "Countermeasure": "countermeasure_id"
+  "Countermeasure": "key"
  },
  "author": "zeroroot",
  "visibility": "public",
@@ -129,6 +129,9 @@
     "T1114.003",
     "T1564",
     "T1564.008"
+   ],
+   "nist_controls": [
+    "cm-6.3"
    ]
   },
   {
@@ -199,6 +202,12 @@
     "T1531",
     "T1548",
     "T1548.005"
+   ],
+   "nist_controls": [
+    "ac-2.1",
+    "ac-2.2",
+    "ac-2.3",
+    "ac-7.4"
    ]
   },
   {
@@ -2104,7 +2113,10 @@
    "id": "D3-DLIC",
    "name": "Driver Load Integrity Checking",
    "tactic": "Harden",
-   "parent": "D3-PH"
+   "parent": "D3-PH",
+   "nist_controls": [
+    "au-10.5"
+   ]
   },
   {
    "id": "D3-DLV",
@@ -2524,6 +2536,9 @@
     "T1574.007",
     "T1574.008",
     "T1574.009"
+   ],
+   "nist_controls": [
+    "ac-17.8"
    ]
   },
   {
@@ -2655,7 +2670,10 @@
   {
    "id": "D3-EI",
    "name": "Execution Isolation",
-   "tactic": "Isolate"
+   "tactic": "Isolate",
+   "nist_controls": [
+    "sc-3"
+   ]
   },
   {
    "id": "D3-ELM",
@@ -2856,6 +2874,10 @@
     "T1574.009",
     "T1574.012",
     "T1649"
+   ],
+   "nist_controls": [
+    "ra-3.3",
+    "si-3"
    ]
   },
   {
@@ -3762,7 +3784,10 @@
   {
    "id": "D3-ID",
    "name": "Identifier Analysis",
-   "tactic": "Detect"
+   "tactic": "Detect",
+   "nist_controls": [
+    "ra-3.3"
+   ]
   },
   {
    "id": "D3-IDA",
@@ -3866,6 +3891,10 @@
     "T1566",
     "T1566.001",
     "T1566.002"
+   ],
+   "nist_controls": [
+    "ac-4.10",
+    "ac-4.11"
    ]
   },
   {
@@ -3934,6 +3963,9 @@
     "T1087.001",
     "T1136",
     "T1136.001"
+   ],
+   "nist_controls": [
+    "ac-6.9"
    ]
   },
   {
@@ -4107,6 +4139,11 @@
     "T1574.009",
     "T1574.012",
     "T1649"
+   ],
+   "nist_controls": [
+    "ac-5",
+    "ac-6",
+    "sc-2"
    ]
   },
   {
@@ -4136,7 +4173,10 @@
   {
    "id": "D3-MA",
    "name": "Message Analysis",
-   "tactic": "Detect"
+   "tactic": "Detect",
+   "nist_controls": [
+    "ra-3.3"
+   ]
   },
   {
    "id": "D3-MAN",
@@ -4291,6 +4331,9 @@
     "T1606",
     "T1606.001",
     "T1606.002"
+   ],
+   "nist_controls": [
+    "ac-2.1"
    ]
   },
   {
@@ -4313,7 +4356,10 @@
   {
    "id": "D3-NI",
    "name": "Network Isolation",
-   "tactic": "Isolate"
+   "tactic": "Isolate",
+   "nist_controls": [
+    "sc-3"
+   ]
   },
   {
    "id": "D3-NM",
@@ -4374,7 +4420,12 @@
   {
    "id": "D3-NTA",
    "name": "Network Traffic Analysis",
-   "tactic": "Detect"
+   "tactic": "Detect",
+   "nist_controls": [
+    "ra-3.3",
+    "ra-5",
+    "si-3"
+   ]
   },
   {
    "id": "D3-NTCD",
@@ -4950,7 +5001,10 @@
    "id": "D3-OSM",
    "name": "Operating System Monitoring",
    "tactic": "Detect",
-   "parent": "D3-PM"
+   "parent": "D3-PM",
+   "nist_controls": [
+    "si-4"
+   ]
   },
   {
    "id": "D3-OTF",
@@ -5010,6 +5064,10 @@
     "T1573",
     "T1573.001",
     "T1573.002"
+   ],
+   "nist_controls": [
+    "ac-4.10",
+    "ac-4.11"
    ]
   },
   {
@@ -5042,7 +5100,11 @@
   {
    "id": "D3-PA",
    "name": "Process Analysis",
-   "tactic": "Detect"
+   "tactic": "Detect",
+   "nist_controls": [
+    "ra-3.3",
+    "si-3"
+   ]
   },
   {
    "id": "D3-PAM",
@@ -5344,7 +5406,11 @@
   {
    "id": "D3-PM",
    "name": "Platform Monitoring",
-   "tactic": "Detect"
+   "tactic": "Detect",
+   "nist_controls": [
+    "ra-3.3",
+    "si-3"
+   ]
   },
   {
    "id": "D3-PMAD",
@@ -6987,6 +7053,9 @@
     "T1564.005",
     "T1614",
     "T1614.001"
+   ],
+   "nist_controls": [
+    "sc-2"
    ]
   },
   {
@@ -7435,12 +7504,20 @@
     "T1531",
     "T1548",
     "T1548.005"
+   ],
+   "nist_controls": [
+    "ac-5",
+    "ac-6"
    ]
   },
   {
    "id": "D3-UBA",
    "name": "User Behavior Analysis",
-   "tactic": "Detect"
+   "tactic": "Detect",
+   "nist_controls": [
+    "ac-6.9",
+    "ra-3.3"
+   ]
   },
   {
    "id": "D3-UDTA",

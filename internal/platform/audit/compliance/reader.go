@@ -71,6 +71,23 @@ type ControlEvidence struct {
 	State         State
 	EventCount    int64
 	LastEventTime time.Time // zero when EventCount is 0
+	// Countermeasures are the countermeasures that the D3FEND pack maps to
+	// this control. They are named only when the tenant enabled that pack.
+	// A countermeasure is context for the control. It is not evidence.
+	Countermeasures []CountermeasureRef
+}
+
+// CountermeasureRef names one countermeasure next to a control.
+type CountermeasureRef struct {
+	// ID is the id of the countermeasure, for example "D3-FA".
+	ID string
+	// Name is the name of the countermeasure.
+	Name string
+	// Tactic is the tactic of the countermeasure, for example "Detect".
+	Tactic string
+	// MappedControls are the ids of the controls that D3FEND maps to the
+	// countermeasure, when they are this control or one of its enhancements.
+	MappedControls []string
 }
 
 // EvidenceEvent is one audit record that is evidence for one control or
@@ -236,6 +253,9 @@ func (r *Reader) Evidence(ctx context.Context, q Query) (*Report, error) {
 	}
 
 	report := newReport(&pack, q)
+	if err := r.nameCountermeasures(ctx, q, report); err != nil {
+		return nil, err
+	}
 	index := make(map[string]int, len(report.Controls))
 	for i, c := range report.Controls {
 		index[c.ID] = i
@@ -310,6 +330,38 @@ ORDER  BY id ASC`, q.Tenant, q.Start, q.End)
 		report.NextPageToken = token
 	}
 	return report, nil
+}
+
+// nameCountermeasures adds to each control of the report the countermeasures
+// that the D3FEND pack maps to it (gibson#1486). It does nothing when the
+// catalog has no D3FEND pack, or when the tenant did not enable it. The D3FEND
+// mapping names NIST SP 800-53 controls, so only a framework pack that has
+// those control ids gets names, and a control that no countermeasure maps to
+// has none.
+func (r *Reader) nameCountermeasures(ctx context.Context, q Query, report *Report) error {
+	if q.Pack != ontology.NISTPackName {
+		return nil
+	}
+	d3fend, ok := r.catalog.Get(ontology.D3FENDPackName)
+	if !ok || len(d3fend.Countermeasures) == 0 {
+		return nil
+	}
+	enabled, err := r.enabled.IsDomainPackEnabled(ctx, q.Tenant, ontology.D3FENDPackName)
+	if err != nil {
+		return fmt.Errorf("compliance: read the enabled packs of the tenant: %w", err)
+	}
+	if !enabled {
+		return nil
+	}
+	for i := range report.Controls {
+		c := &report.Controls[i]
+		for _, cm := range d3fend.CountermeasuresForControl(c.ID) {
+			c.Countermeasures = append(c.Countermeasures, CountermeasureRef{
+				ID: cm.ID, Name: cm.Name, Tactic: cm.Tactic, MappedControls: cm.ControlsUnder(c.ID),
+			})
+		}
+	}
+	return nil
 }
 
 // newReport returns a report with each control of the pack in its first

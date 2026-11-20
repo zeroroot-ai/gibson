@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 )
@@ -59,6 +60,8 @@ type extract struct {
 		Tactic   string   `json:"tactic"`
 		Parent   string   `json:"parent"`
 		Counters []string `json:"counters"`
+		// NISTControls are the labels that D3FEND uses, for example "AC-17(8)".
+		NISTControls []string `json:"nist_controls"`
 	} `json:"countermeasures"`
 }
 
@@ -110,6 +113,7 @@ func BuildPack(ex *extract) (ontology.DomainPack, error) {
 		tactics[c.Tactic] = struct{}{}
 		pack.Countermeasures = append(pack.Countermeasures, ontology.Countermeasure{
 			ID: c.ID, Name: c.Name, Tactic: c.Tactic, Parent: c.Parent, Counters: c.Counters,
+			NISTControls: controlIDs(c.NISTControls),
 		})
 	}
 	for t := range tactics {
@@ -120,6 +124,19 @@ func BuildPack(ex *extract) (ontology.DomainPack, error) {
 		return ontology.DomainPack{}, fmt.Errorf("d3fendgen: %w", err)
 	}
 	return pack, nil
+}
+
+// controlIDs turns the control labels of D3FEND into the control ids of the
+// pack nist-800-53-r5: "AC-17(8)" becomes "ac-17.8".
+func controlIDs(labels []string) []string {
+	var out []string
+	for _, l := range labels {
+		id := strings.ToLower(strings.TrimSpace(l))
+		id = strings.ReplaceAll(id, "(", ".")
+		id = strings.ReplaceAll(id, ")", "")
+		out = append(out, id)
+	}
+	return out
 }
 
 // Render returns the bytes of the pack file.

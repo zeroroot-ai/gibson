@@ -2,7 +2,7 @@
 
 `d3fendgen` writes the catalog Domain Pack `mitre-d3fend` (gibson#1484, ADR-0133).
 
-The pack holds taxonomy and ontology only. It has the `Countermeasure` label, the countermeasure hierarchy (tactic, then technique), and the ATT&CK techniques that each countermeasure counters. It holds no predicate.
+The pack holds taxonomy and ontology only. It has the `Countermeasure` label, the countermeasure hierarchy (tactic, then technique), and the ATT&CK techniques that each countermeasure counters.  It also holds the NIST SP 800-53 rev 5 controls that D3FEND maps to each countermeasure. It holds no predicate.
 
 ## Source
 
@@ -28,3 +28,7 @@ The ontology states the license `MIT` (`dcterms:license`). The ontology also say
 2. To check that the committed pack file matches the extract, run `make check-d3fend-pack`. The unit test `TestCommittedPackMatchesTheExtract` runs the same check.
 3. To move to a new D3FEND release, make an empty directory and run `python3 -I tools/d3fendgen/fetch.py <empty dir> <extract file>`. The run takes about 15 minutes.
 4. Compress the extract with `gzip -9 -n`, replace `d3fend-extract.json.gz`, update `ExtractSHA256` in `main.go` and the table above, and increment `PackVersion`.
+
+## NIST SP 800-53 mapping
+
+The ontology links a NIST SP 800-53 rev 5 control to a defensive technique with the property `broader`. `fetch.py` copies each such link into the extract. The tool writes the control label as a pack control id, so "AC-17(8)" becomes "ac-17.8". The pack `nist-800-53-r5` lists base controls only. A countermeasure that maps to an enhancement is named next to the base control of that enhancement. The mapping is sparse in the official data: 21 countermeasures map to 35 controls in release 1.6.0.

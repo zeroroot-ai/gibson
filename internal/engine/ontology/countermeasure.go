@@ -26,11 +26,15 @@ const (
 	// rule of the fix loop, never a predicate of a countermeasure.
 	D3FENDPackName = "mitre-d3fend"
 
+	// NISTPackName is the catalog name of the NIST SP 800-53 rev 5 pack. The
+	// NISTControls of a countermeasure use the control ids of that pack.
+	NISTPackName = "nist-800-53-r5"
+
 	// CountermeasureLabel is the node label of a countermeasure.
 	CountermeasureLabel = "Countermeasure"
 	// CountermeasureIdentityProperty is the property that a countermeasure node
 	// is merged on. Its value is the id of the countermeasure.
-	CountermeasureIdentityProperty = "countermeasure_id"
+	CountermeasureIdentityProperty = "key"
 	// CountersRelationshipType is the edge from a countermeasure to an ATT&CK
 	// technique that it counters.
 	CountersRelationshipType = "COUNTERS"
@@ -138,12 +142,25 @@ func (p *DomainPack) Countermeasure(id string) (Countermeasure, bool) {
 }
 
 // CountermeasuresForControl returns the countermeasures that the pack maps to
-// the control, in pack order.
+// the control or to one of its enhancements, in pack order. The control
+// "ac-2" matches a mapping to "ac-2" and to "ac-2.1".
 func (p *DomainPack) CountermeasuresForControl(controlID string) []Countermeasure {
 	var out []Countermeasure
 	for _, c := range p.Countermeasures {
-		if slices.Contains(c.NISTControls, controlID) {
+		if len(c.ControlsUnder(controlID)) > 0 {
 			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ControlsUnder returns the controls of the countermeasure that are the
+// control itself or one of its enhancements, in the order of NISTControls.
+func (c Countermeasure) ControlsUnder(controlID string) []string {
+	var out []string
+	for _, id := range c.NISTControls {
+		if id == controlID || strings.HasPrefix(id, controlID+".") {
+			out = append(out, id)
 		}
 	}
 	return out

@@ -116,3 +116,20 @@ func TestBuildPack_RefusesAnEmptyExtract(t *testing.T) {
 		t.Fatal("BuildPack accepted an extract with no countermeasure")
 	}
 }
+
+func TestBuildPack_MapsControlLabelsToPackIDs(t *testing.T) {
+	raw := []byte(`{"release":"1","license":"MIT","ontology_url":"u","ontology_sha256":"abc","countermeasures":[
+ {"id":"D3-EDL","name":"Executable Denylisting","tactic":"Isolate","counters":[],"nist_controls":["AC-17(8)","SC-3"]}]}`)
+	ex, err := ReadExtract(gzipBytes(t, raw), sha(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, err := BuildPack(ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := pack.Countermeasures[0].NISTControls
+	if len(got) != 2 || got[0] != "ac-17.8" || got[1] != "sc-3" {
+		t.Fatalf("controls = %v", got)
+	}
+}
