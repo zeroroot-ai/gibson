@@ -122,7 +122,7 @@ func TestWireExecutor_GivesThePlannerItsCatalog(t *testing.T) {
 		registry := liveBeliefRegistry(t)
 		hierarchy := dispatchTestHierarchy(t)
 		hunter := Capability{Kind: "agent", Name: "injection-hunter",
-			Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+			Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"initial_access"}, nil)}
 		deps := ExecutorDeps{
 			Dispatcher:    &goroutineDispatcher{},
 			Decider:       &scriptedLLM{},
@@ -143,7 +143,7 @@ func TestWireExecutor_GivesThePlannerItsCatalog(t *testing.T) {
 		}
 
 		e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
-		e.Submit(HypothesisObserved{ScopeID: "s", Claim: "the filter is bypassable", Proposer: "a", Technique: "indirect_prompt_injection"})
+		e.Submit(HypothesisObserved{ScopeID: "s", Claim: "the debug endpoint is exposed", Proposer: "a", Technique: "exposed_debug_endpoint"})
 		voiSettle(e, w, 1)
 		cancel()
 

@@ -23,7 +23,7 @@ type CategoryClassifier interface {
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and tracing
-	//   - proposed: The proposed category name (e.g., "jailbreaking")
+	//   - proposed: The proposed category name (e.g., "exposed_svc")
 	//   - description: Additional context about the category
 	//
 	// Returns the normalized category name (either matched or newly registered)

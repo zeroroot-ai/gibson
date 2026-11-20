@@ -4,6 +4,7 @@
 package ontology
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -51,11 +52,28 @@ func TestMainDomainPack_FreshValueEachCall(t *testing.T) {
 	assert.Len(t, b.Predicates, want, "mutating one call's map must never affect another")
 }
 
-// The catalog pack states each of its predicates as non-destructive. A new
-// predicate that the pack does not state is destructive, so this test makes
-// the author decide.
+// destructivePredicates is the decision of the author for each predicate that
+// changes the target. The pack names the other predicates as non-destructive
+// (ADR-0132). A new predicate is destructive until the author names it, so this
+// test makes the author decide: a predicate is in the pack list or in this one.
+var destructivePredicates = []string{
+	// The proof writes one ConfigMap to the namespace of the target.
+	"rbac_write_access_proven",
+}
+
 func TestMainDomainPack_StatesEveryPredicate(t *testing.T) {
 	pack := mainPack(t)
 	require.NoError(t, pack.Validate())
-	assert.Len(t, pack.NonDestructivePredicates, len(pack.Predicates))
+	assert.Len(t, pack.NonDestructivePredicates, len(pack.Predicates)-len(destructivePredicates))
+	for _, name := range destructivePredicates {
+		assert.Contains(t, pack.Predicates, name)
+		assert.NotContains(t, pack.NonDestructivePredicates, name,
+			"the predicate %s is destructive and must not be listed as non-destructive", name)
+	}
+	for name := range pack.Predicates {
+		if !slices.Contains(destructivePredicates, name) {
+			assert.Contains(t, pack.NonDestructivePredicates, name,
+				"the predicate %s is not stated: list it as non-destructive or as destructive", name)
+		}
+	}
 }

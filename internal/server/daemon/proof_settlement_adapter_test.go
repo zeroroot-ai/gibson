@@ -192,7 +192,7 @@ func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t
 		Version:                  1,
 		Predicates:               map[string]string{"read_only": "true", "writes": "true", "outside": "true"},
 		NonDestructivePredicates: []string{"read_only"},
-		Techniques:               map[string]string{"read_only": "reconnaissance", "writes": "extraction"},
+		Techniques:               map[string]string{"read_only": "reconnaissance", "writes": "credential_access"},
 	})
 	deadline := time.Now().Add(2 * time.Second)
 	for len(registry.For("acme").DomainPacks()) == 0 {

@@ -1,0 +1,68 @@
+# Service reports. Flaw: the image nginx 1.18.0 holds known vulnerable
+# packages (flaw "vulnerable-package-in-image"). The check is an image scan.
+# Fix: move the image to a current nginx release, pinned by digest.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reports-nginx
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      location = /healthz {
+        default_type text/plain;
+        return 200 'ok';
+      }
+      location / {
+        default_type text/plain;
+        return 200 'reports';
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reports
+  annotations:
+    refenv.zeroroot.ai/health-url: http://reports.refenv.svc.cluster.local:8080/healthz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: reports
+  template:
+    metadata:
+      labels:
+        app: reports
+    spec:
+      containers:
+        - name: reports
+          image: nginx@sha256:e90ac5331fe095cea01b121a3627174b2e33e06e83720e9a934c7b8ccc9c55a0
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: conf
+          configMap:
+            name: reports-nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reports
+spec:
+  selector:
+    app: reports
+  ports:
+    - port: 8080
+      targetPort: 8080

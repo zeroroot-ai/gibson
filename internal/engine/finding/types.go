@@ -26,12 +26,8 @@ const (
 type FindingCategory string
 
 const (
-	CategoryJailbreak             FindingCategory = "jailbreak"
-	CategoryPromptInjection       FindingCategory = "prompt_injection"
-	CategoryDataExtraction        FindingCategory = "data_extraction"
 	CategoryPrivilegeEscalation   FindingCategory = "privilege_escalation"
 	CategoryDoS                   FindingCategory = "dos"
-	CategoryModelManipulation     FindingCategory = "model_manipulation"
 	CategoryInformationDisclosure FindingCategory = "information_disclosure"
 	CategoryUncategorized         FindingCategory = "uncategorized"
 )
@@ -44,8 +40,7 @@ func (fc FindingCategory) String() string {
 // IsValid checks if the category is a valid value
 func (fc FindingCategory) IsValid() bool {
 	switch fc {
-	case CategoryJailbreak, CategoryPromptInjection, CategoryDataExtraction,
-		CategoryPrivilegeEscalation, CategoryDoS, CategoryModelManipulation,
+	case CategoryPrivilegeEscalation, CategoryDoS,
 		CategoryInformationDisclosure, CategoryUncategorized:
 		return true
 	default:
@@ -92,41 +87,9 @@ type ReproStep struct {
 
 // SimpleMitreMapping is a simplified MITRE mapping for JSON storage
 type SimpleMitreMapping struct {
-	TechniqueID   string `json:"technique_id"`     // e.g., "T1566", "AML.T0043"
+	TechniqueID   string `json:"technique_id"`     // e.g., "T1566"
 	TechniqueName string `json:"technique_name"`   // Human-readable name
 	Tactic        string `json:"tactic,omitempty"` // e.g., "Initial Access"
-}
-
-// Classification represents the output of the finding classifier
-type Classification struct {
-	Category    FindingCategory       `json:"category"`
-	Subcategory string                `json:"subcategory"`
-	Severity    agent.FindingSeverity `json:"severity"`
-	Confidence  float64               `json:"confidence"` // 0.0 - 1.0
-	MitreAttack []SimpleMitreMapping  `json:"mitre_attack,omitempty"`
-	MitreAtlas  []SimpleMitreMapping  `json:"mitre_atlas,omitempty"`
-	RiskScore   float64               `json:"risk_score"` // 0.0 - 10.0
-	Remediation string                `json:"remediation"`
-	NeedsReview bool                  `json:"needs_review"` // True if classifier is uncertain
-
-	// Metadata about the classification
-	Method    ClassificationMethod `json:"method"`    // Which classifier produced this result
-	Rationale string               `json:"rationale"` // Explanation for the classification
-}
-
-// ClassificationMethod indicates which classifier produced the classification
-type ClassificationMethod string
-
-const (
-	MethodHeuristic ClassificationMethod = "heuristic"
-	MethodLLM       ClassificationMethod = "llm"
-	MethodComposite ClassificationMethod = "composite"
-	MethodManual    ClassificationMethod = "manual"
-)
-
-// String returns the string representation of ClassificationMethod
-func (cm ClassificationMethod) String() string {
-	return string(cm)
 }
 
 // NewEnhancedFinding creates a new enhanced finding from a base finding
@@ -144,33 +107,6 @@ func NewEnhancedFinding(baseFinding agent.Finding, missionID types.ID, agentName
 		OccurrenceCount: 1,
 		UpdatedAt:       now,
 	}
-}
-
-// WithClassification applies classification results to the finding
-func (f EnhancedFinding) WithClassification(c Classification) EnhancedFinding {
-	f.Category = string(c.Category)
-	f.Subcategory = c.Subcategory
-	f.Severity = c.Severity
-	f.Confidence = c.Confidence
-	f.RiskScore = c.RiskScore
-	f.Remediation = c.Remediation
-
-	// Store MITRE mappings in Metadata
-	if len(c.MitreAttack) > 0 {
-		if f.Metadata == nil {
-			f.Metadata = make(map[string]any)
-		}
-		f.Metadata["mitre_attack"] = c.MitreAttack
-	}
-	if len(c.MitreAtlas) > 0 {
-		if f.Metadata == nil {
-			f.Metadata = make(map[string]any)
-		}
-		f.Metadata["mitre_atlas"] = c.MitreAtlas
-	}
-
-	f.UpdatedAt = time.Now()
-	return f
 }
 
 // WithStatus sets the finding status
@@ -247,21 +183,6 @@ func (f EnhancedFinding) GetMitreAttack() []SimpleMitreMapping {
 	}
 
 	val, ok := f.Metadata[security.MetaKeyMitreAttack]
-	if !ok {
-		return nil
-	}
-
-	// Handle various types from JSON deserialization
-	return convertToSimpleMappings(val)
-}
-
-// GetMitreAtlas retrieves the MITRE ATLAS mappings from Metadata
-func (f EnhancedFinding) GetMitreAtlas() []SimpleMitreMapping {
-	if f.Metadata == nil {
-		return nil
-	}
-
-	val, ok := f.Metadata[security.MetaKeyMitreAtlas]
 	if !ok {
 		return nil
 	}
@@ -348,7 +269,7 @@ func (f EnhancedFinding) GetCVSS() *agent.CVSSScore {
 }
 
 // MarshalJSON implements custom JSON marshaling to maintain backward compatibility
-// by including mitre_attack and mitre_atlas as top-level fields in the JSON output
+// by including mitre_attack as a top-level field in the JSON output
 func (f EnhancedFinding) MarshalJSON() ([]byte, error) {
 	// Create an alias type to avoid recursion
 	type Alias EnhancedFinding
@@ -357,16 +278,14 @@ func (f EnhancedFinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		*Alias
 		MitreAttack []SimpleMitreMapping `json:"mitre_attack,omitempty"`
-		MitreAtlas  []SimpleMitreMapping `json:"mitre_atlas,omitempty"`
 	}{
 		Alias:       (*Alias)(&f),
 		MitreAttack: f.GetMitreAttack(),
-		MitreAtlas:  f.GetMitreAtlas(),
 	})
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling to maintain backward compatibility
-// by reading mitre_attack and mitre_atlas from either top-level fields or metadata
+// by reading mitre_attack from either top-level fields or metadata
 func (f *EnhancedFinding) UnmarshalJSON(data []byte) error {
 	// Create an alias type to avoid recursion
 	type Alias EnhancedFinding
@@ -375,7 +294,6 @@ func (f *EnhancedFinding) UnmarshalJSON(data []byte) error {
 	aux := &struct {
 		*Alias
 		MitreAttack []SimpleMitreMapping `json:"mitre_attack,omitempty"`
-		MitreAtlas  []SimpleMitreMapping `json:"mitre_atlas,omitempty"`
 	}{
 		Alias: (*Alias)(f),
 	}
@@ -384,18 +302,12 @@ func (f *EnhancedFinding) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// If MITRE fields were in the JSON, store them in Metadata
+	// If the MITRE field was in the JSON, store them in Metadata
 	if len(aux.MitreAttack) > 0 {
 		if f.Metadata == nil {
 			f.Metadata = make(map[string]any)
 		}
 		f.Metadata["mitre_attack"] = aux.MitreAttack
-	}
-	if len(aux.MitreAtlas) > 0 {
-		if f.Metadata == nil {
-			f.Metadata = make(map[string]any)
-		}
-		f.Metadata["mitre_atlas"] = aux.MitreAtlas
 	}
 
 	return nil

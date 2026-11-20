@@ -47,7 +47,7 @@ func TestLoadDomainPack_CompilesEveryPredicate(t *testing.T) {
 	pack := &ontology.DomainPack{
 		Name:       "k8s",
 		Version:    1,
-		Techniques: map[string]string{"T1190": "reconnaissance", "T1059": "extraction"},
+		Techniques: map[string]string{"T1190": "reconnaissance", "T1059": "credential_access"},
 		Predicates: map[string]string{
 			"T1190": `evidence.exists(e, httpStatus(e) == 200)`,
 			"T1059": `markerPresent(evidence, "nonce")`,
@@ -78,7 +78,7 @@ func TestLoadDomainPack_FailsClosedOnOutOfEnvironmentReference(t *testing.T) {
 	pack := &ontology.DomainPack{
 		Name:       "k8s",
 		Version:    1,
-		Techniques: map[string]string{"T1190": "reconnaissance", "T1059": "extraction"},
+		Techniques: map[string]string{"T1190": "reconnaissance", "T1059": "credential_access"},
 		Predicates: map[string]string{
 			"T1190": `evidence.exists(e, httpStatus(e) == 200)`, // good
 			"T1059": `evidence.exists(e, cvssScore(e) > 7.0)`,   // out-of-environment function
@@ -95,7 +95,7 @@ func TestLoadDomainPack_FailsClosedOnSyntaxError(t *testing.T) {
 	pack := &ontology.DomainPack{
 		Name:       "k8s",
 		Version:    1,
-		Techniques: map[string]string{"T1190": "reconnaissance", "T1059": "extraction"},
+		Techniques: map[string]string{"T1190": "reconnaissance", "T1059": "credential_access"},
 		Predicates: map[string]string{
 			"T1190": `evidence.exists(e, e.type ==`,
 		},
@@ -109,7 +109,7 @@ func TestLoadDomainPack_FailsClosedOnNonBoolPredicate(t *testing.T) {
 	pack := &ontology.DomainPack{
 		Name:       "k8s",
 		Version:    1,
-		Techniques: map[string]string{"T1190": "reconnaissance", "T1059": "extraction"},
+		Techniques: map[string]string{"T1190": "reconnaissance", "T1059": "credential_access"},
 		Predicates: map[string]string{
 			"T1190": `evidence.size()`,
 		},

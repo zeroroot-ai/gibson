@@ -50,8 +50,8 @@ func TestCoreCategoriesIncludeEveryEnumValue(t *testing.T) {
 	// Pinned explicitly, alongside the derived check above, so a change to
 	// target_technique.go that silently drops a value is caught two ways.
 	for _, want := range []CategoryID{
-		"prompt_injection", "jailbreak", "extraction", "dos",
-		"poisoning", "evasion", "reconnaissance", "custom",
+		"dos", "reconnaissance", "initial_access", "credential_access",
+		"privilege_escalation", "custom",
 	} {
 		assert.True(t, GlobalTechniques.HasCategory(want), "core categories missing %q", want)
 	}
@@ -75,27 +75,27 @@ func TestGlobalTechniquesSeedsNoTechniques(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewTechniqueHierarchyValidatesCategories(t *testing.T) {
-	_, err := NewTechniqueHierarchy([]CategoryID{"jailbreak", "not a valid id"}, nil)
+	_, err := NewTechniqueHierarchy([]CategoryID{"initial_access", "not a valid id"}, nil)
 	require.Error(t, err)
 }
 
 func TestNewTechniqueHierarchyRejectsDuplicateCategory(t *testing.T) {
-	_, err := NewTechniqueHierarchy([]CategoryID{"jailbreak", "jailbreak"}, nil)
+	_, err := NewTechniqueHierarchy([]CategoryID{"initial_access", "initial_access"}, nil)
 	require.Error(t, err)
 }
 
 func TestNewTechniqueHierarchyValidatesTechniqueID(t *testing.T) {
 	_, err := NewTechniqueHierarchy(
-		[]CategoryID{"jailbreak"},
-		map[TechniqueID]CategoryID{"not a valid id": "jailbreak"},
+		[]CategoryID{"initial_access"},
+		map[TechniqueID]CategoryID{"not a valid id": "initial_access"},
 	)
 	require.Error(t, err)
 }
 
 func TestNewTechniqueHierarchyValidatesRollupCategory(t *testing.T) {
 	_, err := NewTechniqueHierarchy(
-		[]CategoryID{"jailbreak"},
-		map[TechniqueID]CategoryID{"dan_prompt": "not a valid id"},
+		[]CategoryID{"initial_access"},
+		map[TechniqueID]CategoryID{"default_credentials": "not a valid id"},
 	)
 	require.Error(t, err)
 }
@@ -104,23 +104,23 @@ func TestNewTechniqueHierarchyRejectsUnadmittedCategoryInRollup(t *testing.T) {
 	// The rollup edge must point at something admitted, or it bridges to
 	// nothing.
 	_, err := NewTechniqueHierarchy(
-		[]CategoryID{"jailbreak"},
-		map[TechniqueID]CategoryID{"dan_prompt": "extraction"},
+		[]CategoryID{"initial_access"},
+		map[TechniqueID]CategoryID{"default_credentials": "credential_access"},
 	)
 	require.Error(t, err)
 }
 
 func TestNewTechniqueHierarchyAcceptsAValidRollup(t *testing.T) {
 	h, err := NewTechniqueHierarchy(
-		[]CategoryID{"jailbreak", "extraction"},
+		[]CategoryID{"initial_access", "credential_access"},
 		map[TechniqueID]CategoryID{
-			"dan_prompt":         "jailbreak",
-			"system_prompt_leak": "extraction",
+			"default_credentials": "initial_access",
+			"token_leak":          "credential_access",
 		},
 	)
 	require.NoError(t, err)
-	assert.ElementsMatch(t, []CategoryID{"jailbreak", "extraction"}, h.Categories())
-	assert.ElementsMatch(t, []TechniqueID{"dan_prompt", "system_prompt_leak"}, h.Techniques())
+	assert.ElementsMatch(t, []CategoryID{"initial_access", "credential_access"}, h.Categories())
+	assert.ElementsMatch(t, []TechniqueID{"default_credentials", "token_leak"}, h.Techniques())
 }
 
 // ---------------------------------------------------------------------------
@@ -130,18 +130,18 @@ func TestNewTechniqueHierarchyAcceptsAValidRollup(t *testing.T) {
 
 func TestCategoryOfLooksUpTheRollup(t *testing.T) {
 	h, err := NewTechniqueHierarchy(
-		[]CategoryID{"jailbreak"},
-		map[TechniqueID]CategoryID{"dan_prompt": "jailbreak"},
+		[]CategoryID{"initial_access"},
+		map[TechniqueID]CategoryID{"default_credentials": "initial_access"},
 	)
 	require.NoError(t, err)
 
-	category, ok := h.CategoryOf("dan_prompt")
+	category, ok := h.CategoryOf("default_credentials")
 	require.True(t, ok)
-	assert.Equal(t, CategoryID("jailbreak"), category)
+	assert.Equal(t, CategoryID("initial_access"), category)
 }
 
 func TestCategoryOfReportsNotFoundForAnUnadmittedTechnique(t *testing.T) {
-	h, err := NewTechniqueHierarchy([]CategoryID{"jailbreak"}, nil)
+	h, err := NewTechniqueHierarchy([]CategoryID{"initial_access"}, nil)
 	require.NoError(t, err)
 
 	category, ok := h.CategoryOf("never_registered")
@@ -151,14 +151,14 @@ func TestCategoryOfReportsNotFoundForAnUnadmittedTechnique(t *testing.T) {
 
 func TestHasCategoryAndHasTechnique(t *testing.T) {
 	h, err := NewTechniqueHierarchy(
-		[]CategoryID{"jailbreak"},
-		map[TechniqueID]CategoryID{"dan_prompt": "jailbreak"},
+		[]CategoryID{"initial_access"},
+		map[TechniqueID]CategoryID{"default_credentials": "initial_access"},
 	)
 	require.NoError(t, err)
 
-	assert.True(t, h.HasCategory("jailbreak"))
-	assert.False(t, h.HasCategory("extraction"))
-	assert.True(t, h.HasTechnique("dan_prompt"))
+	assert.True(t, h.HasCategory("initial_access"))
+	assert.False(t, h.HasCategory("credential_access"))
+	assert.True(t, h.HasTechnique("default_credentials"))
 	assert.False(t, h.HasTechnique("never_registered"))
 }
 
@@ -167,57 +167,57 @@ func TestHasCategoryAndHasTechnique(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWithTechniqueAddsWithoutMutatingTheReceiver(t *testing.T) {
-	base, err := NewTechniqueHierarchy([]CategoryID{"jailbreak", "extraction"}, nil)
+	base, err := NewTechniqueHierarchy([]CategoryID{"initial_access", "credential_access"}, nil)
 	require.NoError(t, err)
 
-	next, err := base.WithTechnique("dan_prompt", "jailbreak")
+	next, err := base.WithTechnique("default_credentials", "initial_access")
 	require.NoError(t, err)
 
-	assert.False(t, base.HasTechnique("dan_prompt"), "WithTechnique mutated the receiver")
-	assert.True(t, next.HasTechnique("dan_prompt"))
+	assert.False(t, base.HasTechnique("default_credentials"), "WithTechnique mutated the receiver")
+	assert.True(t, next.HasTechnique("default_credentials"))
 
-	category, ok := next.CategoryOf("dan_prompt")
+	category, ok := next.CategoryOf("default_credentials")
 	require.True(t, ok)
-	assert.Equal(t, CategoryID("jailbreak"), category)
+	assert.Equal(t, CategoryID("initial_access"), category)
 }
 
 func TestWithTechniqueRejectsAnUnadmittedCategory(t *testing.T) {
-	base, err := NewTechniqueHierarchy([]CategoryID{"jailbreak"}, nil)
+	base, err := NewTechniqueHierarchy([]CategoryID{"initial_access"}, nil)
 	require.NoError(t, err)
 
-	_, err = base.WithTechnique("system_prompt_leak", "extraction")
+	_, err = base.WithTechnique("token_leak", "credential_access")
 	require.Error(t, err)
 }
 
 func TestWithTechniqueRejectsANonIdentifierTechnique(t *testing.T) {
-	base, err := NewTechniqueHierarchy([]CategoryID{"jailbreak"}, nil)
+	base, err := NewTechniqueHierarchy([]CategoryID{"initial_access"}, nil)
 	require.NoError(t, err)
 
-	_, err = base.WithTechnique("dan prompt", "jailbreak")
+	_, err = base.WithTechnique("dan prompt", "initial_access")
 	require.Error(t, err)
 }
 
 func TestWithTechniqueRejectsADuplicateTechnique(t *testing.T) {
 	base, err := NewTechniqueHierarchy(
-		[]CategoryID{"jailbreak"},
-		map[TechniqueID]CategoryID{"dan_prompt": "jailbreak"},
+		[]CategoryID{"initial_access"},
+		map[TechniqueID]CategoryID{"default_credentials": "initial_access"},
 	)
 	require.NoError(t, err)
 
-	_, err = base.WithTechnique("dan_prompt", "jailbreak")
+	_, err = base.WithTechnique("default_credentials", "initial_access")
 	require.Error(t, err)
 }
 
 func TestWithTechniqueChainsAcrossMultipleCalls(t *testing.T) {
-	h, err := NewTechniqueHierarchy([]CategoryID{"jailbreak", "extraction"}, nil)
+	h, err := NewTechniqueHierarchy([]CategoryID{"initial_access", "credential_access"}, nil)
 	require.NoError(t, err)
 
-	h, err = h.WithTechnique("dan_prompt", "jailbreak")
+	h, err = h.WithTechnique("default_credentials", "initial_access")
 	require.NoError(t, err)
-	h, err = h.WithTechnique("system_prompt_leak", "extraction")
+	h, err = h.WithTechnique("token_leak", "credential_access")
 	require.NoError(t, err)
 
-	assert.ElementsMatch(t, []TechniqueID{"dan_prompt", "system_prompt_leak"}, h.Techniques())
+	assert.ElementsMatch(t, []TechniqueID{"default_credentials", "token_leak"}, h.Techniques())
 }
 
 // ---------------------------------------------------------------------------

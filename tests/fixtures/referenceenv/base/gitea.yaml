@@ -1,0 +1,112 @@
+# The Git host of the reference environment: Gitea, with SQLite and no
+# persistent volume. A new cluster starts with a new Git host, and the seed job
+# fills it. Gitea Actions is the pipeline (see pipeline.yaml).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitea-admin
+type: Opaque
+stringData:
+  username: refadmin
+  password: refenv-admin-pw-3b8c
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea
+  annotations:
+    refenv.zeroroot.ai/health-url: http://gitea.refenv.svc.cluster.local:3000/api/healthz
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gitea
+  template:
+    metadata:
+      labels:
+        app: gitea
+    spec:
+      initContainers:
+        # Make the admin user before the server starts. The setup script of
+        # the image writes app.ini from the GITEA__ variables.
+        - name: admin
+          image: gitea/gitea@sha256:4216d612992a25ed5fe6062679ca0be0b224f93c0b6fdba03e6c8f3d623cfb4e
+          command:
+            - sh
+            - -c
+            - >-
+              /usr/local/bin/docker-setup.sh &&
+              gitea migrate &&
+              gitea admin user create --admin --username "$ADMIN_USER"
+              --password "$ADMIN_PASSWORD" --email refadmin@refenv.invalid
+              --must-change-password=false
+          envFrom:
+            - configMapRef:
+                name: gitea-env
+          env:
+            - name: ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: gitea-admin
+                  key: username
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gitea-admin
+                  key: password
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/gitea
+            - name: config
+              mountPath: /etc/gitea
+      containers:
+        - name: gitea
+          image: gitea/gitea@sha256:4216d612992a25ed5fe6062679ca0be0b224f93c0b6fdba03e6c8f3d623cfb4e
+          envFrom:
+            - configMapRef:
+                name: gitea-env
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: 3000
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: 3000
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/gitea
+            - name: config
+              mountPath: /etc/gitea
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: config
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitea-env
+data:
+  GITEA__security__INSTALL_LOCK: "true"
+  GITEA__database__DB_TYPE: sqlite3
+  GITEA__server__HTTP_PORT: "3000"
+  GITEA__server__ROOT_URL: http://gitea.refenv.svc.cluster.local:3000/
+  GITEA__actions__ENABLED: "true"
+  GITEA__service__DISABLE_REGISTRATION: "true"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea
+spec:
+  selector:
+    app: gitea
+  ports:
+    - port: 3000
+      targetPort: 3000

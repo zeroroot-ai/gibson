@@ -19,10 +19,10 @@ import (
 func testHierarchy(t *testing.T) *TechniqueHierarchy {
 	t.Helper()
 	h, err := NewTechniqueHierarchy(
-		[]CategoryID{"prompt_injection", "data_exfiltration"},
+		[]CategoryID{"initial_access", "data_exfiltration"},
 		map[TechniqueID]CategoryID{
-			"direct_prompt_injection":   "prompt_injection",
-			"indirect_prompt_injection": "prompt_injection",
+			"exposed_admin_endpoint": "initial_access",
+			"exposed_debug_endpoint": "initial_access",
 		},
 	)
 	require.NoError(t, err)
@@ -33,17 +33,17 @@ func TestNewCoverage_AcceptsAdmittedCategoriesAndTechniques(t *testing.T) {
 	h := testHierarchy(t)
 
 	cov, err := NewCoverage(h,
-		[]CategoryID{"prompt_injection"},
-		[]TechniqueID{"direct_prompt_injection"},
+		[]CategoryID{"initial_access"},
+		[]TechniqueID{"exposed_admin_endpoint"},
 	)
 	require.NoError(t, err)
 
-	assert.True(t, cov.HasCategory("prompt_injection"))
-	assert.True(t, cov.HasTechnique("direct_prompt_injection"))
+	assert.True(t, cov.HasCategory("initial_access"))
+	assert.True(t, cov.HasTechnique("exposed_admin_endpoint"))
 	assert.False(t, cov.HasCategory("data_exfiltration"))
-	assert.False(t, cov.HasTechnique("indirect_prompt_injection"))
-	assert.ElementsMatch(t, []CategoryID{"prompt_injection"}, cov.Categories())
-	assert.ElementsMatch(t, []TechniqueID{"direct_prompt_injection"}, cov.Techniques())
+	assert.False(t, cov.HasTechnique("exposed_debug_endpoint"))
+	assert.ElementsMatch(t, []CategoryID{"initial_access"}, cov.Categories())
+	assert.ElementsMatch(t, []TechniqueID{"exposed_admin_endpoint"}, cov.Techniques())
 	assert.False(t, cov.IsEmpty())
 }
 
@@ -64,7 +64,7 @@ func TestNewCoverage_RejectsUnknownTechnique(t *testing.T) {
 }
 
 func TestNewCoverage_RejectsNilHierarchy(t *testing.T) {
-	_, err := NewCoverage(nil, []CategoryID{"prompt_injection"}, nil)
+	_, err := NewCoverage(nil, []CategoryID{"initial_access"}, nil)
 	require.Error(t, err)
 }
 
@@ -72,8 +72,8 @@ func TestNewCoverage_DedupesRepeatedIDs(t *testing.T) {
 	h := testHierarchy(t)
 
 	cov, err := NewCoverage(h,
-		[]CategoryID{"prompt_injection", "prompt_injection"},
-		[]TechniqueID{"direct_prompt_injection", "direct_prompt_injection"},
+		[]CategoryID{"initial_access", "initial_access"},
+		[]TechniqueID{"exposed_admin_endpoint", "exposed_admin_endpoint"},
 	)
 	require.NoError(t, err)
 	assert.Len(t, cov.Categories(), 1)
@@ -98,8 +98,8 @@ func TestNewCoverage_EmptyDeclarationIsEmpty(t *testing.T) {
 func TestCoverage_ZeroValueIsEmptyAndQueryable(t *testing.T) {
 	var cov Coverage
 	assert.True(t, cov.IsEmpty())
-	assert.False(t, cov.HasCategory("prompt_injection"))
-	assert.False(t, cov.HasTechnique("direct_prompt_injection"))
+	assert.False(t, cov.HasCategory("initial_access"))
+	assert.False(t, cov.HasTechnique("exposed_admin_endpoint"))
 	assert.Empty(t, cov.Categories())
 	assert.Empty(t, cov.Techniques())
 }
@@ -107,7 +107,7 @@ func TestCoverage_ZeroValueIsEmptyAndQueryable(t *testing.T) {
 func TestEmptyCoverage_IsEmptyAndQueryable(t *testing.T) {
 	cov := EmptyCoverage()
 	assert.True(t, cov.IsEmpty())
-	assert.False(t, cov.HasCategory("prompt_injection"))
+	assert.False(t, cov.HasCategory("initial_access"))
 	assert.Empty(t, cov.Categories())
 }
 

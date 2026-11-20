@@ -63,7 +63,7 @@ func mainPack() ontology.DomainPack {
 		TaxonomyNodeLabels:        []string{"Container"},
 		TaxonomyRelationshipTypes: []string{"RUNS_ON"},
 		Predicates:                map[string]string{"privilege_escalation": `evidence.exists(e, e.kind == "root_shell")`},
-		Techniques:                map[string]string{"privilege_escalation": "extraction"},
+		Techniques:                map[string]string{"privilege_escalation": "credential_access"},
 	}
 }
 

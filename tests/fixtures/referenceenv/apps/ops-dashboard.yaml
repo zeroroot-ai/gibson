@@ -1,0 +1,67 @@
+# Service ops-dashboard. Flaw: its service account holds the ClusterRole edit
+# in the whole namespace, so its token reads each Secret and writes each
+# object of refenv (flaw "wide-rbac-binding").
+# Fix: bind a Role that grants only what the service needs, or no Role.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ops-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ops-dashboard
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: ServiceAccount
+    name: ops-dashboard
+    namespace: refenv
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ops-dashboard
+  annotations:
+    refenv.zeroroot.ai/health-url: http://ops-dashboard.refenv.svc.cluster.local:8080/healthz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ops-dashboard
+  template:
+    metadata:
+      labels:
+        app: ops-dashboard
+    spec:
+      serviceAccountName: ops-dashboard
+      containers:
+        - name: ops-dashboard
+          image: curlimages/curl@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b
+          command:
+            - sh
+            - -c
+            - mkdir -p /tmp/www && echo ok > /tmp/www/healthz && exec busybox httpd -f -p 8080 -h /tmp/www
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ops-dashboard
+spec:
+  selector:
+    app: ops-dashboard
+  ports:
+    - port: 8080
+      targetPort: 8080
