@@ -126,6 +126,7 @@ func init() {
 	// destructive_authz.go
 	registerEvent("destructive_action.requested", func() Event { return &DestructiveActionRequested{} })
 	registerEvent("destructive_action.decided", func() Event { return &DestructiveActionDecided{} })
+	registerEvent("destructive_action.consumed", func() Event { return &DestructiveActionConsumed{} })
 
 	// voi_planner.go
 	registerEvent("voi.plan.requested", func() Event { return &VoIPlanRequested{} })
@@ -273,6 +274,8 @@ func dereferenceEvent(ev Event) Event {
 	case *DestructiveActionRequested:
 		return *v
 	case *DestructiveActionDecided:
+		return *v
+	case *DestructiveActionConsumed:
 		return *v
 	case *VoIPlanRequested:
 		return *v

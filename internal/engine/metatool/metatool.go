@@ -67,6 +67,10 @@ type Handler struct {
 	authz      catalog.Authorizer
 	connectors ConnectorCaller
 
+	// gate and marks serve the approval of a marked tool. See approval.go.
+	gate  ApprovalGate
+	marks ApprovalMarks
+
 	// skills and onSkillLoad serve a skill: id. See WithSkills.
 	skills      SkillStore
 	onSkillLoad func(ctx context.Context, load SkillLoad) error

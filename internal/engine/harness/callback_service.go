@@ -154,6 +154,11 @@ type HarnessCallbackService struct {
 	// beliefSubstrate uses. See callback_submit_proof.go.
 	proofSettlement brain.ProofSettlementEngine
 
+	// toolApproval is the approval queue that invoke_tool uses for a tool that
+	// the manifest of its connector marks (gibson#1474). nil means that a
+	// call of a marked tool is refused.
+	toolApproval metatool.ApprovalGate
+
 	// ontologyDiscovery backs the ProposeOntologyExtension RPC (ADR-0124,
 	// ADR-0133, gibson#391): folding an agent-proposed Taxonomy
 	// node label or relationship type through the ValidIdentifier safety gate
@@ -453,6 +458,14 @@ func WithBeliefSubstrate(substrate brain.BeliefSubstrate) CallbackServiceOption 
 func WithProofSettlement(engine brain.ProofSettlementEngine) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.proofSettlement = engine
+	}
+}
+
+// WithToolApproval wires the approval queue that invoke_tool uses for a tool
+// that the manifest of its connector marks (gibson#1474).
+func WithToolApproval(g metatool.ApprovalGate) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.toolApproval = g
 	}
 }
 

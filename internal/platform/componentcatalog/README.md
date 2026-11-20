@@ -11,6 +11,43 @@ The catalog is the set of manifests in `manifests/`. The `gibson` binary embeds 
 
 A new or changed connector thus needs a `gibson` release (owner decision of 2026-10-05, gibson#727). A signed catalog file outside `gibson` can come later, if on-prem customers need new connectors faster than they upgrade the daemon.
 
+## Approval for a response action
+
+A response action is a tool call through a connector, for example "isolate a host" or "disable an account". A person must approve some of these calls before they run (gibson#1474, ADR-0180, ADR-0132). The manifest marks them by tool name.
+
+```yaml
+spec:
+  responseActions: true
+  tools:
+    isolate_host:
+      approval: required
+      undo: release_host
+      blastRadius: one host
+    release_host:
+      approval: none
+    revoke_session:
+      approval: none
+```
+
+- `approval: required` sends each call of the tool to the approval queue. `approval: none` needs only the grant (`can_execute`).
+- The mark is a per-catalog decision. It is not derived from "has an undo". The owner decision is that a session revoke needs no approval, so the manifest states `approval: none` for it.
+- `undo` names the tool of the same connector that undoes this tool. The approver sees `reversible` only when the manifest names one. With no `undo`, the approver sees `irreversible`.
+- `blastRadius` is a short text for the approver. The daemon adds the arguments of the call to it.
+- Only the manifest sets the mark. An agent cannot set it, and the annotations of the MCP server do not change it.
+
+**The rule for a tool that the manifest does not name.**
+
+- A connector with `responseActions: true` marks it. A new tool of the MCP server stays behind the approval until a manifest names it. The loader needs at least one `required` tool for such a connector.
+- A connector without `responseActions` needs only the grant for it. This is the choice for the connectors that only read. The platform has no list of the tools of a vendor, and a mark on every tool would make each read wait for a person. The cost is real: a vendor can add a write tool to a read-only server. Two measures limit it. The grant still applies. A reviewer who adds a connector that can write must set `responseActions: true`. A tool of a read-only connector that is dangerous can also be named with `approval: required`, and `approval: none` is then not allowed there.
+
+**What happens at tool dispatch.** `metatool.Handler.Call` is the one path for an `mcp:` id. The harness (`invoke_tool`) and the `CallTool` RPC both use it. The order is: mission policy, grant, approval, dispatch.
+
+1. A call of a marked tool with no decision records one request. It returns `pending authorization` to the agent at once. The agent is not blocked, and the connector gets no call.
+2. A person decides in the approval queue (`DestructiveAuthorizationService`). A denial is final. The call then returns permission denied.
+3. The next identical call runs one time after an approval. The daemon records the use as the event `destructive_action.consumed`. A later identical call needs a new approval.
+
+An approval covers one call. The request key is a hash of the tenant, the mission, the connector, the tool and the canonical arguments. A call with another target, tool or mission needs its own approval. If the approval queue is not wired, a marked call is refused.
+
 ## A Remote connector with an endpoint for each tenant
 
 Some vendors host one MCP server for each customer, or one for each Region or site. A manifest states `endpointPatterns` in `spec`. A tenant gives one `endpoint` when it enables the connector. The daemon accepts the endpoint only when it matches a pattern.

@@ -584,6 +584,16 @@ func (m *CallbackManager) SetProofSettlement(engine brain.ProofSettlementEngine)
 	}
 }
 
+// SetToolApproval wires the approval queue of invoke_tool (gibson#1474).
+// Call after NewCallbackManager, before Start(). Thread-safe.
+func (m *CallbackManager) SetToolApproval(g metatool.ApprovalGate) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithToolApproval(g)(m.server.service)
+	}
+}
+
 // ProofSettlement returns the proof-settlement engine currently wired onto
 // the callback service (nil if none has been set) — the read half of
 // SetProofSettlement, mirroring BeliefSubstrate's (e.g. for a test proving a

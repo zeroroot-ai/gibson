@@ -33,6 +33,14 @@ func (s *ComponentServiceServer) WithConnectorCaller(c metatool.ConnectorCaller)
 	return s
 }
 
+// WithToolApproval wires the approval queue of a tool that the manifest of its
+// connector marks (gibson#1474). A server with none refuses a call of a marked
+// tool.
+func (s *ComponentServiceServer) WithToolApproval(g metatool.ApprovalGate) *ComponentServiceServer {
+	s.toolApproval = g
+	return s
+}
+
 // WithToolCallRecorder wires the flight recorder of connector calls. A server
 // with none refuses a connector call (ADR-0131).
 func (s *ComponentServiceServer) WithToolCallRecorder(r metatool.FlightRecorder) *ComponentServiceServer {
@@ -103,7 +111,9 @@ func (s *ComponentServiceServer) callConnectorTool(
 		return nil, err
 	}
 
-	result, err := metatool.NewHandler(nil, catalog.NewFGAAuthorizer(s.authorizer), s.connectorCaller).Call(ctx, call)
+	handler := metatool.NewHandler(nil, catalog.NewFGAAuthorizer(s.authorizer), s.connectorCaller).
+		WithApprovalGate(s.toolApproval)
+	result, err := handler.Call(ctx, call)
 	switch {
 	case err == nil:
 		out, mErr := json.Marshal(result)
@@ -111,6 +121,12 @@ func (s *ComponentServiceServer) callConnectorTool(
 			return nil, status.Errorf(codes.Internal, "encode the connector result: %v", mErr)
 		}
 		return &componentpb.CallToolResponse{OutputJson: string(out), ToolCallId: callID}, nil
+	case errors.Is(err, metatool.ErrApprovalPending):
+		return nil, status.Errorf(codes.FailedPrecondition, "%s. Call again with the same arguments after the approval.", err.Error())
+	case errors.Is(err, metatool.ErrApprovalUnavailable):
+		return nil, status.Error(codes.Unavailable, err.Error())
+	case errors.Is(err, metatool.ErrApprovalDenied):
+		return nil, status.Errorf(codes.PermissionDenied, "the call of %s was denied by a person", tid.Canonical())
 	case errors.Is(err, metatool.ErrBlocked), errors.Is(err, metatool.ErrRunInactive), errors.Is(err, metatool.ErrUnauthorized):
 		return nil, status.Errorf(codes.PermissionDenied, "the call of %s is not allowed", tid.Canonical())
 	case errors.Is(err, metatool.ErrAuditUnavailable):

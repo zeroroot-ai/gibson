@@ -107,6 +107,12 @@ type ConnectorSpec struct {
 	Args            []string              `yaml:"args"`
 	Port            int                   `yaml:"port"`
 	ImagePullSecret string                `yaml:"imagePullSecret"`
+	// ResponseActions states that the connector has tools that change the
+	// tool of the buyer. A tool that the manifest does not name then needs
+	// approval. See approval.go (gibson#1474).
+	ResponseActions bool `yaml:"responseActions"`
+	// Tools marks tools by name. See approval.go.
+	Tools map[string]ConnectorTool `yaml:"tools"`
 }
 
 // ConnectorClasses is the closed list of tool classes of a connector
@@ -574,6 +580,9 @@ func validateConnector(id string, s ConnectorSpec, egress []string) error {
 	if err := validateAuthFields(id, s); err != nil {
 		return err
 	}
+	if err := validateTools(id, s); err != nil {
+		return err
+	}
 	return validateHostedConfig(id, s)
 }
 
@@ -715,6 +724,9 @@ type ConnectorEntry struct {
 	Args            []string
 	Port            int
 	ImagePullSecret string
+	// ResponseActions and Tools carry the approval marks. See ApprovalFor.
+	ResponseActions bool
+	Tools           map[string]ConnectorTool
 }
 
 func (m Manifest) toConnectorEntry() ConnectorEntry {
@@ -741,6 +753,8 @@ func (m Manifest) toConnectorEntry() ConnectorEntry {
 		Args:               s.Args,
 		Port:               s.Port,
 		ImagePullSecret:    s.ImagePullSecret,
+		ResponseActions:    s.ResponseActions,
+		Tools:              s.Tools,
 	}
 }
 

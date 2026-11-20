@@ -1971,6 +1971,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// identity provisioning of the tenant-admin surface (gibson#33).
 			compSvc.WithProducedComponentEnroller(producedEnroller{srv: daemonSvc})
 			compSvc.WithConnectorTools(d.connectorMCPClient()).WithConnectorCaller(d.connectorMCPClient())
+			if d.brainRegistry != nil {
+				compSvc.WithToolApproval(newTenantRoutedToolApproval(d.brainRegistry))
+			}
 			if d.callback != nil {
 				// A connector call that names a work item takes the mission
 				// policy of its run, the same policy as invoke_tool.

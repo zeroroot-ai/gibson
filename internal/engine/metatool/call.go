@@ -209,7 +209,11 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 	var result any
 	var err error
 	if _, err = h.Authorize(ctx, c.Caller, c.ID); err == nil {
-		result, err = h.Dispatch(ctx, c.Caller, tid, c.Args)
+		// The grant is not enough for a tool that the manifest marks. The
+		// call reaches the connector only after a person approved it.
+		if err = h.gateCall(ctx, c, tid.Connector, tid.Tool); err == nil {
+			result, err = h.Dispatch(ctx, c.Caller, tid, c.Args)
+		}
 	}
 	var resultJSON []byte
 	if err == nil {
