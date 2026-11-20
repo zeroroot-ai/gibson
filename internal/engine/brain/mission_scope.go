@@ -220,6 +220,8 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		return e.MissionID != "" && e.MissionID == missionID
 	case HealthObserved:
 		return e.MissionID != "" && e.MissionID == missionID
+	case HealthUnavailable:
+		return e.MissionID != "" && e.MissionID == missionID
 	case FixReverted:
 		return e.MissionID != "" && e.MissionID == missionID
 	case CheckRerun:

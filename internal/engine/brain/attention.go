@@ -119,6 +119,9 @@ type FixFacts struct {
 	// Health is what the health signal said after the deploy: empty, held or
 	// failed.
 	Health string
+	// HealthUnavailableAt is when the daemon found that the service has no
+	// health signal. It is zero when a signal exists or the daemon did not look.
+	HealthUnavailableAt time.Time
 	// RerunKind, RerunFound and RerunAt are the latest rerun of a check on the
 	// Finding. RerunAt is the time of the evidence.
 	RerunKind  string
@@ -408,5 +411,6 @@ func resetFix(f *Finding) {
 	f.DeployedAt = time.Time{}
 	f.DeploymentKey = ""
 	f.Health = ""
+	f.HealthUnavailableAt = time.Time{}
 	f.RerunKind, f.RerunFound, f.RerunAt = "", false, time.Time{}
 }

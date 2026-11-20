@@ -181,6 +181,12 @@ func TestStep_NoHealthSignalKeepsTheFindingFixed(t *testing.T) {
 	g.deployed()
 	g.r.health = HealthFact{Known: false}
 	g.tick()
+	g.tick()
+	for _, f := range g.w.FindingSnapshot() {
+		if !f.HealthUnavailableAt.Equal(g.now) {
+			t.Fatalf("HealthUnavailableAt = %v, want %v", f.HealthUnavailableAt, g.now)
+		}
+	}
 	brain.Reduce(g.w, brain.CheckRerun{ID: "f1", CheckKind: "scan", Found: false, EvidenceAt: at(4)})
 	g.tick()
 	if got := g.status(); got != brain.FindingStatusFixed {

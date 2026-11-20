@@ -218,14 +218,26 @@ func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.Fin
 		}
 	}
 	if app == "" {
-		return nil, nil // no place, so no health signal to read
+		return w.unavailable(mr, f), nil // no place, so no health signal to read
 	}
 	h, err := w.reader.Health(ctx, tenant, app, since, pol.HoldTime)
 	if err != nil {
 		return nil, fmt.Errorf("read health: %w", err)
 	}
-	if !h.Known || !h.Done {
-		return nil, nil // no signal keeps the finding `fixed`. A running hold waits.
+	if !h.Known {
+		return w.unavailable(mr, f), nil // no signal keeps the finding `fixed`
+	}
+	if !h.Done {
+		return nil, nil // the hold time still runs
 	}
 	return []brain.Event{brain.HealthObserved{MergeRequest: mr, Held: h.Held, At: w.stampOr(h.At)}}, nil
+}
+
+// unavailable returns the one event that records a missing health signal. The
+// finding keeps the time of the first report.
+func (w *Watcher) unavailable(mr string, f brain.FindingSnapshot) []brain.Event {
+	if !f.HealthUnavailableAt.IsZero() {
+		return nil
+	}
+	return []brain.Event{brain.HealthUnavailable{MergeRequest: mr, At: w.now()}}
 }

@@ -54,6 +54,7 @@ func applyDeployObserved(w *World, e DeployObserved) {
 		f.DeployedAt = e.At
 		f.DeploymentKey = e.DeploymentKey
 		f.Health = ""
+		f.HealthUnavailableAt = time.Time{}
 	})
 }
 
@@ -78,8 +79,37 @@ func applyHealthObserved(w *World, e HealthObserved) {
 	if e.Held {
 		health = HealthHeld
 	}
-	forEachFindingOfMR(w, e.MergeRequest, func(f *Finding) { f.Health = health })
+	forEachFindingOfMR(w, e.MergeRequest, func(f *Finding) {
+		f.Health = health
+		f.HealthUnavailableAt = time.Time{}
+	})
 	releaseMergeSlot(w, e.MergeRequest)
+}
+
+// HealthUnavailable records that the service of the merge request has no health
+// signal to read. A fix of such a service stays `fixed`, because `verified`
+// needs a held signal. The fix waits on a person, who must add the signal
+// (gibson#1500).
+type HealthUnavailable struct {
+	MergeRequest string
+	At           time.Time
+	MissionID    string
+}
+
+// Kind identifies the health.unavailable brain event.
+func (HealthUnavailable) Kind() string { return "health.unavailable" }
+
+// applyHealthUnavailable marks each Finding of the merge request. The first
+// report keeps its time, so a repeated report does not restart the wait.
+func applyHealthUnavailable(w *World, e HealthUnavailable) {
+	if e.MergeRequest == "" || e.At.IsZero() {
+		return
+	}
+	forEachFindingOfMR(w, e.MergeRequest, func(f *Finding) {
+		if f.HealthUnavailableAt.IsZero() {
+			f.HealthUnavailableAt = e.At
+		}
+	})
 }
 
 // FixReverted records that an agent reverted its own merge because the health

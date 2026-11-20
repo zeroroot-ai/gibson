@@ -530,6 +530,8 @@ func Reduce(w *World, ev Event) {
 		applyDeployObserved(w, e)
 	case HealthObserved:
 		applyHealthObserved(w, e)
+	case HealthUnavailable:
+		applyHealthUnavailable(w, e)
 	case FixReverted:
 		applyFixReverted(w, e)
 	case CheckRerun:
