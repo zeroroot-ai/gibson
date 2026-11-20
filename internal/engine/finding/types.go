@@ -45,7 +45,6 @@ func (s FindingStatus) IsValid() bool {
 type FindingCategory string
 
 const (
-	CategoryJailbreak             FindingCategory = "jailbreak"
 	CategoryPromptInjection       FindingCategory = "prompt_injection"
 	CategoryDataExtraction        FindingCategory = "data_extraction"
 	CategoryPrivilegeEscalation   FindingCategory = "privilege_escalation"
@@ -63,7 +62,7 @@ func (fc FindingCategory) String() string {
 // IsValid checks if the category is a valid value
 func (fc FindingCategory) IsValid() bool {
 	switch fc {
-	case CategoryJailbreak, CategoryPromptInjection, CategoryDataExtraction,
+	case CategoryPromptInjection, CategoryDataExtraction,
 		CategoryPrivilegeEscalation, CategoryDoS, CategoryModelManipulation,
 		CategoryInformationDisclosure, CategoryUncategorized:
 		return true
@@ -126,38 +125,6 @@ type SimpleMitreMapping struct {
 	Tactic        string `json:"tactic,omitempty"` // e.g., "Initial Access"
 }
 
-// Classification represents the output of the finding classifier
-type Classification struct {
-	Category    FindingCategory       `json:"category"`
-	Subcategory string                `json:"subcategory"`
-	Severity    agent.FindingSeverity `json:"severity"`
-	Confidence  float64               `json:"confidence"` // 0.0 - 1.0
-	MitreAttack []SimpleMitreMapping  `json:"mitre_attack,omitempty"`
-	MitreAtlas  []SimpleMitreMapping  `json:"mitre_atlas,omitempty"`
-	RiskScore   float64               `json:"risk_score"` // 0.0 - 10.0
-	Remediation string                `json:"remediation"`
-	NeedsReview bool                  `json:"needs_review"` // True if classifier is uncertain
-
-	// Metadata about the classification
-	Method    ClassificationMethod `json:"method"`    // Which classifier produced this result
-	Rationale string               `json:"rationale"` // Explanation for the classification
-}
-
-// ClassificationMethod indicates which classifier produced the classification
-type ClassificationMethod string
-
-const (
-	MethodHeuristic ClassificationMethod = "heuristic"
-	MethodLLM       ClassificationMethod = "llm"
-	MethodComposite ClassificationMethod = "composite"
-	MethodManual    ClassificationMethod = "manual"
-)
-
-// String returns the string representation of ClassificationMethod
-func (cm ClassificationMethod) String() string {
-	return string(cm)
-}
-
 // NewEnhancedFinding creates a new enhanced finding from a base finding
 func NewEnhancedFinding(baseFinding agent.Finding, missionID types.ID, agentName string) EnhancedFinding {
 	now := time.Now()
@@ -173,33 +140,6 @@ func NewEnhancedFinding(baseFinding agent.Finding, missionID types.ID, agentName
 		OccurrenceCount: 1,
 		UpdatedAt:       now,
 	}
-}
-
-// WithClassification applies classification results to the finding
-func (f EnhancedFinding) WithClassification(c Classification) EnhancedFinding {
-	f.Category = string(c.Category)
-	f.Subcategory = c.Subcategory
-	f.Severity = c.Severity
-	f.Confidence = c.Confidence
-	f.RiskScore = c.RiskScore
-	f.Remediation = c.Remediation
-
-	// Store MITRE mappings in Metadata
-	if len(c.MitreAttack) > 0 {
-		if f.Metadata == nil {
-			f.Metadata = make(map[string]any)
-		}
-		f.Metadata["mitre_attack"] = c.MitreAttack
-	}
-	if len(c.MitreAtlas) > 0 {
-		if f.Metadata == nil {
-			f.Metadata = make(map[string]any)
-		}
-		f.Metadata["mitre_atlas"] = c.MitreAtlas
-	}
-
-	f.UpdatedAt = time.Now()
-	return f
 }
 
 // WithStatus sets the finding status

@@ -34,41 +34,6 @@ func TestEnhancedFinding_NewEnhancedFinding(t *testing.T) {
 	assert.Empty(t, enhanced.RelatedIDs)
 }
 
-func TestEnhancedFinding_WithClassification(t *testing.T) {
-	baseFinding := agent.NewFinding("Test Finding", "Test Description", agent.SeverityMedium)
-	enhanced := NewEnhancedFinding(baseFinding, types.NewID(), "test-agent")
-
-	classification := Classification{
-		Category:    CategoryJailbreak,
-		Subcategory: "instruction_override",
-		Severity:    agent.SeverityCritical,
-		Confidence:  0.95,
-		RiskScore:   9.5,
-		Remediation: "Implement input validation",
-		MitreAttack: []SimpleMitreMapping{
-			{
-				TechniqueID:   "AML.T0015",
-				TechniqueName: "Jailbreak",
-				Tactic:        "ML Attack Staging",
-			},
-		},
-	}
-
-	enhanced = enhanced.WithClassification(classification)
-
-	assert.Equal(t, "jailbreak", enhanced.Category)
-	assert.Equal(t, "instruction_override", enhanced.Subcategory)
-	assert.Equal(t, agent.SeverityCritical, enhanced.Severity)
-	assert.Equal(t, 0.95, enhanced.Confidence)
-	assert.Equal(t, 9.5, enhanced.RiskScore)
-	assert.Equal(t, "Implement input validation", enhanced.Remediation)
-
-	// Check MITRE mappings from Metadata
-	mitreAttack := enhanced.GetMitreAttack()
-	assert.Len(t, mitreAttack, 1)
-	assert.Equal(t, "AML.T0015", mitreAttack[0].TechniqueID)
-}
-
 func TestEnhancedFinding_WithStatus(t *testing.T) {
 	baseFinding := agent.NewFinding("Test", "Test", agent.SeverityLow)
 	enhanced := NewEnhancedFinding(baseFinding, types.NewID(), "agent")
@@ -227,37 +192,12 @@ func TestFindingStatus_Values(t *testing.T) {
 }
 
 func TestFindingCategory_Values(t *testing.T) {
-	assert.Equal(t, FindingCategory("jailbreak"), CategoryJailbreak)
 	assert.Equal(t, FindingCategory("prompt_injection"), CategoryPromptInjection)
 	assert.Equal(t, FindingCategory("data_extraction"), CategoryDataExtraction)
 	assert.Equal(t, FindingCategory("privilege_escalation"), CategoryPrivilegeEscalation)
 	assert.Equal(t, FindingCategory("dos"), CategoryDoS)
 	assert.Equal(t, FindingCategory("model_manipulation"), CategoryModelManipulation)
 	assert.Equal(t, FindingCategory("information_disclosure"), CategoryInformationDisclosure)
-}
-
-func TestClassification(t *testing.T) {
-	classification := Classification{
-		Category:    CategoryPromptInjection,
-		Subcategory: "indirect_injection",
-		Severity:    agent.SeverityHigh,
-		Confidence:  0.88,
-		RiskScore:   8.5,
-		Remediation: "Sanitize user inputs",
-		NeedsReview: false,
-		MitreAtlas: []SimpleMitreMapping{
-			{
-				TechniqueID:   "AML.T0051",
-				TechniqueName: "Prompt Injection",
-				Tactic:        "ML Attack Staging",
-			},
-		},
-	}
-
-	assert.Equal(t, CategoryPromptInjection, classification.Category)
-	assert.Equal(t, 0.88, classification.Confidence)
-	assert.False(t, classification.NeedsReview)
-	assert.Len(t, classification.MitreAtlas, 1)
 }
 
 func TestFindingErrorCode_Constants(t *testing.T) {

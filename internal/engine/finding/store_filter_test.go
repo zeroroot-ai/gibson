@@ -17,7 +17,7 @@ import (
 func filterSample() EnhancedFinding {
 	f := NewEnhancedFinding(
 		agent.NewFinding("Open SSH port", "Port 22 accepts password login", agent.SeverityHigh), types.NewID(), "recon")
-	f.Category = string(CategoryJailbreak)
+	f.Category = string(CategoryDoS)
 	f.RiskScore = 5
 	return f
 }
@@ -35,7 +35,7 @@ func TestFindingFilter_Matches(t *testing.T) {
 		{"empty filter", &FindingFilter{}, true},
 		{"same severity", &FindingFilter{Severity: ptr(agent.SeverityHigh)}, true},
 		{"other severity", &FindingFilter{Severity: ptr(agent.SeverityLow)}, false},
-		{"same category", &FindingFilter{Category: ptr(CategoryJailbreak)}, true},
+		{"same category", &FindingFilter{Category: ptr(CategoryDoS)}, true},
 		{"other category", &FindingFilter{Category: ptr(FindingCategory("other"))}, false},
 		{"same status", &FindingFilter{Status: ptr(StatusOpen)}, true},
 		{"other status", &FindingFilter{Status: ptr(StatusFixed)}, false},
