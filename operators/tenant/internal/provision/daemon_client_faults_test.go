@@ -25,61 +25,61 @@ import (
 type operatorCall struct {
 	name string
 	op   string
-	call func(c *EntitlementsGRPCClient) error
+	call func(c *DaemonClient) error
 }
 
 func operatorCalls() []operatorCall {
 	ctx := context.Background()
 	return []operatorCall{
-		{"SetTenantZitadelOrg", "set-tenant-zitadel-org", func(c *EntitlementsGRPCClient) error {
+		{"SetTenantZitadelOrg", "set-tenant-zitadel-org", func(c *DaemonClient) error {
 			return c.SetTenantZitadelOrg(ctx, "acme", "org-1")
 		}},
-		{"WriteAccessTuples", "write-tuples", func(c *EntitlementsGRPCClient) error {
+		{"WriteAccessTuples", "write-tuples", func(c *DaemonClient) error {
 			return c.WriteAccessTuples(ctx, []string{"user:a#viewer@doc:1"}, nil, "test")
 		}},
-		{"SeedCatalogTenantEnabled", "seed-catalog", func(c *EntitlementsGRPCClient) error {
+		{"SeedCatalogTenantEnabled", "seed-catalog", func(c *DaemonClient) error {
 			return c.SeedCatalogTenantEnabled(ctx, "acme")
 		}},
-		{"ListPendingTenantProvisioning", "list-pending-tenant-provisioning", func(c *EntitlementsGRPCClient) error {
+		{"ListPendingTenantProvisioning", "list-pending-tenant-provisioning", func(c *DaemonClient) error {
 			_, err := c.ListPendingTenantProvisioning(ctx)
 			return err
 		}},
-		{"AckTenantProvisioned", "ack-tenant-provisioned", func(c *EntitlementsGRPCClient) error {
+		{"AckTenantProvisioned", "ack-tenant-provisioned", func(c *DaemonClient) error {
 			return c.AckTenantProvisioned(ctx, "acme")
 		}},
-		{"EnqueueTenantProvisioning", "enqueue-tenant-provisioning", func(c *EntitlementsGRPCClient) error {
+		{"EnqueueTenantProvisioning", "enqueue-tenant-provisioning", func(c *DaemonClient) error {
 			_, err := c.EnqueueTenantProvisioning(ctx, PendingTenant{TenantID: "acme"})
 			return err
 		}},
-		{"ReportTenantStatus", "report-tenant-status", func(c *EntitlementsGRPCClient) error {
+		{"ReportTenantStatus", "report-tenant-status", func(c *DaemonClient) error {
 			return c.ReportTenantStatus(ctx, TenantStatusReport{TenantID: "acme", Phase: "Ready"})
 		}},
-		{"ListPendingTenantOps", "list-pending-tenant-ops", func(c *EntitlementsGRPCClient) error {
+		{"ListPendingTenantOps", "list-pending-tenant-ops", func(c *DaemonClient) error {
 			_, err := c.ListPendingTenantOps(ctx)
 			return err
 		}},
-		{"AckTenantOp", "ack-tenant-op", func(c *EntitlementsGRPCClient) error {
+		{"AckTenantOp", "ack-tenant-op", func(c *DaemonClient) error {
 			return c.AckTenantOp(ctx, "op-1")
 		}},
-		{"EmitAuditEvent", "emit-audit-event", func(c *EntitlementsGRPCClient) error {
+		{"EmitAuditEvent", "emit-audit-event", func(c *DaemonClient) error {
 			return c.EmitAuditEvent(ctx, audit.Event{Action: audit.ActionSagaStep, TenantID: "acme"})
 		}},
-		{"SetAgentEnrollmentLimits", "set agent enrollment limits", func(c *EntitlementsGRPCClient) error {
+		{"SetAgentEnrollmentLimits", "set agent enrollment limits", func(c *DaemonClient) error {
 			return c.SetAgentEnrollmentLimits(ctx, "acme", "scout", time.Minute)
 		}},
-		{"ModelProviderCredential", "get-model-provider-credential", func(c *EntitlementsGRPCClient) error {
+		{"ModelProviderCredential", "get-model-provider-credential", func(c *DaemonClient) error {
 			_, err := c.ModelProviderCredential(ctx, "acme", "key", "anthropic", "")
 			return err
 		}},
-		{"TenantModelProviders", "get-tenant-model-providers", func(c *EntitlementsGRPCClient) error {
+		{"TenantModelProviders", "get-tenant-model-providers", func(c *DaemonClient) error {
 			_, _, err := c.TenantModelProviders(ctx, "acme")
 			return err
 		}},
-		{"TenantOutsideAgents", "get-tenant-outside-agents", func(c *EntitlementsGRPCClient) error {
+		{"TenantOutsideAgents", "get-tenant-outside-agents", func(c *DaemonClient) error {
 			_, err := c.TenantOutsideAgents(ctx, "acme")
 			return err
 		}},
-		{"OutsideAgentCredential", "get-outside-agent-credential", func(c *EntitlementsGRPCClient) error {
+		{"OutsideAgentCredential", "get-outside-agent-credential", func(c *DaemonClient) error {
 			_, err := c.OutsideAgentCredential(ctx, "acme", "scout")
 			return err
 		}},
@@ -87,7 +87,7 @@ func operatorCalls() []operatorCall {
 }
 
 // Each call stops before it dials when the token source fails.
-func TestEntitlementsGRPC_EachCallStopsWhenTheTokenFails(t *testing.T) {
+func TestDaemonClient_EachCallStopsWhenTheTokenFails(t *testing.T) {
 	c := bufconnClient(t, &captureAuditServer{})
 	c.tokens = failingTokens{}
 	for _, tt := range operatorCalls() {
@@ -100,7 +100,7 @@ func TestEntitlementsGRPC_EachCallStopsWhenTheTokenFails(t *testing.T) {
 }
 
 // Each call turns a refusal of the daemon into an error that names the call.
-func TestEntitlementsGRPC_EachCallReportsADaemonRefusal(t *testing.T) {
+func TestDaemonClient_EachCallReportsADaemonRefusal(t *testing.T) {
 	// The server answers Unimplemented for each RPC it does not define.
 	c := bufconnClient(t, &captureAuditServer{err: status.Error(codes.Internal, "boom")})
 	for _, tt := range operatorCalls() {
@@ -193,7 +193,7 @@ func (f *operatorFixture) GetOutsideAgentCredential(
 	return &operatorv1.GetOutsideAgentCredentialResponse{Secret: &operatorv1.SecretData{Data: data}}, nil
 }
 
-func TestEntitlementsGRPC_ReturnsWhatTheDaemonSends(t *testing.T) {
+func TestDaemonClient_ReturnsWhatTheDaemonSends(t *testing.T) {
 	ctx := context.Background()
 	c := bufconnClient(t, &operatorFixture{})
 
@@ -234,7 +234,7 @@ func TestEntitlementsGRPC_ReturnsWhatTheDaemonSends(t *testing.T) {
 
 // A credential that the daemon does not hold is clients.ErrNotFound, so a
 // controller waits for it. Any other failure keeps its class.
-func TestEntitlementsGRPC_ACredentialThatDoesNotExistIsNotFound(t *testing.T) {
+func TestDaemonClient_ACredentialThatDoesNotExistIsNotFound(t *testing.T) {
 	ctx := context.Background()
 	missing := bufconnClient(t, &operatorFixture{err: status.Error(codes.NotFound, "no such secret")})
 	_, err := missing.ModelProviderCredential(ctx, "acme", "key", "anthropic", "")
@@ -284,12 +284,12 @@ func TestTranslateGRPCError_MapsEachClass(t *testing.T) {
 	}
 }
 
-func TestEntitlementsGRPC_CloseOfANilOrUnconnectedClientIsSafe(t *testing.T) {
-	var nilClient *EntitlementsGRPCClient
+func TestDaemonClient_CloseOfANilOrUnconnectedClientIsSafe(t *testing.T) {
+	var nilClient *DaemonClient
 	if err := nilClient.Close(); err != nil {
 		t.Errorf("nil client: %v", err)
 	}
-	if err := (&EntitlementsGRPCClient{}).Close(); err != nil {
+	if err := (&DaemonClient{}).Close(); err != nil {
 		t.Errorf("client without a transport: %v", err)
 	}
 }
@@ -308,7 +308,7 @@ func (staticTokens) FetchToken(_ context.Context, audience string) (string, erro
 }
 
 // A token source adds the bearer token of the audience to each call.
-func TestEntitlementsGRPC_SendsTheBearerTokenOfTheAudience(t *testing.T) {
+func TestDaemonClient_SendsTheBearerTokenOfTheAudience(t *testing.T) {
 	c := bufconnClient(t, &operatorFixture{})
 	c.tokens = staticTokens{}
 	data, err := c.OutsideAgentCredential(context.Background(), "acme", "scout")
@@ -321,12 +321,12 @@ func TestEntitlementsGRPC_SendsTheBearerTokenOfTheAudience(t *testing.T) {
 }
 
 // With no SPIRE agent, the constructor fails with a clear error and no client.
-func TestNewEntitlementsGRPCClient_NoWorkloadAPIIsAnError(t *testing.T) {
+func TestNewDaemonClient_NoWorkloadAPIIsAnError(t *testing.T) {
 	t.Setenv("SPIFFE_ENDPOINT_SOCKET", "unix:///tmp/no-such-spire-socket-"+t.Name())
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	c, err := NewEntitlementsGRPCClient(ctx, "gibson-workloads:50051", "spiffe://zeroroot.ai/platform/daemon", nil)
-	if err == nil || !strings.Contains(err.Error(), "entitlements: daemon-transport:") {
+	c, err := NewDaemonClient(ctx, "gibson-workloads:50051", "spiffe://zeroroot.ai/platform/daemon", nil)
+	if err == nil || !strings.Contains(err.Error(), "daemon client: daemon-transport:") {
 		t.Fatalf("error = %v", err)
 	}
 	if c != nil {
@@ -375,7 +375,7 @@ func (f *twoPageFixture) GetTenantOutsideAgents(
 
 // A sync deletes what the list does not hold, so the client must read each
 // page until the next token is empty.
-func TestEntitlementsGRPC_TenantListsReadEachPage(t *testing.T) {
+func TestDaemonClient_TenantListsReadEachPage(t *testing.T) {
 	ctx := context.Background()
 	fx := &twoPageFixture{}
 	c := bufconnClient(t, fx)
@@ -403,7 +403,7 @@ func TestEntitlementsGRPC_TenantListsReadEachPage(t *testing.T) {
 
 // A failure on a later page fails the read. A partial list must never reach a
 // sync.
-func TestEntitlementsGRPC_TenantListsFailOnALaterPage(t *testing.T) {
+func TestDaemonClient_TenantListsFailOnALaterPage(t *testing.T) {
 	ctx := context.Background()
 	c := bufconnClient(t, &failingSecondPage{})
 	if providers, _, err := c.TenantModelProviders(ctx, "acme"); err == nil || providers != nil {

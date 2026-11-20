@@ -69,7 +69,7 @@ func (s *DaemonServer) WithProvisionedOwnerInviter(i ProvisionedOwnerInviter) *D
 // gibsoncheck:allow tenant-from-request — AdminTenantService: platform_operator on
 // system_tenant at ext-authz. Naming another tenant is the whole point of this surface.
 func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.AdminProvisionTenantRequest) (*tenantv1.AdminProvisionTenantResponse, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -154,7 +154,7 @@ func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.A
 // gibsoncheck:allow tenant-from-request — AdminTenantService: platform_operator on
 // system_tenant at ext-authz.
 func (s *DaemonServer) AdminUpdateTenant(ctx context.Context, req *tenantv1.AdminUpdateTenantRequest) (*tenantv1.AdminUpdateTenantResponse, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -201,7 +201,7 @@ func (s *DaemonServer) AdminUpdateTenant(ctx context.Context, req *tenantv1.Admi
 // gibsoncheck:allow tenant-from-request — AdminTenantService: platform_operator on
 // system_tenant at ext-authz.
 func (s *DaemonServer) AdminDeleteTenant(ctx context.Context, req *tenantv1.AdminDeleteTenantRequest) (*tenantv1.AdminDeleteTenantResponse, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -292,7 +292,7 @@ func (r *tenantRequestRecord) failed(ctx context.Context, cause error) {
 // tenant's ops apply in sequence. Operator-only (platform_operator on
 // system_tenant, enforced by ext-authz). The daemon never reads Kubernetes here.
 func (s *DaemonServer) ListPendingTenantOps(ctx context.Context, req *daemonoperatorv1.ListPendingTenantOpsRequest) (*daemonoperatorv1.ListPendingTenantOpsResponse, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -363,7 +363,7 @@ func (s *DaemonServer) ListPendingTenantOps(ctx context.Context, req *daemonoper
 // it to the Tenant CR. Operator-only. Idempotent: acking an unknown or
 // already-done op_id returns acked=false with no error.
 func (s *DaemonServer) AckTenantOp(ctx context.Context, req *daemonoperatorv1.AckTenantOpRequest) (*daemonoperatorv1.AckTenantOpResponse, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}

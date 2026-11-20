@@ -34,7 +34,7 @@ func (s *DaemonServer) SetAgentEnrollmentLimits(ctx context.Context, req *daemon
 	if req.GetMaxRuntimeSeconds() < 0 {
 		return nil, status.Error(codes.InvalidArgument, "max_runtime_seconds must not be negative")
 	}
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}

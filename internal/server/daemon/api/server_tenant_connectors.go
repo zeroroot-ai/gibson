@@ -22,7 +22,7 @@ import (
 // connectorStore returns the tenant connector store over the platform
 // database, or Unavailable when the daemon has none.
 func (s *DaemonServer) connectorStore() (*tenantconnector.Store, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}

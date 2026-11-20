@@ -5,7 +5,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -14,14 +13,6 @@ import (
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
-
-// entitlementsDB returns the platform *sql.DB of the operator RPCs. The
-// daemon wires it via WithPlatformDB. A nil value means that the daemon
-// started without a platform Postgres connection, and the RPCs that need it
-// return Unavailable.
-func (s *DaemonServer) entitlementsDB() *sql.DB {
-	return s.platformDB
-}
 
 // WriteAccessTuples atomically adds and/or deletes FGA tuples. The operator
 // calls this via the dashboard's SPIFFE-authenticated provisioning endpoint.
@@ -77,7 +68,7 @@ func (s *DaemonServer) WriteAccessTuples(ctx context.Context, req *daemonoperato
 		)
 	}
 
-	s.logger.Info("entitlements: WriteAccessTuples",
+	s.logger.Info("WriteAccessTuples",
 		"added", len(adds), "deleted", len(dels), "reason", req.GetReason())
 	return &daemonoperatorv1.WriteAccessTuplesResponse{Added: int32(len(adds)), Deleted: int32(len(dels))}, nil
 }

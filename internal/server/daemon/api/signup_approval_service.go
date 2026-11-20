@@ -252,7 +252,7 @@ func (s *DaemonServer) AdminApproveRegistration(ctx context.Context, req *tenant
 	}
 	// An approval queues the tenant in the platform Postgres. With no queue
 	// the approval would build nothing, so it is refused before the claim.
-	if s.entitlementsDB() == nil {
+	if s.platformDB == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
 	if req.GetRegistrationId() == "" {

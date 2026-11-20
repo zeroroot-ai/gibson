@@ -7,7 +7,7 @@
 //
 // AdminProvisionTenant (internal/server/daemon/api/gibson/tenant/v1/admin_tenant.proto)
 // only enqueues Tenant-CR creation; the tenant-operator's provisioning saga
-// creates the namespace, entitlements, and the tenant's per-tenant Zitadel org
+// creates the namespace, the access tuples, and the tenant's per-tenant Zitadel org
 // (EnsureZitadelOrg), but mints no HUMAN user and writes no ownership tuple.
 // When SIGNUP_SELF_SERVE is off from first boot there is therefore no way to
 // sign in as the owner without briefly reopening self-serve registration. This

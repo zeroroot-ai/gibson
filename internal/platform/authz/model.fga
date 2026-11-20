@@ -185,11 +185,6 @@ type tenant
     #
     # Spec: instant-session-revocation (gibson#627 Slice 1).
     define active_session: [user with token_not_revoked]
-    # Spec plans-and-quotas-simplification removed the has_* feature-flag
-    # relations (has_sso / has_audit_logs / has_compliance_exports /
-    # has_dedicated_slack / has_dedicated_tenant / has_private_registry).
-    # None were enforced; the operator's tuple writers + plans.yaml fields
-    # are deleted alongside.
 
 type agent_principal
   relations
@@ -218,7 +213,7 @@ type plugin_principal
 type component
   relations
     define owner: [tenant]
-    # Ownership / publication scope (agent-authoring-and-tenant-entitlements R3):
+    # Ownership / publication scope:
     # platform_enabled — item is in the system-tenant's public catalog
     # tenant_published — item is in its owning tenant's private registry
     # tenant_enabled   — a given tenant has this item available (seeded per-tenant by operator)

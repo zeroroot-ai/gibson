@@ -33,7 +33,6 @@ webhooks:
 # ValidatingWebhookConfiguration — enforces content invariants on Tenant CRs:
 #   slug (metadata.name): DNS-safe, 1–60 chars, immutable after create
 #   spec.owner (email): RFC-5322 format, immutable after create
-#   spec.tier: one of {free, pro, enterprise}
 #   spec.displayName: 1–120 chars
 # Failure-closed (failurePolicy: Fail) because a webhook outage here means
 # invalid Tenants could reach the controller. When the webhook is not deployed

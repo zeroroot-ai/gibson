@@ -72,7 +72,7 @@ spec:
               owner:
                 description: |-
                   Owner is the email address of the tenant owner. Used as the admin user
-                  in Zitadel (via Auth.js) and as billing contact in Stripe.
+                  in Zitadel (via Auth.js).
                 format: email
                 type: string
               resources:
@@ -148,7 +148,7 @@ spec:
                 description: |-
                   Conditions represent the current state of the Tenant resource.
                   Standard condition types: Ready, NamespaceProvisioned, ZitadelOrgReady,
-                  StripeReady, FGAReady, RedisReady, Terminating.
+                  FGAReady, RedisReady, Terminating.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

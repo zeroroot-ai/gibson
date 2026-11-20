@@ -33,7 +33,7 @@ Concretely the operator owns:
 - The pipeline orchestrator at
   [`pipeline.go`](../internal/dataplane/pipeline.go), which runs the five
   steps in order with LIFO rollback on failure.
-- Quota application in [`postgres.go`](../internal/dataplane/postgres.go)
+- Resource limits in [`postgres.go`](../internal/dataplane/postgres.go)
   (`ALTER ROLE ... CONNECTION LIMIT`) and [`redis.go`](../internal/dataplane/redis.go)
   (per-DB maxmemory policy where supported).
 - The standalone backup CLI

@@ -12,8 +12,6 @@
 //     app/api/components/permissions/route.ts (the bridge that fail-opens
 //     to enabled=true for every visible catalog item)
 //   - any future gibson CLI
-//
-// Spec: agent-authoring-and-tenant-entitlements R1, R6.
 package discovery
 
 import (

@@ -23,7 +23,7 @@ import (
 const defaultFirstTenantSeedInterval = 10 * time.Second
 
 // TenantProvisioningEnqueuer is the slice of the daemon client the first-tenant
-// seed needs. provision.EntitlementsGRPCClient satisfies it; tests pass a stub.
+// seed needs. provision.DaemonClient satisfies it; tests pass a stub.
 type TenantProvisioningEnqueuer interface {
 	EnqueueTenantProvisioning(ctx context.Context, t provision.PendingTenant) (alreadyExisted bool, err error)
 }

@@ -48,7 +48,7 @@ import (
 const defaultPendingProvisioningInterval = 15 * time.Second
 
 // PendingProvisioningClient is the slice of the daemon client the runnable
-// needs. provision.EntitlementsGRPCClient satisfies it; tests pass a stub.
+// needs. provision.DaemonClient satisfies it; tests pass a stub.
 type PendingProvisioningClient interface {
 	ListPendingTenantProvisioning(ctx context.Context) ([]provision.PendingTenant, error)
 	AckTenantProvisioned(ctx context.Context, tenantID string) error

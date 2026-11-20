@@ -53,7 +53,7 @@ const (
 	CapabilityQdrantAdmin ClientCapability = "qdrant-admin"
 
 	// CapabilityDaemonGRPC: Connect-RPC client to the gibson daemon's
-	// DaemonOperatorService. Used by the entitlements steps to write
+	// DaemonOperatorService. Used by the saga steps that write
 	// FGA tuples and the catalog seed via daemon gRPC, with no dashboard hop.
 	CapabilityDaemonGRPC ClientCapability = "daemon-grpc"
 

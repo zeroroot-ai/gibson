@@ -3,7 +3,7 @@
 
 package api
 
-// Unit tests for the entitlements audit classifiers + emit helpers.
+// Unit tests for the access tuple audit classifiers + emit helpers.
 //
 // Spec: access-matrix-finish task 23, R6 AC 1-3.
 

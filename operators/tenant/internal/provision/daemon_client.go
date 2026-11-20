@@ -1,19 +1,12 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// entitlements_grpc_client.go — gRPC implementation of
-// controller.EntitlementsProvisioner that calls the daemon's
-// gibson.daemon.operator.v1.DaemonOperatorService directly.
+// daemon_client.go holds DaemonClient, the gRPC client that the tenant
+// operator uses for every call to the daemon
+// gibson.daemon.operator.v1.DaemonOperatorService.
 //
-// Phase 5.1 of spec tenant-provisioning-unification-phase2 replaces the
-// HTTP-to-dashboard fan-out (EntitlementsHTTPClient) with a direct
-// service-to-service gRPC call. The dashboard is no longer the auth
-// gateway for these RPCs — the daemon receives the operator's Zitadel
-// service-account JWT and dispatches to the same FGA Check the dashboard
-// previously did via Envoy.
-//
-// Auth: same TokenSource interface as the HTTP client (Zitadel
-// client_credentials), passed as `Authorization: Bearer <jwt>` metadata.
+// Auth: the TokenSource mints a Zitadel client_credentials token. The client
+// sends it as `Authorization: Bearer <jwt>` metadata.
 
 package provision
 
@@ -35,13 +28,12 @@ import (
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
 )
 
-// EntitlementsGRPCClient implements controller.EntitlementsProvisioner by
-// calling the daemon's DaemonOperatorService over SPIFFE-mTLS gRPC. The
+// DaemonClient calls the daemon's DaemonOperatorService over SPIFFE-mTLS gRPC. The
 // underlying transport (workload-API-sourced X509 SVIDs + dial) is owned by
 // pkg/transport/daemon.Client; this type focuses on the per-RPC marshalling
 // and error mapping. Close releases both the gRPC connection and the
 // SPIRE-agent stream.
-type EntitlementsGRPCClient struct {
+type DaemonClient struct {
 	transport *daemontransport.Client
 	client    operatorv1.DaemonOperatorServiceClient
 	tokens    TokenSource
@@ -50,7 +42,7 @@ type EntitlementsGRPCClient struct {
 	audience string
 }
 
-// NewEntitlementsGRPCClient dials `addr` over SPIFFE mTLS, authorising the
+// NewDaemonClient dials `addr` over SPIFFE mTLS, authorising the
 // daemon's expected SVID, and returns a ready-to-use client. The operator's
 // own SVID is fetched continuously from the SPIRE Workload API socket the
 // pod mounts (chart wiring: helm/gibson-operators tenant-operator/deployment.yaml).
@@ -64,15 +56,15 @@ type EntitlementsGRPCClient struct {
 // is the sole trust anchor. See gibson#245 and tenant-operator#253.
 //
 // Decided by ADR-0002, operator-to-daemon transport.
-func NewEntitlementsGRPCClient(ctx context.Context, addr, daemonSVID string, tokens TokenSource) (*EntitlementsGRPCClient, error) {
+func NewDaemonClient(ctx context.Context, addr, daemonSVID string, tokens TokenSource) (*DaemonClient, error) {
 	transport, err := daemontransport.NewClient(ctx, daemontransport.Options{
 		Addr:       addr,
 		DaemonSVID: daemonSVID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("entitlements: %w", err)
+		return nil, fmt.Errorf("daemon client: %w", err)
 	}
-	return &EntitlementsGRPCClient{
+	return &DaemonClient{
 		transport: transport,
 		client:    operatorv1.NewDaemonOperatorServiceClient(transport.Conn()),
 		tokens:    tokens,
@@ -81,7 +73,7 @@ func NewEntitlementsGRPCClient(ctx context.Context, addr, daemonSVID string, tok
 }
 
 // Close releases the gRPC connection and the underlying X509Source.
-func (c *EntitlementsGRPCClient) Close() error {
+func (c *DaemonClient) Close() error {
 	if c == nil || c.transport == nil {
 		return nil
 	}
@@ -91,14 +83,14 @@ func (c *EntitlementsGRPCClient) Close() error {
 // authCtx attaches the Zitadel service-account JWT as `authorization: Bearer …`
 // metadata. The token is carried for forward-compatibility; on the current
 // SPIFFE direct-dial path the daemon's bypass intercept fires before the JWT
-// is inspected (see NewEntitlementsGRPCClient doc, gibson#245).
-func (c *EntitlementsGRPCClient) authCtx(ctx context.Context) (context.Context, error) {
+// is inspected (see NewDaemonClient doc, gibson#245).
+func (c *DaemonClient) authCtx(ctx context.Context) (context.Context, error) {
 	if c.tokens == nil {
 		return ctx, nil
 	}
 	tok, err := c.tokens.FetchToken(ctx, c.audience)
 	if err != nil {
-		return nil, fmt.Errorf("entitlements: fetch token: %w", err)
+		return nil, fmt.Errorf("daemon client: fetch token: %w", err)
 	}
 	return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+tok), nil
 }
@@ -122,9 +114,9 @@ func translateGRPCError(op string, err error) error {
 	metrics.ObserveDaemonCallError(op, err)
 	st, ok := grpcstatus.FromError(err)
 	if !ok {
-		return fmt.Errorf("entitlements: %s: %w: %w", op, clients.ErrUnreachable, err)
+		return fmt.Errorf("daemon client: %s: %w: %w", op, clients.ErrUnreachable, err)
 	}
-	base := fmt.Errorf("entitlements: %s: %s", op, st.Message())
+	base := fmt.Errorf("daemon client: %s: %s", op, st.Message())
 	switch st.Code() {
 	case codes.Unauthenticated, codes.PermissionDenied:
 		return fmt.Errorf("%w: %w", clients.ErrUnauthorized, base)
@@ -141,7 +133,7 @@ func translateGRPCError(op string, err error) error {
 
 // SetTenantZitadelOrg seeds the daemon's tenant -> Zitadel-org mapping via
 // DaemonOperatorService.SetTenantZitadelOrg (gibson#621). Idempotent.
-func (c *EntitlementsGRPCClient) SetTenantZitadelOrg(ctx context.Context, tenantID, zitadelOrgID string) error {
+func (c *DaemonClient) SetTenantZitadelOrg(ctx context.Context, tenantID, zitadelOrgID string) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return err
@@ -153,7 +145,7 @@ func (c *EntitlementsGRPCClient) SetTenantZitadelOrg(ctx context.Context, tenant
 	return translateGRPCError("set-tenant-zitadel-org", err)
 }
 
-func (c *EntitlementsGRPCClient) WriteAccessTuples(ctx context.Context, add, del []string, reason string) error {
+func (c *DaemonClient) WriteAccessTuples(ctx context.Context, add, del []string, reason string) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return err
@@ -166,7 +158,7 @@ func (c *EntitlementsGRPCClient) WriteAccessTuples(ctx context.Context, add, del
 	return translateGRPCError("write-tuples", err)
 }
 
-func (c *EntitlementsGRPCClient) SeedCatalogTenantEnabled(ctx context.Context, tenantID string) error {
+func (c *DaemonClient) SeedCatalogTenantEnabled(ctx context.Context, tenantID string) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return err
@@ -194,7 +186,7 @@ type PendingTenant struct {
 // ListPendingTenantProvisioning returns the daemon's queue of tenants awaiting
 // Tenant-CR creation (operator-pull provisioning, gibson#948). Each record
 // carries the spec the operator stamps onto the Tenant CR.
-func (c *EntitlementsGRPCClient) ListPendingTenantProvisioning(ctx context.Context) ([]PendingTenant, error) {
+func (c *DaemonClient) ListPendingTenantProvisioning(ctx context.Context) ([]PendingTenant, error) {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return nil, err
@@ -228,7 +220,7 @@ func (c *EntitlementsGRPCClient) ListPendingTenantProvisioning(ctx context.Conte
 
 // AckTenantProvisioned marks a pending record done after the operator has
 // ensured the Tenant CR exists (gibson#948). Idempotent.
-func (c *EntitlementsGRPCClient) AckTenantProvisioned(ctx context.Context, tenantID string) error {
+func (c *DaemonClient) AckTenantProvisioned(ctx context.Context, tenantID string) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return err
@@ -246,7 +238,7 @@ func (c *EntitlementsGRPCClient) AckTenantProvisioned(ctx context.Context, tenan
 // the first tenant here instead. Idempotent on tenant_id (daemon ON CONFLICT).
 // Returns whether the row already existed, so the seed can log "already seeded"
 // rather than treat a re-run as new work.
-func (c *EntitlementsGRPCClient) EnqueueTenantProvisioning(ctx context.Context, t PendingTenant) (alreadyExisted bool, err error) {
+func (c *DaemonClient) EnqueueTenantProvisioning(ctx context.Context, t PendingTenant) (alreadyExisted bool, err error) {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return false, err
@@ -280,7 +272,7 @@ type TenantStatusReport struct {
 // ReportTenantStatus upserts the operator-observed Tenant CR status into the
 // daemon's tenant_status table. Best-effort: callers log failures and never
 // fail the reconcile on a daemon blip.
-func (c *EntitlementsGRPCClient) ReportTenantStatus(ctx context.Context, r TenantStatusReport) error {
+func (c *DaemonClient) ReportTenantStatus(ctx context.Context, r TenantStatusReport) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return err
@@ -318,7 +310,7 @@ type TenantAdminOp struct {
 // ListPendingTenantOps returns the daemon's queue of admin tenant CRUD ops
 // awaiting application to a Tenant CR (operator-pull admin CRUD, gibson#964).
 // Each record carries the op type plus the spec inputs the operator applies.
-func (c *EntitlementsGRPCClient) ListPendingTenantOps(ctx context.Context) ([]TenantAdminOp, error) {
+func (c *DaemonClient) ListPendingTenantOps(ctx context.Context) ([]TenantAdminOp, error) {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return nil, err
@@ -355,7 +347,7 @@ func (c *EntitlementsGRPCClient) ListPendingTenantOps(ctx context.Context) ([]Te
 
 // AckTenantOp marks an admin-op record done after the operator has applied it to
 // the Tenant CR (gibson#964). Idempotent.
-func (c *EntitlementsGRPCClient) AckTenantOp(ctx context.Context, opID string) error {
+func (c *DaemonClient) AckTenantOp(ctx context.Context, opID string) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return err
@@ -369,7 +361,7 @@ func (c *EntitlementsGRPCClient) AckTenantOp(ctx context.Context, opID string) e
 // (DaemonOperatorService.EmitAuditEvent, gibson#583). The daemon writes it to
 // Postgres before it answers, with the SPIFFE identity of the operator as the
 // actor. It implements audit.Sink.
-func (c *EntitlementsGRPCClient) EmitAuditEvent(ctx context.Context, ev audit.Event) error {
+func (c *DaemonClient) EmitAuditEvent(ctx context.Context, ev audit.Event) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return err
@@ -379,8 +371,7 @@ func (c *EntitlementsGRPCClient) EmitAuditEvent(ctx context.Context, ev audit.Ev
 }
 
 // parseAccessTuples splits "user#relation@object" into the gRPC
-// AccessTuple message. Mirrors EntitlementsHTTPClient's tuplesFromStrings
-// so the operator's caller surface is unchanged.
+// AccessTuple message.
 func parseAccessTuples(tuples []string) []*operatorv1.AccessTuple {
 	out := make([]*operatorv1.AccessTuple, 0, len(tuples))
 	for _, t := range tuples {
@@ -401,7 +392,7 @@ func parseAccessTuples(tuples []string) []*operatorv1.AccessTuple {
 // SetAgentEnrollmentLimits reports the runtime cap an AgentEnrollment
 // declares (spec.maxRuntime, gibson#597) so the daemon can bound that
 // agent's sandboxed runs. Zero clears the cap.
-func (c *EntitlementsGRPCClient) SetAgentEnrollmentLimits(ctx context.Context, tenantID, agentName string, maxRuntime time.Duration) error {
+func (c *DaemonClient) SetAgentEnrollmentLimits(ctx context.Context, tenantID, agentName string, maxRuntime time.Duration) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return err
@@ -431,7 +422,7 @@ type DesiredCatalogPlugin struct {
 
 // ListDesiredCatalogPlugins pulls every (tenant, catalog plugin) pair a tenant
 // enabled. The operator runs one instance for each pair.
-func (c *EntitlementsGRPCClient) ListDesiredCatalogPlugins(ctx context.Context) ([]DesiredCatalogPlugin, error) {
+func (c *DaemonClient) ListDesiredCatalogPlugins(ctx context.Context) ([]DesiredCatalogPlugin, error) {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return nil, err
@@ -463,7 +454,7 @@ func (c *EntitlementsGRPCClient) ListDesiredCatalogPlugins(ctx context.Context) 
 
 // ReportCatalogPluginStatus reports the state of one tenant's plugin instance
 // to the daemon.
-func (c *EntitlementsGRPCClient) ReportCatalogPluginStatus(ctx context.Context, tenantID, pluginID, phase, lastError string) error {
+func (c *DaemonClient) ReportCatalogPluginStatus(ctx context.Context, tenantID, pluginID, phase, lastError string) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
 		return err
@@ -484,7 +475,7 @@ func (c *EntitlementsGRPCClient) ReportCatalogPluginStatus(ctx context.Context, 
 // provider via DaemonOperatorService.GetModelProviderCredential (gibson#1387).
 // A tenant secret that does not exist gives clients.ErrNotFound. The error text
 // never holds a value.
-func (c *EntitlementsGRPCClient) ModelProviderCredential(
+func (c *DaemonClient) ModelProviderCredential(
 	ctx context.Context, tenantID, credentialSecret, providerType, caBundleSecret string,
 ) (map[string][]byte, error) {
 	authedCtx, err := c.authCtx(ctx)
@@ -497,7 +488,7 @@ func (c *EntitlementsGRPCClient) ModelProviderCredential(
 	})
 	if grpcstatus.Code(err) == codes.NotFound {
 		metrics.ObserveDaemonCallError("get-model-provider-credential", err)
-		return nil, fmt.Errorf("entitlements: get-model-provider-credential: %w", clients.ErrNotFound)
+		return nil, fmt.Errorf("daemon client: get-model-provider-credential: %w", clients.ErrNotFound)
 	}
 	if err := translateGRPCError("get-model-provider-credential", err); err != nil {
 		return nil, err
@@ -522,7 +513,7 @@ type DesiredModelProvider struct {
 // the ModelProviderRecords interface of the controller package. The sync
 // removes each ModelProvider that is not in the result, so it walks every page.
 // A read of the first page only would delete the providers of the later pages.
-func (c *EntitlementsGRPCClient) TenantModelProviders(
+func (c *DaemonClient) TenantModelProviders(
 	ctx context.Context, tenantID string,
 ) ([]DesiredModelProvider, []string, error) {
 	authedCtx, err := c.authCtx(ctx)
@@ -568,7 +559,7 @@ type DesiredOutsideAgent struct {
 // DaemonOperatorService.GetTenantOutsideAgents (gibson#1403). It satisfies the
 // OutsideAgentRecords interface of the controller package. The sync removes each
 // route that is not in the result, so it walks every page.
-func (c *EntitlementsGRPCClient) TenantOutsideAgents(
+func (c *DaemonClient) TenantOutsideAgents(
 	ctx context.Context, tenantID string,
 ) ([]DesiredOutsideAgent, error) {
 	authedCtx, err := c.authCtx(ctx)
@@ -602,7 +593,7 @@ func (c *EntitlementsGRPCClient) TenantOutsideAgents(
 // outside agent via DaemonOperatorService.GetOutsideAgentCredential
 // (gibson#1403). A record or a tenant secret that does not exist gives
 // clients.ErrNotFound. The error text never holds a value.
-func (c *EntitlementsGRPCClient) OutsideAgentCredential(
+func (c *DaemonClient) OutsideAgentCredential(
 	ctx context.Context, tenantID, name string,
 ) (map[string][]byte, error) {
 	authedCtx, err := c.authCtx(ctx)
@@ -614,7 +605,7 @@ func (c *EntitlementsGRPCClient) OutsideAgentCredential(
 	})
 	if grpcstatus.Code(err) == codes.NotFound {
 		metrics.ObserveDaemonCallError("get-outside-agent-credential", err)
-		return nil, fmt.Errorf("entitlements: get-outside-agent-credential: %w", clients.ErrNotFound)
+		return nil, fmt.Errorf("daemon client: get-outside-agent-credential: %w", clients.ErrNotFound)
 	}
 	if err := translateGRPCError("get-outside-agent-credential", err); err != nil {
 		return nil, err

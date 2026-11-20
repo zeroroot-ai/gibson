@@ -190,7 +190,7 @@ func (s *DaemonServer) GetSignupStep(ctx context.Context, req *tenantv1.GetSignu
 	if !isUUID(req.GetAttemptId()) {
 		return nil, status.Error(codes.InvalidArgument, "attempt_id must be a valid UUID")
 	}
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}

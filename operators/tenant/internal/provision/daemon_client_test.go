@@ -51,7 +51,7 @@ func TestSetTenantZitadelOrg_SendsMapping(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	c := &EntitlementsGRPCClient{
+	c := &DaemonClient{
 		client:   operatorv1.NewDaemonOperatorServiceClient(conn),
 		audience: "gibson-daemon",
 	}
@@ -106,7 +106,7 @@ func TestReportTenantStatus_SendsFields(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	c := &EntitlementsGRPCClient{
+	c := &DaemonClient{
 		client:   operatorv1.NewDaemonOperatorServiceClient(conn),
 		audience: "gibson-daemon",
 	}
@@ -168,7 +168,7 @@ func TestReportTenantStatus_RPCError_Translated(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	c := &EntitlementsGRPCClient{
+	c := &DaemonClient{
 		client:   operatorv1.NewDaemonOperatorServiceClient(conn),
 		audience: "gibson-daemon",
 	}
@@ -214,7 +214,7 @@ func TestEnqueueTenantProvisioning_SendsFirstTenant(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	c := &EntitlementsGRPCClient{
+	c := &DaemonClient{
 		client:   operatorv1.NewDaemonOperatorServiceClient(conn),
 		audience: "gibson-daemon",
 	}
@@ -277,7 +277,7 @@ func TestEnqueueTenantProvisioning_RPCError_Translated(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	c := &EntitlementsGRPCClient{
+	c := &DaemonClient{
 		client:   operatorv1.NewDaemonOperatorServiceClient(conn),
 		audience: "gibson-daemon",
 	}

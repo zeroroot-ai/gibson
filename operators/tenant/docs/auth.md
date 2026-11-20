@@ -25,8 +25,8 @@ No static tokens, no PATs, no `gsk_` keys.
 
 | Concern | File |
 |---|---|
-| Service identity (Zitadel client_credentials token source) | [`internal/provision/entitlements_client.go`](../internal/provision/entitlements_client.go) |
-| Daemon gRPC dial over SPIFFE mTLS | [`pkg/transport/daemon/client.go`](../pkg/transport/daemon/client.go), [`internal/provision/entitlements_grpc_client.go`](../internal/provision/entitlements_grpc_client.go) |
+| Service identity (Zitadel client_credentials token source) | [`internal/provision/token_source.go`](../internal/provision/token_source.go) |
+| Daemon gRPC dial over SPIFFE mTLS | [`pkg/transport/daemon/client.go`](../pkg/transport/daemon/client.go), [`internal/provision/daemon_client.go`](../internal/provision/daemon_client.go) |
 | Tenant lifecycle saga (foundation steps) | [`internal/saga/flows/provision.go`](../internal/saga/flows/provision.go) |
 | Zitadel org create, declarative | [`internal/controller/tenantidentity_controller.go`](../internal/controller/tenantidentity_controller.go), [`internal/identity/provisioner.go`](../internal/identity/provisioner.go) |
 | Tenant teardown saga (foundation cleanup) | [`internal/saga/flows/teardown.go`](../internal/saga/flows/teardown.go) |
@@ -49,7 +49,7 @@ ZITADEL_EXTERNAL_DOMAIN # the public host the operator claims, e.g. app.zeroroot
 The Helm Secret `gibson-zitadel-tenant-operator` mounts these
 (rendered by the umbrella chart in `zeroroot-ai/charts`).
 
-[`internal/provision/entitlements_client.go`](../internal/provision/entitlements_client.go) wraps an
+[`internal/provision/token_source.go`](../internal/provision/token_source.go) wraps an
 oauth2 client_credentials TokenSource that:
 
 - exchanges client_id/client_secret for a Zitadel JWT,

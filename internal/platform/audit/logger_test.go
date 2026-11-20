@@ -191,7 +191,7 @@ func TestAuditLogger_LogWithResult_RecordsFailure(t *testing.T) {
 	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	al.LogWithResult(ctx, "mission.start", "mission", "m-1", resultFailure, map[string]any{
-		"reason": "quota exceeded",
+		"reason": "rate limit exceeded",
 	})
 	require.True(t, waitForQueue(al, 200*time.Millisecond), "write queue did not drain")
 	time.Sleep(10 * time.Millisecond)
@@ -200,7 +200,7 @@ func TestAuditLogger_LogWithResult_RecordsFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.Equal(t, resultFailure, entries[0].Result)
-	assert.Equal(t, "quota exceeded", entries[0].Details["reason"])
+	assert.Equal(t, "rate limit exceeded", entries[0].Details["reason"])
 }
 
 // ---------------------------------------------------------------------------

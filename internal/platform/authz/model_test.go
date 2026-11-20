@@ -427,6 +427,4 @@ func TestModel_CatalogGating(t *testing.T) {
 		require.False(t, checkAllow(c, "agent_principal:a", "can_execute", sysComp),
 			"direct_execute without tenant_enabled baseline is a no-op (in_tenant_catalog unsatisfied)")
 	})
-
-	// has_* feature-flag tests removed by spec plans-and-quotas-simplification.
 }

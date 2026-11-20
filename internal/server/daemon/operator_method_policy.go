@@ -106,7 +106,7 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 	},
 	daemonoperatorv1.DaemonOperatorService_SetTenantZitadelOrg_FullMethodName: {
 		allowed: true,
-		reason:  "operator records the tenant->Zitadel-org mapping in the Entitlements saga step (gibson#621)",
+		reason:  "operator records the tenant->Zitadel-org mapping during provisioning (gibson#621)",
 	},
 	daemonoperatorv1.DaemonOperatorService_ListPendingTenantProvisioning_FullMethodName: {
 		allowed: true,

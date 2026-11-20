@@ -182,16 +182,6 @@ func TestReconcile_ProvisionsNamespaceAndPolicy(t *testing.T) {
 		t.Fatalf("networkpolicy missing: %v", err)
 	}
 
-	// Per-tenant K8s ResourceQuota was removed by spec
-	// plans-and-quotas-simplification — daemon enforces concurrent_missions
-	// / concurrent_agents instead. Verify NO ResourceQuota exists.
-	rq := &corev1.ResourceQuota{}
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "gibson-tenant-quota"}, rq); err == nil {
-		t.Errorf("resourcequota should not be created any more, but found one")
-	} else if !apierrors.IsNotFound(err) {
-		t.Errorf("unexpected error checking ResourceQuota: %v", err)
-	}
-
 	// E8/gibson#805: the Tenant now stays Provisioning until its four owned
 	// sub-CRDs report Ready. The sub-CRD controllers are not running in this
 	// fake harness, so the children never flip Ready — the Tenant must NOT be

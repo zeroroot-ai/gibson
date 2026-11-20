@@ -5,7 +5,7 @@
 
 package api
 
-// server_entitlements_audit_integration_test.go — end-to-end test of the
+// server_access_tuples_audit_integration_test.go — end-to-end test of the
 // audit-emission path exercised by WriteAccessTuples.
 //
 // Spec: access-matrix-finish task 26, R6 AC 1-3, 9.

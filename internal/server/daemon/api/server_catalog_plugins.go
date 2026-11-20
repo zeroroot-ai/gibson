@@ -25,7 +25,7 @@ import (
 func (s *DaemonServer) ListDesiredCatalogPlugins(
 	ctx context.Context, req *daemonoperatorv1.ListDesiredCatalogPluginsRequest,
 ) (*daemonoperatorv1.ListDesiredCatalogPluginsResponse, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -91,7 +91,7 @@ func (s *DaemonServer) ReportCatalogPluginStatus(
 	if req.GetPhase() == "" {
 		return nil, status.Error(codes.InvalidArgument, "phase required")
 	}
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}

@@ -14,8 +14,8 @@
 // imported here for the service's request/response messages.
 //
 // Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
-// Mutations further require tenant-admin entitlement enforced inside the
-// daemon handler.
+// Mutations further require the tenant-admin relation, which the daemon
+// handler checks.
 
 package tenantv1
 

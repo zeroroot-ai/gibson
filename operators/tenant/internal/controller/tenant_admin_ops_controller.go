@@ -48,7 +48,7 @@ import (
 const defaultTenantAdminOpsInterval = 15 * time.Second
 
 // TenantAdminOpsClient is the slice of the daemon client the runnable needs.
-// provision.EntitlementsGRPCClient satisfies it; tests pass a stub.
+// provision.DaemonClient satisfies it; tests pass a stub.
 type TenantAdminOpsClient interface {
 	ListPendingTenantOps(ctx context.Context) ([]provision.TenantAdminOp, error)
 	AckTenantOp(ctx context.Context, opID string) error

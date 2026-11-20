@@ -49,7 +49,7 @@ type Event struct {
 }
 
 // Sink sends one record to the durable audit store. The daemon client
-// (provision.EntitlementsGRPCClient) implements it.
+// (provision.DaemonClient) implements it.
 type Sink interface {
 	EmitAuditEvent(ctx context.Context, ev Event) error
 }
