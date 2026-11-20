@@ -39,17 +39,17 @@ func requireDaemonGRPCAddress(getenv func(string) string) (string, error) {
 }
 
 // newDaemonClientFunc builds the daemon gRPC client. Production passes
-// provision.NewEntitlementsGRPCClient.
+// provision.NewDaemonClient.
 type newDaemonClientFunc func(
 	ctx context.Context, addr, daemonSVID string, tokens provision.TokenSource,
-) (*provision.EntitlementsGRPCClient, error)
+) (*provision.DaemonClient, error)
 
 // daemonClientFromEnv builds the daemon gRPC client from the address and the
 // SPIFFE ID of the daemon. Both are required: the client refuses an empty
 // SPIFFE ID. It returns the address so the caller can log it.
 func daemonClientFromEnv(
 	ctx context.Context, getenv func(string) string, tokens provision.TokenSource, newClient newDaemonClientFunc,
-) (*provision.EntitlementsGRPCClient, string, error) {
+) (*provision.DaemonClient, string, error) {
 	addr, err := requireDaemonGRPCAddress(getenv)
 	if err != nil {
 		return nil, "", err

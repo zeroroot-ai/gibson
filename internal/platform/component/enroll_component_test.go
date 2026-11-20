@@ -69,7 +69,7 @@ func TestEnrollComponent_Refusals(t *testing.T) {
 		t.Fatalf("no identity: want Unauthenticated, got %v", err)
 	}
 
-	enr.err = status.Error(codes.ResourceExhausted, "quota")
+	enr.err = status.Error(codes.ResourceExhausted, "too many components")
 	if _, err := svc.EnrollComponent(componentCaller("acme", "agent_principal:p-1"), req); status.Code(err) != codes.ResourceExhausted {
 		t.Fatalf("enroller error: want it unchanged, got %v", err)
 	}

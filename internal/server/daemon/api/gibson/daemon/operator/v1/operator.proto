@@ -19,7 +19,7 @@ import "buf/validate/validate.proto";
 // system_tenant:_system.
 service DaemonOperatorService {
   // ---------------------------------------------------------------------------
-  // Entitlements — operator RPCs called by the tenant-operator reconciler
+  // Tenant provisioning: operator RPCs called by the tenant-operator reconciler
   // ---------------------------------------------------------------------------
   //
   // gibson#1530 removed the RPCs UpsertTenantQuota and ListFeatureTuples and
@@ -427,7 +427,7 @@ service DaemonOperatorService {
 }
 
 // ---------------------------------------------------------------------------
-// Entitlements — request/response messages
+// Tenant provisioning: request/response messages
 // ---------------------------------------------------------------------------
 
 // AccessTuple is a single FGA relationship tuple.

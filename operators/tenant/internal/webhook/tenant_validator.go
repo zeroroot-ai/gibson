@@ -32,7 +32,7 @@ const ValidatePath = "/validate-tenant"
 // validator (auth: invalid tenant identifier ... lowercase letter start,
 // [a-z0-9_-] body, [a-z0-9] end). Without it a name like "2foo" would pass
 // the webhook, the saga would provision through 10 steps, then the
-// Entitlements step's call to the daemon admin API would fail with a
+// first daemon call of the saga would fail with a
 // 502/permission_denied — looking like a hang to the user. Reject early.
 //
 // The trailing "?" makes the interior+final group optional so a single

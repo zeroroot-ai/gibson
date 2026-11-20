@@ -37,7 +37,7 @@ const envIDPZitadelOrgID = "GIBSON_IDP_ZITADEL_ORG_ID"
 // system_tenant at ext-authz, plus the SPIFFE peer allowlist. The operator seeds this
 // mapping for every tenant.
 func (s *DaemonServer) SetTenantZitadelOrg(ctx context.Context, req *daemonoperatorv1.SetTenantZitadelOrgRequest) (*daemonoperatorv1.SetTenantZitadelOrgResponse, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}

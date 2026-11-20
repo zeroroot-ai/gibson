@@ -197,7 +197,7 @@ func TestProvision_CreateErrorSurfaces(t *testing.T) {
 // clients.IsPermanent check still sees it and does not retry.
 func TestProvision_PermanentCreateErrorIsReturnedUnwrapped(t *testing.T) {
 	fz := newFakeZitadel()
-	permanent := clients.WrapPermanent(errors.New("quota exceeded"))
+	permanent := clients.WrapPermanent(errors.New("rate limit exceeded"))
 	fz.createErr = permanent
 	p := New(fz, "PROJ-1")
 

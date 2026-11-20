@@ -400,7 +400,7 @@ func TestWorkOwnerBinding_RoundTrip(t *testing.T) {
 	assert.False(t, env.mr.Exists(workOwnerKey("work-bind-2")))
 }
 
-// TestTenantMayActOnWork enumerates the entitlement rule so the shared-component
+// TestTenantMayActOnWork enumerates the access rule so the shared-component
 // carve-out cannot widen unnoticed.
 func TestTenantMayActOnWork(t *testing.T) {
 	cases := []struct {
@@ -452,7 +452,7 @@ func TestWorkQueue_RefusesToWaitOnAnUnboundWorkId(t *testing.T) {
 }
 
 // TestSubmitResult_RefusesWhenTheOwnerLookupFails covers the third outcome of
-// the check: Redis is unreachable, so entitlement is unknown rather than
+// the check: Redis is unreachable, so access is unknown rather than
 // granted.
 func TestSubmitResult_RefusesWhenTheOwnerLookupFails(t *testing.T) {
 	env := newWorkIDEnv(t)

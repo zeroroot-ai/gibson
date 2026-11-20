@@ -1115,7 +1115,7 @@ func (s *ComponentServiceServer) PollWork(
 //
 // A work id is a routing token the daemon hands to a remote component, and it
 // comes back to the daemon on RPCs that component controls. It therefore proves
-// nothing on its own: possession of an id is not evidence of entitlement to the
+// nothing on its own: possession of an id is not evidence of a right to the
 // work it names. Every RPC that accepts a component-supplied work id resolves
 // the tenant that enqueued it and compares that to the caller's authenticated
 // tenant before letting the id select any state.

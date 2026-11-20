@@ -32,7 +32,7 @@ func (s *captureAuditServer) EmitAuditEvent(_ context.Context, req *operatorv1.E
 	return &operatorv1.EmitAuditEventResponse{}, nil
 }
 
-func auditClient(t *testing.T, srv operatorv1.DaemonOperatorServiceServer) *EntitlementsGRPCClient {
+func auditClient(t *testing.T, srv operatorv1.DaemonOperatorServiceServer) *DaemonClient {
 	t.Helper()
 	return bufconnClient(t, srv)
 }

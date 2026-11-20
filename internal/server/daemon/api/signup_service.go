@@ -383,7 +383,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		return nil, err
 	}
 
-	if s.signupVerifications == nil || s.entitlementsDB() == nil {
+	if s.signupVerifications == nil || s.platformDB == nil {
 		return nil, status.Error(codes.Unavailable, "signup is temporarily unavailable; please try again shortly")
 	}
 	if s.idpAdminClient == nil {

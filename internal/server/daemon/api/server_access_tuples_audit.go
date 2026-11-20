@@ -3,8 +3,8 @@
 
 package api
 
-// server_entitlements_audit.go — classification helpers + emission shims
-// used by the entitlements admin RPCs (WriteAccessTuples, EmitAuditEvent).
+// server_access_tuples_audit.go — classification helpers + emission shims
+// used by the operator admin RPCs (WriteAccessTuples, EmitAuditEvent).
 //
 // Classification logic is intentionally pure (no I/O, no logger) so it is
 // easy to unit-test.

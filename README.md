@@ -63,7 +63,7 @@ role on the object `system_tenant:_system`, and no tenant role gives it.
 | RPC group | Role | Who holds the role | What it does |
 |---|---|---|---|
 | `gibson.daemon.operator.v1.DaemonOperatorService` | `platform_operator` | Platform service accounts, for example the tenant operator | Tenant provisioning, tenant status, access tuples, connector grants, audit events |
-| `gibson.tenant.v1.AdminTenantService` | `platform_owner` | The one Platform owner of the install, a person | Approve or reject a registration. Provision, update or delete a tenant. Read the billing state of a tenant |
+| `gibson.tenant.v1.AdminTenantService` | `platform_owner` | The one Platform owner of the install, a person | Approve or reject a registration. Provision, update or delete a tenant |
 
 This list comes from the authz registry. The full list is each row with the
 object type `system_tenant` in

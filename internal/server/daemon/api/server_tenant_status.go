@@ -50,7 +50,7 @@ func (s *DaemonServer) ReportTenantStatus(ctx context.Context, req *daemonoperat
 	if req.GetTenantId() == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "tenant_id required")
 	}
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Errorf(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -124,7 +124,7 @@ func (s *DaemonServer) GetTenantProvisioningStatus(ctx context.Context, req *ten
 	if req.GetTenantId() == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "tenant_id required")
 	}
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Errorf(codes.Unavailable, "platform Postgres not configured")
 	}

@@ -65,9 +65,8 @@ func testFuncsInDir(t *testing.T, dir string) map[string]struct{} {
 }
 
 // TestManifestCoversTheCriticalPaths is a sanity check on the manifest shape:
-// it declares exactly four paths, each with at least one test. The fifth path
-// of QUALITY-BARS §4 Tier 3, the entitlements bypass, went with the
-// entitlements seam (gibson#1529).
+// it declares exactly four paths, each with at least one test. gibson#1529
+// deleted the fifth path of QUALITY-BARS §4 Tier 3 with the code it covered.
 func TestManifestCoversTheCriticalPaths(t *testing.T) {
 	const want = 4
 	if len(Manifest) != want {

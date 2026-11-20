@@ -56,7 +56,7 @@ type Step interface {
 
 	// Skip, if it returns true, causes the Runner to mark the step's
 	// condition True with Reason=Skipped without calling Provision.
-	// Used for tier-dependent steps (e.g., Stripe creation on free tier).
+	// Used for a step that does not apply to a given object.
 	// Default implementations return false.
 	Skip(obj ConditionedObject) bool
 }

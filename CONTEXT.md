@@ -230,14 +230,11 @@ the time" — agents run long after the user has gone — it is that **every wri
 attributable to a mission a user launched**.
 _Avoid_: caller-supplied tenant, work_id lookup, "authed user" (agents are not users)
 
-**Entitlements provider**:
-The pluggable seam that decouples commercial gating from the source-available brain. The budget enforcer
-and rate limiter consume "what are this tenant's limits / what's enabled?" from this interface
-— they never read plans or Stripe directly. Gibson ships a permissive/config-driven provider
-(admins set per-team quotas; no payment); the **commercial** layer ships the plan +
-subscription (Stripe) provider. `BillingService`, Stripe, and `plans.yaml` live **entirely**
-in the commercial layer — never in gibson.
-_Avoid_: plan check, billing (billing is not in gibson)
+**Tenant limits**:
+A tenant has two kinds of limits. The platform sets protective bounds (rate limits and size,
+depth and time bounds). The tenant sets its own budget. Gibson has no plan, tier, quota or
+entitlement check (owner decision 2026-11-20, gibson#1525).
+_Avoid_: plan check, quota, entitlement, billing (billing is not in gibson)
 
 **Scope (vantage)**:
 The network/addressing context an observation was made *within*, carried by the agent's
@@ -343,7 +340,7 @@ _Avoid_: Catalog pack (that is the shared, curated tier)
 
 **Catalog pack**:
 A versioned Domain Pack the platform owner curates and distributes to all tenants — SDK source of
-truth, shipped via release/rollout, entitlement-gated (free or paid). Pure data (taxonomy /
+truth, shipped via release/rollout, open to every tenant. Pure data (taxonomy /
 ontology + CEL predicates), never code
 (ADR-0133).
 _Avoid_: Tenant extension (that is the private tier), template
@@ -516,8 +513,7 @@ tenants; `tenant_enabled` marks a tenant's enabled instance. The catalog-source
 reconciler converges `platform_enabled` tuples from the embedded catalog table.
 `ListCatalog` filters by the gate and `EnableConnector` enforces it. v1 is
 **mechanical only**: every embedded entry is seeded `platform_enabled`, so
-behavior is unchanged but de-listing works by removing one tuple. Plan-based
-gating arrives later through the entitlements seam via `tenant_published`.
+behavior is unchanged but de-listing works by removing one tuple.
 _Avoid_: plan/Stripe policy inside gibson, per-tenant catalog tables
 
 **Connector UI parity**:
@@ -746,9 +742,9 @@ _Avoid_: account recovery, password reset (a different, self-service flow)
 - The **Platform owner** belongs to no tenant.
 
 - **License boundary:** gibson is **source-available (Elastic License 2.0) and multi-tenant** (a self-hoster's teams get real
-  tenancy with the per-tenant isolation above). The *only* commercial coupling is the payment
-  gate, decoupled behind the **Entitlements provider**; `BillingService` + Stripe + `plans.yaml`
-  live in the closed layer, not gibson.
+  tenancy with the per-tenant isolation above). Gibson holds no commercial limit. The billing
+  component connects only at the neutral connection points (ADR-0060). `BillingService` and
+  Stripe are not in gibson.
 - **No cross-tenant anything** (see invariant above). Everything below is *within one tenant*.
 - An **Application** has one **Repository**, many **Images** (each built from one
   Repository commit by one **Pipeline**), and many **Deployments** (each running one Image).
@@ -804,8 +800,8 @@ _Avoid_: account recovery, password reset (a different, self-service flow)
   World = fold of the Timeline.
 - **Cutover scope (retiring `internal/orchestrator`).** *Survives, re-expressed:* the
   **runaway guard** — an unbounded LLM Decider can loop forever, so a per-mission
-  **budget/limit System** (max executions / depth / token-cost, from CUE `MissionConstraints`
-  + the Entitlements provider) is **mandatory**, replacing the old ancestry-based
+  **budget/limit System** (max executions / depth / token-cost, from CUE `MissionConstraints`)
+  is **mandatory**, replacing the old ancestry-based
   `spawn_cycle_guard`. *Removed entirely:* **HITL approval + escalation** — the brain runs
   **fully autonomously**; bounds come from declared **Rules of Engagement** (CUE
   `MissionConstraints`) + **FGA authz** + the budget System, never a runtime human gate (fits

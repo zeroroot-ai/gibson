@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // daemon_call.go — observability for the operator's calls to the daemon over
-// SPIFFE-mTLS gRPC (provision.EntitlementsGRPCClient, ADR-0002).
+// SPIFFE-mTLS gRPC (provision.DaemonClient, ADR-0002).
 //
 // gibson#1043 was a SPIFFE-allowlist omission that made the daemon deny the
 // operator's admin-ops drain (~every 15s). The failure was SILENT — log-only,

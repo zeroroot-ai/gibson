@@ -22,7 +22,7 @@ func TestAuditEntriesToResponse_NamesTheActorAndTheTarget(t *testing.T) {
 		{ID: "e1", Timestamp: ts, TenantID: "acme", ActorID: "user-1", ActorSource: "user",
 			ActorEmail: "user-1", Action: "apikey.revoke", Resource: "apikey", ResourceID: "key-9"},
 		{ID: "e2", Timestamp: ts, TenantID: "acme", ActorID: "svc-1", ActorSource: "system",
-			Action: "tenant.quota", Resource: "tenant"},
+			Action: "tenant.suspend", Resource: "tenant"},
 		{ID: "e3", Timestamp: ts, TenantID: "acme", ActorID: "svc-1", ActorSource: "system",
 			Action: "x", ResourceID: "only-id"},
 	}, "next")

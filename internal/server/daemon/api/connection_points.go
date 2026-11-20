@@ -104,7 +104,7 @@ func (s *DaemonServer) CompleteSignupStep(ctx context.Context, req *connectionv1
 	default:
 		return nil, status.Error(codes.InvalidArgument, "outcome must be DONE or FAILED")
 	}
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -132,7 +132,7 @@ func (s *DaemonServer) DescribeSignupStep(ctx context.Context, req *connectionv1
 	if req.GetStepToken() == "" {
 		return nil, status.Error(codes.InvalidArgument, "step_token is required")
 	}
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -173,7 +173,7 @@ func (s *DaemonServer) SetTenantActivation(ctx context.Context, req *connectionv
 	default:
 		return nil, status.Error(codes.InvalidArgument, "state must be ACTIVE or SUSPENDED")
 	}
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -201,7 +201,7 @@ func (s *DaemonServer) ListTenantUsage(ctx context.Context, req *connectionv1.Li
 	if !ok {
 		return nil, status.Error(codes.Unavailable, "budget counters are not configured")
 	}
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}

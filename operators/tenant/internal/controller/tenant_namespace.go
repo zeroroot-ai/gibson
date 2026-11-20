@@ -96,7 +96,7 @@ const (
 )
 
 // NamespaceProvisioner holds the configuration needed for the
-// namespace/NetworkPolicy/ResourceQuota provisioning step.
+// namespace/NetworkPolicy provisioning step.
 //
 // It satisfies saga.Step so the runner can drive it directly without an
 // adapter — the embedded saga.StepBase supplies the boilerplate methods.
@@ -150,12 +150,6 @@ func (p *NamespaceProvisioner) Provision(ctx context.Context, obj saga.Condition
 	if err := p.ensureNetworkPolicy(ctx, nsName); err != nil {
 		return false, fmt.Errorf("ensure networkpolicy: %w", err)
 	}
-	// Per-tenant K8s ResourceQuota was removed by spec
-	// plans-and-quotas-simplification: per-tenant resource consumption is
-	// bounded by the fixed shape of operator-managed data-plane infra. The
-	// chart's remove-orphan-resource-quotas pre-upgrade Job
-	// deletes any leftover gibson-tenant-quota objects from prior installs.
-
 	// Record namespace in status for later phases and UI.
 	t.Status.Namespace = nsName
 	return true, nil

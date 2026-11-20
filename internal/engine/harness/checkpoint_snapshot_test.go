@@ -182,7 +182,7 @@ func TestRewind_AGoneSnapshotStartsFresh(t *testing.T) {
 
 // Any other restore error fails the node.
 func TestRewind_ARestoreErrorFailsTheNode(t *testing.T) {
-	launcher := &recordingLauncher{restoreErr: errors.New("quota")}
+	launcher := &recordingLauncher{restoreErr: errors.New("disk full")}
 	h, _ := forkHarness(t, launcher)
 	task := agent.NewTask("exploit", "x")
 	task.NodeID, task.FromSnapshot = "exploit", "snap-1"

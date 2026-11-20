@@ -34,7 +34,7 @@ type SPIFFEConfig struct {
 	// AllowedPeerIDs is the optional list of additional SPIFFE IDs the
 	// daemon's gRPC mTLS listener accepts beyond EnvoyID. Used for direct
 	// control-plane callers that don't go through Envoy — currently the
-	// tenant-operator's EntitlementsGRPCClient. The complete accepted set
+	// tenant-operator's DaemonClient. The complete accepted set
 	// is EnvoyID ∪ AllowedPeerIDs; all entries are validated against
 	// TrustDomain. Populated from env var GIBSON_SPIFFE_ALLOWED_PEER_IDS
 	// (comma-separated).

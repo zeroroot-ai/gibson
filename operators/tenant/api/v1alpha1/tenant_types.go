@@ -116,7 +116,7 @@ type TenantSpec struct {
 	DisplayName string `json:"displayName"`
 
 	// Owner is the email address of the tenant owner. Used as the admin user
-	// in Zitadel (via Auth.js) and as billing contact in Stripe.
+	// in Zitadel (via Auth.js).
 	// +kubebuilder:validation:Format=email
 	// +required
 	Owner string `json:"owner"`
@@ -226,7 +226,7 @@ type TenantStatus struct {
 
 	// Conditions represent the current state of the Tenant resource.
 	// Standard condition types: Ready, NamespaceProvisioned, ZitadelOrgReady,
-	// StripeReady, FGAReady, RedisReady, Terminating.
+	// FGAReady, RedisReady, Terminating.
 	// +listType=map
 	// +listMapKey=type
 	// +optional

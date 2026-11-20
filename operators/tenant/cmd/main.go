@@ -395,11 +395,6 @@ func main() {
 			"REDIS_ADDR empty — fga pubsub publisher disabled " +
 				"(dashboard membership cache will not invalidate on operator FGA writes)")
 	}
-	// Billing (Stripe + plans) moved to the closed commercial tier
-	// (E7/gibson#798): the hosted billing-webhook owns subscription state and
-	// the closed Entitlements provider owns plan→quota. OSS gibson's operator
-	// carries no Stripe client, plan registry, or billing reconcilers.
-	//
 	// Redis is required infrastructure (one-code-path epic / deploy#199).
 	// `REDIS_ADDR` must be set; missing → exit 1. There is no NoopClient
 	// fallback — the saga steps that write the tenant keyspace, publish
@@ -634,10 +629,6 @@ func main() {
 	// (SetTenantZitadelOrg, FGA tuple writes, catalog seeding, …) are
 	// satisfied. The daemon's expected SVID is read from GIBSON_DAEMON_SPIFFE_ID,
 	// which is required.
-	//
-	// Plan→quota and Stripe subscription reconciliation moved to the closed
-	// billing tier (E7/gibson#798): the operator no longer loads a plan
-	// registry or runs an entitlements/billing reconciler.
 	// The daemon is a required dependency (ADR-0003, ADR-0002). The operator
 	// reports each tenant status to it, seeds the tenant to Zitadel org
 	// mapping in it (ADR-0093 decision 4), sends the enrollment runtime cap
@@ -653,7 +644,7 @@ func main() {
 	// One block for the wiring of the daemon client and of each loop that
 	// needs it.
 	{
-		grpcClient, grpcAddr, gerr := daemonClientFromEnv(context.Background(), os.Getenv, operatorTokenSource, provision.NewEntitlementsGRPCClient)
+		grpcClient, grpcAddr, gerr := daemonClientFromEnv(context.Background(), os.Getenv, operatorTokenSource, provision.NewDaemonClient)
 		if gerr != nil {
 			setupLog.Error(gerr, "daemon gRPC client init failed", "addr", grpcAddr)
 			os.Exit(1)

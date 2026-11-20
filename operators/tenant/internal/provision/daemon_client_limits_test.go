@@ -28,7 +28,7 @@ func (s *captureLimitsServer) SetAgentEnrollmentLimits(_ context.Context, req *o
 	return &operatorv1.SetAgentEnrollmentLimitsResponse{}, s.err
 }
 
-func limitsClient(t *testing.T, srv *captureLimitsServer) *EntitlementsGRPCClient {
+func limitsClient(t *testing.T, srv *captureLimitsServer) *DaemonClient {
 	t.Helper()
 	return bufconnClient(t, srv)
 }

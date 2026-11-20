@@ -43,7 +43,7 @@ func (s *catalogPluginServer) ReportCatalogPluginStatus(_ context.Context, req *
 
 // bufconnClient serves srv over an in-memory connection and returns a client
 // over it.
-func bufconnClient(t *testing.T, srv operatorv1.DaemonOperatorServiceServer) *EntitlementsGRPCClient {
+func bufconnClient(t *testing.T, srv operatorv1.DaemonOperatorServiceServer) *DaemonClient {
 	t.Helper()
 	lis := bufconn.Listen(1 << 20)
 	gs := grpc.NewServer()
@@ -59,7 +59,7 @@ func bufconnClient(t *testing.T, srv operatorv1.DaemonOperatorServiceServer) *En
 		t.Fatalf("dial bufconn: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	return &EntitlementsGRPCClient{client: operatorv1.NewDaemonOperatorServiceClient(conn), audience: "gibson-daemon"}
+	return &DaemonClient{client: operatorv1.NewDaemonOperatorServiceClient(conn), audience: "gibson-daemon"}
 }
 
 // The client maps each desired plugin of the daemon, and reports the phase

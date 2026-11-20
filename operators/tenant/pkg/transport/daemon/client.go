@@ -9,7 +9,7 @@
 // agent's Workload API socket. The daemon's gRPC server validates the
 // operator's SVID against its inbound peer allow-list (gibson#107) before
 // accepting the connection. The token-source-Bearer path that the existing
-// EntitlementsGRPCClient sends in `authorization` metadata stays exactly as
+// DaemonClient sends in `authorization` metadata stays exactly as
 // it is — mTLS is workload identity; the JWT is the per-call authorization
 // principal the daemon dispatches into OpenFGA.
 //

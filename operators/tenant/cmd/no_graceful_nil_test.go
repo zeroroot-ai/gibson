@@ -83,8 +83,8 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/clients/vault/client.go :: if out == nil { ... }":                    entry(astchecks.CategoryDefensiveGuard, httpDiscard),
 		"internal/clients/vault/transit.go :: if out == nil { ... }":                   entry(astchecks.CategoryDefensiveGuard, httpDiscard),
 
-		"internal/clients/signupprogress/redis.go :: if c == nil || c.rdb == nil { ... }":             entry(astchecks.CategoryReceiverNilGuard, ctorGuard),
-		"internal/provision/entitlements_grpc_client.go :: if c == nil || c.transport == nil { ... }": entry(astchecks.CategoryReceiverNilGuard, ctorGuard),
+		"internal/clients/signupprogress/redis.go :: if c == nil || c.rdb == nil { ... }":  entry(astchecks.CategoryReceiverNilGuard, ctorGuard),
+		"internal/provision/daemon_client.go :: if c == nil || c.transport == nil { ... }": entry(astchecks.CategoryReceiverNilGuard, ctorGuard),
 
 		// Controller-runtime patterns.
 		"internal/controller/tenant_namespace.go :: if dst == nil { ... }": entry(astchecks.CategoryDefensiveGuard, applyShim),

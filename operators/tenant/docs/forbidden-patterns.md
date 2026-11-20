@@ -181,7 +181,7 @@ clientID := os.Getenv("ZITADEL_DASHBOARD_CLIENT_ID")          // forbidden
 clientSecret := os.Getenv("ZITADEL_DASHBOARD_CLIENT_SECRET")  // forbidden
 ```
 
-Right ([`internal/provision/entitlements_client.go`](../internal/provision/entitlements_client.go)):
+Right ([`internal/provision/token_source.go`](../internal/provision/token_source.go)):
 
 ```go
 clientID := os.Getenv("ZITADEL_TENANT_OPERATOR_CLIENT_ID")

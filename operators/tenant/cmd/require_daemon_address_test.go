@@ -86,9 +86,9 @@ func daemonEnv(k string) string {
 // address no client is built, and a client error names the SPIFFE ID variable.
 func TestDaemonClientFromEnv(t *testing.T) {
 	t.Parallel()
-	want := &provision.EntitlementsGRPCClient{}
+	want := &provision.DaemonClient{}
 	var gotAddr, gotSVID string
-	ok := func(_ context.Context, addr, svid string, _ provision.TokenSource) (*provision.EntitlementsGRPCClient, error) {
+	ok := func(_ context.Context, addr, svid string, _ provision.TokenSource) (*provision.DaemonClient, error) {
 		gotAddr, gotSVID = addr, svid
 		return want, nil
 	}
@@ -101,7 +101,7 @@ func TestDaemonClientFromEnv(t *testing.T) {
 	}
 
 	called := false
-	never := func(context.Context, string, string, provision.TokenSource) (*provision.EntitlementsGRPCClient, error) {
+	never := func(context.Context, string, string, provision.TokenSource) (*provision.DaemonClient, error) {
 		called = true
 		return nil, nil
 	}
@@ -112,7 +112,7 @@ func TestDaemonClientFromEnv(t *testing.T) {
 		t.Error("a client was built with no address")
 	}
 
-	refuse := func(context.Context, string, string, provision.TokenSource) (*provision.EntitlementsGRPCClient, error) {
+	refuse := func(context.Context, string, string, provision.TokenSource) (*provision.DaemonClient, error) {
 		return nil, errors.New("DaemonSVID is required")
 	}
 	_, addr, err = daemonClientFromEnv(context.Background(), daemonEnv, nil, refuse)

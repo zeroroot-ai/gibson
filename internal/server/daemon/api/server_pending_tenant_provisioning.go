@@ -54,7 +54,7 @@ import (
 func (s *DaemonServer) enqueuePendingTenantProvisioning(
 	ctx context.Context, p *daemonoperatorv1.PendingTenant, hold *signupStepHold, welcomeOwner bool,
 ) (bool, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return false, errNoPlatformDB
 	}
@@ -106,7 +106,7 @@ func (s *DaemonServer) enqueueOwnedTenant(
 		return err
 	}
 	var owner string
-	err = s.entitlementsDB().QueryRowContext(ctx,
+	err = s.platformDB.QueryRowContext(ctx,
 		`SELECT owner_user_id FROM pending_tenant_provisioning WHERE tenant_id = $1`,
 		p.GetTenantId()).Scan(&owner)
 	if err != nil {
@@ -122,7 +122,7 @@ func (s *DaemonServer) enqueueOwnedTenant(
 // status. The queue keeps the row of a built tenant, so a row means that the
 // tenant id is in use.
 func (s *DaemonServer) tenantIDQueued(ctx context.Context, tenantID string) (bool, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return false, errNoPlatformDB
 	}
@@ -173,7 +173,7 @@ func workspaceNameTaken(msg string) error {
 // operator does not see it until ConnectionPointService.CompleteSignupStep
 // reports the step done (ADR-0060, D54).
 func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *daemonoperatorv1.ListPendingTenantProvisioningRequest) (*daemonoperatorv1.ListPendingTenantProvisioningResponse, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -249,7 +249,7 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *d
 // gibsoncheck:allow tenant-from-request — DaemonOperatorService: platform_operator on
 // system_tenant at ext-authz, plus the SPIFFE peer allowlist.
 func (s *DaemonServer) AckTenantProvisioned(ctx context.Context, req *daemonoperatorv1.AckTenantProvisionedRequest) (*daemonoperatorv1.AckTenantProvisionedResponse, error) {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
@@ -361,7 +361,7 @@ func (s *DaemonServer) EnqueueTenantProvisioning(ctx context.Context, req *daemo
 // A row that the operator claimed or finished stays as it is: the tenant
 // exists, and the queue no longer decides anything for it.
 func (s *DaemonServer) rewritePendingSeed(ctx context.Context, tenantID, ownerEmail, workspaceName, tier string) error {
-	db := s.entitlementsDB()
+	db := s.platformDB
 	if db == nil {
 		return nil
 	}

@@ -53,7 +53,7 @@ func TestListPendingTenantOps_Denied_IncrementsFailureMetric(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	c := &EntitlementsGRPCClient{
+	c := &DaemonClient{
 		client:   operatorv1.NewDaemonOperatorServiceClient(conn),
 		audience: "gibson-daemon",
 	}

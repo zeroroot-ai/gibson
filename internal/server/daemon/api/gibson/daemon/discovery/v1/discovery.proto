@@ -19,8 +19,6 @@
 // in fga_rpc_registry.go. Tenant_published items from other tenants are
 // invisible by construction of the FGA model (model.fga v2 component type),
 // not by filter logic in these handlers.
-//
-// Spec: agent-authoring-and-tenant-entitlements R1, R6.
 
 syntax = "proto3";
 
@@ -318,9 +316,9 @@ message SuggestMissingCapabilityResponse {
   reserved 2;
   reserved "actionable_paths";
   // Human-readable suggestion. Example:
-  //   "plugin:servicenow is not installed in tenant:acme. The org plan
-  //    includes it — request your tenant admin enable it from Security
-  //    Policy, or install it from the platform catalog."
+  //   "plugin:servicenow is not installed in tenant:acme. Ask your tenant
+  //    admin to enable it from Security Policy, or install it from the
+  //    platform catalog."
   string message = 1;
 }
 

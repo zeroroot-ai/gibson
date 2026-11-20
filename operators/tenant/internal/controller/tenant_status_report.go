@@ -26,7 +26,7 @@ import (
 )
 
 // TenantStatusReporter reports observed Tenant status to the daemon.
-// provision.EntitlementsGRPCClient satisfies it; tests pass a stub. It is
+// provision.DaemonClient satisfies it; tests pass a stub. It is
 // always set on the reconcile path: the operator does not start without a
 // daemon address (GIBSON_DAEMON_GRPC_ADDRESS), so no implementation exists
 // that reports nothing ([[0003]]).
