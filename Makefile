@@ -637,6 +637,15 @@ nist-pack:
 	@$(GOCMD) run ./tools/oscalgen -dir . -write
 check-nist-pack:
 	@$(GOCMD) run ./tools/oscalgen -dir . -check
+# d3fend-pack — regenerate the catalog pack mitre-d3fend from the pinned
+# D3FEND extract (gibson#1484, tools/d3fendgen/README.md).
+# check-d3fend-pack — fail when the committed pack file is stale. The same
+# check runs in the unit lane as tools/d3fendgen TestCommittedPackMatchesTheExtract.
+.PHONY: d3fend-pack check-d3fend-pack
+d3fend-pack:
+	@$(GOCMD) run ./tools/d3fendgen -dir . -write
+check-d3fend-pack:
+	@$(GOCMD) run ./tools/d3fendgen -dir . -check
 # env-readers — refresh configs/env-readers.txt, the env reader set that
 # zeroroot-ai/charts vendors (ADR-0094 layer 2, charts#303).
 # check-env-readers — fail when the file is stale. The same check runs in the

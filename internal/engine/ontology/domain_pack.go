@@ -180,6 +180,16 @@ type DomainPack struct {
 	// writes it from the published catalog of the framework (tools/oscalgen).
 	// When a pack has controls, each mapping rule must name one of them.
 	Controls []Control `json:"controls,omitempty"`
+
+	// Source records the release of the published data that this pack came
+	// from, for a pack that a generator writes from such data.
+	Source *PackSource `json:"source,omitempty"`
+
+	// CountermeasureTactics and Countermeasures are the defensive framework
+	// of this pack (gibson#1484). See countermeasure.go. They are taxonomy and
+	// ontology only. A pack with countermeasures holds no predicate.
+	CountermeasureTactics []string         `json:"countermeasure_tactics,omitempty"`
+	Countermeasures       []Countermeasure `json:"countermeasures,omitempty"`
 }
 
 // Control is one control of a compliance framework.
@@ -445,6 +455,14 @@ func (p *DomainPack) Validate() error {
 		return fmt.Errorf("domain pack %q: %w", p.Name, err)
 	}
 	if err := p.validateMappingRules(); err != nil {
+		return err
+	}
+	if p.Source != nil {
+		if err := p.Source.validate(); err != nil {
+			return fmt.Errorf("domain pack %q: %w", p.Name, err)
+		}
+	}
+	if err := p.validateCountermeasures(); err != nil {
 		return err
 	}
 	return p.validateControls()
