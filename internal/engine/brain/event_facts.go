@@ -43,53 +43,67 @@ func EventTime(ev Event) time.Time {
 // EventSubject returns the finding and the merge request that the event is
 // about. Each is empty when the event names none.
 func EventSubject(ev Event) (findingID, mergeRequest string) {
-	switch e := deref(ev).(type) {
-	case FindingRaised:
-		return e.ID, ""
-	case FindingStatusChanged:
-		return e.ID, e.MergeRequest
-	case CheckRerun:
-		return e.ID, ""
-	case MergeRequestObserved:
-		return "", e.Key
-	case DeployObserved:
-		return "", e.MergeRequest
-	case FixReverted:
-		return "", e.MergeRequest
-	case RevertRequested:
-		return "", e.MergeRequest
+	ev = deref(ev)
+	if id, mr, ok := findingSubject(ev); ok {
+		return id, mr
 	}
+	return "", mergeRequestSubject(ev)
+}
+
+// findingSubject reads the events that name a Finding.
+func findingSubject(ev Event) (id, mergeRequest string, ok bool) {
 	switch e := ev.(type) {
+	case FindingRaised:
+		return e.ID, "", true
+	case FindingStatusChanged:
+		return e.ID, e.MergeRequest, true
+	case CheckRerun:
+		return e.ID, "", true
 	case FindingPrioritized:
-		return e.ID, ""
+		return e.ID, "", true
 	case *FindingPrioritized:
-		return e.ID, ""
+		return e.ID, "", true
 	case FixClaimed:
-		return e.ID, ""
+		return e.ID, "", true
 	case *FixClaimed:
-		return e.ID, ""
+		return e.ID, "", true
 	case FixClaimReleased:
-		return e.ID, ""
+		return e.ID, "", true
 	case *FixClaimReleased:
-		return e.ID, ""
-	case HealthObserved:
-		return "", e.MergeRequest
-	case *HealthObserved:
-		return "", e.MergeRequest
-	case HealthUnavailable:
-		return "", e.MergeRequest
-	case *HealthUnavailable:
-		return "", e.MergeRequest
-	case MergeRequestQueued:
-		return "", e.MergeRequest
-	case *MergeRequestQueued:
-		return "", e.MergeRequest
-	case MergeGranted:
-		return "", e.MergeRequest
-	case *MergeGranted:
-		return "", e.MergeRequest
+		return e.ID, "", true
 	}
-	return "", ""
+	return "", "", false
+}
+
+// mergeRequestSubject reads the events that name only a merge request.
+func mergeRequestSubject(ev Event) string {
+	switch e := ev.(type) {
+	case MergeRequestObserved:
+		return e.Key
+	case DeployObserved:
+		return e.MergeRequest
+	case FixReverted:
+		return e.MergeRequest
+	case RevertRequested:
+		return e.MergeRequest
+	case HealthObserved:
+		return e.MergeRequest
+	case *HealthObserved:
+		return e.MergeRequest
+	case HealthUnavailable:
+		return e.MergeRequest
+	case *HealthUnavailable:
+		return e.MergeRequest
+	case MergeRequestQueued:
+		return e.MergeRequest
+	case *MergeRequestQueued:
+		return e.MergeRequest
+	case MergeGranted:
+		return e.MergeRequest
+	case *MergeGranted:
+		return e.MergeRequest
+	}
+	return ""
 }
 
 // FindingEventIndexes returns the positions of the events of one finding: the

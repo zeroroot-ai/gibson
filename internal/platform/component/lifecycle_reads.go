@@ -224,6 +224,15 @@ func encodeApplicationFindings(rows []map[string]any) ([]byte, error) {
 // has no use for — routing this read through it would make reachability
 // unreadable on any tenant that has not configured an embedder, which is
 // exactly the silent-unknown this read exists to remove.
+// ReadGraph runs a read-only Cypher query on the graph of the tenant. It is
+// the one read of a raw query, for a reader outside this package such as the
+// incident report (gibson#1478).
+func (q *PoolGraphRAGQuerier) ReadGraph(
+	ctx context.Context, tenant, cypher string, params map[string]any,
+) ([]map[string]any, error) {
+	return q.readGraph(ctx, tenant, cypher, params)
+}
+
 func (q *PoolGraphRAGQuerier) readGraph(
 	ctx context.Context, tenant, cypher string, params map[string]any,
 ) ([]map[string]any, error) {

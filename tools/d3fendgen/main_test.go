@@ -133,3 +133,54 @@ func TestBuildPack_MapsControlLabelsToPackIDs(t *testing.T) {
 		t.Fatalf("controls = %v", got)
 	}
 }
+
+// The command checks the committed pack, writes a pack into a copy of the
+// tree, refuses a wrong flag set and fails on a tree with no extract.
+func TestRun_ChecksWritesAndRefuses(t *testing.T) {
+	root := repoRoot(t)
+	var stderr bytes.Buffer
+	if code := run([]string{"-dir", root, "-check"}, &stderr); code != 0 {
+		t.Fatalf("check of the committed pack: code %d, %s", code, stderr.String())
+	}
+	if code := run([]string{"-dir", root}, &stderr); code != 2 {
+		t.Errorf("no mode: code %d, want 2", code)
+	}
+	if code := run([]string{"-no-such-flag"}, &stderr); code != 2 {
+		t.Errorf("a bad flag: code %d, want 2", code)
+	}
+	empty := t.TempDir()
+	if code := run([]string{"-dir", empty, "-check"}, &stderr); code != 1 {
+		t.Errorf("a tree with no extract: code %d, want 1", code)
+	}
+
+	// A copy of the tree with the extract and no pack: check fails, write
+	// writes the pack, and the check then passes.
+	tree := t.TempDir()
+	raw, err := os.ReadFile(filepath.Clean(filepath.Join(root, ExtractFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{ExtractFile, PackFile} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(tree, rel)), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tree, ExtractFile), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"-dir", tree, "-check"}, &stderr); code != 1 {
+		t.Errorf("a tree with no pack: code %d, want 1", code)
+	}
+	if code := run([]string{"-dir", tree, "-write"}, &stderr); code != 0 {
+		t.Fatalf("write: code %d, %s", code, stderr.String())
+	}
+	if code := run([]string{"-dir", tree, "-check"}, &stderr); code != 0 {
+		t.Errorf("check after the write: code %d, %s", code, stderr.String())
+	}
+	if err := os.WriteFile(filepath.Join(tree, PackFile), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"-dir", tree, "-check"}, &stderr); code != 1 {
+		t.Errorf("a stale pack: code %d, want 1", code)
+	}
+}

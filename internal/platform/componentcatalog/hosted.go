@@ -243,7 +243,7 @@ func validateHostedConfig(id string, s ConnectorSpec) error {
 	if err != nil {
 		return err
 	}
-	if err = validateHostedEnv(id, s.Env, seen); err != nil {
+	if err := validateHostedEnv(id, s.Env, seen); err != nil {
 		return err
 	}
 	for _, a := range s.Args {

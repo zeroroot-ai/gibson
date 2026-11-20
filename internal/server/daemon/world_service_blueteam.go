@@ -336,7 +336,7 @@ func (d *daemonImpl) blueTeamWorldServer(s *worldServer) *worldServer {
 	}
 	confidence := func(ctx context.Context, tenant, id string) (float64, bool, error) {
 		fid := types.ID(id)
-		if fid.Validate() != nil {
+		if hasRow := fid.Validate() == nil; !hasRow {
 			return 0, false, nil // a World finding with no UUID has no row
 		}
 		rec, err := pgstore.New(func() datapool.Pool { return d.pool }).Get(ctx, tenant, fid)

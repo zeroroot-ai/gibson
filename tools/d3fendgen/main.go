@@ -174,35 +174,44 @@ func Check(committed, generated []byte) error {
 	return nil
 }
 
-func main() {
-	dir := flag.String("dir", ".", "repository root")
-	write := flag.Bool("write", false, "write the pack file")
-	check := flag.Bool("check", false, "fail when the pack file is stale")
-	flag.Parse()
+func main() { os.Exit(run(os.Args[1:], os.Stderr)) }
+
+// run is the command: it parses args, writes or checks the pack file, and
+// returns the exit code. Errors go to stderr.
+func run(args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("d3fendgen", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repository root")
+	write := fs.Bool("write", false, "write the pack file")
+	check := fs.Bool("check", false, "fail when the pack file is stale")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 	if *write == *check {
-		fmt.Fprintln(os.Stderr, "d3fendgen: pass exactly one of -write or -check")
-		os.Exit(2)
+		_, _ = fmt.Fprintln(stderr, "d3fendgen: pass exactly one of -write or -check")
+		return 2
 	}
 	out, err := Generate(*dir)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
 	}
 	target := filepath.Join(*dir, PackFile)
 	if *write {
 		if err := os.WriteFile(target, out, 0o600); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			_, _ = fmt.Fprintln(stderr, err)
+			return 1
 		}
-		return
+		return 0
 	}
 	committed, err := os.ReadFile(filepath.Clean(target))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
 	}
 	if err := Check(committed, out); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
 	}
+	return 0
 }
