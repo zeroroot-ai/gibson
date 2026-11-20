@@ -69,7 +69,7 @@ func TestNeo4jStatefulSet_RunsTheConfiguredImage(t *testing.T) {
 		Image:             testNeo4jImage,
 	}}
 	ctx := context.Background()
-	if err := n.applyResources(ctx, testTenantID, testTenantID, "team", testTenantNS, "pw"); err != nil {
+	if err := n.applyResources(ctx, testTenantID, testTenantNS, "pw", nil); err != nil {
 		t.Fatalf("applyResources: %v", err)
 	}
 	got := &appsv1.StatefulSet{}

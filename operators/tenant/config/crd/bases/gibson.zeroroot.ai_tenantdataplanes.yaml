@@ -87,6 +87,42 @@ spec:
                   operator's Helm-chart defaults apply — identical to the Tenant CR's
                   spec.resources semantics.
                 properties:
+                  neo4j:
+                    description: |-
+                      Neo4j overrides the default size of the Neo4j instance of the tenant.
+                      The chart sets the default size (tenantNeo4j.size). A field that is
+                      not set keeps the default.
+                    properties:
+                      cpu:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: |-
+                          CPU is the CPU request of the Neo4j container. The container has no
+                          CPU limit.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      memory:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: |-
+                          Memory is the memory request and the memory limit of the Neo4j
+                          container. The operator sets the JVM heap to a quarter of it and the
+                          page cache to an eighth of it.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      storage:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: |-
+                          Storage is the storage request of the data volume. It applies when the
+                          operator creates the volume. The operator does not resize a volume that
+                          exists.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    type: object
                   postgresConnectionLimit:
                     description: |-
                       PostgresConnectionLimit overrides the default per-role Postgres connection

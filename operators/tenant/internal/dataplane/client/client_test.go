@@ -166,7 +166,7 @@ func TestUnscoped_BypassesGuard(t *testing.T) {
 	inner := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	c := New(inner, operatorNS)
 	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "tenant-neo4j-template", Namespace: operatorNS},
+		ObjectMeta: metav1.ObjectMeta{Name: "tenant-neo4j-size", Namespace: operatorNS},
 	}
 	// e.g. the chart-mounted ConfigMap that lives in the gibson ns
 	if err := c.Unscoped().Create(context.Background(), cm); err != nil {

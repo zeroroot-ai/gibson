@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
@@ -427,5 +428,42 @@ func TestValidateDisplayName_BoundaryLengths(t *testing.T) {
 	name121 := strings.Repeat("x", 121)
 	if err := validateDisplayName(name121); err == nil {
 		t.Errorf("121-char displayName should be rejected")
+	}
+}
+
+// A Tenant can set the size of its Neo4j (gibson#1526). The webhook accepts a
+// size the operator can apply and refuses a size it cannot apply.
+func TestTenantValidator_ValidateCreate_Neo4jSize(t *testing.T) {
+	q := func(s string) *resource.Quantity {
+		v := resource.MustParse(s)
+		return &v
+	}
+	v := &TenantValidator{}
+
+	tn := validTenant()
+	tn.Spec.Resources = &gibsonv1alpha1.TenantDataPlaneResources{
+		Neo4j: &gibsonv1alpha1.TenantNeo4jResources{Storage: q("50Gi"), CPU: q("500m"), Memory: q("4Gi")},
+	}
+	if _, err := v.ValidateCreate(context.Background(), tn); err != nil {
+		t.Fatalf("expected a valid Neo4j size to pass, got: %v", err)
+	}
+
+	for name, size := range map[string]*gibsonv1alpha1.TenantNeo4jResources{
+		"zero cpu":         {CPU: q("0")},
+		"negative storage": {Storage: q("-1Gi")},
+		"zero memory":      {Memory: q("0")},
+		"memory too small": {Memory: q("4Mi")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tn := validTenant()
+			tn.Spec.Resources = &gibsonv1alpha1.TenantDataPlaneResources{Neo4j: size}
+			_, err := v.ValidateCreate(context.Background(), tn)
+			if err == nil {
+				t.Fatal("expected rejection of the Neo4j size, got nil")
+			}
+			if !strings.Contains(err.Error(), "spec.resources.neo4j") {
+				t.Errorf("expected error to mention spec.resources.neo4j, got: %v", err)
+			}
+		})
 	}
 }

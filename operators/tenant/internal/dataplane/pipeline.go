@@ -128,8 +128,8 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 		},
 		{
 			Name: "Neo4j",
-			Provision: func(ctx context.Context, tenantID string, _ Limits) error {
-				return p.cfg.Neo4j.Provision(ctx, tenantID)
+			Provision: func(ctx context.Context, tenantID string, limits Limits) error {
+				return p.cfg.Neo4j.Provision(ctx, tenantID, limits)
 			},
 			Rollback: func(ctx context.Context, tenantID string) error {
 				return p.cfg.Neo4j.Deprovision(ctx, tenantID)

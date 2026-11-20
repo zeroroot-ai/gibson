@@ -19,7 +19,7 @@
 // behaviour.
 //
 // Cluster-scope or operator-ns reads (e.g. the chart-mounted
-// tenant-neo4j-template ConfigMap that lives in the gibson namespace,
+// tenant-neo4j-size ConfigMap that lives in the gibson namespace,
 // or a Get on the Tenant CR) MUST go through Unscoped() with a comment
 // explaining the legitimate use.
 //
@@ -71,7 +71,7 @@ func New(inner ctrlclient.Client, operatorNamespace string) *Client {
 // scope reads; comment every call site with the reason.
 //
 // Legitimate callers today:
-//   - dataplane/neo4j.go: reads the tenant-neo4j-template ConfigMap from
+//   - dataplane/neo4j.go: reads the tenant-neo4j-size ConfigMap from
 //     the gibson namespace (chart-mounted, see neo4jTemplateNamespace).
 //   - dataplane/neo4j.go / neo4j_upgrade.go: Get on the Tenant CR, which
 //     is cluster-scoped from the operator's POV (no Namespace).
@@ -179,7 +179,7 @@ func (c *Client) guard(obj ctrlclient.Object, namespace, op string) error {
 
 // Get rejects per-tenant-kind reads targeted at the operator namespace.
 // Implementations that ARE supposed to read from the operator namespace
-// (e.g. tenant-neo4j-template ConfigMap from gibson ns) must use
+// (e.g. tenant-neo4j-size ConfigMap from gibson ns) must use
 // Unscoped().Get instead.
 func (c *Client) Get(ctx context.Context, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
 	if err := c.guard(obj, key.Namespace, "Get"); err != nil {

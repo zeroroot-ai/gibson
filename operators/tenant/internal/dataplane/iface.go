@@ -24,6 +24,10 @@ type Limits struct {
 	// PostgresConnectionLimit is applied to the per-tenant role as
 	// ALTER ROLE ... CONNECTION LIMIT N. 0 = the operator default.
 	PostgresConnectionLimit int
+
+	// Neo4j is the size the Tenant sets for its Neo4j instance. nil, or a
+	// field that is not set, means the default size of the chart.
+	Neo4j *gibsonv1alpha1.TenantNeo4jResources
 }
 
 // LimitsFrom reads the limits a TenantDataPlane spec declares. A nil resources
@@ -32,7 +36,7 @@ func LimitsFrom(res *gibsonv1alpha1.TenantDataPlaneResources) Limits {
 	if res == nil {
 		return Limits{}
 	}
-	return Limits{PostgresConnectionLimit: res.PostgresConnectionLimit}
+	return Limits{PostgresConnectionLimit: res.PostgresConnectionLimit, Neo4j: res.Neo4j.DeepCopy()}
 }
 
 // Provisioner is called by the tenant reconciler to provision and deprovision
