@@ -100,6 +100,9 @@ func init() {
 	registerEvent("finding.raised", func() Event { return &FindingRaised{} })
 	registerEvent("finding.status_changed", func() Event { return &FindingStatusChanged{} })
 
+	// mergerequest.go
+	registerEvent("merge_request.observed", func() Event { return &MergeRequestObserved{} })
+
 	// rescan.go
 	registerEvent("scan.reconciled", func() Event { return &ScanReconciled{} })
 

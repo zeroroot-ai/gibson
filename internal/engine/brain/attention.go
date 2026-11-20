@@ -73,6 +73,12 @@ type Finding struct {
 	ScanScope string
 	LastScan  string
 
+	// MergeRequest is the key of the merge request that carries the fix
+	// (gibson#1505). MergeRequestState is what the Git host last reported for
+	// it: empty while it is open, then merged or closed.
+	MergeRequest      string
+	MergeRequestState string
+
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208). See FindingRaised.
 	SubmittedBy string
@@ -196,6 +202,10 @@ type FindingStatusChanged struct {
 	ID        string
 	Status    string
 	MissionID string
+	// MergeRequest is the key of the merge request behind the change
+	// (gibson#1505). When it is set, the Finding records it and forgets the
+	// state of any earlier merge request.
+	MergeRequest string
 }
 
 // Kind identifies the finding.status_changed brain event.
@@ -213,6 +223,10 @@ func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 		f := q.Get()
 		if f.ID == e.ID {
 			f.Status = e.Status
+			if e.MergeRequest != "" {
+				f.MergeRequest = e.MergeRequest
+				f.MergeRequestState = ""
+			}
 			q.Close()
 			return
 		}
@@ -233,6 +247,9 @@ type FindingSnapshot struct {
 	// recurring scan responsible for this Finding, and the scan that last saw it.
 	ScanScope string
 	LastScan  string
+	// MergeRequest and MergeRequestState: see Finding (gibson#1505).
+	MergeRequest      string
+	MergeRequestState string
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208). See FindingRaised.
 	SubmittedBy string
@@ -289,6 +306,7 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 			ID: f.ID, Title: f.Title, Description: f.Description, ScopeID: f.ScopeID,
 			Address: f.Address, Severity: f.Severity, Status: f.Status, VulnerabilityID: f.VulnerabilityID,
 			ScanScope: f.ScanScope, LastScan: f.LastScan,
+			MergeRequest: f.MergeRequest, MergeRequestState: f.MergeRequestState,
 			SubmittedBy: f.SubmittedBy, AgentName: f.AgentName, EnrolledBy: f.EnrolledBy,
 		})
 	}

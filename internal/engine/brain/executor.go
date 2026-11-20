@@ -35,6 +35,7 @@ func ExecutorSystems() []System {
 		DeciderGateSystem,
 		VoIGateSystem,
 		MissionCompletionSystem,
+		MergeRequestReconciliationSystem, // merged → fixed, closed → open (gibson#1505)
 		// Last: it judges what a scan did not see, so it must run after the
 		// completion System has decided the scan is finished looking (gibson#1686).
 		RescanReconciliationSystem,

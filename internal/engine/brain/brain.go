@@ -512,6 +512,8 @@ func Reduce(w *World, ev Event) {
 		applyFindingStatusChanged(w, e)
 	case ScanReconciled:
 		applyScanReconciled(w, e)
+	case MergeRequestObserved:
+		applyMergeRequestObserved(w, e)
 	case VoIPlanRequested:
 		applyVoIPlanRequested(w, e)
 	case VoIPlanned:
