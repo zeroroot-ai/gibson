@@ -462,6 +462,9 @@ func (p *DomainPack) Validate() error {
 			return fmt.Errorf("domain pack %q: %w", p.Name, err)
 		}
 	}
+	if err := p.validateNoPredicates(); err != nil {
+		return err
+	}
 	if err := p.validateCountermeasures(); err != nil {
 		return err
 	}

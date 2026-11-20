@@ -13,7 +13,7 @@ import (
 )
 
 // d3fendPackName is the catalog name of the MITRE D3FEND pack.
-const d3fendPackName = "mitre-d3fend"
+const d3fendPackName = D3FENDPackName
 
 func d3fendPack(t *testing.T) DomainPack {
 	t.Helper()
@@ -65,4 +65,35 @@ func TestD3FENDPack_ImportPromotesItsLabelAndEdges(t *testing.T) {
 	assert.True(t, reg.ClassifyNode(CountermeasureLabel).InTaxonomy)
 	assert.True(t, reg.ClassifyRelationship(CountersRelationshipType).InTaxonomy)
 	assert.True(t, reg.ClassifyRelationship(AppliesCountermeasureRelationshipType).InTaxonomy)
+}
+
+// TestD3FENDPack_HoldsNoPredicate: the pack in the catalog holds no
+// predicate (gibson#1485). The guard keys on the pack name.
+func TestD3FENDPack_HoldsNoPredicate(t *testing.T) {
+	p := d3fendPack(t)
+	assert.Empty(t, p.Predicates)
+	assert.Empty(t, p.NonDestructivePredicates)
+	assert.Equal(t, D3FENDPackName, p.Name)
+}
+
+// TestD3FENDPack_RefusesAPredicate is the failing fixture of the guard: a
+// copy of the pack with one predicate fails Validate, and so the catalog
+// refuses it. The same predicate in a pack with another name is valid.
+func TestD3FENDPack_RefusesAPredicate(t *testing.T) {
+	fixture := d3fendPack(t)
+	fixture.Predicates = map[string]string{"prompt_injection_marker_present": `markerPresent(evidence, "X")`}
+	fixture.Techniques = map[string]string{"prompt_injection_marker_present": "prompt_injection"}
+
+	err := fixture.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no predicate")
+	assert.Panics(t, func() { NewDomainPackCatalog(fixture) })
+
+	other := fixture
+	other.Name = "other-pack"
+	assert.NoError(t, other.Validate(), "the guard keys on the pack name")
+
+	listed := d3fendPack(t)
+	listed.NonDestructivePredicates = []string{"x"}
+	require.Error(t, listed.Validate())
 }

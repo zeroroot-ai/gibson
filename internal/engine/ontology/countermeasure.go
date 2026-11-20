@@ -20,6 +20,12 @@ import (
 // fix is the rule of the fix loop, never a predicate of a countermeasure.
 
 const (
+	// D3FENDPackName is the catalog name of the MITRE D3FEND pack. The pack
+	// holds taxonomy and ontology only: Validate refuses a predicate in it
+	// (owner decision of 2026-11-19, gibson#1485). The proof of a fix is the
+	// rule of the fix loop, never a predicate of a countermeasure.
+	D3FENDPackName = "mitre-d3fend"
+
 	// CountermeasureLabel is the node label of a countermeasure.
 	CountermeasureLabel = "Countermeasure"
 	// CountermeasureIdentityProperty is the property that a countermeasure node
@@ -265,6 +271,18 @@ func (p *DomainPack) validateCountermeasureParents() error {
 			}
 			cur = parent[cur]
 		}
+	}
+	return nil
+}
+
+// validateNoPredicates refuses a predicate in the D3FEND pack. It keys on the
+// name of the pack.
+func (p *DomainPack) validateNoPredicates() error {
+	if p.Name != D3FENDPackName {
+		return nil
+	}
+	if len(p.Predicates) > 0 || len(p.NonDestructivePredicates) > 0 {
+		return fmt.Errorf("domain pack %q: the pack holds taxonomy and ontology only, and no predicate", p.Name)
 	}
 	return nil
 }
