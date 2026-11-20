@@ -58,7 +58,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
-	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 )
 
 // slugNonAllowed matches every run of characters that are not lowercase
@@ -430,7 +429,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 	// per-tenant data plane and binds the Stripe product, so resolve it
 	// against the canonical plan set before creating any identity or
 	// provisioning state. See plan gate rationale in internal/platform/plans.
-	plan, err := s.resolveSignupPlan(row.Tier, s.signupStepConfigured())
+	plan, err := s.resolveSignupPlan(row.Tier)
 	if err != nil {
 		s.logger.WarnContext(ctx, "Signup: plan gate refused request",
 			"attempt_id", req.GetAttemptId(),
@@ -663,7 +662,7 @@ func stepURLFor(hold *signupStepHold, u string) string {
 // answers "may this request provision a tenant at this tier?" and returns the
 // canonical plan on success, or a ready-to-return gRPC status on refusal.
 //
-// Three rules, all fail-closed:
+// Two rules, both fail-closed:
 //
 //  1. The tier MUST resolve to a canonical plan. An unknown, legacy, or
 //     mis-cased id is InvalidArgument — never coerced to a default plan.
@@ -672,15 +671,7 @@ func stepURLFor(hold *signupStepHold, u string) string {
 //     Stripe product and no trial, so a self-serve signup can never
 //     legitimately land on it; requesting it is PermissionDenied and the
 //     caller is pointed at the administrator path (AdminProvisionTenant).
-//
-//  3. A paid plan MUST pass the external signup step WHEN the deployment
-//     enforces entitlements (GIBSON_ENTITLEMENTS_REQUIRED=true). With no step
-//     configured, nothing can confirm the plan, so the request is refused.
-//     Self-hosted installs leave the knob unset and are unaffected: ADR-0074
-//     makes the seam bypassable on-prem by design (ADR-0060, D54).
-//
-// stepConfigured is false on the approval rung, which has no step.
-func (s *DaemonServer) resolveSignupPlan(tier string, stepConfigured bool) (plans.Plan, error) {
+func (s *DaemonServer) resolveSignupPlan(tier string) (plans.Plan, error) {
 	plan, ok := plans.Lookup(tier)
 	if !ok {
 		return plans.Plan{}, status.Errorf(codes.InvalidArgument,
@@ -690,11 +681,6 @@ func (s *DaemonServer) resolveSignupPlan(tier string, stepConfigured bool) (plan
 	if !plan.SelfServe {
 		return plans.Plan{}, status.Errorf(codes.PermissionDenied,
 			"plan %q is not available through self-serve signup; contact sales to have an administrator provision it",
-			plan.ID)
-	}
-	if plan.Paid && entitlements.Required() && !stepConfigured {
-		return plans.Plan{}, status.Errorf(codes.PermissionDenied,
-			"plan %q is not available through this signup path; contact your administrator",
 			plan.ID)
 	}
 	return plan, nil

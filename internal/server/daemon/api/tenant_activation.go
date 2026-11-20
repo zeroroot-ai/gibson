@@ -125,7 +125,7 @@ func listTenantIDsAfter(ctx context.Context, db *sql.DB, after string, limit int
 // requireActiveTenant refuses new work for a suspended tenant. With no
 // platform database, or no row for the tenant, the tenant is active. A read
 // error is not a refusal: the gate must not stop work because the database
-// had a blip, and the quota gates still apply.
+// had a blip.
 func (s *DaemonServer) requireActiveTenant(ctx context.Context, tenantID string) error {
 	if tenantID == "" {
 		return nil

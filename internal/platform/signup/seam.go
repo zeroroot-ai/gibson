@@ -45,8 +45,7 @@
 // # Registration
 //
 // The seam is registered in the default pkg/seam registry so it appears in
-// the startup seam-state log alongside the entitlements seam and any future
-// seams.
+// the startup seam-state log.
 package signup
 
 import (
@@ -106,7 +105,7 @@ var signupSeam = seam.New(seam.Spec[Policy]{
 
 func init() {
 	// Register in the process-wide seam registry so LogStartupState includes
-	// the signup seam alongside entitlements and any future seams.
+	// the signup seam.
 	seam.Register("signup", ConfigKnob, "saas/signup-svc")
 }
 

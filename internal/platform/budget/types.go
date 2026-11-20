@@ -4,10 +4,8 @@
 // Package budget implements per-user, per-team, and per-tenant token and
 // spend budget enforcement around LLM execution.
 //
-// Spec: llm-user-attribution-governance (Requirement 3). Complementary to
-// the existing per-tenant quota system at internal/platform/component/quota.go —
-// that one counts missions / agents / memory; this one counts tokens and
-// dollars.
+// Spec: llm-user-attribution-governance (Requirement 3). A tenant admin sets
+// each budget. A scope with no budget has no ceiling.
 package budget
 
 import (

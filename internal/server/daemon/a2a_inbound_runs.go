@@ -301,10 +301,10 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	if err != nil {
 		// The client may be gone, and the place must still be given back.
 		rerr := r.published.Release(context.WithoutCancel(ctx), c.Tenant, slot)
-		// A tenant that is suspended or over its quota, and a pin that does not match,
-		// are refusals of policy. The Task is rejected, as for any other refusal of a
-		// well formed message.
-		if code := status.Code(err); rerr == nil && (code == codes.ResourceExhausted || code == codes.FailedPrecondition) {
+		// A tenant that is suspended, and a pin that does not match, are refusals
+		// of policy. The Task is rejected, as for any other refusal of a well
+		// formed message.
+		if rerr == nil && status.Code(err) == codes.FailedPrecondition {
 			return a2aserver.RejectedTask("the mission cannot start now: " + status.Convert(err).Message()), nil
 		}
 		if rerr != nil {

@@ -109,7 +109,7 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 	// The plan gate runs at approval time, where it decides provisioning. It
 	// runs here too, so a request for a plan no self-serve registration may
 	// have is refused at the door instead of filling an administrator's queue.
-	if _, err := s.resolveSignupPlan(req.GetTier(), false); err != nil {
+	if _, err := s.resolveSignupPlan(req.GetTier()); err != nil {
 		return nil, err
 	}
 
@@ -337,9 +337,8 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 	}
 
 	// The same server-side plan gate the open rung runs, from the same
-	// function. This rung has no external step, so a paid plan is refused
-	// where the deployment enforces entitlements.
-	plan, err := s.resolveSignupPlan(row.Tier, false)
+	// function.
+	plan, err := s.resolveSignupPlan(row.Tier)
 	if err != nil {
 		s.logger.WarnContext(ctx, "AdminApproveRegistration: plan gate refused the registration",
 			"registration_id", row.ID, "requested_tier", row.Tier, "error", err.Error())

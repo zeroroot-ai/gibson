@@ -45,7 +45,7 @@ var defaultRegistry Registry
 //     used when constructing the Seam).
 //   - configKnob is the env-var that activates the remote implementation.
 //   - saasComponent is the human label of the SaaS-only component that fills
-//     this seam when the knob is set (e.g. "billing/entitlements-svc").
+//     this seam when the knob is set (e.g. "saas/signup-svc").
 func Register(name, configKnob, saasComponent string) {
 	defaultRegistry.Register(name, configKnob, saasComponent)
 }

@@ -207,10 +207,8 @@ func (x *WriteAccessTuplesResponse) GetDeleted() int32 {
 	return 0
 }
 
-// UpsertTenantQuotaRequest writes the tenant's runtime quota record. The
-// schema is governed by spec plans-and-quotas-simplification — only
-// concurrent_missions and concurrent_agents are enforced; 0 means
-// "unlimited" on either dimension.
+// UpsertTenantQuotaRequest writes the quota record of the tenant. The daemon
+// stores the record and enforces none of its values.
 type UpsertTenantQuotaRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

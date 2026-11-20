@@ -181,12 +181,6 @@ type missionManager struct {
 	// One-code-path slice deploy#195: required, never nil after daemon startup.
 	authzStore mission.MissionAuthzStore
 
-	// quotaCounter maintains the per-tenant concurrent_missions Redis
-	// counter. INCR fires when execution begins (queued → running);
-	// DECR fires when the mission reaches a terminal state. nil-safe.
-	// Spec plans-and-quotas-simplification.
-	quotaCounter mission.QuotaCounter
-
 	// activeMissions tracks running missions keyed by (tenant, missionID).
 	// The outer key is the tenant; the inner key is the mission ID string.
 	// Pause/Resume/Stop operations traverse only the calling tenant's submap
@@ -248,7 +242,6 @@ func newMissionManager(
 	infrastructure *Infrastructure,
 	otelStack *observability.OTelObservabilityStack,
 	authzStore mission.MissionAuthzStore,
-	quotaCounter mission.QuotaCounter,
 	brainRegistry *brain.Registry,
 	brainExecutor *brainExecutor,
 	graphWriter GraphWriter,
@@ -264,7 +257,6 @@ func newMissionManager(
 		infrastructure:  infrastructure,
 		otelStack:       otelStack,
 		authzStore:      authzStore,
-		quotaCounter:    quotaCounter,
 		brainRegistry:   brainRegistry,
 		brainExecutor:   brainExecutor,
 		graphWriter:     graphWriter,
@@ -1152,8 +1144,7 @@ func (m *missionManager) newerRunActive(am *activeMission) bool {
 // endRunAccounting settles what a run holds when it reaches terminal. It gives
 // a child mission's reserved budget back to its parent (gibson#1358). That
 // reservation belongs to the record, so it stays when a newer run of the record
-// is active. It also decrements the concurrent_missions counter of the tenant,
-// floored at zero, once for the run that incremented it.
+// is active.
 func (m *missionManager) endRunAccounting(ctx context.Context, poolConn *datapool.Conn, am *activeMission) {
 	// The decision and the release run under the record lock that claimActive
 	// takes, so a new run cannot claim the record between them.
@@ -1162,18 +1153,6 @@ func (m *missionManager) endRunAccounting(ctx context.Context, poolConn *datapoo
 		m.releaseChildReservation(ctx, poolConn, am.mission)
 	}
 	unlock()
-	m.releaseQuotaSlot(ctx, am)
-}
-
-// releaseQuotaSlot gives back the concurrent_missions slot that the run took
-// when it started. The counter is floored at zero.
-func (m *missionManager) releaseQuotaSlot(ctx context.Context, am *activeMission) {
-	if m.quotaCounter != nil {
-		if decErr := m.quotaCounter.DecrementMissionCount(ctx); decErr != nil {
-			m.logger.Warn("mission manager: decrement concurrent_missions failed (non-fatal)",
-				"mission_id", am.mission.ID.String(), "error", decErr.Error())
-		}
-	}
 }
 
 // reserveRunBudget reserves the budget of a run at its start. It records a
@@ -1185,8 +1164,6 @@ func (m *missionManager) reserveRunBudget(ctx context.Context, poolConn *datapoo
 	}
 	m.failBeforeStart(am.tenantID, am.mission.ID.String(), runIDOf(am), name,
 		fmt.Sprintf("failed to reserve the budget of the run against the parent: %v", err))
-	// The run never starts, so it must give back the slot that it took.
-	m.releaseQuotaSlot(ctx, am)
 	return false
 }
 
@@ -1297,17 +1274,6 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 
 	// Status is now World-derived (ADR-0163/gibson#1118): the brain's MissionStarted
 	// event sets status=running in the World. No store write here.
-
-	// Increment the concurrent_missions counter on dispatch (queued → running).
-	// DECR fires from the terminal-state block below. Failure is non-fatal:
-	// counter mismatches self-correct via floor-at-zero. Spec
-	// plans-and-quotas-simplification.
-	if m.quotaCounter != nil {
-		if incErr := m.quotaCounter.IncrementMissionCount(ctx); incErr != nil {
-			m.logger.Warn("mission manager: increment concurrent_missions failed (non-fatal)",
-				"mission_id", missionID, "error", incErr.Error())
-		}
-	}
 
 	// Acquire the per-tenant Neo4j session from the data-plane Pool.
 	// The pool is required for mission execution (per-call Neo4j).

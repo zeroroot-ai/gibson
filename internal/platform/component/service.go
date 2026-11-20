@@ -191,10 +191,6 @@ type ComponentServiceServer struct {
 	// May be nil; when nil, audit events are silently skipped.
 	auditLog *audit.AuditLogger
 
-	// quotaManager enforces per-tenant agent quotas during RegisterComponent.
-	// May be nil; when nil, quota checks are skipped entirely.
-	quotaManager *QuotaManager
-
 	// toolExecutor dispatches tool execution for streaming and queued operations.
 	// May be nil; tool streaming and queue RPCs return codes.Unimplemented when nil.
 	toolExecutor ToolExecutor
@@ -366,17 +362,6 @@ func (s *ComponentServiceServer) WithMissionContextResolver(r *MissionContextRes
 	return s
 }
 
-// WithQuotaManager attaches a QuotaManager so that RegisterComponent enforces
-// per-tenant agent quotas. Call this immediately after NewComponentServiceServer
-// and before serving any RPCs:
-//
-//	svc := component.NewComponentServiceServer(...)
-//	svc.WithQuotaManager(quotaMgr)
-func (s *ComponentServiceServer) WithQuotaManager(qm *QuotaManager) *ComponentServiceServer {
-	s.quotaManager = qm
-	return s
-}
-
 // WithToolExecutor attaches a ToolExecutor for streaming and queued tool execution.
 // May be nil; tool streaming and queue RPCs return codes.Unimplemented when nil.
 func (s *ComponentServiceServer) WithToolExecutor(te ToolExecutor) *ComponentServiceServer {
@@ -535,20 +520,6 @@ func (s *ComponentServiceServer) RegisterComponent(
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
 
-	// Enforce per-tenant agent quota before touching the registry.
-	// Only agent-kind components count against the agent quota; tools and plugins
-	// are infrastructure components and are not subject to this limit.
-	if req.Kind == "agent" && s.quotaManager != nil {
-		if err := s.quotaManager.CheckAgentQuota(ctx); err != nil {
-			s.logger.WarnContext(ctx, "agent registration rejected: quota exceeded",
-				slog.String("tenant", tenant),
-				slog.String("name", req.Name),
-				slog.String("error", err.Error()),
-			)
-			return nil, err
-		}
-	}
-
 	info := ComponentInfo{
 		Kind:     req.Kind,
 		Name:     req.Name,
@@ -689,12 +660,6 @@ func (s *ComponentServiceServer) RegisterComponent(
 		slog.String("version", req.Version),
 		slog.String("instance_id", instanceID),
 	)
-
-	// Spec plans-and-quotas-simplification: agent registration alone no
-	// longer consumes the concurrent_agents quota. Counters increment when
-	// an agent transitions idle→busy (first task pickup) and decrement on
-	// busy→idle. Wiring into the harness's per-agent inFlightTasks
-	// callbacks lives in the orchestrator/agent package.
 
 	// Forward plugin-kind registrations to the ComponentInstallRegistry for install persistence.
 	// The ComponentInstallRegistry persists install metadata in Postgres (plugin_install table) and

@@ -12,8 +12,8 @@ import (
 // the runaway-Decider guard (CONTEXT.md, replacing the legacy spawn_cycle_guard).
 // An unbounded LLM Decider could dispatch forever; BudgetSystem hard-stops a
 // mission that exceeds its Budget, regardless of goal. Limits are sourced into the
-// Budget at projection (CUE MissionConstraints merged with the Entitlements
-// provider — the merge is daemon-side; the brain enforces what it is given).
+// Budget at projection from the CUE MissionConstraints. The brain enforces what
+// it is given.
 
 // TokenUsed reports LLM token spend attributed to a mission (emitted by the
 // dispatch/LLM layer, daemon-side). The reducer accumulates it; BudgetSystem

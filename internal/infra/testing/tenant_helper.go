@@ -18,7 +18,7 @@ const (
 // WithTestTenant creates a context with the default test tenant injected.
 //
 // This helper should be used in tests that interact with tenant-scoped
-// resources like Redis (via TenantScopedStore) or Neo4j operations.
+// resources like Redis or Neo4j operations.
 //
 // Example:
 //

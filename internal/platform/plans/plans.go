@@ -37,9 +37,7 @@ package plans
 import "strings"
 
 // Plan is one canonical plan and the policy bits the platform enforces on it.
-// It deliberately carries no quota numbers, price, or Stripe product id: those
-// live in plans.yaml and reach the runtime through the entitlements seam
-// (pkg/billing/entitlements), never through gibson source.
+// It carries no limit, price, or Stripe product id.
 type Plan struct {
 	// ID is the canonical plan id — the exact string that appears in
 	// plans.yaml, in the Tenant CR's spec.tier, and in the

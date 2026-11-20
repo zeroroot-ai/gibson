@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -1010,5 +1011,36 @@ func TestReconcileBank_SpillCountError(t *testing.T) {
 	}
 	if got := liveMembers(t, store, b.ID); got != before {
 		t.Fatalf("live members after a failed count = %d, want %d", got, before)
+	}
+}
+
+// A member count above the int32 range clamps to the largest int32. A sum of
+// two counts never turns negative.
+func TestClampCount(t *testing.T) {
+	cases := map[int64]int32{
+		-1: 0, 0: 0, 7: 7, math.MaxInt32: math.MaxInt32,
+		int64(math.MaxInt32) + 1: math.MaxInt32, 2 * int64(math.MaxInt32): math.MaxInt32,
+	}
+	for in, want := range cases {
+		if got := clampCount(in); got != want {
+			t.Errorf("clampCount(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+// No plan limits the desired count. A pass with a very large count stops when
+// its context ends, and reports that.
+func TestReconcileBank_AVeryLargeCountStopsWithTheContext(t *testing.T) {
+	store, launcher := newFakeStore(), &fakeLauncher{}
+	r := newReconciler(t, store, launcher, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := r.ReconcileBank(ctx, "acme", testBank(math.MaxInt32))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the canceled context reported", err)
+	}
+	if len(launcher.launched) != 0 {
+		t.Fatalf("launched %d members after the context ended", len(launcher.launched))
 	}
 }

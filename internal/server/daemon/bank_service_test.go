@@ -19,7 +19,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/bank"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/liveagents"
-	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 	bankpb "github.com/zeroroot-ai/sdk/api/gen/gibson/bank/v1"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -235,19 +234,9 @@ func (f *fakeAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
 	return nil
 }
 
-// cappedEntitlements answers one ceiling for every tenant.
-type cappedEntitlements struct {
-	agents int
-	err    error
-}
-
-func (c cappedEntitlements) Limits(context.Context, string) (entitlements.Limits, error) {
-	return entitlements.Limits{ConcurrentAgents: c.agents}, c.err
-}
-
-func bankTestServer(t *testing.T, store bank.Store, az authz.Authorizer, ent entitlements.Provider) bankpb.BankServiceServer {
+func bankTestServer(t *testing.T, store bank.Store, az authz.Authorizer) bankpb.BankServiceServer {
 	t.Helper()
-	srv, err := NewBankServer(BankServerConfig{Store: store, Authorizer: az, Entitlements: ent,
+	srv, err := NewBankServer(BankServerConfig{Store: store, Authorizer: az,
 		Control: harness.NewMemberControl(), Feed: liveagents.NewRegistry()})
 	if err != nil {
 		t.Fatalf("NewBankServer: %v", err)
@@ -295,7 +284,7 @@ func TestNewBankServer_RequiresAStoreAndAnAuthorizer(t *testing.T) {
 
 func TestCreateBank_StoresTheBankAndItsOwnership(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 
 	resp, err := srv.CreateBank(bankCtx(t, "acme", "alice"), apiKeyBank("nightly"))
 	if err != nil {
@@ -327,7 +316,7 @@ func TestCreateBank_StoresTheBankAndItsOwnership(t *testing.T) {
 
 func TestCreateBank_TenantOwnedNamesTheTenant(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 
 	req := apiKeyBank("shared")
 	req.TenantOwned = true
@@ -360,7 +349,7 @@ func TestCreateBank_TenantOwnedNamesTheTenant(t *testing.T) {
 }
 
 func TestCreateBank_SubscriptionNeedsAPerson(t *testing.T) {
-	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{}, nil)
+	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{})
 	req := &bankpb.CreateBankRequest{
 		Name: "mine", TenantOwned: true,
 		LoginShape: bankpb.LoginShape_LOGIN_SHAPE_SUBSCRIPTION,
@@ -372,7 +361,7 @@ func TestCreateBank_SubscriptionNeedsAPerson(t *testing.T) {
 }
 
 func TestCreateBank_ThirdPartyShapeNeedsAProviderConfig(t *testing.T) {
-	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{}, nil)
+	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{})
 	req := &bankpb.CreateBankRequest{
 		Name: "aws", LoginShape: bankpb.LoginShape_LOGIN_SHAPE_BEDROCK,
 	}
@@ -383,7 +372,7 @@ func TestCreateBank_ThirdPartyShapeNeedsAProviderConfig(t *testing.T) {
 }
 
 func TestCreateBank_UnknownLoginShapeIsRefused(t *testing.T) {
-	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{}, nil)
+	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{})
 	req := &bankpb.CreateBankRequest{Name: "x", LoginShape: bankpb.LoginShape(99)}
 	_, err := srv.CreateBank(bankCtx(t, "acme", "alice"), req)
 	if status.Code(err) != codes.InvalidArgument {
@@ -391,18 +380,20 @@ func TestCreateBank_UnknownLoginShapeIsRefused(t *testing.T) {
 	}
 }
 
-func TestCreateBank_AboveTheTenantCeilingIsRefused(t *testing.T) {
-	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{}, cappedEntitlements{agents: 1})
-	_, err := srv.CreateBank(bankCtx(t, "acme", "alice"), apiKeyBank("big"))
-	if status.Code(err) != codes.ResourceExhausted {
-		t.Fatalf("err = %v, want ResourceExhausted for two members under a ceiling of one", err)
+// A bank has no member cap from a plan. The bank owner sets the member count.
+func TestCreateBank_NoPlanCapOnTheMemberCount(t *testing.T) {
+	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{})
+	req := apiKeyBank("big")
+	req.DesiredCount = 500
+	if _, err := srv.CreateBank(bankCtx(t, "acme", "alice"), req); err != nil {
+		t.Fatalf("CreateBank with 500 members: %v", err)
 	}
 }
 
 func TestCreateBank_RemovesTheRowWhenOwnershipCannotBeWritten(t *testing.T) {
 	store := newFakeBankStore()
 	az := &fakeAuthorizer{writeErr: errors.New("fga down")}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 
 	_, err := srv.CreateBank(bankCtx(t, "acme", "alice"), apiKeyBank("orphan"))
 	if status.Code(err) != codes.Internal {
@@ -414,7 +405,7 @@ func TestCreateBank_RemovesTheRowWhenOwnershipCannotBeWritten(t *testing.T) {
 }
 
 func TestCreateBank_NeedsATenantAndACaller(t *testing.T) {
-	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{}, nil)
+	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{})
 	if _, err := srv.CreateBank(context.Background(), apiKeyBank("x")); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("no tenant must be PermissionDenied, got %v", err)
 	}
@@ -427,7 +418,7 @@ func TestCreateBank_NeedsATenantAndACaller(t *testing.T) {
 
 func TestGetBank_ReturnsTheBank(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", "alice")
 	created, err := srv.CreateBank(ctx, apiKeyBank("nightly"))
 	if err != nil {
@@ -444,7 +435,7 @@ func TestGetBank_ReturnsTheBank(t *testing.T) {
 }
 
 func TestGetBank_UnknownIdIsNotFound(t *testing.T) {
-	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{}, nil)
+	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{})
 	_, err := srv.GetBank(bankCtx(t, "acme", "alice"), &bankpb.GetBankRequest{Id: "nope"})
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("err = %v, want NotFound", err)
@@ -453,7 +444,7 @@ func TestGetBank_UnknownIdIsNotFound(t *testing.T) {
 
 func TestListBanks_ReturnsThePage(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", "alice")
 	if _, err := srv.CreateBank(ctx, apiKeyBank("one")); err != nil {
 		t.Fatal(err)
@@ -473,7 +464,7 @@ func TestListBanks_ReturnsThePage(t *testing.T) {
 
 func TestUpdateBank_ChangesOnlyWhatIsSet(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", "alice")
 	created, err := srv.CreateBank(ctx, apiKeyBank("nightly"))
 	if err != nil {
@@ -500,23 +491,26 @@ func TestUpdateBank_ChangesOnlyWhatIsSet(t *testing.T) {
 	}
 }
 
-func TestUpdateBank_AboveTheTenantCeilingIsRefused(t *testing.T) {
+func TestUpdateBank_NoPlanCapOnTheMemberCount(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, cappedEntitlements{agents: 2})
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", "alice")
 	created, err := srv.CreateBank(ctx, apiKeyBank("nightly"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ten := int32(10)
-	_, err = srv.UpdateBank(ctx, &bankpb.UpdateBankRequest{Id: created.GetBank().GetId(), DesiredCount: &ten})
-	if status.Code(err) != codes.ResourceExhausted {
-		t.Fatalf("err = %v, want ResourceExhausted", err)
+	many := int32(500)
+	got, err := srv.UpdateBank(ctx, &bankpb.UpdateBankRequest{Id: created.GetBank().GetId(), DesiredCount: &many})
+	if err != nil {
+		t.Fatalf("UpdateBank to 500 members: %v", err)
+	}
+	if got.GetBank().GetDesiredCount() != many {
+		t.Errorf("desired count = %d, want %d", got.GetBank().GetDesiredCount(), many)
 	}
 }
 
 func TestUpdateBank_UnknownIdIsNotFound(t *testing.T) {
-	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{}, nil)
+	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{})
 	one := int32(1)
 	_, err := srv.UpdateBank(bankCtx(t, "acme", "alice"), &bankpb.UpdateBankRequest{Id: "nope", DesiredCount: &one})
 	if status.Code(err) != codes.NotFound {
@@ -526,7 +520,7 @@ func TestUpdateBank_UnknownIdIsNotFound(t *testing.T) {
 
 func TestDeleteBank_RemovesTheRowAndItsTuples(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", "alice")
 	created, err := srv.CreateBank(ctx, apiKeyBank("nightly"))
 	if err != nil {
@@ -546,7 +540,7 @@ func TestDeleteBank_RemovesTheRowAndItsTuples(t *testing.T) {
 }
 
 func TestDeleteBank_UnknownIdIsNotFound(t *testing.T) {
-	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{}, nil)
+	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{})
 	_, err := srv.DeleteBank(bankCtx(t, "acme", "alice"), &bankpb.DeleteBankRequest{Id: "nope"})
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("err = %v, want NotFound", err)
@@ -555,7 +549,7 @@ func TestDeleteBank_UnknownIdIsNotFound(t *testing.T) {
 
 func TestListMembers_ReturnsTheReportedStatus(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", "alice")
 	created, err := srv.CreateBank(ctx, apiKeyBank("nightly"))
 	if err != nil {
@@ -592,7 +586,7 @@ func TestListMembers_ReturnsTheReportedStatus(t *testing.T) {
 // gets NotFound, never a hint that the bank exists.
 func TestGetBank_WithoutTheRightIsNotFound(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", "alice")
 	created, err := srv.CreateBank(ctx, apiKeyBank("nightly"))
 	if err != nil {
@@ -613,7 +607,7 @@ func TestGetBank_WithoutTheRightIsNotFound(t *testing.T) {
 // relation, and the row is never touched when the answer is no.
 func TestUpdateBank_WithoutOwnershipIsNotFound(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", "alice")
 	created, err := srv.CreateBank(ctx, apiKeyBank("nightly"))
 	if err != nil {
@@ -644,7 +638,7 @@ func TestUpdateBank_WithoutOwnershipIsNotFound(t *testing.T) {
 // bank exactly as it was.
 func TestDeleteBank_WithoutOwnershipLeavesTheRow(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", "alice")
 	created, err := srv.CreateBank(ctx, apiKeyBank("nightly"))
 	if err != nil {
@@ -665,7 +659,7 @@ func TestDeleteBank_WithoutOwnershipLeavesTheRow(t *testing.T) {
 // bank, so an operator can tell the two apart.
 func TestGetBank_AuthorizationOutageIsUnavailable(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", "alice")
 	created, err := srv.CreateBank(ctx, apiKeyBank("nightly"))
 	if err != nil {
@@ -679,7 +673,7 @@ func TestGetBank_AuthorizationOutageIsUnavailable(t *testing.T) {
 }
 
 func TestListMembers_UnknownBankIsNotFound(t *testing.T) {
-	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{}, nil)
+	srv := bankTestServer(t, newFakeBankStore(), &fakeAuthorizer{})
 	_, err := srv.ListMembers(bankCtx(t, "acme", "alice"), &bankpb.ListMembersRequest{BankId: "nope"})
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("err = %v, want NotFound, never an empty page that reads as a bank with no members", err)

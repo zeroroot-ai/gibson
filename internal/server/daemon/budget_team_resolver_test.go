@@ -9,7 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/budget"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // budgetResolverAuthorizer answers ListObjects with a canned team list and
@@ -95,5 +100,27 @@ func TestBudgetTeamResolver_RequiresBothIdentifiers(t *testing.T) {
 				t.Errorf("resolver = %v, %v; want nil, nil", got, err)
 			}
 		})
+	}
+}
+
+// The enforcer of the daemon reads the team budgets of a caller through FGA.
+// A budget that the tenant admin sets for a team is enforced, and a tenant
+// with no budget has no ceiling.
+func TestDaemonBudgetEnforcer_EnforcesOnlyTheBudgetsThatAreSet(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	enf := newDaemonBudgetEnforcer(rdb, &budgetResolverAuthorizer{objects: []string{"team:acme/eng"}}, nil)
+	ctx := auth.ContextWithActingUser(auth.ContextWithTenantString(context.Background(), "acme"), "alice")
+
+	if _, err := enf.Check(ctx, 5_000_000_000); err != nil {
+		t.Fatalf("a tenant with no budget met a ceiling: %v", err)
+	}
+
+	if err := enf.SetBudget(ctx, &budget.Budget{Scope: budget.ScopeTeam, SubjectID: "eng", MonthlyTokens: 500}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enf.Check(ctx, 1000); !errors.Is(err, budget.ErrTokenBudgetExceededTeam) {
+		t.Fatalf("err = %v, want the team budget refusal", err)
 	}
 }

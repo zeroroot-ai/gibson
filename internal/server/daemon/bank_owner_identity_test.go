@@ -18,7 +18,7 @@ const spiffeCaller = "spiffe://zeroroot.ai/platform/e2e-runner"
 
 func TestCreateBank_SPIFFECallerOwnsWhatItCanRead(t *testing.T) {
 	store, az := newFakeBankStore(), &fakeAuthorizer{}
-	srv := bankTestServer(t, store, az, nil)
+	srv := bankTestServer(t, store, az)
 	ctx := bankCtx(t, "acme", spiffeCaller)
 
 	resp, err := srv.CreateBank(ctx, apiKeyBank("nightly"))

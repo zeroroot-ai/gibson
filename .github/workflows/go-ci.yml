@@ -373,10 +373,10 @@ jobs:
     env:
       # This is the one lane that guarantees a Redis Stack (the service above),
       # so it is the lane that must not be allowed to silently lose it.
-      # requireTenantStoreRedis (internal/engine/state) turns an unreachable
-      # Redis into a FAILURE when this is set, instead of a skip. gibson#1297:
-      # the TenantScopedStore isolation tests spent their whole life skipped and
-      # reported green, so a probe that can only skip is not a gate.
+      # The Redis probes of internal/server/daemon turn an unreachable Redis
+      # into a FAILURE when this is set, instead of a skip. gibson#1297: a
+      # suite that needs Redis spent its whole life skipped and reported
+      # green, so a probe that can only skip is not a gate.
       GIBSON_TEST_REQUIRE_REDIS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

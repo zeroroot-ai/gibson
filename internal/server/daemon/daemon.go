@@ -60,7 +60,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/admin"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/liveagents"
-	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 	"github.com/zeroroot-ai/gibson/pkg/seam"
 	"github.com/zeroroot-ai/gibson/pkg/version"
@@ -401,17 +400,6 @@ type daemonImpl struct {
 	// agentAccessStore manages tenant opt-in for agents.
 	// Initialized when a standalone Redis client is available.
 	agentAccessStore *component.RedisAgentAccessStore
-
-	// quotaManager enforces per-tenant resource quotas (missions, agents, memory).
-	// Initialized after stateClient is available. May be nil until then; quota
-	// enforcement is a no-op while nil.
-	quotaManager *component.QuotaManager
-
-	// entitlementsProvider is the ADR-0089 seam: it answers "what are this
-	// tenant's limits?" for the OSS enforcers (QuotaManager, budget). The OSS
-	// build wires the config-driven default; the commercial layer swaps in a
-	// plan/subscription provider behind the same interface (gibson#798).
-	entitlementsProvider entitlements.Provider
 
 	// redisEventStream bridges the in-process EventBus to per-tenant Redis Streams.
 	// It is initialised after stateClient is available. May be nil before that;
@@ -1234,42 +1222,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.missionService = missionService
 	d.logger.Info(ctx, "initialized mission service (reference-only, pool-backed)")
 
-	// Initialize QuotaManager for per-tenant resource enforcement.
-	// The TenantScopedStore wraps stateClient so that all quota counters are
-	// automatically namespaced by tenant — no cross-tenant data leakage.
-	if d.stateClient != nil {
-		tenantStoreCfg := state.TenantStoreConfigForAuthMode(d.config.Auth.Mode)
-		tenantStore := state.NewTenantScopedStore(d.stateClient, tenantStoreCfg)
-		// platformDB is guaranteed non-nil here: initPlatformPostgres ran
-		// earlier in Start() and is fatal on failure (gibson#246).
-		//
-		// Limits flow through the entitlements seam (ADR-0089): entitlements.New
-		// returns the commercial Stripe-backed provider when the closed billing
-		// module registered one (gibson#798/#800), else the OSS config-driven
-		// default that derives per-tenant limits from admin-set quota config.
-		// Either way the QuotaManager never reads plans/Stripe directly.
-		d.entitlementsProvider = entitlements.New(d.platformDB)
-		d.quotaManager = component.NewQuotaManager(tenantStore, d.entitlementsProvider, d.logger.Slog())
-		d.logger.Info(ctx, "quota manager initialized via entitlements seam")
-		// Emit the startup seam-state table (ADR-0074, gibson#1087):
-		// logs each registered seam as wired (remote SaaS component active) or
-		// fail-safe (self-hosted/OSS default). Any seam registered via
-		// seam.Register — including entitlements above — appears in the table.
-		seam.LogStartupState(ctx, d.logger.Slog())
-
-		// Single-use sweep of legacy quota Redis keys deleted by spec
-		// plans-and-quotas-simplification (quota:config / quota:memory /
-		// quota:*:count). Gated by an internal sentinel; later boots are
-		// no-ops. Failure is non-fatal — keys persist but production code
-		// never reads them.
-		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
-			if err := component.CleanupLegacyQuotaKeys(ctx, redisClient, d.logger.Slog()); err != nil {
-				d.logger.Warn(ctx, "legacy quota key cleanup failed (non-fatal)", "error", err)
-			}
-		}
-	} else {
-		d.logger.Warn(ctx, "quota manager not initialized - state client unavailable")
-	}
+	// Log each registered seam as wired or fail-safe (ADR-0074, gibson#1087).
+	seam.LogStartupState(ctx, d.logger.Slog())
 
 	// Initialize infrastructure components (DAG executor, finding store, LLM registry, harness factory)
 	// This must happen before creating the orchestrator because the orchestrator needs the harness factory

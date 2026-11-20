@@ -5,7 +5,7 @@
 // source: gibson/tenant/v1/tenant.proto
 
 // Package gibson.tenant.v1 defines TenantService — the slimmed core
-// tenant-management surface covering onboarding, quota, audit events,
+// tenant-management surface covering onboarding, audit events,
 // findings export, and mission drafts.
 //
 // The following surfaces have been extracted into focused services in this
@@ -40,8 +40,6 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	TenantService_GetOnboardingState_FullMethodName    = "/gibson.tenant.v1.TenantService/GetOnboardingState"
 	TenantService_UpdateOnboardingState_FullMethodName = "/gibson.tenant.v1.TenantService/UpdateOnboardingState"
-	TenantService_GetTenantQuota_FullMethodName        = "/gibson.tenant.v1.TenantService/GetTenantQuota"
-	TenantService_GetTenantQuotaUsage_FullMethodName   = "/gibson.tenant.v1.TenantService/GetTenantQuotaUsage"
 	TenantService_ListAuditEvents_FullMethodName       = "/gibson.tenant.v1.TenantService/ListAuditEvents"
 	TenantService_GetAuditRetention_FullMethodName     = "/gibson.tenant.v1.TenantService/GetAuditRetention"
 	TenantService_SetAuditRetention_FullMethodName     = "/gibson.tenant.v1.TenantService/SetAuditRetention"
@@ -58,18 +56,12 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // TenantService provides the core tenant-management operations: onboarding
-// state, quota, audit events, findings export, and mission drafts.
+// state, audit events, findings export, and mission drafts.
 type TenantServiceClient interface {
 	// GetOnboardingState queries the onboarding progress for a tenant.
 	GetOnboardingState(ctx context.Context, in *GetOnboardingStateRequest, opts ...grpc.CallOption) (*GetOnboardingStateResponse, error)
 	// UpdateOnboardingState advances or modifies the onboarding state.
 	UpdateOnboardingState(ctx context.Context, in *UpdateOnboardingStateRequest, opts ...grpc.CallOption) (*UpdateOnboardingStateResponse, error)
-	// GetTenantQuota retrieves the configured resource quotas (limits) for a
-	// tenant. Returns zero values for any quota not explicitly set.
-	GetTenantQuota(ctx context.Context, in *GetTenantQuotaRequest, opts ...grpc.CallOption) (*GetTenantQuotaResponse, error)
-	// GetTenantQuotaUsage returns the live counter values (current usage) from
-	// Redis. Cheap (single MGET); does not consult Postgres.
-	GetTenantQuotaUsage(ctx context.Context, in *GetTenantQuotaUsageRequest, opts ...grpc.CallOption) (*GetTenantQuotaUsageResponse, error)
 	// ListAuditEvents returns audit events for a tenant.
 	ListAuditEvents(ctx context.Context, in *ListAuditEventsRequest, opts ...grpc.CallOption) (*ListAuditEventsResponse, error)
 	// GetAuditRetention returns the audit retention period of the caller's
@@ -121,26 +113,6 @@ func (c *tenantServiceClient) UpdateOnboardingState(ctx context.Context, in *Upd
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateOnboardingStateResponse)
 	err := c.cc.Invoke(ctx, TenantService_UpdateOnboardingState_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *tenantServiceClient) GetTenantQuota(ctx context.Context, in *GetTenantQuotaRequest, opts ...grpc.CallOption) (*GetTenantQuotaResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetTenantQuotaResponse)
-	err := c.cc.Invoke(ctx, TenantService_GetTenantQuota_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *tenantServiceClient) GetTenantQuotaUsage(ctx context.Context, in *GetTenantQuotaUsageRequest, opts ...grpc.CallOption) (*GetTenantQuotaUsageResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetTenantQuotaUsageResponse)
-	err := c.cc.Invoke(ctx, TenantService_GetTenantQuotaUsage_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -242,18 +214,12 @@ func (c *tenantServiceClient) DeleteMissionDraft(ctx context.Context, in *Delete
 // for forward compatibility.
 //
 // TenantService provides the core tenant-management operations: onboarding
-// state, quota, audit events, findings export, and mission drafts.
+// state, audit events, findings export, and mission drafts.
 type TenantServiceServer interface {
 	// GetOnboardingState queries the onboarding progress for a tenant.
 	GetOnboardingState(context.Context, *GetOnboardingStateRequest) (*GetOnboardingStateResponse, error)
 	// UpdateOnboardingState advances or modifies the onboarding state.
 	UpdateOnboardingState(context.Context, *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error)
-	// GetTenantQuota retrieves the configured resource quotas (limits) for a
-	// tenant. Returns zero values for any quota not explicitly set.
-	GetTenantQuota(context.Context, *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error)
-	// GetTenantQuotaUsage returns the live counter values (current usage) from
-	// Redis. Cheap (single MGET); does not consult Postgres.
-	GetTenantQuotaUsage(context.Context, *GetTenantQuotaUsageRequest) (*GetTenantQuotaUsageResponse, error)
 	// ListAuditEvents returns audit events for a tenant.
 	ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error)
 	// GetAuditRetention returns the audit retention period of the caller's
@@ -296,12 +262,6 @@ func (UnimplementedTenantServiceServer) GetOnboardingState(context.Context, *Get
 }
 func (UnimplementedTenantServiceServer) UpdateOnboardingState(context.Context, *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateOnboardingState not implemented")
-}
-func (UnimplementedTenantServiceServer) GetTenantQuota(context.Context, *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetTenantQuota not implemented")
-}
-func (UnimplementedTenantServiceServer) GetTenantQuotaUsage(context.Context, *GetTenantQuotaUsageRequest) (*GetTenantQuotaUsageResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetTenantQuotaUsage not implemented")
 }
 func (UnimplementedTenantServiceServer) ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAuditEvents not implemented")
@@ -383,42 +343,6 @@ func _TenantService_UpdateOnboardingState_Handler(srv interface{}, ctx context.C
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TenantServiceServer).UpdateOnboardingState(ctx, req.(*UpdateOnboardingStateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _TenantService_GetTenantQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetTenantQuotaRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TenantServiceServer).GetTenantQuota(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TenantService_GetTenantQuota_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TenantServiceServer).GetTenantQuota(ctx, req.(*GetTenantQuotaRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _TenantService_GetTenantQuotaUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetTenantQuotaUsageRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TenantServiceServer).GetTenantQuotaUsage(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TenantService_GetTenantQuotaUsage_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TenantServiceServer).GetTenantQuotaUsage(ctx, req.(*GetTenantQuotaUsageRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -599,14 +523,6 @@ var TenantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateOnboardingState",
 			Handler:    _TenantService_UpdateOnboardingState_Handler,
-		},
-		{
-			MethodName: "GetTenantQuota",
-			Handler:    _TenantService_GetTenantQuota_Handler,
-		},
-		{
-			MethodName: "GetTenantQuotaUsage",
-			Handler:    _TenantService_GetTenantQuotaUsage_Handler,
 		},
 		{
 			MethodName: "ListAuditEvents",

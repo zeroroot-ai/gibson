@@ -19,7 +19,7 @@ func newUsage(t *testing.T) (*budgetUsage, budget.Enforcer) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	enf := budget.NewEnforcer(rdb, nil, nil, nil, nil)
+	enf := budget.NewEnforcer(rdb, nil, nil, nil)
 	return newBudgetUsage(enf, rdb, nil), enf
 }
 

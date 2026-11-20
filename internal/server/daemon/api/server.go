@@ -108,10 +108,6 @@ type DaemonServer struct {
 	// sessionCounter generates unique session IDs
 	sessionCounter int64
 
-	// quotaManager enforces per-tenant resource quotas on mission submission.
-	// May be nil; when nil, quota checks are skipped.
-	quotaManager MissionQuotaChecker
-
 	// connectorGrantRevoker backs the operator-scoped RevokeConnectorGrant
 	// (ADR-0061). Wired via WithConnectorGrantRevoker; nil answers
 	// Unavailable.
@@ -191,10 +187,8 @@ type DaemonServer struct {
 	// Returning ("", false, nil) is a cache miss — also handled as fallback.
 	tenantNameResolver func(ctx context.Context, tenantID string) (string, bool, error)
 
-	// platformDB is the shared-dashboard Postgres pool used by the
-	// entitlements handlers (UpsertTenantQuota in particular). Wired via
-	// WithPlatformDB by the daemon; nil in dev/kind when the Postgres
-	// connection couldn't be established.
+	// platformDB is the platform Postgres pool. Wired via WithPlatformDB by
+	// the daemon. A unit test server can leave it nil.
 	platformDB *sql.DB
 
 	// auditLogger is the Redis-backed audit log reader/writer.
@@ -229,10 +223,6 @@ type DaemonServer struct {
 	// May be nil; when nil those RPCs return codes.Unavailable.
 	// Wired by the daemon via WithPoolGetter. Spec: dashboard-neo4j-crud-removal.
 	poolGetter func() datapool.Pool
-
-	// quotaStore + tenantUsage fields removed by spec
-	// plans-and-quotas-simplification: quota limits are read from Postgres
-	// directly by GetTenantQuota; live counters via the QuotaManager.
 
 	// alertStore persists and retrieves per-user platform alerts.
 	// May be nil; when nil, ListAlerts/MarkAlertRead return codes.Unavailable.
@@ -479,36 +469,6 @@ type PrincipalRevoker interface {
 func (s *DaemonServer) WithPrincipalRevoker(r PrincipalRevoker) *DaemonServer {
 	s.principalRevoker = r
 	return s
-}
-
-// MissionQuotaChecker is the narrow interface the DaemonServer uses to enforce
-// per-tenant quotas. It is satisfied by *component.QuotaManager.
-//
-// Memory enforcement (CheckMemoryQuota) was removed by spec
-// plans-and-quotas-simplification — only concurrent_missions and
-// concurrent_agents are enforced going forward.
-type MissionQuotaChecker interface {
-	// CheckMissionQuota returns a codes.ResourceExhausted error when the tenant
-	// in ctx has met or exceeded its concurrent_missions limit.
-	CheckMissionQuota(ctx context.Context) error
-
-	// CheckAgentQuota returns a codes.ResourceExhausted error when the tenant
-	// in ctx has met or exceeded its concurrent_agents limit
-	// (counted only while bound to an in-flight task — idle agents do not
-	// count).
-	CheckAgentQuota(ctx context.Context) error
-
-	// IncrementMissionCount increments the active-mission counter for the
-	// tenant in ctx. Called when a mission transitions queued → running.
-	IncrementMissionCount(ctx context.Context) error
-
-	// InvalidateCache drops any in-process cached limits for tenant so the
-	// next Limits call fetches a fresh value, allowing the 60 s TTL to be
-	// bypassed without waiting for natural expiry.
-	// Implementations must be safe to call concurrently and must be a no-op
-	// when the underlying provider has no cache (OSS configProvider path:
-	// delete(cache, tenant) on an empty map is always harmless).
-	InvalidateCache(tenantID string)
 }
 
 // DaemonInterface defines the interface that the daemon must implement
@@ -1037,18 +997,6 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 	}
 }
 
-// WithQuotaManager attaches a MissionQuotaChecker to the server so that
-// RunMission enforces per-tenant mission quotas.  Call this immediately
-// after NewDaemonServer and before registering the server:
-//
-//	srv := api.NewDaemonServer(d, handler, logger)
-//	srv.WithQuotaManager(quotaMgr)
-//	api.RegisterDaemonServiceServer(grpcSrv, srv)
-func (s *DaemonServer) WithQuotaManager(qm MissionQuotaChecker) *DaemonServer {
-	s.quotaManager = qm
-	return s
-}
-
 // WithTargetService wires the tenant-scoped target service backing the
 // CreateTarget / GetTarget / ListTargets / UpdateTarget / DeleteTarget RPCs.
 // Call immediately after NewDaemonServer and before registering the server.
@@ -1122,9 +1070,8 @@ func (s *DaemonServer) WithTenantNameResolver(fn func(ctx context.Context, tenan
 	return s
 }
 
-// WithPlatformDB wires the shared-dashboard Postgres pool used by the
-// entitlements handlers (UpsertTenantQuota writes the tenant_quotas row
-// there). May be nil; handlers that require it return Unavailable.
+// WithPlatformDB wires the platform Postgres pool. May be nil; handlers that
+// require it return Unavailable.
 func (s *DaemonServer) WithPlatformDB(db *sql.DB) *DaemonServer {
 	s.platformDB = db
 	return s
@@ -1357,8 +1304,7 @@ func isTerminalMissionEvent(me *MissionEventData) bool {
 // StartMission starts one mission by reference. It is the one function that
 // starts a mission for a caller: the RunMission RPC calls it, and the inbound
 // A2A entry point calls it. It enforces the per-tenant admission rules before it
-// allocates anything. A suspended tenant starts no new mission (ADR-0060, D41),
-// and a tenant over its mission or agent quota starts none either.
+// allocates anything. A suspended tenant starts no new mission (ADR-0060, D41).
 func (s *DaemonServer) StartMission(ctx context.Context, req RunMissionData) (string, error) {
 	if err := s.admitMission(ctx); err != nil {
 		return "", err
@@ -1372,19 +1318,6 @@ func (s *DaemonServer) admitMission(ctx context.Context) error {
 	if err := s.requireActiveTenant(ctx, auth.TenantStringFromContext(ctx)); err != nil {
 		s.logger.Warn("mission submission rejected: tenant suspended", "error", err)
 		return preserveStatus(err, "tenant check failed")
-	}
-	if s.quotaManager != nil {
-		if err := s.quotaManager.CheckMissionQuota(ctx); err != nil {
-			s.logger.Warn("mission submission rejected: mission quota exceeded", "error", err)
-			return preserveStatus(err, "mission quota check failed")
-		}
-		if err := s.quotaManager.CheckAgentQuota(ctx); err != nil {
-			s.logger.Warn("mission submission rejected: agent quota exceeded", "error", err)
-			return preserveStatus(err, "agent quota check failed")
-		}
-		// Memory-quota enforcement was removed by spec
-		// plans-and-quotas-simplification (it was unenforced and the Redis
-		// key family was dead). Future memory checks ship in their own spec.
 	}
 	return nil
 }
@@ -1437,11 +1370,6 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 		s.logger.Error("failed to start mission", "error", err)
 		return preserveStatus(err, "failed to start mission")
 	}
-
-	// Spec plans-and-quotas-simplification: the concurrent_missions counter
-	// is now incremented by the missionManager at queued → running dispatch
-	// (mission_manager.go) and decremented at terminal-state transitions.
-	// Submission alone no longer counts toward the quota.
 
 	// Stream events to client
 	for {

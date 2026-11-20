@@ -156,8 +156,6 @@ func TestListPendingTenantProvisioning_ReturnsRows(t *testing.T) {
 	srv.platformDB = db
 
 	expectEnsureTable(mock)
-	// The drain gate is inert here because the entitlements knob is unset
-	// (self-hosted posture).
 	rows := sqlmock.NewRows([]string{
 		"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier", "audit_record_id", "created_at",
 	}).

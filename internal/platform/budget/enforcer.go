@@ -13,7 +13,6 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -73,13 +72,12 @@ type Clock func() time.Time
 // redisEnforcer is the Redis-backed Enforcer implementation. Fields are
 // unexported because callers should not depend on the concrete type.
 type redisEnforcer struct {
-	rdb      redis.UniversalClient
-	logger   *slog.Logger
-	teams    TeamMembershipResolver
-	clock    Clock
-	provider entitlements.Provider
-	checkLs  *redis.Script
-	recLs    *redis.Script
+	rdb     redis.UniversalClient
+	logger  *slog.Logger
+	teams   TeamMembershipResolver
+	clock   Clock
+	checkLs *redis.Script
+	recLs   *redis.Script
 }
 
 // NewEnforcer constructs an Enforcer backed by the given Redis client. The
@@ -87,14 +85,9 @@ type redisEnforcer struct {
 // through it ([[0003]]). The daemon builds it from FGA, which it requires at
 // start.
 //
-// Limits flow through the ADR-0089 entitlements seam: explicit admin-set
-// budgets (the Redis budget:* config) always win, and when no explicit
-// tenant-scope budget exists the enforcer falls back to the entitlements
-// Provider's per-tenant default token/spend ceilings. A nil Provider (or the
-// OSS default's zero Limits) means "no provider-supplied ceiling" — i.e.
-// unlimited unless an admin set one. The enforcer therefore never reads
-// plans or Stripe directly.
-func NewEnforcer(rdb redis.UniversalClient, logger *slog.Logger, teamResolver TeamMembershipResolver, clock Clock, provider entitlements.Provider) Enforcer {
+// The only ceilings are the budgets that a tenant admin sets (the Redis
+// budget:* config). A scope with no budget has no ceiling.
+func NewEnforcer(rdb redis.UniversalClient, logger *slog.Logger, teamResolver TeamMembershipResolver, clock Clock) Enforcer {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -102,13 +95,12 @@ func NewEnforcer(rdb redis.UniversalClient, logger *slog.Logger, teamResolver Te
 		clock = time.Now
 	}
 	return &redisEnforcer{
-		rdb:      rdb,
-		logger:   logger.With("component", "budget_enforcer"),
-		teams:    teamResolver,
-		clock:    clock,
-		provider: entitlements.Resolve(provider),
-		checkLs:  redis.NewScript(luaCheck),
-		recLs:    redis.NewScript(luaRecord),
+		rdb:     rdb,
+		logger:  logger.With("component", "budget_enforcer"),
+		teams:   teamResolver,
+		clock:   clock,
+		checkLs: redis.NewScript(luaCheck),
+		recLs:   redis.NewScript(luaRecord),
 	}
 }
 
@@ -220,34 +212,6 @@ func (e *redisEnforcer) resolveTeams(ctx context.Context, tenantID, userID strin
 	return teams
 }
 
-// loadTenantBudget returns the tenant-scope budget. An explicit admin-set
-// tenant default (Redis budget:tenant:{t}:defaults) always wins; when absent,
-// the enforcer falls back to the entitlements Provider's per-tenant default
-// token/spend ceilings (ADR-0089 seam). Returns nil when neither source sets
-// a ceiling — meaning unlimited at tenant scope.
-func (e *redisEnforcer) loadTenantBudget(ctx context.Context, tenantID string) *Budget {
-	if b, _ := e.loadBudget(ctx, configKey(tenantID, ScopeTenant, "")); b != nil {
-		return b
-	}
-	lim, err := e.provider.Limits(ctx, tenantID)
-	if err != nil {
-		e.logger.WarnContext(ctx, "budget: entitlements provider lookup failed; treating tenant as unlimited",
-			slog.String("error", err.Error()),
-			slog.String("tenant_id", tenantID),
-		)
-		return nil
-	}
-	if lim.MonthlyTokens == 0 && lim.MonthlySpendUSDCents == 0 {
-		return nil
-	}
-	return &Budget{
-		TenantID:             tenantID,
-		Scope:                ScopeTenant,
-		MonthlyTokens:        lim.MonthlyTokens,
-		MonthlySpendUSDCents: lim.MonthlySpendUSDCents,
-	}
-}
-
 // loadBudget reads a config entry; returns (nil, nil) when absent.
 func (e *redisEnforcer) loadBudget(ctx context.Context, key string) (*Budget, error) {
 	raw, err := e.rdb.Get(ctx, key).Result()
@@ -297,9 +261,9 @@ func (e *redisEnforcer) Check(ctx context.Context, estimatedTokens int64) (*Stat
 	period := PeriodID(now)
 	resetAt := PeriodResetAt(now)
 
-	// Tenant check. The tenant-scope ceiling comes from the explicit admin
-	// default if set, else the entitlements provider (ADR-0089 seam).
-	tenantBudget := e.loadTenantBudget(ctx, tenantID)
+	// Tenant check. The tenant-scope ceiling is the budget that the tenant
+	// admin set. With no budget, the tenant has no ceiling.
+	tenantBudget, _ := e.loadBudget(ctx, configKey(tenantID, ScopeTenant, ""))
 	tenantTokens, tenantCost := e.readCounter(ctx, counterKey(tenantID, ScopeTenant, "", period))
 	if err := exceedsTokens(tenantBudget, tenantTokens+estimatedTokens); err != nil {
 		return nil, wrapExceed(ScopeTenant, "", tenantTokens, estimatedTokens, tenantBudget, resetAt, err)

@@ -203,12 +203,10 @@ Do not delete an unrun suite and do not mark one skipped.
 
 `internal/engine/state` is untagged, so it is part of the default build — but
 its integration tests need a live Redis Stack (RediSearch + RedisJSON). They
-probe `localhost:6379` and skip when it is unreachable (see
-`requireTenantStoreRedis` / `main_test.go`; the bare `t.Skip` they used to open
-with was removed). The `coverage` job provisions a
+probe `localhost:6379` and skip when it is unreachable (see `main_test.go`).
+The `coverage` job provisions a
 `redis/redis-stack-server` service on `localhost:6379` and runs `go test ./...`
-(no `-short`), so these tests — including the `TestTenantScopedStore_*`
-tenant-isolation trio — execute there on **both** lanes. `heavy`
+(no `-short`), so these tests execute there on **both** lanes. `heavy`
 and `vet-tags` do **not** provision Redis, so the same suites self-skip under
 those jobs by design.
 

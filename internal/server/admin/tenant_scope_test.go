@@ -220,7 +220,7 @@ func TestTeamRPCs_ForeignTenantRejected(t *testing.T) {
 // will do) rather than a hand-rolled one, so the interface satisfaction has no
 // var-naming friction with GetTenantId's protoc-gen-go casing.
 func TestRequireCallerTenant_NoTenantInContext(t *testing.T) {
-	_, err := requireCallerTenant(context.Background(), &tenantv1.GetTenantQuotaRequest{})
+	_, err := requireCallerTenant(context.Background(), &tenantv1.InviteMemberRequest{})
 	if err == nil {
 		t.Fatal("requireCallerTenant: expected error for a context with no tenant, got nil")
 	}

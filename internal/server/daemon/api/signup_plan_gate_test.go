@@ -23,7 +23,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
-	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 )
 
 // requestVerifiedSession drives phase 1 and 2 of the flow
@@ -113,25 +112,9 @@ func TestSignup_RejectsContactSalesPlan(t *testing.T) {
 	}
 }
 
-// TestSignup_PaidPlanNeedsTheStepWhenEntitlementsRequired covers rule 3 of the
-// gate: on a deployment that enforces entitlements, a paid plan needs the
-// external signup step. With no step configured, nothing can confirm it.
-func TestSignup_PaidPlanNeedsTheStepWhenEntitlementsRequired(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "true")
-	h := planGateHarness(t)
-	session := requestVerifiedSession(t, h, "enterprise")
-
-	_, err := signupWithSession(t, h, session)
-	if got := status.Code(err); got != codes.PermissionDenied {
-		t.Fatalf("Signup(tier=enterprise, no step) code = %v, want PermissionDenied", got)
-	}
-}
-
-// TestSignup_PaidPlanAllowedOnPremWithoutStep pins ADR-0074: the seam is
-// bypassable on-prem, so a self-hosted install (entitlements knob unset) signs
-// up with no step.
-func TestSignup_PaidPlanAllowedOnPremWithoutStep(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "")
+// TestSignup_PaidPlanSucceedsWithoutAStep pins that no signup path refuses a
+// plan because no external step is configured.
+func TestSignup_PaidPlanSucceedsWithoutAStep(t *testing.T) {
 	h := newSignupHarness(t)
 	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 		return idp.CreateHumanUserResult{UserID: "user-owner"}, nil
@@ -140,7 +123,7 @@ func TestSignup_PaidPlanAllowedOnPremWithoutStep(t *testing.T) {
 
 	resp, err := signupWithSession(t, h, session)
 	if err != nil {
-		t.Fatalf("on-prem signup without a step must succeed, got: %v", err)
+		t.Fatalf("signup without a step must succeed, got: %v", err)
 	}
 	if resp.GetStepUrl() != "" || resp.GetStepToken() != "" {
 		t.Fatalf("a signup with no step configured got step_url %q and a token", resp.GetStepUrl())
@@ -150,7 +133,6 @@ func TestSignup_PaidPlanAllowedOnPremWithoutStep(t *testing.T) {
 // TestSignup_AcceptsCanonicalSelfServePlans guards against the gate being too
 // tight: every self-serve plan must still be requestable.
 func TestSignup_AcceptsCanonicalSelfServePlans(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "true")
 	for _, tier := range []string{"team", "org", "enterprise"} {
 		t.Run(tier, func(t *testing.T) {
 			h := newSignupHarness(t)
@@ -175,38 +157,9 @@ func TestSignup_AcceptsCanonicalSelfServePlans(t *testing.T) {
 // Provisioning drain
 // ---------------------------------------------------------------------------
 
-// TestWithholdPendingTenant is the decision table for the drain gate.
-func TestWithholdPendingTenant(t *testing.T) {
-	tests := []struct {
-		name         string
-		tier         string
-		enforce      bool
-		wantWithheld bool
-	}{
-		{"self-hosted never withholds", "enterprise-plus", false, false},
-		{"a canonical plan drains", "enterprise", true, false},
-		{"unpriceable tier is withheld", "enterprise-plus", true, true},
-		{"empty tier is withheld", "", true, true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			reason, withheld := withholdPendingTenant(tc.tier, tc.enforce)
-			if withheld != tc.wantWithheld {
-				t.Fatalf("withhold = %v (%q), want %v", withheld, reason, tc.wantWithheld)
-			}
-			if withheld && reason == "" {
-				t.Error("a withheld row must carry a reason for the operator log")
-			}
-		})
-	}
-}
-
-// TestListPendingTenantProvisioning_SelfHostedDrainsEverything pins ADR-0074:
-// with the entitlements knob unset the queue drains unchanged, even a tier
-// that does not resolve.
-func TestListPendingTenantProvisioning_SelfHostedDrainsEverything(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "")
-
+// TestListPendingTenantProvisioning_DrainsEveryPendingRow pins that the queue
+// withholds no row for its tier, even a tier that does not resolve.
+func TestListPendingTenantProvisioning_DrainsEveryPendingRow(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -228,6 +181,6 @@ func TestListPendingTenantProvisioning_SelfHostedDrainsEverything(t *testing.T) 
 		t.Fatalf("list: %v", err)
 	}
 	if len(resp.GetPending()) != 1 {
-		t.Fatalf("self-hosted must drain every pending row, got %d", len(resp.GetPending()))
+		t.Fatalf("the queue must drain every pending row, got %d", len(resp.GetPending()))
 	}
 }

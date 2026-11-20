@@ -19,15 +19,6 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// scriptedQuota fails the check that the test names.
-type scriptedQuota struct {
-	MissionQuotaChecker
-	missionErr, agentErr error
-}
-
-func (q scriptedQuota) CheckMissionQuota(context.Context) error { return q.missionErr }
-func (q scriptedQuota) CheckAgentQuota(context.Context) error   { return q.agentErr }
-
 // StartMission is the one function that starts a mission for a caller. It passes
 // the whole request, with the target set, to the daemon.
 func TestStartMission_PassesTheWholeRequestToTheDaemon(t *testing.T) {
@@ -66,17 +57,11 @@ func TestStartMission_KeepsTheStatusOfAFailedStart(t *testing.T) {
 
 // A refusal of admission comes before the daemon starts anything.
 func TestStartMission_RefusesBeforeTheDaemonStartsAnything(t *testing.T) {
-	exhausted := status.Error(codes.ResourceExhausted, "quota used up")
 	tests := []struct {
 		name  string
-		quota MissionQuotaChecker
 		setup func(*DaemonServer, sqlmock.Sqlmock)
 		code  codes.Code
 	}{
-		{name: "the mission quota is used up", quota: scriptedQuota{missionErr: exhausted}, code: codes.ResourceExhausted},
-		{name: "the agent quota is used up", quota: scriptedQuota{agentErr: exhausted}, code: codes.ResourceExhausted},
-		{name: "a quota check that fails with no status", quota: scriptedQuota{agentErr: errors.New("redis down")},
-			code: codes.Internal},
 		{
 			name: "the tenant is suspended",
 			setup: func(_ *DaemonServer, m sqlmock.Sqlmock) {
@@ -95,7 +80,6 @@ func TestStartMission_RefusesBeforeTheDaemonStartsAnything(t *testing.T) {
 			}}
 			srv, mock := mockedConnectionServer(t)
 			srv.daemon = d
-			srv.quotaManager = tt.quota
 			if tt.setup != nil {
 				tt.setup(srv, mock)
 			}
@@ -118,13 +102,15 @@ func TestRunMission_SubscribesOnlyAfterAdmission(t *testing.T) {
 		subscribed = true
 		return make(chan EventData), nil
 	}}
-	srv := NewDaemonServer(d, nil, nil)
-	srv.quotaManager = scriptedQuota{missionErr: status.Error(codes.ResourceExhausted, "quota used up")}
+	srv, mock := mockedConnectionServer(t)
+	srv.daemon = d
+	mock.ExpectQuery("SELECT activation FROM tenant_status").WithArgs("acme").
+		WillReturnRows(sqlmock.NewRows([]string{"activation"}).AddRow("suspended"))
 	ctx, cancel := context.WithCancel(auth.WithTenant(context.Background(), auth.MustNewTenantID("acme")))
 	defer cancel()
 
 	err := srv.RunMission(&daemonpb.RunMissionRequest{MissionDefinitionId: "d", TargetId: "t"}, &mockServerStream{ctx: ctx})
 
-	assert.Equal(t, codes.ResourceExhausted, status.Code(err))
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 	assert.False(t, subscribed, "a refused call opened a subscription")
 }

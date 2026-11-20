@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -229,23 +228,6 @@ type DefaultAgentHarness struct {
 	// safe. A test injects a stub so the routing is exercised without shipping a
 	// manifest into the embedded catalog.
 	agentDispatchMode func(name string) (mode string, listed bool)
-
-	// quotaCounter maintains the per-tenant concurrent_agents Redis
-	// counter on agent idle→busy / busy→idle transitions, gated by
-	// inFlightTasks bookkeeping below. nil disables agent-quota
-	// counting. Spec plans-and-quotas-simplification.
-	quotaCounter QuotaCounter
-
-	// inFlightTasks tracks per-(parent → child agent) outstanding
-	// DelegateToAgent calls. The child agent transitions idle→busy on
-	// the 0→1 increment of its entry, and busy→idle on the 1→0
-	// decrement. quotaCounter callbacks fire only on those transitions.
-	// Sibling siblings of a parent harness DO NOT share state (each
-	// DefaultAgentHarness instance owns its own map); the daemon's
-	// missionManager owns one parent harness per mission, and that
-	// parent's map is the authoritative source.
-	inFlightTasksMu sync.Mutex
-	inFlightTasks   map[string]int
 
 	// maxTokensPerCall is the effective token cap of one model call of the
 	// agent node that runs through this harness. Zero means no cap.
@@ -596,43 +578,6 @@ func (h *DefaultAgentHarness) observeDelegation(ctx context.Context, name string
 			ChildRunID:  childRunID,
 			ChildAgent:  name,
 		})
-	}
-}
-
-// trackInFlightAgent does the concurrent_agents quota bookkeeping for one
-// delegation and returns the release function. Shared by the sandbox and
-// work-queue paths so each agent counts against the tenant's quota.
-func (h *DefaultAgentHarness) trackInFlightAgent(ctx context.Context, name string) func() {
-	if h.quotaCounter == nil {
-		return func() {}
-	}
-	h.inFlightTasksMu.Lock()
-	if h.inFlightTasks == nil {
-		h.inFlightTasks = make(map[string]int)
-	}
-	prev := h.inFlightTasks[name]
-	h.inFlightTasks[name] = prev + 1
-	h.inFlightTasksMu.Unlock()
-	if prev == 0 {
-		if incErr := h.quotaCounter.IncrementAgentCount(ctx); incErr != nil {
-			h.logger.Warn("harness: increment concurrent_agents failed (non-fatal)",
-				"agent", name, "error", incErr.Error())
-		}
-	}
-	return func() {
-		h.inFlightTasksMu.Lock()
-		h.inFlightTasks[name]--
-		now := h.inFlightTasks[name]
-		if now <= 0 {
-			delete(h.inFlightTasks, name)
-		}
-		h.inFlightTasksMu.Unlock()
-		if now == 0 {
-			if decErr := h.quotaCounter.DecrementAgentCount(ctx); decErr != nil {
-				h.logger.Warn("harness: decrement concurrent_agents failed (non-fatal)",
-					"agent", name, "error", decErr.Error())
-			}
-		}
 	}
 }
 
@@ -1560,7 +1505,6 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 	}
 
 	if decision == dispatchpolicy.RequireSetec {
-		defer h.trackInFlightAgent(ctx, name)()
 		return h.delegateToAgentViaSandbox(ctx, name, task, agentTrust)
 	}
 
@@ -1612,7 +1556,6 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		return agent.Result{}, types.NewError(ErrHarnessAgentNotFound,
 			fmt.Sprintf("agent %q has no sandbox manifest and no work queue instance", name))
 	}
-	defer h.trackInFlightAgent(ctx, name)()
 	return h.delegateToAgentViaWorkQueue(ctx, tenant, name, task, info)
 }
 
@@ -1913,12 +1856,9 @@ func (h *DefaultAgentHarness) Target() TargetInfo {
 // SubmitProof, the destructive-authz callback — resolves the target this unit of
 // work actually ran against.
 //
-// It delegates rather than copying the struct. A copy would duplicate
-// inFlightTasksMu while sharing the inFlightTasks map it guards, so two
-// harnesses would protect one map with two mutexes and the agent-concurrency
-// quota would race. `go vet`'s copylocks says so, and it is right: the harness
-// owns locked state, which makes it a thing to point at and not a thing to
-// duplicate.
+// It delegates rather than copying the struct. A copy would be a second
+// harness with its own token tracker and callback registrations, so the
+// mission budget and the in-flight callbacks would split in two.
 //
 // Only the ID differs. The rest of TargetInfo describes the mission's primary
 // and is not read for scope; a view that invented a name or a URL would be a

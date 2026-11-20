@@ -993,27 +993,24 @@ func TestResultCache_NeverHoldsMoreThanTheByteBudget(t *testing.T) {
 	assert.LessOrEqual(t, c.bytes, resultCacheBytes)
 }
 
-// A tenant that is suspended or over its quota is a refusal of policy. The Task is
-// rejected, and the place is given back. Another failure of the start is an error.
-func TestInboundRuns_AQuotaOrSuspensionRefusalIsARejectedTask(t *testing.T) {
-	for name, code := range map[string]codes.Code{
-		"over the quota": codes.ResourceExhausted, "suspended": codes.FailedPrecondition,
-	} {
-		t.Run(name, func(t *testing.T) {
-			starter := &recordingStarter{err: status.Error(code, "no new work")}
-			r := newInboundRuns(starter)
+// A tenant that is suspended is a refusal of policy. The Task is rejected, and
+// the place is given back. Another failure of the start is an error.
+func TestInboundRuns_ASuspensionRefusalIsARejectedTask(t *testing.T) {
+	starter := &recordingStarter{err: status.Error(codes.FailedPrecondition, "no new work")}
+	r := newInboundRuns(starter)
 
-			task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
+	task, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
 
-			require.NoError(t, err)
-			assert.Equal(t, a2a.TaskStateRejected, task.Status.State)
-			assert.Contains(t, a2aserver.TextOf(task.Status.Message), "no new work")
-			assert.Contains(t, r.published.(*fakePublished).events, "release:slot-1")
-		})
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateRejected, task.Status.State)
+	assert.Contains(t, a2aserver.TextOf(task.Status.Message), "no new work")
+	assert.Contains(t, r.published.(*fakePublished).events, "release:slot-1")
+
+	for _, code := range []codes.Code{codes.Internal, codes.ResourceExhausted} {
+		r := newInboundRuns(&recordingStarter{err: status.Error(code, "boom")})
+		_, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
+		require.Error(t, err, "code %s is not a refusal of policy", code)
 	}
-	r := newInboundRuns(&recordingStarter{err: status.Error(codes.Internal, "boom")})
-	_, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
-	require.Error(t, err)
 }
 
 // denyGrants is the state after an unpublish or a revoke of the grant of a caller.

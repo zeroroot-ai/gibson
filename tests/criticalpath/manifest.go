@@ -5,7 +5,7 @@
 // the integration lane must always carry (gibson#795, E3 / QUALITY-BARS §4
 // Tier 3), and guards their existence.
 //
-// QUALITY-BARS §4 Tier 3 names five critical paths that must each have a
+// QUALITY-BARS §4 Tier 3 names the critical paths that must each have a
 // present, green integration test:
 //
 //  1. auth-chain          — JWT → ext-authz → FGA → handler
@@ -13,7 +13,6 @@
 //     (guards the predicate-leak / IDOR class)
 //  3. tenant-provision saga — step idempotency + rollback/teardown
 //  4. mission-run          — a mission is driven through the engine
-//  5. entitlements/billing-bypass — on-prem entitlement bypass + operator bypass
 //
 // Rather than re-implement coverage that already exists, this manifest pins the
 // concrete test functions that cover each path. The guard test
@@ -89,16 +88,6 @@ var Manifest = []CriticalPath{
 			{Dir: "internal/engine/brain", Func: "TestWireExecutor_DrivesGoalMissionEndToEnd"},
 			{Dir: "internal/infra/datapool", Func: "TestHydrate_InFlightWorkFailedOnRestart"},
 			{Dir: "internal/engine/brain", Func: "TestCrashResume_GoalMissionDeciderReEngages"},
-		},
-	},
-	{
-		Name:    "entitlements-billing-bypass",
-		Purpose: "Entitlement classification behaves as specified (on-prem billing is bypassable).",
-		// TestGetCheckpoint_OperatorBypassesRedaction left with the
-		// checkpoint-browser handlers (gibson#1321): the redaction path and
-		// its operator bypass no longer exist to cover.
-		Tests: []CoveringTest{
-			{Dir: "internal/server/daemon/api", Func: "TestClassifyRelationAction"},
 		},
 	},
 }
