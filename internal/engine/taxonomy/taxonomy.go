@@ -125,6 +125,11 @@ var coreNodeLabels = []string{
 	// Finding. An Incident links its alerts and its findings.
 	"Alert",
 	"Incident",
+
+	// Defensive countermeasures (v6, ADR-0178, gibson#1487). A Countermeasure
+	// is one MITRE D3FEND technique. The D3FEND pack supplies the vocabulary,
+	// and a fix names the countermeasure that it applies.
+	"Countermeasure",
 }
 
 // coreRelationshipTypes is the promoted edge vocabulary, likewise tracking the
@@ -166,6 +171,10 @@ var coreRelationshipTypes = []string{
 	// Incident response (v6, gibson#1473). An Alert joins its Incident with
 	// PART_OF, and it names what it is about with AFFECTS.
 	"CAUSED_BY", // Incident -> Finding
+
+	// Defensive countermeasures (v6, gibson#1487).
+	"APPLIES_COUNTERMEASURE", // MergeRequest -> Countermeasure
+	"COUNTERS",               // Countermeasure -> Technique
 }
 
 // Registry is a Taxonomy: a version plus the labels and relationship types it

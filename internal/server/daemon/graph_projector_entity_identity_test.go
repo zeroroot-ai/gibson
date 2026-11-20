@@ -49,7 +49,7 @@ func TestEntityUpsertParams_AFirstClassLabelIsIdentifiedTheSameWayItsProjectionI
 func TestEntityUpsertParams_ALifecycleLabelKeepsItsNaturalKey(t *testing.T) {
 	// The labels the entity path owns are identified by their natural key — a
 	// CVE id, an image digest, a repository path.
-	for _, label := range []string{"Application", "Repository", "Image", "Package", "Deployment", "Vulnerability", "MergeRequest", "Pipeline", "Control", "Alert", "Incident"} {
+	for _, label := range []string{"Application", "Repository", "Image", "Package", "Deployment", "Vulnerability", "MergeRequest", "Pipeline", "Control", "Alert", "Incident", "Countermeasure"} {
 		t.Run(label, func(t *testing.T) {
 			ident := identOf(t, label, "CVE-2025-1234")
 			if got, ok := ident["key"]; !ok || got != "CVE-2025-1234" {

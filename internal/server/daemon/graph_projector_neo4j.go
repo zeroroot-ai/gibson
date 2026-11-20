@@ -57,6 +57,9 @@ var projectedNodeLabels = []string{
 	// Incident response (gibson#1473): materialised by upsertEntityCypher
 	// with the label as a parameter.
 	"Alert", "Incident",
+	// Defensive countermeasures (gibson#1487): materialised by
+	// upsertEntityCypher with the label as a parameter.
+	"Countermeasure",
 }
 
 var projectedRelationshipTypes = []string{
@@ -74,6 +77,10 @@ var projectedRelationshipTypes = []string{
 	// Incident response (gibson#1473): travels as the e.type parameter of
 	// apoc.merge.relationship in upsertEntityCypher.
 	"CAUSED_BY", // Incident -> Finding
+	// Defensive countermeasures (gibson#1487): both travel as the e.type
+	// parameter of apoc.merge.relationship in upsertEntityCypher.
+	"APPLIES_COUNTERMEASURE", // MergeRequest -> Countermeasure
+	"COUNTERS",               // Countermeasure -> Technique
 }
 
 // vocabularyDrift reports every label or relationship type in the given

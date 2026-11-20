@@ -306,13 +306,13 @@ func TestContentHash(t *testing.T) {
 // labels and the edge from an incident to its cause (ADR-0180, gibson#1473).
 // An Alert is not a Finding, so both labels must classify as themselves.
 func TestIncidentResponseVocabulary(t *testing.T) {
-	for _, label := range []string{"Alert", "Incident"} {
+	for _, label := range []string{"Alert", "Incident", "Countermeasure"} {
 		c := Global.ClassifyNode(label)
 		if !c.InTaxonomy || c.Label != label {
 			t.Errorf("ClassifyNode(%q) = %+v, want the label in the Taxonomy", label, c)
 		}
 	}
-	for _, relType := range []string{"CAUSED_BY", "PART_OF", "AFFECTS"} {
+	for _, relType := range []string{"CAUSED_BY", "PART_OF", "AFFECTS", "APPLIES_COUNTERMEASURE", "COUNTERS"} {
 		if !Global.ClassifyRelationship(relType).InTaxonomy {
 			t.Errorf("relationship type %q is not in the Taxonomy", relType)
 		}
