@@ -262,7 +262,7 @@ func (s *worldServer) ListActionsByGrant(ctx context.Context, req *worldpb.ListA
 			GrantObject: g.Grant.Object, GrantRelation: g.Grant.Relation, Grantor: g.Grantor,
 			Refused: g.Refused, Count: pagetoken.Int32(g.Count),
 			First: timestamppb.New(g.First), Last: timestamppb.New(g.Last),
-			Agents: g.Agents, Tools: g.Tools,
+			Agents: g.Agents, Tools: g.Tools, AuditRecordIds: g.RecordIDs,
 		})
 	}
 	return resp, nil

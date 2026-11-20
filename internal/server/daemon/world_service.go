@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
@@ -210,24 +211,45 @@ func (s *worldServer) GetTimeline(ctx context.Context, req *worldpb.GetTimelineR
 	if runFound {
 		runScope = "run:" + runID
 	}
-	pg, err := s.pageOf(ctx, "GetTimeline", req.GetPageSize(), req.GetPageToken(), req.GetMissionId(), runScope)
+	// A finding filter keeps the events of one finding. Each event keeps its
+	// position in the slice, so its replay_seq still opens its frame.
+	positions := make([]int, 0, len(events))
+	if f := req.GetFindingId(); f != "" {
+		positions = brain.FindingEventIndexes(events, f)
+	} else {
+		for i := range events {
+			positions = append(positions, i)
+		}
+	}
+	pg, err := s.pageOf(ctx, "GetTimeline", req.GetPageSize(), req.GetPageToken(),
+		req.GetMissionId(), runScope, req.GetFindingId())
 	if err != nil {
 		return nil, err
 	}
-	start, end, next, err := s.seqWindow(pg, len(events))
+	start, end, next, err := s.seqWindow(pg, len(positions))
 	if err != nil {
 		return nil, err
 	}
 	resp := &worldpb.GetTimelineResponse{NextPageToken: next}
-	for i := start; i < end; i++ {
-		ev := events[i]
-		resp.Events = append(resp.Events, &worldpb.TimelineEvent{
-			Seq:     uint64(i),
-			Kind:    ev.Kind(),
-			Summary: fmt.Sprintf("%+v", ev),
-		})
+	for _, i := range positions[start:end] {
+		resp.Events = append(resp.Events, timelineEvent(uint64(i), events[i])) //nolint:gosec // G115: i is an index
 	}
 	return resp, nil
+}
+
+// timelineEvent is the view of one event at position seq.
+func timelineEvent(seq uint64, ev brain.Event) *worldpb.TimelineEvent {
+	out := &worldpb.TimelineEvent{
+		Seq:       seq,
+		Kind:      ev.Kind(),
+		Summary:   fmt.Sprintf("%+v", ev),
+		ReplaySeq: seq + 1,
+	}
+	if t := brain.EventTime(ev); !t.IsZero() {
+		out.Time = timestamppb.New(t)
+	}
+	out.FindingId, out.MergeRequest = brain.EventSubject(ev)
+	return out
 }
 
 // GetFrameAt folds the tenant's Timeline to position seq and returns the World as

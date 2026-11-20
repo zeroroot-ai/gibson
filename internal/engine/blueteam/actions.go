@@ -54,6 +54,9 @@ type ActionGroup struct {
 	// Agents and Tools are the sorted ids that appear in the group.
 	Agents []string
 	Tools  []string
+	// RecordIDs are the ids of the audit records of the actions of the group,
+	// in the order of their time, so each row links to its own records.
+	RecordIDs []string
 }
 
 type grantEvent struct {
@@ -117,6 +120,9 @@ func GroupActions(calls, changes []audit.PgEntry, from, to time.Time) []ActionGr
 			groups[key], agents[key], tools[key] = g, map[string]bool{}, map[string]bool{}
 		}
 		g.Count++
+		if c.ID != "" {
+			g.RecordIDs = append(g.RecordIDs, c.ID)
+		}
 		if c.CreatedAt.Before(g.First) {
 			g.First = c.CreatedAt
 		}

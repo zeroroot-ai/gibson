@@ -367,6 +367,16 @@ message TimelineEvent {
   uint64 seq = 1;     // 0-based position in the tenant Timeline
   string kind = 2;    // event Kind(), e.g. "host.observed"
   string summary = 3; // human-readable one-line summary
+  // time is the time that the event holds: the time of the fact, or the time
+  // when the daemon read it. It is not set for an event that holds no time.
+  google.protobuf.Timestamp time = 4;
+  // replay_seq is the seq to give GetFrameAt (with the same mission_id) for
+  // the World just after this event. It is seq + 1.
+  uint64 replay_seq = 5;
+  // finding_id and merge_request name the finding and the merge request that
+  // the event is about. Each is empty when the event names none.
+  string finding_id = 6;
+  string merge_request = 7;
 }
 
 // LlmCallView is a single LLM completion's metadata (gibson#755): model + token
@@ -485,6 +495,10 @@ message GetLlmCallResponse { LlmCallDetail call = 1; }
 
 message GetTimelineRequest {
   string mission_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  // finding_id keeps only the events of one finding: the events that name it,
+  // and the events of each merge request of its fixes. Each event keeps its
+  // seq in the unfiltered Timeline, so replay_seq still opens its frame.
+  string finding_id = 4 [(buf.validate.field).string = { max_len: 1024 }];
   // page_size is the most events one page returns. Zero means 100.
   int32 page_size = 2 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
   // page_token is the next_page_token of the previous page. Empty starts at
@@ -893,6 +907,10 @@ message ActionGroup {
   google.protobuf.Timestamp last = 7;
   repeated string agents = 8;
   repeated string tools = 9;
+  // audit_record_ids are the ids of the audit records of the actions of the
+  // group, in the order of their time. The result record of each call is in
+  // the list, and the intent record is not.
+  repeated string audit_record_ids = 10;
 }
 message ListActionsByGrantResponse {
   repeated ActionGroup groups = 1;

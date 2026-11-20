@@ -84,3 +84,23 @@ func TestGroupActions_RemovedGrantAndRange(t *testing.T) {
 		t.Fatalf("groups = %+v", got)
 	}
 }
+
+// Each group lists the ids of the audit records of its actions, so a row of
+// the dashboard links to its own records.
+func TestGroupActions_NamesTheAuditRecordsOfEachGroup(t *testing.T) {
+	from := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
+	to := from.Add(24 * time.Hour)
+	call := func(id string, at time.Time) audit.PgEntry {
+		return audit.PgEntry{
+			ID: id, ActorID: "agent_principal:a1", Action: actionToolCall, TargetID: "okta", CreatedAt: at,
+			Metadata: []byte(`{"Result":"success","Details":{"Tool":"suspend_user"}}`),
+		}
+	}
+	groups := GroupActions([]audit.PgEntry{call("rec-1", from.Add(time.Hour)), call("rec-2", from.Add(2*time.Hour))}, nil, from, to)
+	if len(groups) != 1 {
+		t.Fatalf("groups = %d, want 1", len(groups))
+	}
+	if got := groups[0].RecordIDs; len(got) != 2 || got[0] != "rec-1" || got[1] != "rec-2" {
+		t.Fatalf("record ids = %v", got)
+	}
+}
