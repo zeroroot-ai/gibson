@@ -116,6 +116,11 @@ func complianceResponse(rep *compliance.Report) *tenantv1.ListComplianceEvidence
 		if !c.LastEventTime.IsZero() {
 			ce.LastEventTime = timestamppb.New(c.LastEventTime)
 		}
+		for _, cm := range c.Countermeasures {
+			ce.Countermeasures = append(ce.Countermeasures, &tenantv1.ControlCountermeasure{
+				Id: cm.ID, Name: cm.Name, Tactic: cm.Tactic, MappedControlIds: append([]string(nil), cm.MappedControls...),
+			})
+		}
 		out.Controls = append(out.Controls, ce)
 	}
 	for _, e := range rep.Events {
