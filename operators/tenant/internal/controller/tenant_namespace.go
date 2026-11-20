@@ -152,9 +152,8 @@ func (p *NamespaceProvisioner) Provision(ctx context.Context, obj saga.Condition
 	}
 	// Per-tenant K8s ResourceQuota was removed by spec
 	// plans-and-quotas-simplification: per-tenant resource consumption is
-	// bounded by daemon quota enforcement (concurrent_missions /
-	// concurrent_agents) plus the fixed shape of operator-managed data-plane
-	// infra. The chart's remove-orphan-resource-quotas pre-upgrade Job
+	// bounded by the fixed shape of operator-managed data-plane infra. The
+	// chart's remove-orphan-resource-quotas pre-upgrade Job
 	// deletes any leftover gibson-tenant-quota objects from prior installs.
 
 	// Record namespace in status for later phases and UI.

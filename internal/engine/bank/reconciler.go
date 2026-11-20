@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -286,9 +287,9 @@ func (r *Reconciler) ReconcileBank(ctx context.Context, tenantID string, b *bank
 
 	// A suspended member is still a member of the bank: it counts toward the
 	// running count, so the reconciler does not launch a new member while one
-	// waits to resume. A bank holds tens of members, never more than int32
-	// can count, so the narrowing cannot overflow.
-	running := int32(len(live) + len(suspended)) //nolint:gosec // bounded by the bank's desired count, an int32
+	// waits to resume. No plan limits the member count of a bank, so the
+	// count is clamped to what int32 holds.
+	running := clampCount(int64(len(live)) + int64(len(suspended)))
 	target, terr := r.targetCount(ctx, tenantID, b)
 	if terr != nil {
 		// Without the queue length the reconciler keeps the desired count,
@@ -419,7 +420,21 @@ func (r *Reconciler) targetCount(ctx context.Context, tenantID string, b *bankst
 	if err != nil {
 		return 0, fmt.Errorf("count the waiting jobs of bank %s: %w", b.ID, err)
 	}
-	return b.DesiredCount + spillMembers(waiting, b.MaxJobsInFlight, b.DesiredCount), nil
+	spill := spillMembers(waiting, b.MaxJobsInFlight, b.DesiredCount)
+	return clampCount(int64(b.DesiredCount) + int64(spill)), nil
+}
+
+// clampCount narrows a member count to int32. A count above the int32 range
+// becomes the largest int32, so a sum of two counts cannot overflow and turn
+// negative.
+func clampCount(n int64) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < 0 {
+		return 0
+	}
+	return int32(n)
 }
 
 // spillMembers is the number of extra members for waiting jobs: one for each
@@ -605,7 +620,9 @@ func lessDrainable(a, b *bankstore.Member) bool {
 	return a.CreatedAt.Before(b.CreatedAt)
 }
 
-// launch starts n new members.
+// launch starts n new members, one after the other. No count limits n: the
+// owner of the bank sets the desired count. A launch that fails does not stop
+// the others, and the pass stops when its context ends.
 //
 // A member starts in NEEDS_SIGN_IN when the bank signs in on a person's
 // subscription, because it cannot take a job until its owner completes the
@@ -614,6 +631,10 @@ func lessDrainable(a, b *bankstore.Member) bool {
 func (r *Reconciler) launch(ctx context.Context, tenantID string, b *bankstore.Bank, n int32) error {
 	var failures []error
 	for range n {
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, fmt.Errorf("launch the members of bank %s: %w", b.ID, err))
+			break
+		}
 		memberID := newMemberID()
 		launched, err := r.launcher.LaunchMember(ctx, tenantID, b, memberID)
 		if err != nil {
