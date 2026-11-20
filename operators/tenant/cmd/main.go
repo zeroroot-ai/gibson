@@ -1174,6 +1174,9 @@ func buildDataPlaneProvisioner(
 		// own registry (gibson#1051). The provisioner refuses an empty
 		// value or a value with no digest.
 		Image: os.Getenv("TENANT_NEO4J_IMAGE"),
+		// Recorder reports on the Tenant a storage size that the operator
+		// does not apply to a volume that exists (gibson#1526).
+		Recorder: cfg.Recorder,
 	})
 	if err != nil {
 		log.Error(err, "neo4j provisioner init failed")

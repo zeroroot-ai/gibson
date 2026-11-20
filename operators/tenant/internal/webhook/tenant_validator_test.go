@@ -452,7 +452,7 @@ func TestTenantValidator_ValidateCreate_Neo4jSize(t *testing.T) {
 		"zero cpu":         {CPU: q("0")},
 		"negative storage": {Storage: q("-1Gi")},
 		"zero memory":      {Memory: q("0")},
-		"memory too small": {Memory: q("4Mi")},
+		"memory too small": {Memory: q("512Mi")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tn := validTenant()

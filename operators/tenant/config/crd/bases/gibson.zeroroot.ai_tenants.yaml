@@ -85,6 +85,10 @@ spec:
                       Neo4j overrides the default size of the Neo4j instance of the tenant.
                       The chart sets the default size (tenantNeo4j.size). A field that is
                       not set keeps the default.
+
+                      The CPU and the memory of a running instance only go down when this
+                      block sets a smaller value. If you remove a value from this block, the
+                      running instance keeps it when it is larger than the default.
                     properties:
                       cpu:
                         anyOf:
@@ -102,7 +106,10 @@ spec:
                         description: |-
                           Memory is the memory request and the memory limit of the Neo4j
                           container. The operator sets the JVM heap to a quarter of it and the
-                          page cache to an eighth of it.
+                          page cache to an eighth of it. The minimum is 1Gi (a 256 MiB heap and a
+                          128 MiB page cache). That is the smallest size at which the exit tests
+                          start a tenant Neo4j. It is already below the 2Gi that Neo4j states as
+                          its minimum, and no smaller size is measured to start.
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
                       storage:
@@ -112,7 +119,8 @@ spec:
                         description: |-
                           Storage is the storage request of the data volume. It applies when the
                           operator creates the volume. The operator does not resize a volume that
-                          exists.
+                          exists. When this value differs from that volume, the operator emits
+                          the Warning event Neo4jStorageNotChanged on the Tenant.
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
                     type: object

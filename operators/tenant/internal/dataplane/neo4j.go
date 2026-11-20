@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
@@ -92,6 +93,10 @@ type Neo4jConfig struct {
 	// chart sets it from the mirror (TENANT_NEO4J_IMAGE), so an air-gapped
 	// install pulls it from its own registry (gibson#1051). Required.
 	Image string
+
+	// Recorder emits a Kubernetes event on the Tenant when the operator does
+	// not apply a size that the Tenant sets. Required.
+	Recorder events.EventRecorder
 }
 
 // Neo4jProvisioner provisions per-tenant Neo4j instances as K8s resources
@@ -111,6 +116,9 @@ func NewNeo4jProvisioner(cfg Neo4jConfig) (*Neo4jProvisioner, error) {
 	}
 	if err := validateNeo4jImage(cfg.Image); err != nil {
 		return nil, err
+	}
+	if cfg.Recorder == nil {
+		return nil, fmt.Errorf("dataplane/neo4j: Recorder required")
 	}
 	return &Neo4jProvisioner{cfg: cfg}, nil
 }
@@ -334,6 +342,8 @@ func (n *Neo4jProvisioner) applyResources(
 		}
 	} else if err != nil {
 		return fmt.Errorf("dataplane/neo4j: get PVC: %w", err)
+	} else {
+		n.reportStorageNotChanged(ctx, tenantID, existingPVC, override)
 	}
 
 	// Apply Service.
@@ -348,6 +358,39 @@ func (n *Neo4jProvisioner) applyResources(
 	}
 
 	return n.applyStatefulSet(ctx, sts, existingSTS)
+}
+
+// neo4jStorageNotChangedReason is the reason of the event that says the
+// operator did not apply the storage size of a Tenant.
+const neo4jStorageNotChangedReason = "Neo4jStorageNotChanged"
+
+// reportStorageNotChanged emits a Warning event on the Tenant when the Tenant
+// sets a storage size that differs from the volume of its running instance.
+// The operator does not resize a volume, so without the event the edit would
+// do nothing and say nothing. The event is only a report: a failure to read
+// the Tenant does not fail the provision.
+func (n *Neo4jProvisioner) reportStorageNotChanged(
+	ctx context.Context,
+	tenantID string,
+	pvc *corev1.PersistentVolumeClaim,
+	override *gibsonv1alpha1.TenantNeo4jResources,
+) {
+	if override == nil || override.Storage == nil {
+		return
+	}
+	have := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+	if have.Cmp(*override.Storage) == 0 {
+		return
+	}
+	var tenant gibsonv1alpha1.Tenant
+	if err := n.cfg.K8sClient.Get(ctx, types.NamespacedName{Name: tenantID}, &tenant); err != nil {
+		return
+	}
+	n.cfg.Recorder.Eventf(&tenant, nil, corev1.EventTypeWarning,
+		neo4jStorageNotChangedReason, neo4jStorageNotChangedReason,
+		"spec.resources.neo4j.storage is %s and the volume of the running Neo4j instance is %s. "+
+			"The operator does not resize a volume that exists, so the storage does not change.",
+		override.Storage.String(), have.String())
 }
 
 // applyStatefulSet creates the StatefulSet, or reconciles the pod template of
@@ -792,6 +835,17 @@ func (s neo4jSize) validate() error {
 // stopped being the input. A default that is larger still raises the
 // instance, and a field the Tenant sets always applies as written, so a
 // deliberate reduction stays possible.
+//
+// THE FLOOR ONLY RAISES. The operator keeps no record of where a size came
+// from, so the CPU and the memory of a running instance are its floor from
+// then on. Two results follow, and both are intended:
+//
+//   - A default that was raised and then lowered again leaves each running
+//     instance at the raised size.
+//   - A Tenant that sets a size and then removes it keeps that size when it
+//     is larger than the default.
+//
+// In both cases, set the smaller size on the Tenant to reduce the instance.
 //
 // Storage is not handled here. The PVC of a running instance is never
 // rewritten, so its storage cannot shrink.

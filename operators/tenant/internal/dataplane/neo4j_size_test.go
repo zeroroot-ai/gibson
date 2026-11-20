@@ -5,6 +5,7 @@ package dataplane
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -14,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -50,7 +52,7 @@ func newSizeTestProvisioner(t *testing.T, cmData map[string]string, objs ...clie
 	}
 	scheme := runtime.NewScheme()
 	for _, add := range []func(*runtime.Scheme) error{
-		corev1.AddToScheme, appsv1.AddToScheme, networkingv1.AddToScheme,
+		corev1.AddToScheme, appsv1.AddToScheme, networkingv1.AddToScheme, gibsonv1alpha1.AddToScheme,
 	} {
 		if err := add(scheme); err != nil {
 			t.Fatalf("AddToScheme: %v", err)
@@ -62,7 +64,26 @@ func newSizeTestProvisioner(t *testing.T, cmData map[string]string, objs ...clie
 		VaultClient:       newRecordingVaultAdmin(),
 		PlatformNamespace: testPlatformNS,
 		Image:             testNeo4jImage,
+		Recorder:          events.NewFakeRecorder(10),
 	}}
+}
+
+// storageEvents drains the events the provisioner emitted.
+func storageEvents(t *testing.T, n *Neo4jProvisioner) []string {
+	t.Helper()
+	rec, ok := n.cfg.Recorder.(*events.FakeRecorder)
+	if !ok {
+		t.Fatalf("Recorder is %T, want a FakeRecorder", n.cfg.Recorder)
+	}
+	var got []string
+	for {
+		select {
+		case e := <-rec.Events:
+			got = append(got, e)
+		default:
+			return got
+		}
+	}
 }
 
 // applied reads the size back from the objects the apply path wrote, so a
@@ -174,7 +195,7 @@ func TestAMalformedChartSizeFailsTheProvision(t *testing.T) {
 		"unparseable cpu":    with(neo4jSizeCPUKey, "250mm"),
 		"unparseable memory": with(neo4jSizeMemoryKey, "8Gigabytes"),
 		"zero storage":       with(neo4jSizeStorageKey, "0"),
-		"memory too small":   with(neo4jSizeMemoryKey, "4Mi"),
+		"memory too small":   with(neo4jSizeMemoryKey, "512Mi"),
 		// The table of the chart before gibson#1526, keyed by plan.
 		"a plan table": {"tiers.yaml": "team:\n  storage: 10Gi\n  cpu: 100m\n  memory: 1Gi\n"},
 	} {
@@ -198,7 +219,7 @@ func TestABadTenantSizeFailsTheProvision(t *testing.T) {
 	for name, override := range map[string]*gibsonv1alpha1.TenantNeo4jResources{
 		"zero cpu":         {CPU: qty("0")},
 		"negative storage": {Storage: qty("-1Gi")},
-		"memory too small": {Memory: qty("4Mi")},
+		"memory too small": {Memory: qty("512Mi")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			n := newSizeTestProvisioner(t, chartSize())
@@ -288,4 +309,100 @@ func TestLimitsFromCarriesTheNeo4jSize(t *testing.T) {
 	if got.Neo4j == nil || got.Neo4j.Memory == nil || got.Neo4j.Memory.String() != "4Gi" {
 		t.Fatalf("LimitsFrom = %+v, want the Neo4j memory 4Gi", got)
 	}
+}
+
+// A Tenant that sets a storage size that differs from its volume gets a
+// Warning event. The operator does not resize the volume, and the event is
+// what says so.
+func TestAStorageChangeOnARunningInstanceIsReported(t *testing.T) {
+	ctx := context.Background()
+	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: testTenantID}}
+	n := newSizeTestProvisioner(t, chartSize(), tenant)
+
+	// The create applies the storage, so it has nothing to report.
+	first := &gibsonv1alpha1.TenantNeo4jResources{Storage: qty("50Gi")}
+	if err := n.applyResources(ctx, testTenantID, testTenantNS, "pw", first); err != nil {
+		t.Fatalf("first applyResources: %v", err)
+	}
+	// The same size again, and no size, are not a change.
+	if err := n.applyResources(ctx, testTenantID, testTenantNS, "pw", first); err != nil {
+		t.Fatalf("second applyResources: %v", err)
+	}
+	if err := n.applyResources(ctx, testTenantID, testTenantNS, "pw", nil); err != nil {
+		t.Fatalf("third applyResources: %v", err)
+	}
+	if got := storageEvents(t, n); len(got) != 0 {
+		t.Fatalf("events with no storage change = %v, want none", got)
+	}
+
+	for _, storage := range []string{"100Gi", "10Gi"} {
+		override := &gibsonv1alpha1.TenantNeo4jResources{Storage: qty(storage)}
+		if err := n.applyResources(ctx, testTenantID, testTenantNS, "pw", override); err != nil {
+			t.Fatalf("applyResources(%s): %v", storage, err)
+		}
+		got := storageEvents(t, n)
+		if len(got) != 1 {
+			t.Fatalf("storage %s: events = %v, want one", storage, got)
+		}
+		for _, want := range []string{corev1.EventTypeWarning, neo4jStorageNotChangedReason, storage, "50Gi"} {
+			if !strings.Contains(got[0], want) {
+				t.Errorf("storage %s: event %q does not name %q", storage, got[0], want)
+			}
+		}
+		if have, _, _, _ := applied(t, n); have != "50Gi" {
+			t.Errorf("storage %s: the volume is %s, want 50Gi", storage, have)
+		}
+	}
+}
+
+// The floor of a running instance only raises. This pins the two results the
+// comment of notBelowRunning names, so a change of either is a decision.
+func TestTheFloorOfARunningInstanceOnlyRaises(t *testing.T) {
+	ctx := context.Background()
+	setDefault := func(n *Neo4jProvisioner, data map[string]string) {
+		t.Helper()
+		var cm corev1.ConfigMap
+		key := types.NamespacedName{Name: neo4jSizeConfigMapName, Namespace: neo4jTemplateNamespace}
+		if err := n.cfg.K8sClient.Unscoped().Get(ctx, key, &cm); err != nil {
+			t.Fatalf("get ConfigMap: %v", err)
+		}
+		cm.Data = data
+		if err := n.cfg.K8sClient.Unscoped().Update(ctx, &cm); err != nil {
+			t.Fatalf("update ConfigMap: %v", err)
+		}
+	}
+	apply := func(n *Neo4jProvisioner, override *gibsonv1alpha1.TenantNeo4jResources) {
+		t.Helper()
+		if err := n.applyResources(ctx, testTenantID, testTenantNS, "pw", override); err != nil {
+			t.Fatalf("applyResources: %v", err)
+		}
+	}
+
+	t.Run("a default raised and then lowered stays raised", func(t *testing.T) {
+		n := newSizeTestProvisioner(t, chartSize())
+		apply(n, nil)
+		raised := chartSize()
+		raised[neo4jSizeCPUKey], raised[neo4jSizeMemoryKey] = "1", "8Gi"
+		setDefault(n, raised)
+		apply(n, nil)
+		setDefault(n, chartSize())
+		apply(n, nil)
+		if _, cpu, mem, _ := applied(t, n); cpu != "1" || mem != "8Gi" {
+			t.Errorf("size = %s/%s, want the raised 1/8Gi", cpu, mem)
+		}
+	})
+
+	t.Run("a Tenant size that is removed stays", func(t *testing.T) {
+		n := newSizeTestProvisioner(t, chartSize())
+		apply(n, &gibsonv1alpha1.TenantNeo4jResources{CPU: qty("500m"), Memory: qty("4Gi")})
+		apply(n, nil)
+		if _, cpu, mem, _ := applied(t, n); cpu != "500m" || mem != "4Gi" {
+			t.Errorf("size = %s/%s, want the removed Tenant size 500m/4Gi", cpu, mem)
+		}
+		// The way down is a smaller size on the Tenant.
+		apply(n, &gibsonv1alpha1.TenantNeo4jResources{CPU: qty("250m"), Memory: qty("2Gi")})
+		if _, cpu, mem, _ := applied(t, n); cpu != "250m" || mem != "2Gi" {
+			t.Errorf("size = %s/%s, want 250m/2Gi", cpu, mem)
+		}
+	})
 }

@@ -23,7 +23,7 @@ import (
 // The env values must fit the memory limit with more than half left for JVM
 // native overhead and APOC, at each size.
 func TestNeo4jMemoryEnv_PinsHeapAndPageCacheInsideTheLimit(t *testing.T) {
-	for _, mem := range []string{gibsonv1alpha1.MinNeo4jMemory, "1Gi", "4Gi", "8Gi"} {
+	for _, mem := range []string{gibsonv1alpha1.MinNeo4jMemory, "2Gi", "4Gi", "8Gi"} {
 		env := neo4jMemoryEnv(resource.MustParse(mem))
 		if len(env) != 3 {
 			t.Fatalf("memory %s: want 3 memory env vars, got %d", mem, len(env))

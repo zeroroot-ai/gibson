@@ -41,7 +41,7 @@ func TestTenantNeo4jResourcesValidateRefusesAnUnusableSize(t *testing.T) {
 		"negative storage": {&TenantNeo4jResources{Storage: neo4jQty("-1Gi")}, "storage"},
 		"zero cpu":         {&TenantNeo4jResources{CPU: neo4jQty("0")}, "cpu"},
 		"zero memory":      {&TenantNeo4jResources{Memory: neo4jQty("0")}, "memory"},
-		"memory too small": {&TenantNeo4jResources{Memory: neo4jQty("4Mi")}, "at least " + MinNeo4jMemory},
+		"memory too small": {&TenantNeo4jResources{Memory: neo4jQty("512Mi")}, "at least " + MinNeo4jMemory},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := tc.r.Validate()
