@@ -217,6 +217,9 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 	// Spec: critical-tls-no-fallbacks Component 1.
 	if s.spiffeSource != nil {
 		tlsCfg := tlsconfig.MTLSServerConfig(s.spiffeSource, s.spiffeSource, tlsconfig.AuthorizeOneOf(s.peerSVIDs...))
+		// go-spiffe checks the peer in VerifyPeerCertificate, which a Go server does not
+		// call on a resumed session. Each connection does a full handshake.
+		tlsCfg.SessionTicketsDisabled = true
 		// Mirror the main daemon listener (see grpc.go for the full
 		// rationale). We rely on tlsconfig.MTLSServerConfig's built-in
 		// ClientAuth — which rejects cert-less handshakes — and on

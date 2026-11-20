@@ -212,3 +212,44 @@ func TestPeerTLSConfig_EachListenerHasItsOwnMinimumVersion(t *testing.T) {
 	require.Error(t, handshake(tls.VersionTLS13), "the gateway listener refuses a client that offers TLS 1.2 at most")
 	require.NoError(t, handshake(tls.VersionTLS12), "the inbound listener accepts it")
 }
+
+// go-spiffe checks the peer in VerifyPeerCertificate, and a Go server does not call it on a
+// resumed session. A peer could then resume after its SVID expired. A second connection
+// from a client that keeps its session ticket must do a full handshake.
+func TestPeerTLSConfig_ASecondConnectionDoesAFullHandshake(t *testing.T) {
+	pki := newTestPKI(t)
+	edge := spiffeid.RequireFromPath(pki.td, "/platform/envoy")
+	server := spiffeid.RequireFromPath(pki.td, "/gibson/daemon")
+	d := a2aListenerDaemon(t, func(d *daemonImpl) {
+		d.spiffeX509Source = pkiSource{svid: pki.svid(t, server), bundle: pki.bundle}
+	})
+	cfg, err := d.peerTLSConfig("A2A inbound listener", edge, tls.VersionTLS12)
+	require.NoError(t, err)
+	assert.True(t, cfg.SessionTicketsDisabled)
+	lis, err := tls.Listen("tcp", "127.0.0.1:0", cfg)
+	require.NoError(t, err)
+	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})}
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	client := pkiSource{svid: pki.svid(t, edge), bundle: pki.bundle}
+	cc := tlsconfig.MTLSClientConfig(client, client, tlsconfig.AuthorizeID(server))
+	cc.ClientSessionCache = tls.NewLRUClientSessionCache(4)
+	hc := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+		TLSClientConfig:   cc,
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, lis.Addr().String())
+		},
+	}}
+	for i := range 3 {
+		req, rerr := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://daemon.invalid/", http.NoBody)
+		require.NoError(t, rerr)
+		resp, derr := hc.Do(req)
+		require.NoError(t, derr)
+		_ = resp.Body.Close()
+		assert.False(t, resp.TLS.DidResume, "connection %d does a full handshake", i+1)
+	}
+}

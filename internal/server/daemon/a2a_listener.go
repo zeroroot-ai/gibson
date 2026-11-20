@@ -179,6 +179,10 @@ func (d *daemonImpl) peerTLSConfig(label string, peer spiffeid.ID, minVersion ui
 	}
 	cfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(peer))
 	cfg.MinVersion = minVersion
+	// go-spiffe checks the peer in VerifyPeerCertificate, and a Go server does not call
+	// it on a resumed session. A peer could then resume after its SVID expired. Each
+	// connection does a full handshake.
+	cfg.SessionTicketsDisabled = true
 	return cfg, nil
 }
 

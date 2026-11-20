@@ -276,6 +276,9 @@ func main() {
 		os.Exit(1)
 	}
 	grpcTLSCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, envoyAuthorizer)
+	// go-spiffe checks the peer in VerifyPeerCertificate, which a Go server does not
+	// call on a resumed session. Each connection does a full handshake.
+	grpcTLSCfg.SessionTicketsDisabled = true
 
 	// Panic-recovery interceptor MUST be the outermost UnaryInterceptor
 	// so panics raised by inner interceptors are also caught. Audit fix:
