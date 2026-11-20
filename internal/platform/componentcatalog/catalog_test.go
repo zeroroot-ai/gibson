@@ -7,6 +7,7 @@
 package componentcatalog
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"testing/fstest"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
 func manifestFSWith(files map[string]string) fstest.MapFS {
@@ -222,6 +224,67 @@ func TestCatalog_EveryConnectorStatesAClass(t *testing.T) {
 		if e.Class != "git-host" {
 			t.Errorf("connector %q has class %q, want git-host", id, e.Class)
 		}
+	}
+}
+
+// TestCatalog_BlueTeamConnectors: each connector of a buyer tool loads from the
+// embedded catalog with its tool class, its shape and its auth (ADR-0177,
+// gibson#1426). A Remote entry names an https endpoint, and its egress list
+// names the host of that endpoint and no other host. A Hosted entry names an
+// image of the vendor, pinned by digest.
+func TestCatalog_BlueTeamConnectors(t *testing.T) {
+	const remote, hosted = connectorv1alpha1.ConnectorShapeRemote, connectorv1alpha1.ConnectorShapeHosted
+	const oauth, secret = connectorv1alpha1.ConnectorAuthOAuth, connectorv1alpha1.ConnectorAuthSecret
+	cases := []struct {
+		id    string
+		class string
+		shape connectorv1alpha1.ConnectorShape
+		auth  connectorv1alpha1.ConnectorAuthKind
+	}{
+		{"microsoft-sentinel", "siem", remote, oauth},
+		{"microsoft-defender-endpoint", "edr", remote, oauth},
+		{"crowdstrike-falcon", "edr", hosted, secret},
+		{"wiz", "scanner", remote, oauth},
+		{"microsoft-entra", "identity", remote, oauth},
+		{"aws-security-hub", "cloud", remote, oauth},
+		{"datadog", "observability", remote, oauth},
+		{"jira", "ticket", remote, oauth},
+		{"pagerduty", "paging", remote, oauth},
+		{"aws-systems-manager", "patch", remote, oauth},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			e, err := LookupConnector(tc.id)
+			if err != nil {
+				t.Fatalf("LookupConnector(%s): %v", tc.id, err)
+			}
+			if e.Class != tc.class || e.Shape != tc.shape || e.Auth != tc.auth {
+				t.Errorf("got class %q shape %q auth %q, want %q %q %q",
+					e.Class, e.Shape, e.Auth, tc.class, tc.shape, tc.auth)
+			}
+			if e.Vendor == "" || e.DisplayName == "" || e.Description == "" {
+				t.Errorf("the entry lost a display field: %+v", e)
+			}
+			if len(e.EgressAllow) == 0 {
+				t.Fatal("the entry names no egress host")
+			}
+			if tc.shape == hosted {
+				if strings.HasPrefix(e.Image, "ghcr.io/zeroroot-ai/") || !strings.Contains(e.Image, "@sha256:") {
+					t.Errorf("image %q must be a vendor image pinned by digest", e.Image)
+				}
+				return
+			}
+			u, err := url.Parse(e.Endpoint)
+			if err != nil || u.Scheme != "https" || u.Host == "" {
+				t.Fatalf("endpoint %q must be an https URL (parse error: %v)", e.Endpoint, err)
+			}
+			if want := []string{u.Hostname() + ":443"}; !slices.Equal(e.EgressAllow, want) {
+				t.Errorf("egressAllow = %v, want %v: only the host of the endpoint", e.EgressAllow, want)
+			}
+			if tc.auth == oauth && e.DefaultInstanceURL == "" {
+				t.Error("an oauth entry needs defaultInstanceUrl: the daemon starts OAuth discovery from it")
+			}
+		})
 	}
 }
 
