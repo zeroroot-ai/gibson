@@ -145,14 +145,15 @@ func (c *inboundClient) token(ctx context.Context, path string) string {
 	return md[capabilitygrant.MetadataHeaderCapabilityGrant]
 }
 
-// call sends one HTTP request to the Edge and returns the status and the body.
-// A client with no signer sends no grant. extra holds more headers.
-func (c *inboundClient) call(
-	ctx context.Context, t *testing.T, method, path string, body []byte, extra map[string]string,
-) (int, []byte) {
-	t.Helper()
+// send sends one HTTP request to the Edge and returns the status, the body and the
+// transport error. A client with no signer sends no grant. extra holds more headers.
+func (c *inboundClient) send(
+	ctx context.Context, method, path string, body []byte, extra map[string]string,
+) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.edge.origin.String()+path, bytes.NewReader(body))
-	require.NoError(t, err)
+	if err != nil {
+		return 0, nil, fmt.Errorf("build the request: %w", err)
+	}
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -163,11 +164,26 @@ func (c *inboundClient) call(
 		req.Header.Set(k, v)
 	}
 	resp, err := c.edge.httpClient().Do(req)
-	require.NoError(t, err, "%s %s", method, path)
+	if err != nil {
+		return 0, nil, fmt.Errorf("%s %s: %w", method, path, err)
+	}
 	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, fmt.Errorf("read the answer of %s %s: %w", method, path, err)
+	}
+	return resp.StatusCode, out, nil
+}
+
+// call is send for a test step that cannot go on without an answer. A transport error
+// fails the test.
+func (c *inboundClient) call(
+	ctx context.Context, t *testing.T, method, path string, body []byte, extra map[string]string,
+) (int, []byte) {
+	t.Helper()
+	status, out, err := c.send(ctx, method, path, body, extra)
 	require.NoError(t, err)
-	return resp.StatusCode, out
+	return status, out
 }
 
 // rpc sends one JSON-RPC call to the A2A endpoint of the agent.
@@ -346,8 +362,11 @@ func (f *inboundFixture) nextWork(t *testing.T, c *inboundClient, taskID string)
 		case <-deadline:
 			t.Fatalf("the agent %s got no work item within %s: the mission never dispatched it", inboundAgent, inboundTimeout)
 		case <-tick.C:
-			status, body := c.rpc(f.ctx, t, inboundAgent, "GetTask", `{"id":"`+taskID+`"}`, nil)
-			if status != http.StatusOK {
+			// A transport error of one poll is not a failure of the test. The loop tries
+			// again, and the deadline bounds it.
+			getTask := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"GetTask","params":{"id":%q}}`, taskID)
+			status, body, err := c.send(f.ctx, http.MethodPost, "/a2a/inbound/"+inboundAgent, []byte(getTask), nil)
+			if err != nil || status != http.StatusOK {
 				continue
 			}
 			r := decodeTaskRPC(t, body)
