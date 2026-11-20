@@ -67,6 +67,7 @@ import (
 	agentidentityv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"github.com/zeroroot-ai/sdk/capabilitygrant"
 )
@@ -77,6 +78,9 @@ const (
 	inboundAgent = "e2e-inbound-recon"
 	// inboundUnpublished is an agent that no definition is published for.
 	inboundUnpublished = "e2e-inbound-unpublished"
+	// inboundFanAgent is the agent of a definition with a for_each node, published with
+	// two approved targets.
+	inboundFanAgent    = "e2e-inbound-fan"
 	inboundTimeout     = 6 * time.Minute
 	inboundFindingText = "INBOUND-TYPED-EVIDENCE"
 )
@@ -331,9 +335,15 @@ func (f *inboundFixture) grant(t *testing.T, principalID string) {
 // taskState polls GetTask until the Task has the state, and returns the answer.
 func (f *inboundFixture) waitState(t *testing.T, c *inboundClient, id, want string) rpcResult {
 	t.Helper()
+	return f.waitStateOf(t, c, inboundAgent, id, want)
+}
+
+// waitStateOf is waitState for the Task of another agent.
+func (f *inboundFixture) waitStateOf(t *testing.T, c *inboundClient, agent, id, want string) rpcResult {
+	t.Helper()
 	var last rpcResult
 	helpers.Eventually(t, inboundTimeout, "the Task "+id+" reaches "+want, func() (bool, string) {
-		status, body := c.rpc(f.ctx, t, inboundAgent, "GetTask", `{"id":"`+id+`"}`, nil)
+		status, body := c.rpc(f.ctx, t, agent, "GetTask", `{"id":"`+id+`"}`, nil)
 		if status != http.StatusOK {
 			return false, fmt.Sprintf("HTTP %d: %s", status, body)
 		}
@@ -570,6 +580,73 @@ func TestA2AInbound(t *testing.T) {
 		require.NotNil(t, r.Result.Task, "body: %s", body)
 		require.Equal(t, rejectedState, r.Result.Task.Status.State)
 		require.Contains(t, string(body), "no for_each node")
+	})
+
+	t.Run("a definition with a for_each node runs on each approved target", func(t *testing.T) {
+		// The agent node of the definition is the template of a for_each. A message with no
+		// data part runs the mission on both approved targets: the agent gets one work item
+		// for each target, and the Task completes when both end.
+		fanAgent := helpers.StartHeldAgent(ctx, t, f.comp, membership, inboundFanAgent)
+		def := &missionpb.MissionDefinition{
+			Name: helpers.RunName(t, "a2a-inbound-fan"), Description: "a for_each over the approved targets",
+			Nodes: map[string]*missionpb.MissionNode{
+				"each": {
+					Id: "each", Name: "Each", Type: missionpb.NodeType_NODE_TYPE_FOR_EACH,
+					Config: &missionpb.MissionNode_ForEachConfig{ForEachConfig: &missionpb.ForEachNodeConfig{
+						Source: missionpb.ForEachNodeConfig_SOURCE_TARGET_SET,
+						Template: &missionpb.MissionNode{
+							Id: "scan", Name: "Scan", Type: missionpb.NodeType_NODE_TYPE_AGENT,
+							Config: &missionpb.MissionNode_AgentConfig{
+								AgentConfig: &missionpb.AgentNodeConfig{AgentName: inboundFanAgent},
+							},
+						},
+					}},
+				},
+			},
+			EntryPoints: []string{"each"},
+		}
+		created, cerr := clients.Daemon.CreateMissionDefinition(ctx, &daemonpb.CreateMissionDefinitionRequest{Definition: def})
+		require.NoError(t, cerr, "CreateMissionDefinition")
+		_, perr := f.inbound.PublishInboundMission(ctx, &tenantv1.PublishInboundMissionRequest{
+			Agent: inboundFanAgent, MissionDefinitionId: created.GetMissionDefinitionId(),
+			TargetIds: f.targets[:2], MaxActiveMissions: 2,
+		})
+		require.NoError(t, perr, "a definition with its agent in a for_each template can be published")
+		t.Cleanup(func() {
+			c, cancel := context.WithTimeout(auth.ContextWithTenantString(context.Background(), inboundTenant), 30*time.Second)
+			defer cancel()
+			_, _ = f.inbound.UnpublishInboundMission(c, &tenantv1.UnpublishInboundMissionRequest{Agent: inboundFanAgent})
+		})
+		fanCaller, fanCallerID := f.provision(t, "inbound-e2e-fan", ceiling)
+		_, gerr := f.inbound.GrantInboundCaller(ctx, &tenantv1.GrantInboundCallerRequest{
+			Agent: inboundFanAgent, IdentityId: fanCallerID,
+		})
+		require.NoError(t, gerr, "GrantInboundCaller(fan)")
+
+		var id string
+		helpers.Eventually(t, time.Minute, "the fan caller starts a mission", func() (bool, string) {
+			status, body := fanCaller.rpc(ctx, t, inboundFanAgent, "SendMessage", sendParams("scan both"), nil)
+			r := decodeRPC(t, body)
+			if status != http.StatusOK || r.Result.Task == nil {
+				return false, string(body)
+			}
+			id = r.Result.Task.ID
+			return true, ""
+		})
+		works := make([]*helpers.HeldWork, 0, 2)
+		for range 2 {
+			select {
+			case w := <-fanAgent.Works():
+				require.Equal(t, id, w.MissionID)
+				works = append(works, w)
+			case <-time.After(inboundTimeout):
+				t.Fatalf("the agent %s got %d of 2 work items: the mission did not run on each target", inboundFanAgent, len(works))
+			}
+		}
+		for _, w := range works {
+			w.Complete()
+		}
+		f.waitStateOf(t, fanCaller, inboundFanAgent, id, "TASK_STATE_COMPLETED")
 	})
 
 	t.Run("an agent with no published definition is refused", func(t *testing.T) {
