@@ -19,3 +19,9 @@
 # column that is their consumer. Nine were spec fields an operator could set
 # that the cluster ignored. gibson#597 built the consumer of seven and deleted
 # two. No verdict is open.
+
+# gibson#1531 step 1: the plan-sync step is gone, and the operator ignores
+# spec.planSync. The chart still renders it, and the structural schema refuses
+# an unknown field. Step 2 of gibson#1531 deletes both fields and these lines.
+v1alpha1.PlatformBootstrapSpec.PlanSync | #1531 | ignored until the chart stops rendering it, then deleted in step 2
+v1alpha1.PlanSyncSpec.PlansConfigMapRef | #1531 | ignored until the chart stops rendering it, then deleted in step 2
