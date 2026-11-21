@@ -24,14 +24,15 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	// stored context window of the saved default model (gibson#1193), 017
 	// lets a finding have no mission (gibson#1378), 018 is the evidence of a
 	// finding (gibson#1380), 019 is the Agent Skill tables (gibson#1370), 020 is the outside agent table and 021 adds its CA
-	// bundle column (gibson#1403), and 022 is the mission definitions published for
-	// inbound A2A calls (gibson#1408).
+	// bundle column (gibson#1403), 022 is the mission definitions published for
+	// inbound A2A calls (gibson#1408), and 023 maps the old finding statuses to
+	// the four of ADR-0178 (gibson#1556 review m11).
 	upCount, downCount := countSQL(t, Tenant, tenantDir)
-	if upCount != 22 {
-		t.Errorf("tenant: expected 22 up.sql files, got %d", upCount)
+	if upCount != 23 {
+		t.Errorf("tenant: expected 23 up.sql files, got %d", upCount)
 	}
-	if downCount != 22 {
-		t.Errorf("tenant: expected 22 down.sql files, got %d", downCount)
+	if downCount != 23 {
+		t.Errorf("tenant: expected 23 down.sql files, got %d", downCount)
 	}
 }
 
@@ -108,14 +109,15 @@ func TestEmbed_UpDownPairing(t *testing.T) {
 //	008 — provider_embedding_capability (BYO-embedder columns, gibson#937)
 //	009 — session_context (component session-context store, gibson#1184)
 //	010 — banks (banks of always-on coding agents, ADR-0119, gibson#1708)
+//	023 — finding_status_values (the old statuses to the four, gibson#1556)
 func TestTenantMaxVersion(t *testing.T) {
 	t.Parallel()
 	v, err := TenantMaxVersion()
 	if err != nil {
 		t.Fatalf("TenantMaxVersion: %v", err)
 	}
-	if v != 22 {
-		t.Errorf("TenantMaxVersion: got %d, want 22", v)
+	if v != 23 {
+		t.Errorf("TenantMaxVersion: got %d, want 23", v)
 	}
 }
 

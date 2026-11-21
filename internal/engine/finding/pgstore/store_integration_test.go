@@ -50,6 +50,16 @@ const adminDSNEnv = "FINDING_TEST_PG_DSN"
 // migration runner of the repo, and returns a store on it.
 func newStore(t *testing.T) (*pgstore.Store, *pgxpool.Pool) {
 	t.Helper()
+	pool, m := newMigratedDB(t)
+	require.NoError(t, m.Up(), "the tenant migrations apply")
+	tp := &tenantPool{pg: pool}
+	return pgstore.New(func() datapool.Pool { return tp }), pool
+}
+
+// newMigratedDB makes a fresh database and returns a pool on it and the
+// migration runner of the repo, with no migration applied yet.
+func newMigratedDB(t *testing.T) (*pgxpool.Pool, *migrate.Migrate) {
+	t.Helper()
 	ctx := context.Background()
 	adminDSN := os.Getenv(adminDSNEnv)
 	if adminDSN == "" {
@@ -77,50 +87,37 @@ func newStore(t *testing.T) (*pgstore.Store, *pgxpool.Pool) {
 	require.NoError(t, err)
 	m, err := migrate.NewWithInstance("iofs", src, dbName, driver)
 	require.NoError(t, err)
-	require.NoError(t, m.Up(), "the tenant migrations apply")
-
-	tp := &tenantPool{pg: pool}
-	return pgstore.New(func() datapool.Pool { return tp }), pool
+	return pool, m
 }
 
-func TestStore_Integration_RoundTrip(t *testing.T) {
-	s, pool := newStore(t)
+// Migration 023 maps the old statuses to the four of ADR-0178 and keeps the
+// old value, and its down step restores it (review m11).
+func TestMigration023_MapsTheOldStatuses(t *testing.T) {
+	pool, m := newMigratedDB(t)
 	ctx := context.Background()
-	mission := types.NewID()
-	now := time.Now().UTC().Truncate(time.Millisecond)
-
-	mk := func(m types.ID, title string, sev agent.FindingSeverity, at time.Time) finding.EnhancedFinding {
-		f := finding.NewEnhancedFinding(agent.NewFinding(title, "d", sev), m, "recon")
-		f.Check = finding.Check{Kind: finding.CheckScan}
-		f.CreatedAt = at
-		return f
+	require.NoError(t, m.Migrate(22))
+	want := map[string]string{"confirmed": "open", "resolved": "fixed", "false_positive": "open", "fixing": "fixing"}
+	ids := map[string]string{}
+	for old := range want {
+		id := types.NewID().String()
+		ids[old] = id
+		_, err := pool.Exec(ctx, `INSERT INTO findings (id, mission_id, title, document) VALUES ($1, $2, 't', $3)`,
+			id, types.NewID().String(), `{"status":"`+old+`"}`)
+		require.NoError(t, err)
 	}
-	a := mk(mission, "a", agent.SeverityHigh, now)
-	b := mk(mission, "b", agent.SeverityLow, now.Add(time.Second))
-	orphan := mk("", "orphan", agent.SeverityHigh, now.Add(2*time.Second))
-	for _, f := range []finding.EnhancedFinding{a, b, orphan} {
-		require.NoError(t, s.Store(ctx, "acme", f))
+	status := func(id string) string {
+		var s string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT document->>'status' FROM findings WHERE id = $1`, id).Scan(&s))
+		return s
 	}
-
-	var rows int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings`).Scan(&rows))
-	assert.Equal(t, 3, rows, "one row for each finding")
-
-	got, err := s.Get(ctx, "acme", a.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "a", got.Title)
-
-	list, err := s.List(ctx, "acme", mission, nil)
-	require.NoError(t, err)
-	require.Len(t, list, 2)
-	assert.Equal(t, "a", list[0].Title)
-
-	high, err := s.ListBySeverity(ctx, "acme", agent.SeverityHigh)
-	require.NoError(t, err)
-	assert.Len(t, high, 2)
-
-	_, err = s.Get(ctx, "acme", types.NewID())
-	require.ErrorIs(t, err, finding.ErrNotFound)
+	require.NoError(t, m.Migrate(23))
+	for old, id := range ids {
+		assert.Equal(t, want[old], status(id), "up: %s", old)
+	}
+	require.NoError(t, m.Migrate(22))
+	for old, id := range ids {
+		assert.Equal(t, old, status(id), "down: %s", old)
+	}
 }
 
 // Confidences reads the confidence of each finding of a list in one read. A
