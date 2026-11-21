@@ -110,7 +110,11 @@ type PendingAuthorization struct {
 	TokenEndpoint      string
 	ClientID           string
 	ClientSecret       string // empty for a public PKCE client
-	RedirectURI        string
+	// ClientSecretName names the secret of the tenant that holds the client
+	// secret of a tenant OAuth client. The grant keeps the name, and each
+	// refresh reads the secret again, so a rotation reaches it (review m13).
+	ClientSecretName string
+	RedirectURI      string
 	Scope              string
 	RevocationEndpoint string
 	// AuthorizedBy is the FGA user reference of the human who started the flow,
@@ -334,6 +338,9 @@ type clientRegistrationRequest struct {
 type ClientRegistration struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
+	// SecretName names the secret of the tenant that holds ClientSecret, for a
+	// client that the tenant registered. It is empty for a registered client.
+	SecretName string `json:"-"`
 }
 
 // RegisterClient performs RFC 7591 dynamic client registration for a public
@@ -477,7 +484,8 @@ func ExchangeCode(ctx context.Context, client *http.Client, pa *PendingAuthoriza
 		RefreshToken:       tr.RefreshToken,
 		TokenEndpoint:      pa.TokenEndpoint,
 		ClientID:           pa.ClientID,
-		ClientSecret:       pa.ClientSecret,
+		ClientSecret:       grantClientSecret(pa),
+		ClientSecretName:   pa.ClientSecretName,
 		Scope:              scope,
 		RevocationEndpoint: pa.RevocationEndpoint,
 		AuthorizedBy:       pa.AuthorizedBy,
@@ -490,4 +498,13 @@ func ExchangeCode(ctx context.Context, client *http.Client, pa *PendingAuthoriza
 // NewHTTPClient with the operator's knob.
 func defaultHTTPClient() *http.Client {
 	return NewHTTPClient(30*time.Second, false)
+}
+
+// grantClientSecret is the client secret that the grant stores. A secret that
+// the tenant names stays in the secret store and the grant keeps only its name.
+func grantClientSecret(pa *PendingAuthorization) string {
+	if pa.ClientSecretName != "" {
+		return ""
+	}
+	return pa.ClientSecret
 }

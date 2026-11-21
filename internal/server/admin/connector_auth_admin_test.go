@@ -1291,8 +1291,10 @@ func TestTenantOAuthClient_MicrosoftEntriesCompleteAuthorization(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if grant.ClientID != "tenant-cid" || grant.ClientSecret != "the-client-secret" {
-				t.Errorf("the grant does not hold the client of the tenant: %q", grant.ClientID)
+			// The grant keeps the name of the secret, not the secret, so a
+			// rotation reaches each refresh (review m13).
+			if grant.ClientID != "tenant-cid" || grant.ClientSecret != "" || grant.ClientSecretName != "entra-client-secret" {
+				t.Errorf("the grant does not hold the client of the tenant: %+v", grant)
 			}
 		})
 	}

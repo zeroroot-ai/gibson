@@ -6,6 +6,8 @@ package api
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -171,6 +173,14 @@ func catalogVariables(e componentcatalog.ConnectorEntry) []*tenantv1.CatalogVari
 	return out
 }
 
+// OAuthClientSecretPrefix is the start of the name of the secret that holds
+// the client secret of a tenant OAuth client of the connector.
+func OAuthClientSecretPrefix(connectorID string) string { return connectorID + "-oauth-" }
+
+// oauthClientIDRE bounds an OAuth client id: 1 to 256 printable ASCII
+// characters with no space. RFC 6749 allows any visible character.
+var oauthClientIDRE = regexp.MustCompile(`^[\x21-\x7e]{1,256}$`)
+
 // tenantChoice checks what the tenant chose against the catalog entry, and
 // returns what the store keeps. A tenant endpoint must match a pattern of the
 // entry (gibson#1534). A tenant OAuth client is required for an entry that has
@@ -206,6 +216,17 @@ func tenantChoice(entry componentcatalog.ConnectorEntry, req *tenantv1.EnableCon
 		if !componentcatalog.ValidSecretName(name) {
 			return cfg, status_grpc.Error(codes.InvalidArgument,
 				"EnableConnector: oauth_client_secret_name is not a valid secret name")
+		}
+		// The secret must be one that the tenant made for this connector, so a
+		// tenant admin cannot send another secret of the tenant to a token
+		// endpoint (review m13).
+		if prefix := OAuthClientSecretPrefix(entry.ID); !strings.HasPrefix(name, prefix) {
+			return cfg, status_grpc.Errorf(codes.InvalidArgument,
+				"EnableConnector: oauth_client_secret_name must start with %q", prefix)
+		}
+		if !oauthClientIDRE.MatchString(id) {
+			return cfg, status_grpc.Error(codes.InvalidArgument,
+				"EnableConnector: oauth_client_id must be 1 to 256 printable characters with no space")
 		}
 		cfg.OAuthClientID, cfg.OAuthClientSecretName = id, name
 	case id != "" || name != "":

@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -340,12 +341,25 @@ func TestEnableConnector_TenantOAuthClient(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err), "the secret name must be valid")
 	assert.Empty(t, store.rows)
 
+	// The secret must hold the id of the connector in its prefix, and the client
+	// id is bounded (review m13).
 	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{ //nolint:gosec // G101: the name of a secret, not a credential
 		CatalogId: "microsoft-sentinel", OauthClientId: "cid", OauthClientSecretName: "entra-client-secret"})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err), "a secret of another connector")
+	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{ //nolint:gosec // G101: the name of a secret, not a credential
+		CatalogId: "microsoft-sentinel", OauthClientId: "c id", OauthClientSecretName: "microsoft-sentinel-oauth-secret"})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err), "a client id with a space")
+	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{ //nolint:gosec // G101: the name of a secret, not a credential
+		CatalogId: "microsoft-sentinel", OauthClientId: strings.Repeat("c", 257), OauthClientSecretName: "microsoft-sentinel-oauth-secret"})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err), "a client id that is too long")
+	assert.Empty(t, store.rows)
+
+	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{ //nolint:gosec // G101: the name of a secret, not a credential
+		CatalogId: "microsoft-sentinel", OauthClientId: "cid", OauthClientSecretName: "microsoft-sentinel-oauth-secret"})
 	require.NoError(t, err)
 	require.Len(t, store.rows, 1)
 	assert.Equal(t, "cid", store.rows[0].OAuthClientID)
-	assert.Equal(t, "entra-client-secret", store.rows[0].OAuthClientSecretName)
+	assert.Equal(t, "microsoft-sentinel-oauth-secret", store.rows[0].OAuthClientSecretName)
 
 	_, err = s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{
 		CatalogId: "gitlab", OauthClientId: "cid", OauthClientSecretName: "x"})

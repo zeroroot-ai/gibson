@@ -284,6 +284,7 @@ func (s *ConnectorAuthAdminServer) StartConnectorAuthorization(ctx context.Conte
 		TokenEndpoint:      meta.TokenEndpoint,
 		ClientID:           reg.ClientID,
 		ClientSecret:       reg.ClientSecret,
+		ClientSecretName:   reg.SecretName,
 		RedirectURI:        redirectURI,
 		Scope:              scope,
 		RevocationEndpoint: meta.RevocationEndpoint,
@@ -349,7 +350,9 @@ func (s *ConnectorAuthAdminServer) tenantClient(
 	if secret == "" {
 		return nil, status.Errorf(codes.FailedPrecondition, "the client secret %q is empty", row.OAuthClientSecretName)
 	}
-	return &connectorauth.ClientRegistration{ClientID: row.OAuthClientID, ClientSecret: secret}, nil
+	return &connectorauth.ClientRegistration{
+		ClientID: row.OAuthClientID, ClientSecret: secret, SecretName: row.OAuthClientSecretName,
+	}, nil
 }
 
 // hostOfConnector reports whether the host of rawURL is the host of the

@@ -461,3 +461,45 @@ func TestUnmarshalAccessToken(t *testing.T) {
 		t.Errorf("error = %q, want no broker bytes in it", err.Error())
 	}
 }
+
+// A grant of a tenant OAuth client names its client secret. Each refresh reads
+// the secret by that name, so a rotation of the secret reaches the next
+// refresh (review m13).
+func TestRefresh_ReadsTheNamedClientSecretEachTime(t *testing.T) {
+	s := newStore()
+	var sent []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		sent = append(sent, r.PostForm.Get("client_secret"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "at", "expires_in": 3600, "refresh_token": "rt-2"})
+	}))
+	defer srv.Close()
+	blob, err := MarshalGrant(&Grant{
+		RefreshToken: "rt-1", TokenEndpoint: srv.URL, ClientID: "cid", ClientSecretName: "entra-oauth-secret",
+		AuthorizedBy: "alice@example.com", AuthorizedAt: time.Unix(1_700_000_000, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Put(context.Background(), GrantSecretName("entra"), blob)
+	_ = s.Put(context.Background(), "entra-oauth-secret", []byte("first\n"))
+	r, err := NewRefresher(s, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Refresh(context.Background(), "entra"); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	_ = s.Put(context.Background(), "entra-oauth-secret", []byte("rotated"))
+	if _, err := r.Refresh(context.Background(), "entra"); err != nil {
+		t.Fatalf("refresh after the rotation: %v", err)
+	}
+	if len(sent) != 2 || sent[0] != "first" || sent[1] != "rotated" {
+		t.Fatalf("client secrets sent = %v", sent)
+	}
+	_ = s.Put(context.Background(), "entra-oauth-secret", []byte(" "))
+	if _, err := r.Refresh(context.Background(), "entra"); err == nil {
+		t.Fatal("an empty client secret must fail the refresh")
+	}
+}
