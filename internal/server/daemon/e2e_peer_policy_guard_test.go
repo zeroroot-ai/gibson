@@ -121,22 +121,36 @@ func logicalLines(lines []string) []logicalLine {
 	return out
 }
 
+// stepsKeyRe matches the key that holds the steps of a job.
+var stepsKeyRe = regexp.MustCompile(`^\s*steps:\s*$`)
+
 // stepBounds returns, for each line, the index of the first line of its step.
-// A step is a list item at the indent of the first list item that holds a name
-// or a uses key, so a container named in a manifest does not start a step.
+// The steps are the list items under a steps: key. Their indent is the indent
+// of the first list item below that key, so a list item at another indent (a
+// matrix entry above the steps, a container in a manifest below) starts no step.
 func stepBounds(lines []string) []int {
 	stepIndent := -1
-	for _, l := range lines {
-		if stepNameR.MatchString(l) {
-			if ind := len(l) - len(strings.TrimLeft(l, " ")); stepIndent < 0 || ind < stepIndent {
-				stepIndent = ind
+	for i, l := range lines {
+		if !stepsKeyRe.MatchString(l) {
+			continue
+		}
+		for _, next := range lines[i+1:] {
+			if strings.TrimSpace(next) == "" || strings.HasPrefix(strings.TrimSpace(next), "#") {
+				continue
 			}
+			if strings.HasPrefix(strings.TrimSpace(next), "- ") {
+				stepIndent = len(next) - len(strings.TrimLeft(next, " "))
+			}
+			break
+		}
+		if stepIndent >= 0 {
+			break
 		}
 	}
 	bounds := make([]int, len(lines))
 	cur := 0
 	for i, l := range lines {
-		if stepNameR.MatchString(l) && len(l)-len(strings.TrimLeft(l, " ")) == stepIndent {
+		if stepIndent >= 0 && strings.HasPrefix(strings.TrimSpace(l), "- ") && len(l)-len(strings.TrimLeft(l, " ")) == stepIndent {
 			cur = i
 		}
 		bounds[i] = cur
@@ -741,9 +755,11 @@ func TestE2ELaunchesOf_CountsEachLaunch(t *testing.T) {
 
 	got := e2eLaunchesOf("hidden_launch.yml", string(raw))
 
-	require.Len(t, got.jobs, 2, "the launch and the continued launch are read")
+	require.Len(t, got.jobs, 3, "the launch, the continued launch and the launch after the other binary are read")
 	assert.Equal(t, []string{"TestVisible"}, got.jobs[0].tests)
 	assert.Equal(t, []string{"TestContinued", "TestAlso"}, got.jobs[1].tests)
+	assert.Equal(t, []string{"TestAfter"}, got.jobs[2].tests,
+		"a launch after the E2E_RUNNER_BINARY step is read, and no step bound has collapsed")
 	require.Len(t, got.unread, 2, "the launch with a variable and the manifest with a variable are unread")
 	assert.Contains(t, got.unread[0], "run-e2e-job.sh")
 	assert.Contains(t, got.unread[1], "-test.run")

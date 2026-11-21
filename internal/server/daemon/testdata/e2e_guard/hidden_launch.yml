@@ -1,30 +1,37 @@
 # A fixture of the guard in e2e_peer_policy_guard_test.go. It is not a workflow.
-steps:
-  - name: reads
-    run: |
-      # run-e2e-job.sh in a comment is no launch
-      gibson/.github/scripts/run-e2e-job.sh job-a 'TestVisible$' 30m
-  - name: continued
-    run: |
-      gibson/.github/scripts/run-e2e-job.sh job-b \
-        'TestContinued$|TestAlso$' 20m
-  - name: hidden by a variable
-    run: |
-      gibson/.github/scripts/run-e2e-job.sh job-c "$PATTERN" 10m
-  - name: manifest with a variable
-    run: |
-      kubectl apply -f - <<EOF
-      kind: Job
-      spec:
-        template:
-          spec:
-            serviceAccountName: x-e2e-runner
-            containers:
-              - name: e2e
-                args: ["-test.run", "${PATTERN}"]
-      EOF
-  - name: another binary
-    env:
-      E2E_RUNNER_BINARY: /usr/local/bin/secrets.test
-    run: |
-      gibson/.github/scripts/run-e2e-job.sh job-d 'TestElsewhere' 15m
+matrix:
+  include:
+  - name: a list item at a smaller indent than the steps
+job:
+  steps:
+    - name: reads
+      run: |
+        # run-e2e-job.sh in a comment is no launch
+        gibson/.github/scripts/run-e2e-job.sh job-a 'TestVisible$' 30m
+    - name: continued
+      run: |
+        gibson/.github/scripts/run-e2e-job.sh job-b \
+          'TestContinued$|TestAlso$' 20m
+    - name: hidden by a variable
+      run: |
+        gibson/.github/scripts/run-e2e-job.sh job-c "$PATTERN" 10m
+    - name: manifest with a variable
+      run: |
+        kubectl apply -f - <<EOF
+        kind: Job
+        spec:
+          template:
+            spec:
+              serviceAccountName: x-e2e-runner
+              containers:
+                - name: e2e
+                  args: ["-test.run", "${PATTERN}"]
+        EOF
+    - name: another binary
+      env:
+        E2E_RUNNER_BINARY: /usr/local/bin/secrets.test
+      run: |
+        gibson/.github/scripts/run-e2e-job.sh job-d 'TestElsewhere' 15m
+    - name: after the other binary
+      run: |
+        gibson/.github/scripts/run-e2e-job.sh job-e 'TestAfter$' 5m
