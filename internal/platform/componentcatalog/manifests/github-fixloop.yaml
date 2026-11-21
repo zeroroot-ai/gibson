@@ -38,7 +38,10 @@ spec:
         - https://api.github.com
       installPatterns: true
   # The merge tool runs only when the merge request holds its merge slot
-  # (gibson#1458). The other tools need only the grant.
+  # (gibson#1458). Only the daemon calls the revert tool, after a failed
+  # health signal that it read. The other tools need only the grant.
   tools:
     merge_merge_request:
       role: merge
+    revert_merge_request:
+      role: daemon

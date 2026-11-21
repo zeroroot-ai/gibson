@@ -38,6 +38,11 @@ var ErrApprovalDenied = errors.New("metatool: a person denied this call")
 // granted.
 var ErrMergeNotGranted = errors.New("metatool: merge not granted yet: the merge request waits for its merge slot")
 
+// ErrDaemonOnly means that only the daemon calls the tool (the role "daemon"
+// of the manifest, review M7). It wraps ErrBlocked, so each caller refuses it
+// as a blocked call.
+var ErrDaemonOnly = fmt.Errorf("%w: only the daemon calls this tool", ErrBlocked)
+
 // ErrApprovalUnavailable means that the tool needs approval and the daemon has
 // no approval queue for it. The call does not run (fail closed).
 var ErrApprovalUnavailable = errors.New("metatool: the tool needs approval and the approval queue is not available")
@@ -116,6 +121,9 @@ func (h *Handler) approvalFor(connector, tool string) componentcatalog.ToolAppro
 // may reach the connector.
 func (h *Handler) gateCall(ctx context.Context, c Call, connector, tool string) error {
 	mark := h.approvalFor(connector, tool)
+	if mark.DaemonOnly && !c.Daemon {
+		return fmt.Errorf("%w: %s:%s", ErrDaemonOnly, connector, tool)
+	}
 	// The merge slot comes first, so a call that waits for its slot never
 	// spends an approval.
 	if mark.Merge {

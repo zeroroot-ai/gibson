@@ -127,6 +127,19 @@ func TestApproval_AManifestMarksTheMergeTool(t *testing.T) {
 	}
 }
 
+// The revert tool of each fix loop connector has the role "daemon", so no
+// agent can call it (review M7).
+func TestApproval_TheFixLoopRevertIsForTheDaemonOnly(t *testing.T) {
+	for _, id := range []string{"github-fixloop", "gitlab-fixloop"} {
+		if got := LookupToolApproval(id, "revert_merge_request"); !got.DaemonOnly || got.Required {
+			t.Errorf("%s revert_merge_request = %+v, want the daemon role", id, got)
+		}
+		if got := LookupToolApproval(id, "merge_merge_request"); got.DaemonOnly || !got.Merge {
+			t.Errorf("%s merge_merge_request = %+v, want the merge role", id, got)
+		}
+	}
+}
+
 func TestApproval_AnUnknownConnectorGetsTheStrictRule(t *testing.T) {
 	if !LookupToolApproval("no-such-connector", "t").Required {
 		t.Fatal("want the strict rule")

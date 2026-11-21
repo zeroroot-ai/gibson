@@ -62,6 +62,14 @@ An approval covers one call. The request key is a hash of the tenant, the missio
 
 The order at dispatch is then: mission policy, grant, merge slot, approval, dispatch. The call must name the merge request in the argument `merge_request`, with the key that the fix job recorded (the URL, or the ref when the URL is empty). The daemon reads the World of the tenant and runs the call only when the merge request holds its merge slot (`World.MayMerge`, ADR-0179: one fix at a time for each Application). Otherwise the call returns `merge not granted yet`, and the connector gets no call. The daemon never takes the word of the agent that a slot is granted. A Git host connector that does not name its merge tool has no merge gate, so each Git host manifest with a merge tool must name it.
 
+**A tool that only the daemon calls.** `role: daemon` marks a tool that the daemon calls on its own governed path, and no agent calls. The fix loop reverts a merge with `revert_merge_request` only after a failed health signal that the daemon read, so both fix loop manifests give that tool this role. An agent call of such a tool is refused as a blocked call before it reaches the connector.
+
+```yaml
+  tools:
+    revert_merge_request:
+      role: daemon
+```
+
 ## A Remote connector with an endpoint for each tenant
 
 Some vendors host one MCP server for each customer, or one for each Region or site. A manifest states `endpointPatterns` in `spec`. A tenant gives one `endpoint` when it enables the connector. The daemon accepts the endpoint only when it matches a pattern.

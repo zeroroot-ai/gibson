@@ -128,6 +128,10 @@ type Call struct {
 	Recorder FlightRecorder
 	// Observer writes the audit records of the call. It is required.
 	Observer CallObserver
+	// Daemon is true only for a call that the daemon makes on its own
+	// governed path (CallConnectorForTenant). A tool with the role "daemon"
+	// runs only then. No agent request sets it.
+	Daemon bool
 }
 
 // grantOf names the grant of an allowed call. A failed read leaves the record

@@ -447,6 +447,7 @@ func (s *HarnessCallbackService) CallConnectorForTenant(
 		MissionID: missionID,
 		Recorder:  s.RecordToolCall,
 		Observer:  &harnessCallObserver{s: s},
+		Daemon:    true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connector call %s for tenant %q: %w", tid.Canonical(), tenant, err)

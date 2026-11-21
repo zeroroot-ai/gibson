@@ -59,6 +59,15 @@ import (
 //	tools:
 //	  merge_merge_request:
 //	    role: merge
+//
+// The second role is "daemon": only the daemon calls the tool, on its own
+// governed path (review M7). An agent call of the tool is refused. The revert
+// of the fix loop has this role, because the daemon reverts only after a
+// failed health signal that it read:
+//
+//	tools:
+//	  revert_merge_request:
+//	    role: daemon
 
 // Values of ConnectorTool.Approval.
 const (
@@ -71,12 +80,15 @@ const (
 // ToolRoleMerge is the role of a tool that merges a merge request.
 const ToolRoleMerge = "merge"
 
+// ToolRoleDaemon is the role of a tool that only the daemon calls.
+const ToolRoleDaemon = "daemon"
+
 // ConnectorTool is the manifest entry of one tool of a connector.
 type ConnectorTool struct {
 	// Approval is "required" or "none". It is empty only on an entry that
 	// states a role, on a connector with no response actions.
 	Approval string `yaml:"approval"`
-	// Role is empty or ToolRoleMerge.
+	// Role is empty, ToolRoleMerge or ToolRoleDaemon.
 	Role string `yaml:"role"`
 	// Undo names the tool of the same connector that undoes this tool. The
 	// approver sees the call as reversible only when the manifest names one.
@@ -98,6 +110,8 @@ type ToolApproval struct {
 	// Merge is true when the tool merges a merge request. The call then needs
 	// the merge slot of the merge request.
 	Merge bool
+	// DaemonOnly is true when only the daemon calls the tool.
+	DaemonOnly bool
 }
 
 var toolNameRE = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
@@ -110,6 +124,7 @@ func (e ConnectorEntry) ApprovalFor(tool string) ToolApproval {
 			UndoTool:    t.Undo,
 			BlastRadius: t.BlastRadius,
 			Merge:       t.Role == ToolRoleMerge,
+			DaemonOnly:  t.Role == ToolRoleDaemon,
 		}
 	}
 	return ToolApproval{Required: e.ResponseActions}
@@ -145,9 +160,9 @@ func validateTools(id string, s ConnectorSpec) error {
 			return fmt.Errorf("%s: tools name %q is not a valid tool name", id, name)
 		}
 		switch t.Role {
-		case "", ToolRoleMerge:
+		case "", ToolRoleMerge, ToolRoleDaemon:
 		default:
-			return fmt.Errorf("%s: tool %q needs role %q or no role, got %q", id, name, ToolRoleMerge, t.Role)
+			return fmt.Errorf("%s: tool %q needs role %q, %q or no role, got %q", id, name, ToolRoleMerge, ToolRoleDaemon, t.Role)
 		}
 		switch t.Approval {
 		case "":

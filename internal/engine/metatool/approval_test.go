@@ -71,12 +71,15 @@ func mergeMarks(connector, tool string) componentcatalog.ToolApproval {
 		return componentcatalog.ToolApproval{Merge: true}
 	case "force_merge":
 		return componentcatalog.ToolApproval{Merge: true, Required: true}
+	case "revert_merge_request":
+		return componentcatalog.ToolApproval{DaemonOnly: true}
 	}
 	return componentcatalog.ToolApproval{}
 }
 
 func newMergeHandler(q *seqQuerier, gate ApprovalGate) *Handler {
-	return NewHandler(nil, allowAll("mcp:forge:merge_merge_request", "mcp:forge:force_merge", "mcp:forge:get_mr"), q).
+	return NewHandler(nil, allowAll("mcp:forge:merge_merge_request", "mcp:forge:force_merge", "mcp:forge:get_mr",
+		"mcp:forge:revert_merge_request"), q).
 		WithApprovalGate(gate).WithApprovalMarks(mergeMarks)
 }
 
@@ -106,6 +109,28 @@ func TestCall_AMergeWithNoSlotNeverReachesTheConnector(t *testing.T) {
 	// The slot of another tenant is not the slot of this one.
 	if len(gate.merges) != 1 || gate.merges[0] != "acme/mr-1" {
 		t.Fatalf("the gate was asked %v", gate.merges)
+	}
+}
+
+// A tool with the role "daemon" runs only on the governed path of the
+// daemon. An agent call never reaches the connector (review M7).
+func TestCall_ADaemonToolRefusesAnAgent(t *testing.T) {
+	obs := &seqObserver{}
+	q := &seqQuerier{obs: obs}
+	h := newMergeHandler(q, &fakeGate{})
+	_, err := gatedCall(h, obs, "mcp:forge:revert_merge_request", map[string]any{"merge_request": "mr-1"})
+	if !errors.Is(err, ErrDaemonOnly) || !errors.Is(err, ErrBlocked) {
+		t.Fatalf("an agent call: err = %v, want ErrDaemonOnly", err)
+	}
+	if q.calls != 0 {
+		t.Fatalf("the connector got %d calls", q.calls)
+	}
+	_, err = h.Call(context.Background(), Call{
+		Caller: callerAlice, ID: "mcp:forge:revert_merge_request", Args: map[string]any{"merge_request": "mr-1"},
+		MissionID: "m1", Observer: obs, Recorder: obs.record, Daemon: true,
+	})
+	if err != nil || q.calls != 1 {
+		t.Fatalf("a daemon call: err = %v, calls = %d", err, q.calls)
 	}
 }
 
