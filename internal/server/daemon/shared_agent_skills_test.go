@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -157,4 +158,64 @@ func TestSeedSharedAgentSkillGate_OpensTheGateThatEnableChecks(t *testing.T) {
 	assert.True(t, offered(t, fga, "web-recon"))
 	assert.False(t, offered(t, fga, "dns"))
 	assert.False(t, offered(t, fga, "extra"))
+}
+
+// flakyGateFGA fails each call until failures reach zero, then works as storeGateFGA.
+type flakyGateFGA struct {
+	*storeGateFGA
+	failures int
+	calls    int
+}
+
+func (f *flakyGateFGA) ListObjects(ctx context.Context, u, r, o string) ([]string, error) {
+	f.calls++
+	if f.failures > 0 {
+		f.failures--
+		return nil, errors.New("fga not ready")
+	}
+	return f.storeGateFGA.ListObjects(ctx, u, r, o)
+}
+
+// A seed that fails at start succeeds later, and the gate that Enable checks is
+// open after that.
+func TestSeedSharedAgentSkillGateUntilDone_RetriesUntilTheSeedSucceeds(t *testing.T) {
+	ctx := context.Background()
+	shared, err := loadSharedAgentSkills(ctx, []config.SharedAgentSkillConfig{
+		{Name: "web-recon", Reference: "r@sha256:a"},
+	}, okPuller, discardLog())
+	require.NoError(t, err)
+	fga := &flakyGateFGA{storeGateFGA: newStoreGateFGA(), failures: 3}
+
+	var delays []int
+	seedSharedAgentSkillGateUntilDone(ctx, fga, shared, discardLog(), func(retry int) time.Duration {
+		delays = append(delays, retry)
+		return time.Millisecond
+	})
+
+	assert.Equal(t, []int{1, 2, 3}, delays, "the daemon waits after each failure")
+	assert.Equal(t, 4, fga.calls)
+	assert.True(t, offered(t, fga.storeGateFGA, "web-recon"), "the gate is open after the seed succeeds")
+}
+
+// The retry stops when the daemon context ends.
+func TestSeedSharedAgentSkillGateUntilDone_StopsWhenTheContextEnds(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	shared, err := loadSharedAgentSkills(ctx, nil, okPuller, discardLog())
+	require.NoError(t, err)
+	fga := &flakyGateFGA{storeGateFGA: newStoreGateFGA(), failures: 1 << 30}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		seedSharedAgentSkillGateUntilDone(ctx, fga, shared, discardLog(), func(int) time.Duration {
+			cancel()
+			return time.Hour
+		})
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the retry did not stop when the context ended")
+	}
+	assert.Equal(t, 1, fga.calls)
 }
