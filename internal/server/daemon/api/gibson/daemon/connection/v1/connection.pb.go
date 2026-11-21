@@ -298,7 +298,8 @@ type DescribeSignupStepResponse struct {
 
 	// tenant_id is the slug of the new tenant.
 	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// plan_id is the plan that the owner chose at signup.
+	// plan_id is always empty. The product has no plan (gibson#1531). The
+	// field stays while the contract of the external signup step keeps it.
 	PlanId string `protobuf:"bytes,2,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 	// owner_email is the address of the owner of the new tenant.
 	OwnerEmail string `protobuf:"bytes,3,opt,name=owner_email,json=ownerEmail,proto3" json:"owner_email,omitempty"`

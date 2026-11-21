@@ -63,9 +63,9 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(
 	}
 	const q = `
 		INSERT INTO pending_tenant_provisioning
-			(tenant_id, owner_user_id, owner_email, workspace_name, tier, status,
+			(tenant_id, owner_user_id, owner_email, workspace_name, status,
 			 attempt_id, step_token_hash, step_expires_at, welcome_owner, audit_record_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
 		ON CONFLICT (tenant_id) DO NOTHING
 	`
 	queueStatus, attemptID, tokenHash := "pending", "", ""
@@ -76,7 +76,7 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(
 	}
 	res, err := db.ExecContext(ctx, q,
 		p.GetTenantId(), p.GetOwnerUserId(), p.GetOwnerEmail(),
-		p.GetWorkspaceName(), p.GetTier(), queueStatus,
+		p.GetWorkspaceName(), queueStatus,
 		attemptID, tokenHash, expiresAt, welcomeOwner, p.GetAuditRecordId(),
 	)
 	if err != nil {
@@ -198,7 +198,7 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *d
 	// first. One more row than the page tells whether a next page exists.
 	size := pagetoken.Size(req.GetPageSize())
 	const cols = `
-		SELECT tenant_id, owner_user_id, owner_email, workspace_name, tier, audit_record_id, created_at
+		SELECT tenant_id, owner_user_id, owner_email, workspace_name, audit_record_id, created_at
 		FROM pending_tenant_provisioning
 		WHERE status = 'pending'`
 	const order = `
@@ -223,7 +223,7 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *d
 		var created time.Time
 		if err := rows.Scan(
 			&p.TenantId, &p.OwnerUserId, &p.OwnerEmail,
-			&p.WorkspaceName, &p.Tier, &p.AuditRecordId, &created,
+			&p.WorkspaceName, &p.AuditRecordId, &created,
 		); err != nil {
 			return nil, status.Errorf(codes.Internal, "scan pending row: %v", err)
 		}
@@ -281,7 +281,6 @@ func ensurePendingTenantProvisioningTable(ctx context.Context, db *sql.DB) error
 			owner_user_id      TEXT NOT NULL DEFAULT '',
 			owner_email        TEXT NOT NULL,
 			workspace_name     TEXT NOT NULL,
-			tier               TEXT NOT NULL,
 			status             TEXT NOT NULL DEFAULT 'pending'
 				CONSTRAINT pending_tenant_provisioning_status_check
 				CHECK (status IN ('waiting_step', 'step_failed', 'pending', 'claimed', 'done')),
@@ -296,7 +295,8 @@ func ensurePendingTenantProvisioningTable(ctx context.Context, db *sql.DB) error
 		);
 		ALTER TABLE pending_tenant_provisioning ADD COLUMN IF NOT EXISTS welcome_owner BOOLEAN NOT NULL DEFAULT FALSE;
 		ALTER TABLE pending_tenant_provisioning ADD COLUMN IF NOT EXISTS welcome_sent_at TIMESTAMPTZ;
-		ALTER TABLE pending_tenant_provisioning ADD COLUMN IF NOT EXISTS audit_record_id TEXT NOT NULL DEFAULT ''
+		ALTER TABLE pending_tenant_provisioning ADD COLUMN IF NOT EXISTS audit_record_id TEXT NOT NULL DEFAULT '';
+		ALTER TABLE pending_tenant_provisioning DROP COLUMN IF EXISTS tier
 	`
 	if _, err := db.ExecContext(ctx, create); err != nil {
 		return fmt.Errorf("create pending_tenant_provisioning: %w", err)
@@ -331,14 +331,10 @@ func (s *DaemonServer) EnqueueTenantProvisioning(ctx context.Context, req *daemo
 	if req.GetOwnerEmail() == "" {
 		return nil, status.Error(codes.InvalidArgument, "owner_email required")
 	}
-	// The tier is optional. An empty tier stays empty, and the Tenant gets no
-	// spec.tier. The field leaves the wire in step 2 of gibson#1531.
-	tier := req.GetTier()
 	inserted, err := s.enqueuePendingTenantProvisioning(ctx, &daemonoperatorv1.PendingTenant{
 		TenantId:      req.GetTenantId(),
 		OwnerEmail:    req.GetOwnerEmail(),
 		WorkspaceName: req.GetDisplayName(),
-		Tier:          tier,
 	}, nil, false)
 	if errors.Is(err, errNoPlatformDB) {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
@@ -347,7 +343,7 @@ func (s *DaemonServer) EnqueueTenantProvisioning(ctx context.Context, req *daemo
 		return nil, status.Errorf(codes.Internal, "enqueue tenant provisioning: %v", err)
 	}
 	if !inserted {
-		if err := s.rewritePendingSeed(ctx, req.GetTenantId(), req.GetOwnerEmail(), req.GetDisplayName(), tier); err != nil {
+		if err := s.rewritePendingSeed(ctx, req.GetTenantId(), req.GetOwnerEmail(), req.GetDisplayName()); err != nil {
 			return nil, status.Errorf(codes.Internal, "rewrite pending tenant provisioning: %v", err)
 		}
 	}
@@ -356,31 +352,31 @@ func (s *DaemonServer) EnqueueTenantProvisioning(ctx context.Context, req *daemo
 
 // rewritePendingSeed makes a queued seed row match the current intent of the
 // operator (gibson#219). The seed is the one writer of this row. A row that
-// still waits in 'pending' with an older owner, name or tier gets the new
+// still waits in 'pending' with an older owner or name gets the new
 // values, so a chart fix reaches a cluster whose first row cannot provision.
 // A row that the operator claimed or finished stays as it is: the tenant
 // exists, and the queue no longer decides anything for it.
-func (s *DaemonServer) rewritePendingSeed(ctx context.Context, tenantID, ownerEmail, workspaceName, tier string) error {
+func (s *DaemonServer) rewritePendingSeed(ctx context.Context, tenantID, ownerEmail, workspaceName string) error {
 	db := s.platformDB
 	if db == nil {
 		return nil
 	}
 	const q = `
 		WITH prev AS (
-			SELECT tenant_id, owner_email, workspace_name, tier
+			SELECT tenant_id, owner_email, workspace_name
 			FROM pending_tenant_provisioning
 			WHERE tenant_id = $1 AND status = 'pending'
 			FOR UPDATE
 		)
 		UPDATE pending_tenant_provisioning p
-		SET owner_email = $2, workspace_name = $3, tier = $4, updated_at = NOW()
+		SET owner_email = $2, workspace_name = $3, updated_at = NOW()
 		FROM prev
 		WHERE p.tenant_id = prev.tenant_id
-		  AND (prev.owner_email, prev.workspace_name, prev.tier) IS DISTINCT FROM ($2, $3, $4)
-		RETURNING prev.tier, prev.owner_email, prev.workspace_name
+		  AND (prev.owner_email, prev.workspace_name) IS DISTINCT FROM ($2, $3)
+		RETURNING prev.owner_email, prev.workspace_name
 	`
-	var oldTier, oldEmail, oldName string
-	err := db.QueryRowContext(ctx, q, tenantID, ownerEmail, workspaceName, tier).Scan(&oldTier, &oldEmail, &oldName)
+	var oldEmail, oldName string
+	err := db.QueryRowContext(ctx, q, tenantID, ownerEmail, workspaceName).Scan(&oldEmail, &oldName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -389,7 +385,6 @@ func (s *DaemonServer) rewritePendingSeed(ctx context.Context, tenantID, ownerEm
 	}
 	s.logger.Warn("queued first tenant did not match the operator configuration; rewrote the pending row",
 		"tenant_id", tenantID,
-		"queued_tier", oldTier, "configured_tier", tier,
 		"queued_owner_email", oldEmail, "configured_owner_email", ownerEmail,
 		"queued_workspace_name", oldName, "configured_workspace_name", workspaceName,
 	)

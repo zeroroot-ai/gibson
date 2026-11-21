@@ -115,7 +115,8 @@ message DescribeSignupStepRequest {
 message DescribeSignupStepResponse {
   // tenant_id is the slug of the new tenant.
   string tenant_id = 1;
-  // plan_id is the plan that the owner chose at signup.
+  // plan_id is always empty. The product has no plan (gibson#1531). The
+  // field stays while the contract of the external signup step keeps it.
   string plan_id = 2;
   // owner_email is the address of the owner of the new tenant.
   string owner_email = 3;

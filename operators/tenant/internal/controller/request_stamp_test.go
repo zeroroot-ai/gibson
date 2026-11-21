@@ -36,7 +36,7 @@ func TestPendingDrain_StampsTheRequestRecord(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := fake.NewClientBuilder().WithScheme(setupScheme(t)).Build()
 			d := &stubDaemon{pending: []provision.PendingTenant{{
-				TenantID: "acme", OwnerEmail: "owner@acme.test", WorkspaceName: "Acme", Tier: "team",
+				TenantID: "acme", OwnerEmail: "owner@acme.test", WorkspaceName: "Acme",
 				AuditRecordID: recordID,
 			}}}
 			if err := newRunnable(t, c, d).drain(context.Background()); err != nil {
@@ -62,7 +62,7 @@ func TestAdminDrain_StampsTheRequestRecord(t *testing.T) {
 				Name: "acme", Finalizers: []string{gibsonv1alpha1.TenantFinalizer},
 				Annotations: map[string]string{audit.AnnotationCorrelationID: "rec-old"},
 			},
-			Spec: gibsonv1alpha1.TenantSpec{DisplayName: "Acme", Owner: "owner@acme.test", Tier: "team"},
+			Spec: gibsonv1alpha1.TenantSpec{DisplayName: "Acme", Owner: "owner@acme.test"},
 		}
 	}
 	cases := map[string]struct {
@@ -71,14 +71,14 @@ func TestAdminDrain_StampsTheRequestRecord(t *testing.T) {
 		want     string
 	}{
 		"provision": {op: provision.TenantAdminOp{OpID: "op-1", TenantID: "acme", OpType: "provision",
-			DisplayName: "Acme", DisplayNameSet: true, OwnerEmail: "owner@acme.test", Tier: "team", TierSet: true,
+			DisplayName: "Acme", DisplayNameSet: true, OwnerEmail: "owner@acme.test",
 			AuditRecordID: "rec-p"}, want: "rec-p"},
 		"update": {op: provision.TenantAdminOp{OpID: "op-2", TenantID: "acme", OpType: "update",
-			Tier: "org", TierSet: true, AuditRecordID: "rec-u"}, existing: true, want: "rec-u"},
+			DisplayName: "Acme Two", DisplayNameSet: true, AuditRecordID: "rec-u"}, existing: true, want: "rec-u"},
 		"delete": {op: provision.TenantAdminOp{OpID: "op-3", TenantID: "acme", OpType: "delete",
 			AuditRecordID: "rec-d"}, existing: true, want: "rec-d"},
 		"update with no record": {op: provision.TenantAdminOp{OpID: "op-4", TenantID: "acme", OpType: "update",
-			Tier: "org", TierSet: true}, existing: true, want: ""},
+			DisplayName: "Acme Two", DisplayNameSet: true}, existing: true, want: ""},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

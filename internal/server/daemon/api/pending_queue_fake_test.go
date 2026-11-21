@@ -36,7 +36,7 @@ var fakeQueueEpoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // fakeQueueRow is one queued tenant.
 type fakeQueueRow struct {
-	tenantID, ownerUserID, ownerEmail, workspaceName, tier, status, auditRecordID string
+	tenantID, ownerUserID, ownerEmail, workspaceName, status, auditRecordID string
 	// createdAt grows with each insert, like the created_at default of the table.
 	createdAt time.Time
 }
@@ -126,8 +126,8 @@ func (c *fakeQueueConn) ExecContext(_ context.Context, query string, args []driv
 		c.q.rows = append(c.q.rows, fakeQueueRow{
 			createdAt: fakeQueueEpoch.Add(time.Duration(c.q.clock) * time.Microsecond),
 			tenantID:  id, ownerUserID: argString(args, 1), ownerEmail: argString(args, 2),
-			workspaceName: argString(args, 3), tier: argString(args, 4), status: argString(args, 5),
-			auditRecordID: argString(args, 10),
+			workspaceName: argString(args, 3), status: argString(args, 4),
+			auditRecordID: argString(args, 9),
 		})
 		return driver.RowsAffected(1), nil
 	}
@@ -181,9 +181,9 @@ func (c *fakeQueueConn) listPending(query string, args []driver.NamedValue) driv
 	if limit, ok := args[0].Value.(int64); ok {
 		rows = rows[:min(limit, int64(len(rows)))]
 	}
-	out := &fakeQueueRows{cols: []string{"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier", "audit_record_id", "created_at"}}
+	out := &fakeQueueRows{cols: []string{"tenant_id", "owner_user_id", "owner_email", "workspace_name", "audit_record_id", "created_at"}}
 	for _, r := range rows {
-		out.vals = append(out.vals, []driver.Value{r.tenantID, r.ownerUserID, r.ownerEmail, r.workspaceName, r.tier, r.auditRecordID, r.createdAt})
+		out.vals = append(out.vals, []driver.Value{r.tenantID, r.ownerUserID, r.ownerEmail, r.workspaceName, r.auditRecordID, r.createdAt})
 	}
 	return out
 }

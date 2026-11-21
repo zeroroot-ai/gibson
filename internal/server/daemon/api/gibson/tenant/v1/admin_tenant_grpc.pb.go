@@ -71,16 +71,15 @@ const (
 type AdminTenantServiceClient interface {
 	// AdminProvisionTenant records intent to create a new tenant. Replaces
 	// provisionTenantAction's applyTenant() Tenant-CR create. The operator creates
-	// a Tenant CR with spec {displayName, owner, tier}. Idempotent on tenant_id:
+	// a Tenant CR with spec {displayName, owner}. Idempotent on tenant_id:
 	// re-recording a provision for a slug whose Tenant CR the operator already
 	// created is a no-op at apply time (the operator's existence check), so a
 	// double-submit cannot double-provision.
 	AdminProvisionTenant(ctx context.Context, in *AdminProvisionTenantRequest, opts ...grpc.CallOption) (*AdminProvisionTenantResponse, error)
-	// AdminUpdateTenant records intent to patch a tenant's tier and/or display
-	// name. Replaces updateTenantAction's patchTenant({spec}). The operator
-	// patches Tenant.spec.tier / spec.displayName for the fields the request marks
-	// set; unset fields are left untouched. Idempotent: applying the same patch
-	// twice converges.
+	// AdminUpdateTenant records intent to patch a tenant's display name.
+	// Replaces updateTenantAction's patchTenant({spec}). The operator patches
+	// Tenant.spec.displayName when the request marks it set. Idempotent:
+	// applying the same patch twice converges.
 	AdminUpdateTenant(ctx context.Context, in *AdminUpdateTenantRequest, opts ...grpc.CallOption) (*AdminUpdateTenantResponse, error)
 	// AdminDeleteTenant records intent to delete a tenant. Replaces
 	// deleteTenantAction's deleteTenant() Tenant-CR delete. The operator deletes
@@ -210,16 +209,15 @@ func (c *adminTenantServiceClient) AdminGetPlatformHealth(ctx context.Context, i
 type AdminTenantServiceServer interface {
 	// AdminProvisionTenant records intent to create a new tenant. Replaces
 	// provisionTenantAction's applyTenant() Tenant-CR create. The operator creates
-	// a Tenant CR with spec {displayName, owner, tier}. Idempotent on tenant_id:
+	// a Tenant CR with spec {displayName, owner}. Idempotent on tenant_id:
 	// re-recording a provision for a slug whose Tenant CR the operator already
 	// created is a no-op at apply time (the operator's existence check), so a
 	// double-submit cannot double-provision.
 	AdminProvisionTenant(context.Context, *AdminProvisionTenantRequest) (*AdminProvisionTenantResponse, error)
-	// AdminUpdateTenant records intent to patch a tenant's tier and/or display
-	// name. Replaces updateTenantAction's patchTenant({spec}). The operator
-	// patches Tenant.spec.tier / spec.displayName for the fields the request marks
-	// set; unset fields are left untouched. Idempotent: applying the same patch
-	// twice converges.
+	// AdminUpdateTenant records intent to patch a tenant's display name.
+	// Replaces updateTenantAction's patchTenant({spec}). The operator patches
+	// Tenant.spec.displayName when the request marks it set. Idempotent:
+	// applying the same patch twice converges.
 	AdminUpdateTenant(context.Context, *AdminUpdateTenantRequest) (*AdminUpdateTenantResponse, error)
 	// AdminDeleteTenant records intent to delete a tenant. Replaces
 	// deleteTenantAction's deleteTenant() Tenant-CR delete. The operator deletes

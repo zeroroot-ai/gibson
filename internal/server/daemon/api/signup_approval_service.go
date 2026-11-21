@@ -156,7 +156,6 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 		AttemptID:      req.GetAttemptId(),
 		Email:          email,
 		WorkspaceName:  workspaceName,
-		Tier:           req.GetTier(),
 		OwnerFirstName: req.GetOwnerFirstName(),
 		OwnerLastName:  req.GetOwnerLastName(),
 		ClientIPHash:   hashClientIP(clientIP),
@@ -225,7 +224,6 @@ func (s *DaemonServer) AdminListPendingRegistrations(ctx context.Context, req *t
 			RegistrationId: r.ID,
 			OwnerEmail:     r.Email,
 			WorkspaceName:  r.WorkspaceName,
-			Tier:           r.Tier,
 			OwnerFirstName: r.OwnerFirstName,
 			OwnerLastName:  r.OwnerLastName,
 			ReceivedAt:     timestamppb.New(r.CreatedAt),
@@ -326,9 +324,6 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 		return nil, status.Error(codes.Internal, "failed to approve the registration")
 	}
 
-	// The plan id is optional and gibson does not judge it, as in Signup.
-	planID := strings.TrimSpace(row.Tier)
-
 	if err := s.idpAdminClient.ReactivateHumanUser(ctx, idp.HumanUserStateRequest{UserID: row.OwnerUserID}); err != nil {
 		s.logger.ErrorContext(ctx, "AdminApproveRegistration: reactivating the owner failed",
 			"registration_id", row.ID, "error", err.Error())
@@ -343,7 +338,6 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 		OwnerUserId:   row.OwnerUserID,
 		OwnerEmail:    row.Email,
 		WorkspaceName: row.WorkspaceName,
-		Tier:          planID,
 		AuditRecordId: recordID,
 	}, nil, true); err != nil {
 		s.logger.ErrorContext(ctx, "AdminApproveRegistration: enqueue pending tenant provisioning failed",
@@ -363,7 +357,6 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 	return &tenantv1.AdminApproveRegistrationResponse{
 		TenantId:    slug,
 		OwnerUserId: row.OwnerUserID,
-		PlanId:      planID,
 	}, nil
 }
 
@@ -474,7 +467,6 @@ func (s *DaemonServer) registrationDecisionEvent(ctx context.Context, decidedBy 
 		"entry_id":       recordID,
 		"owner_email":    row.Email,
 		"workspace_name": row.WorkspaceName,
-		"tier":           row.Tier,
 	}
 	if reason != "" {
 		details["reason"] = reason

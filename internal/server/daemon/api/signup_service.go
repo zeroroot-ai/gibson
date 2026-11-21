@@ -16,9 +16,9 @@
 //	RedeemEmailVerification  — atomically exchanges the emailed token for a
 //	                           short completion session. Single-use.
 //	Signup                   — creates the Zitadel human user and enqueues the
-//	                           tenant. Requires a live session; reads the email,
-//	                           workspace and tier from the verification row, not
-//	                           from the caller.
+//	                           tenant. Requires a live session; reads the email
+//	                           and workspace from the verification row, not from
+//	                           the caller.
 //
 // Two behaviours that used to live here and no longer do:
 //
@@ -181,7 +181,6 @@ func (s *DaemonServer) RequestEmailVerification(ctx context.Context, req *tenant
 		AttemptID:      req.GetAttemptId(),
 		Email:          email,
 		WorkspaceName:  req.GetWorkspaceName(),
-		Tier:           req.GetTier(),
 		OwnerFirstName: req.GetOwnerFirstName(),
 		OwnerLastName:  req.GetOwnerLastName(),
 		ClientIPHash:   hashClientIP(clientIP),
@@ -345,7 +344,6 @@ func (s *DaemonServer) RedeemEmailVerification(ctx context.Context, req *tenantv
 		AttemptId:            row.AttemptID,
 		OwnerEmail:           row.Email,
 		WorkspaceName:        row.WorkspaceName,
-		Tier:                 row.Tier,
 	}, nil
 }
 
@@ -353,7 +351,7 @@ func (s *DaemonServer) RedeemEmailVerification(ctx context.Context, req *tenantv
 //
 // This is the only path to provisioning, and it does not run without a live
 // verified session. Everything about the tenant — owner address, workspace
-// name, tier, profile — is read from the verification row the
+// name, profile — is read from the verification row the
 // session resolves to; the request carries none of it. A caller who redeemed a
 // token for one address therefore cannot provision a tenant for another.
 func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) (*tenantv1.SignupResponse, error) {
@@ -416,14 +414,6 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 			"attempt_id", req.GetAttemptId())
 		return nil, status.Error(codes.Internal, "failed to complete signup")
 	}
-
-	// ---- the plan id ----
-	// The plan id is optional and gibson does not judge it. It comes from the
-	// verification row, so the caller of Signup cannot change it. It goes to
-	// the queue row, and the external signup step reads it from there
-	// (DescribeSignupStep). The component that runs the step decides what the
-	// plan id means. The field leaves the wire in step 2 of gibson#1531.
-	planID := strings.TrimSpace(row.Tier)
 
 	// ---- the workspace name is free ----
 	// The tenant id comes from the workspace name of the verification row.
@@ -518,7 +508,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 	// who proved the mailbox as its actor. The queue entry carries the record
 	// id, so the operator records of the new tenant name this owner
 	// (gibson#583). With no record, nothing is queued.
-	recordID, rerr := s.recordSignupRequest(ctx, result.UserID, slug, workspaceName, planID)
+	recordID, rerr := s.recordSignupRequest(ctx, result.UserID, slug, workspaceName)
 	if rerr != nil {
 		s.logger.ErrorContext(ctx, "Signup: durable audit write failed",
 			"attempt_id", req.GetAttemptId(), "tenant_id", slug, "error", rerr.Error())
@@ -530,7 +520,6 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		OwnerUserId:   result.UserID,
 		OwnerEmail:    row.Email,
 		WorkspaceName: workspaceName,
-		Tier:          planID,
 		AuditRecordId: recordID,
 	}, hold, true); eerr != nil {
 		s.logger.ErrorContext(ctx, "Signup: enqueue pending tenant provisioning failed",
@@ -568,9 +557,6 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 	return &tenantv1.SignupResponse{
 		TenantId:    slug,
 		OwnerUserId: result.UserID,
-		// The plan id of the verification row, the same value enqueued above
-		// (gibson#1325). Empty when the caller gave none.
-		PlanId: planID,
 		// Both are empty when no step is configured.
 		StepUrl:   stepURLFor(hold, s.signupStepURL),
 		StepToken: stepToken,
@@ -648,7 +634,7 @@ const auditActionSignupTenantRequested = "signup.tenant_requested"
 // for a tenant, and returns its id. The actor is the owner user the signup
 // created: that person proved control of the mailbox. With no audit writer,
 // no record is written and the id is empty, as for a registration decision.
-func (s *DaemonServer) recordSignupRequest(ctx context.Context, ownerUserID, tenantID, workspaceName, tier string) (string, error) {
+func (s *DaemonServer) recordSignupRequest(ctx context.Context, ownerUserID, tenantID, workspaceName string) (string, error) {
 	if s.tenantAdminAuditWriter == nil {
 		return "", nil
 	}
@@ -656,7 +642,6 @@ func (s *DaemonServer) recordSignupRequest(ctx context.Context, ownerUserID, ten
 	metadata, err := json.Marshal(map[string]string{
 		"entry_id":       recordID,
 		"workspace_name": workspaceName,
-		"tier":           tier,
 	})
 	if err != nil {
 		return "", fmt.Errorf("signup request record: %w", err)

@@ -130,7 +130,7 @@ func TestNamespaceProvisioner_Annotations(t *testing.T) {
 	const tenantUID = "tuid-123"
 	tenant := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "acme", UID: types.UID(tenantUID)},
-		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Acme", Owner: "alice@acme.io", Tier: "free"},
+		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Acme", Owner: "alice@acme.io"},
 	}
 
 	scheme := setupScheme(t)

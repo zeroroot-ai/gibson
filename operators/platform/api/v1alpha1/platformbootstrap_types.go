@@ -451,18 +451,6 @@ type VaultTransitSpec struct {
 	KeyName string `json:"keyName,omitempty"`
 }
 
-// PlanSyncSpec is ignored. The operator has no plan-sync step (gibson#1531).
-// The type stays while the chart still renders spec.planSync, because the
-// structural CRD schema refuses an unknown field. Step 2 of gibson#1531
-// deletes it.
-type PlanSyncSpec struct {
-	// PlansConfigMapRef points at the ConfigMap + key holding the gibson
-	// plans data. The reconciler hashes the content and re-syncs only
-	// when the hash changes.
-	// +kubebuilder:validation:Required
-	PlansConfigMapRef ConfigMapKeyRef `json:"plansConfigMapRef"`
-}
-
 // MasterKeySpec describes the cluster-wide master-key Secret the platform
 // owns. The reconciler creates the Secret with a 32-byte random key the
 // first time it runs, and never overwrites an existing value (so chart
@@ -657,12 +645,6 @@ type PlatformBootstrapSpec struct {
 	// toggle exists.
 	// +kubebuilder:validation:Required
 	VaultTransit VaultTransitSpec `json:"vaultTransit"`
-
-	// PlanSync is ignored. The operator has no plan-sync step (gibson#1531).
-	// The field stays while the chart still renders it. Step 2 of
-	// gibson#1531 deletes it.
-	// +optional
-	PlanSync *PlanSyncSpec `json:"planSync,omitempty"`
 
 	// MasterKey describes the cluster-wide master-key Secret the operator
 	// owns. Required — the master-kek wrap is structural; no skip toggle.

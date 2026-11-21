@@ -29,7 +29,7 @@ func TestSignup_MakesTheTenantOrgBeforeTheOwner(t *testing.T) {
 		}
 		return "org-tenant", nil
 	}
-	session := requestVerifiedSession(t, h, "team")
+	session := requestVerifiedSession(t, h)
 
 	if _, err := signupWithSession(t, h, session); err != nil {
 		t.Fatalf("Signup: %v", err)
@@ -53,7 +53,7 @@ func TestSignup_TakenOrgNameRefusesTheWorkspaceNameAndMakesNoOwner(t *testing.T)
 	h.idp.createOrgFn = func(_ context.Context, _ string) (string, error) {
 		return "", idp.ErrAlreadyExists
 	}
-	session := requestVerifiedSession(t, h, "team")
+	session := requestVerifiedSession(t, h)
 
 	_, err := signupWithSession(t, h, session)
 	if got := status.Code(err); got != codes.AlreadyExists {
@@ -69,7 +69,7 @@ func TestSignup_RemovesTheOrgWhenTheOwnerCannotBeMade(t *testing.T) {
 	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 		return idp.CreateHumanUserResult{}, errors.New("boom")
 	}
-	session := requestVerifiedSession(t, h, "team")
+	session := requestVerifiedSession(t, h)
 
 	if _, err := signupWithSession(t, h, session); err == nil {
 		t.Fatal("Signup must fail when the owner cannot be made")
@@ -126,7 +126,7 @@ func TestSignup_RemovesTheOwnerAndTheOrgWhenTheQueueRefuses(t *testing.T) {
 		return idp.CreateHumanUserResult{UserID: "user-owner"}, nil
 	}
 	h.queue.insertErr = errors.New("postgres down")
-	session := requestVerifiedSession(t, h, "team")
+	session := requestVerifiedSession(t, h)
 
 	if _, err := signupWithSession(t, h, session); err == nil {
 		t.Fatal("Signup must fail when the tenant cannot be queued")
@@ -164,7 +164,7 @@ func TestSignup_OrgCreateFailuresMapToCodes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newSignupHarness(t)
 			h.idp.createOrgFn = func(_ context.Context, _ string) (string, error) { return "", tc.err }
-			session := requestVerifiedSession(t, h, "team")
+			session := requestVerifiedSession(t, h)
 			_, err := signupWithSession(t, h, session)
 			if got := status.Code(err); got != tc.want {
 				t.Fatalf("code = %v (%v), want %v", got, err, tc.want)
@@ -182,7 +182,7 @@ func TestSignup_AFailedOrgCleanupStillFailsTheSignup(t *testing.T) {
 		return idp.CreateHumanUserResult{}, errors.New("boom")
 	}
 	h.idp.deleteOrgErr = errors.New("zitadel down")
-	session := requestVerifiedSession(t, h, "team")
+	session := requestVerifiedSession(t, h)
 	if _, err := signupWithSession(t, h, session); status.Code(err) != codes.Internal {
 		t.Fatalf("code = %v, want Internal", status.Code(err))
 	}

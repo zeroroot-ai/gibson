@@ -114,14 +114,14 @@ const (
 		 WHERE token_hash = $1
 		   AND status = 'pending'
 		   AND expires_at > $4
-		RETURNING id, attempt_id, email, workspace_name, tier,
+		RETURNING id, attempt_id, email, workspace_name,
 		          owner_first_name, owner_last_name, expires_at,
 		          completion_attempts
 	`
 
 	// getByVerifiedSessionStatement resolves a live completion session.
 	getByVerifiedSessionStatement = `
-		SELECT id, attempt_id, email, workspace_name, tier,
+		SELECT id, attempt_id, email, workspace_name,
 		       owner_first_name, owner_last_name, expires_at,
 		       completion_attempts
 		  FROM signup_verification
@@ -138,7 +138,7 @@ const (
 		   AND status = 'verified'
 		   AND verified_session_expires_at > $2
 		   AND completion_attempts < $3
-		RETURNING id, attempt_id, email, workspace_name, tier,
+		RETURNING id, attempt_id, email, workspace_name,
 		          owner_first_name, owner_last_name, expires_at,
 		          completion_attempts
 	`
@@ -159,7 +159,7 @@ const (
 		   SET status = 'consumed', consumed_at = $3, updated_at = $3,
 		       decided_by = $2, decided_at = $3
 		 WHERE id = $1 AND status = 'pending_approval'
-		RETURNING id, attempt_id, email, workspace_name, tier,
+		RETURNING id, attempt_id, email, workspace_name,
 		          owner_first_name, owner_last_name, expires_at,
 		          completion_attempts, owner_user_id
 	`
@@ -171,7 +171,7 @@ const (
 		   SET status = 'rejected', updated_at = $3,
 		       decided_by = $2, decided_at = $3
 		 WHERE id = $1 AND status = 'pending_approval'
-		RETURNING id, attempt_id, email, workspace_name, tier,
+		RETURNING id, attempt_id, email, workspace_name,
 		          owner_first_name, owner_last_name, expires_at,
 		          completion_attempts, owner_user_id
 	`
@@ -184,7 +184,7 @@ const (
 		   SET status = 'expiring', updated_at = $3,
 		       decided_by = $2, decided_at = $3
 		 WHERE id = $1 AND status = 'pending_approval' AND expires_at <= $3
-		RETURNING id, attempt_id, email, workspace_name, tier,
+		RETURNING id, attempt_id, email, workspace_name,
 		          owner_first_name, owner_last_name, expires_at,
 		          completion_attempts, owner_user_id
 	`
@@ -228,7 +228,6 @@ type SignupVerification struct {
 	AttemptID       string
 	Email           string
 	WorkspaceName   string
-	Tier            string
 	OwnerFirstName  string
 	OwnerLastName   string
 	Status          string
@@ -291,7 +290,6 @@ type IssueParams struct {
 	AttemptID      string
 	Email          string
 	WorkspaceName  string
-	Tier           string
 	OwnerFirstName string
 	OwnerLastName  string
 	ClientIPHash   string
@@ -322,12 +320,12 @@ func (s *SignupVerificationStore) Issue(ctx context.Context, p IssueParams) (row
 
 	const q = `
 		INSERT INTO signup_verification
-			(id, attempt_id, email, workspace_name, tier, owner_first_name, owner_last_name,
+			(id, attempt_id, email, workspace_name, owner_first_name, owner_last_name,
 			 token_hash, status, expires_at, client_ip_hash, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10, $11, $11)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $10)
 	`
 	if _, err := db.ExecContext(ctx, q,
-		id, p.AttemptID, p.Email, p.WorkspaceName, p.Tier,
+		id, p.AttemptID, p.Email, p.WorkspaceName,
 		p.OwnerFirstName, p.OwnerLastName, hash, expires, p.ClientIPHash, now,
 	); err != nil {
 		return SignupVerification{}, "", fmt.Errorf("insert signup_verification: %w", err)
@@ -338,7 +336,6 @@ func (s *SignupVerificationStore) Issue(ctx context.Context, p IssueParams) (row
 		AttemptID:     p.AttemptID,
 		Email:         p.Email,
 		WorkspaceName: p.WorkspaceName,
-		Tier:          p.Tier,
 		Status:        signupStatusPending,
 		ExpiresAt:     expires,
 	}, raw, nil
@@ -469,7 +466,7 @@ func (s *SignupVerificationStore) RedeemToken(ctx context.Context, rawToken stri
 	err = db.QueryRowContext(ctx, redeemStatement,
 		platformtoken.Hash(rawToken), sessionHash, now.Add(SignupSessionTTL), now,
 	).Scan(
-		&out.ID, &out.AttemptID, &out.Email, &out.WorkspaceName, &out.Tier,
+		&out.ID, &out.AttemptID, &out.Email, &out.WorkspaceName,
 		&out.OwnerFirstName, &out.OwnerLastName, &out.ExpiresAt,
 		&out.CompletionCount,
 	)
@@ -501,7 +498,7 @@ func (s *SignupVerificationStore) GetByVerifiedSession(ctx context.Context, rawS
 	}
 	var out SignupVerification
 	err = db.QueryRowContext(ctx, getByVerifiedSessionStatement, platformtoken.Hash(rawSession), s.clock()).Scan(
-		&out.ID, &out.AttemptID, &out.Email, &out.WorkspaceName, &out.Tier,
+		&out.ID, &out.AttemptID, &out.Email, &out.WorkspaceName,
 		&out.OwnerFirstName, &out.OwnerLastName, &out.ExpiresAt,
 		&out.CompletionCount,
 	)
@@ -536,7 +533,7 @@ func (s *SignupVerificationStore) ClaimCompletion(ctx context.Context, rawSessio
 	now := s.clock()
 	var out SignupVerification
 	err = db.QueryRowContext(ctx, claimCompletionStatement, platformtoken.Hash(rawSession), now, SignupMaxCompletionAttempts).Scan(
-		&out.ID, &out.AttemptID, &out.Email, &out.WorkspaceName, &out.Tier,
+		&out.ID, &out.AttemptID, &out.Email, &out.WorkspaceName,
 		&out.OwnerFirstName, &out.OwnerLastName, &out.ExpiresAt,
 		&out.CompletionCount,
 	)
@@ -628,7 +625,6 @@ func (s *SignupVerificationStore) ensureTable(ctx context.Context) error {
 			attempt_id                  UUID NOT NULL,
 			email                       TEXT NOT NULL,
 			workspace_name              TEXT NOT NULL,
-			tier                        TEXT NOT NULL,
 			owner_first_name            TEXT NOT NULL DEFAULT '',
 			owner_last_name             TEXT NOT NULL DEFAULT '',
 			token_hash                  TEXT NOT NULL UNIQUE,
@@ -649,7 +645,8 @@ func (s *SignupVerificationStore) ensureTable(ctx context.Context) error {
 			created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			consumed_at                 TIMESTAMPTZ
-		)
+		);
+		ALTER TABLE signup_verification DROP COLUMN IF EXISTS tier
 	`
 	if _, err := db.ExecContext(ctx, create); err != nil {
 		return fmt.Errorf("create signup_verification: %w", err)
@@ -701,12 +698,12 @@ func (s *SignupVerificationStore) IssuePendingApproval(ctx context.Context, p Is
 
 	const q = `
 		INSERT INTO signup_verification
-			(id, attempt_id, email, workspace_name, tier, owner_first_name, owner_last_name,
+			(id, attempt_id, email, workspace_name, owner_first_name, owner_last_name,
 			 token_hash, status, expires_at, client_ip_hash, owner_user_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_approval', $9, $10, $11, $12, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_approval', $8, $9, $10, $11, $11)
 	`
 	if _, err := db.ExecContext(ctx, q,
-		id, p.AttemptID, p.Email, p.WorkspaceName, p.Tier,
+		id, p.AttemptID, p.Email, p.WorkspaceName,
 		p.OwnerFirstName, p.OwnerLastName, hash, expires, p.ClientIPHash, ownerUserID, now,
 	); err != nil {
 		return SignupVerification{}, fmt.Errorf("insert pending registration: %w", err)
@@ -717,7 +714,6 @@ func (s *SignupVerificationStore) IssuePendingApproval(ctx context.Context, p Is
 		AttemptID:      p.AttemptID,
 		Email:          p.Email,
 		WorkspaceName:  p.WorkspaceName,
-		Tier:           p.Tier,
 		OwnerFirstName: p.OwnerFirstName,
 		OwnerLastName:  p.OwnerLastName,
 		Status:         signupStatusPendingApproval,
@@ -740,7 +736,7 @@ func (s *SignupVerificationStore) ListPendingApprovals(ctx context.Context, offs
 	}
 	offset = max(offset, 0)
 	const q = `
-		SELECT id, attempt_id, email, workspace_name, tier,
+		SELECT id, attempt_id, email, workspace_name,
 		       owner_first_name, owner_last_name, owner_user_id, created_at
 		  FROM signup_verification
 		 WHERE status = 'pending_approval'
@@ -756,7 +752,7 @@ func (s *SignupVerificationStore) ListPendingApprovals(ctx context.Context, offs
 	var out []SignupVerification
 	for rows.Next() {
 		var r SignupVerification
-		if err := rows.Scan(&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName, &r.Tier,
+		if err := rows.Scan(&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName,
 			&r.OwnerFirstName, &r.OwnerLastName, &r.OwnerUserID, &r.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan pending registration: %w", err)
 		}
@@ -782,7 +778,7 @@ func (s *SignupVerificationStore) ListExpiringRegistrations(ctx context.Context,
 		limit = SignupApprovalPageSize
 	}
 	const q = `
-		SELECT id, attempt_id, email, workspace_name, tier,
+		SELECT id, attempt_id, email, workspace_name,
 		       owner_first_name, owner_last_name, owner_user_id, created_at, expires_at, status
 		  FROM signup_verification
 		 WHERE (status = 'pending_approval' AND expires_at <= $1) OR status = 'expiring'
@@ -798,7 +794,7 @@ func (s *SignupVerificationStore) ListExpiringRegistrations(ctx context.Context,
 	var out []SignupVerification
 	for rows.Next() {
 		var r SignupVerification
-		if err := rows.Scan(&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName, &r.Tier,
+		if err := rows.Scan(&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName,
 			&r.OwnerFirstName, &r.OwnerLastName, &r.OwnerUserID, &r.CreatedAt, &r.ExpiresAt, &r.Status); err != nil {
 			return nil, fmt.Errorf("scan expiring registration: %w", err)
 		}
@@ -863,7 +859,7 @@ func (s *SignupVerificationStore) decideRegistration(
 	}
 	var r SignupVerification
 	err = db.QueryRowContext(ctx, stmt, id, decidedBy, s.clock()).Scan(
-		&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName, &r.Tier,
+		&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName,
 		&r.OwnerFirstName, &r.OwnerLastName, &r.ExpiresAt,
 		&r.CompletionCount, &r.OwnerUserID,
 	)

@@ -91,11 +91,8 @@ func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.A
 	if err := ensureTenantAdminOpsTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
-	// The tier is optional. An empty tier stays empty, and the Tenant gets no
-	// spec.tier. The field leaves the wire in step 2 of gibson#1531.
-	tier := req.GetTier()
 	rec, err := s.recordTenantRequest(ctx, auditActionTenantAdminProvision, req.GetTenantId(), map[string]any{
-		"display_name": req.GetDisplayName(), "owner_email": req.GetOwnerEmail(), "tier": tier,
+		"display_name": req.GetDisplayName(), "owner_email": req.GetOwnerEmail(),
 	})
 	if err != nil {
 		return nil, err
@@ -103,15 +100,15 @@ func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.A
 	opID := uuid.NewString()
 	const q = `
 		INSERT INTO tenant_admin_ops
-			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set, status,
+			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, status,
 			 audit_record_id, created_at, updated_at)
-		SELECT $1, $2, 'provision', $3, TRUE, $4, $5, TRUE, 'pending', $6, NOW(), NOW()
+		SELECT $1, $2, 'provision', $3, TRUE, $4, 'pending', $5, NOW(), NOW()
 		WHERE NOT EXISTS (
 			SELECT 1 FROM tenant_admin_ops
 			WHERE tenant_id = $2 AND op_type = 'provision' AND status = 'pending'
 		)
 	`
-	res, err := db.ExecContext(ctx, q, opID, req.GetTenantId(), req.GetDisplayName(), req.GetOwnerEmail(), tier, rec.id)
+	res, err := db.ExecContext(ctx, q, opID, req.GetTenantId(), req.GetDisplayName(), req.GetOwnerEmail(), rec.id)
 	if err != nil {
 		rec.failed(ctx, err)
 		return nil, status.Errorf(codes.Internal, "insert tenant_admin_ops: %v", err)
@@ -146,10 +143,9 @@ func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.A
 	return &tenantv1.AdminProvisionTenantResponse{OpId: opID}, nil
 }
 
-// AdminUpdateTenant records intent to patch a tenant's tier and/or display name.
-// Replaces the dashboard updateTenantAction's patchTenant({spec}). At least one
-// of tier_set / display_name_set must be true. The operator patches the marked
-// fields on Tenant.spec; unset fields are left untouched.
+// AdminUpdateTenant records intent to patch the display name of a tenant.
+// Replaces the dashboard updateTenantAction's patchTenant({spec}).
+// display_name_set must be true. The operator patches Tenant.spec.displayName.
 //
 // gibsoncheck:allow tenant-from-request — AdminTenantService: platform_operator on
 // system_tenant at ext-authz.
@@ -161,15 +157,14 @@ func (s *DaemonServer) AdminUpdateTenant(ctx context.Context, req *tenantv1.Admi
 	if req.GetTenantId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "tenant_id required")
 	}
-	if !req.GetTierSet() && !req.GetDisplayNameSet() {
-		return nil, status.Error(codes.InvalidArgument, "at least one of tier or display_name must be set")
+	if !req.GetDisplayNameSet() {
+		return nil, status.Error(codes.InvalidArgument, "display_name must be set")
 	}
 	if err := ensureTenantAdminOpsTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
 	rec, err := s.recordTenantRequest(ctx, auditActionTenantAdminUpdate, req.GetTenantId(), map[string]any{
 		"display_name": req.GetDisplayName(), "display_name_set": req.GetDisplayNameSet(),
-		"tier": req.GetTier(), "tier_set": req.GetTierSet(),
 	})
 	if err != nil {
 		return nil, err
@@ -177,12 +172,12 @@ func (s *DaemonServer) AdminUpdateTenant(ctx context.Context, req *tenantv1.Admi
 	opID := uuid.NewString()
 	const q = `
 		INSERT INTO tenant_admin_ops
-			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set, status,
+			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, status,
 			 audit_record_id, created_at, updated_at)
-		VALUES ($1, $2, 'update', $3, $4, '', $5, $6, 'pending', $7, NOW(), NOW())
+		VALUES ($1, $2, 'update', $3, $4, '', 'pending', $5, NOW(), NOW())
 	`
 	if _, err := db.ExecContext(ctx, q,
-		opID, req.GetTenantId(), req.GetDisplayName(), req.GetDisplayNameSet(), req.GetTier(), req.GetTierSet(), rec.id,
+		opID, req.GetTenantId(), req.GetDisplayName(), req.GetDisplayNameSet(), rec.id,
 	); err != nil {
 		rec.failed(ctx, err)
 		return nil, status.Errorf(codes.Internal, "insert tenant_admin_ops: %v", err)
@@ -218,9 +213,9 @@ func (s *DaemonServer) AdminDeleteTenant(ctx context.Context, req *tenantv1.Admi
 	opID := uuid.NewString()
 	const q = `
 		INSERT INTO tenant_admin_ops
-			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set, status,
+			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, status,
 			 audit_record_id, created_at, updated_at)
-		SELECT $1, $2, 'delete', '', FALSE, '', '', FALSE, 'pending', $3, NOW(), NOW()
+		SELECT $1, $2, 'delete', '', FALSE, '', 'pending', $3, NOW(), NOW()
 		WHERE NOT EXISTS (
 			SELECT 1 FROM tenant_admin_ops
 			WHERE tenant_id = $2 AND op_type = 'delete' AND status = 'pending'
@@ -317,7 +312,7 @@ func (s *DaemonServer) ListPendingTenantOps(ctx context.Context, req *daemonoper
 	// first. One more row than the page tells whether a next page exists.
 	size := pagetoken.Size(req.GetPageSize())
 	const cols = `
-		SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set,
+		SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email,
 		       audit_record_id, created_at
 		FROM tenant_admin_ops
 		WHERE status = 'pending'`
@@ -342,7 +337,7 @@ func (s *DaemonServer) ListPendingTenantOps(ctx context.Context, req *daemonoper
 		var created time.Time
 		if err := rows.Scan(
 			&op.OpId, &op.TenantId, &op.OpType, &op.DisplayName,
-			&op.DisplayNameSet, &op.OwnerEmail, &op.Tier, &op.TierSet, &op.AuditRecordId, &created,
+			&op.DisplayNameSet, &op.OwnerEmail, &op.AuditRecordId, &created,
 		); err != nil {
 			return nil, status.Errorf(codes.Internal, "scan tenant_admin_op row: %v", err)
 		}
@@ -398,15 +393,15 @@ func ensureTenantAdminOpsTable(ctx context.Context, db *sql.DB) error {
 			display_name       TEXT NOT NULL DEFAULT '',
 			display_name_set   BOOLEAN NOT NULL DEFAULT FALSE,
 			owner_email        TEXT NOT NULL DEFAULT '',
-			tier               TEXT NOT NULL DEFAULT '',
-			tier_set           BOOLEAN NOT NULL DEFAULT FALSE,
 			status             TEXT NOT NULL DEFAULT 'pending'
 				CONSTRAINT tenant_admin_ops_status_check
 				CHECK (status IN ('pending', 'done')),
 			audit_record_id    TEXT NOT NULL DEFAULT '',
 			created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)
+		);
+		ALTER TABLE tenant_admin_ops DROP COLUMN IF EXISTS tier;
+		ALTER TABLE tenant_admin_ops DROP COLUMN IF EXISTS tier_set
 	`
 	if _, err := db.ExecContext(ctx, create); err != nil {
 		return fmt.Errorf("create tenant_admin_ops: %w", err)

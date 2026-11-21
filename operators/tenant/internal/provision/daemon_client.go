@@ -181,7 +181,6 @@ type PendingTenant struct {
 	OwnerUserID   string
 	OwnerEmail    string
 	WorkspaceName string
-	Tier          string
 	// AuditRecordID is the daemon audit record of the human request that
 	// queued this tenant, or "" when no human request is behind it (gibson#583).
 	AuditRecordID string
@@ -210,7 +209,6 @@ func (c *DaemonClient) ListPendingTenantProvisioning(ctx context.Context) ([]Pen
 					OwnerUserID:   p.GetOwnerUserId(),
 					OwnerEmail:    p.GetOwnerEmail(),
 					WorkspaceName: p.GetWorkspaceName(),
-					Tier:          p.GetTier(),
 					AuditRecordID: p.GetAuditRecordId(),
 				})
 			}
@@ -252,7 +250,6 @@ func (c *DaemonClient) EnqueueTenantProvisioning(ctx context.Context, t PendingT
 			TenantId:    t.TenantID,
 			DisplayName: t.WorkspaceName,
 			OwnerEmail:  t.OwnerEmail,
-			Tier:        t.Tier,
 		})
 	if err := translateGRPCError("enqueue-tenant-provisioning", err); err != nil {
 		return false, err
@@ -304,8 +301,6 @@ type TenantAdminOp struct {
 	DisplayName    string
 	DisplayNameSet bool
 	OwnerEmail     string
-	Tier           string
-	TierSet        bool
 	// AuditRecordID is the daemon audit record of the admin request behind
 	// this op (gibson#583).
 	AuditRecordID string
@@ -336,8 +331,6 @@ func (c *DaemonClient) ListPendingTenantOps(ctx context.Context) ([]TenantAdminO
 					DisplayName:    op.GetDisplayName(),
 					DisplayNameSet: op.GetDisplayNameSet(),
 					OwnerEmail:     op.GetOwnerEmail(),
-					Tier:           op.GetTier(),
-					TierSet:        op.GetTierSet(),
 					AuditRecordID:  op.GetAuditRecordId(),
 				})
 			}

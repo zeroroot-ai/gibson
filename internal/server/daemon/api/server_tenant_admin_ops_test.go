@@ -90,7 +90,7 @@ func TestAdminProvisionTenant_MissingFields_InvalidArgument(t *testing.T) {
 	}
 }
 
-func TestAdminProvisionTenant_RecordsOp_DefaultsTier(t *testing.T) {
+func TestAdminProvisionTenant_RecordsOp(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -100,9 +100,9 @@ func TestAdminProvisionTenant_RecordsOp_DefaultsTier(t *testing.T) {
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
-	// An empty tier stays empty (gibson#1531). op_id is a generated UUID (any value).
+	// op_id is a generated UUID (any value).
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	resp, err := srv.AdminProvisionTenant(ctxWithTenantAdmin(context.Background(), "_system", "platform-owner-1"), &tenantv1.AdminProvisionTenantRequest{
@@ -142,7 +142,7 @@ func TestAdminProvisionTenant_PlainInviteErrorIsInternal(t *testing.T) {
 
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	_, err = srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
@@ -191,7 +191,7 @@ func TestAdminProvisionTenant_OwnerInviteFailureIsReturned(t *testing.T) {
 
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	_, err = srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
@@ -203,7 +203,7 @@ func TestAdminProvisionTenant_OwnerInviteFailureIsReturned(t *testing.T) {
 	// The retry: the op is already pending (0 rows), the owner is invited again.
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	inv.err = nil
 	resp, err := srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
@@ -235,11 +235,11 @@ func TestAdminProvisionTenant_IdempotentDedup(t *testing.T) {
 	expectEnsureAdminOpsTable(mock)
 	// WHERE NOT EXISTS matched an already-pending provision → 0 rows affected.
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "org", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	resp, err := srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
-		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test", Tier: "org",
+		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
 	})
 	if err != nil {
 		t.Fatalf("provision: %v", err)
@@ -276,13 +276,13 @@ func TestAdminUpdateTenant_RecordsOp(t *testing.T) {
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
-	// tier-only update: tier="org" tier_set=true, display_name="" display_name_set=false.
+	// display-name update: display_name="Acme Two" display_name_set=true.
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "", false, "org", true, sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Two", true, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	resp, err := srv.AdminUpdateTenant(adminOpsCtx(), &tenantv1.AdminUpdateTenantRequest{
-		TenantId: "acme", Tier: "org", TierSet: true,
+		TenantId: "acme", DisplayName: "Acme Two", DisplayNameSet: true,
 	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -354,10 +354,10 @@ func TestListPendingTenantOps_ReturnsRows(t *testing.T) {
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
-	rows := sqlmock.NewRows([]string{"op_id", "tenant_id", "op_type", "display_name", "display_name_set", "owner_email", "tier", "tier_set", "audit_record_id", "created_at"}).
-		AddRow("op-1", "acme", "provision", "Acme Inc", true, "o@acme.test", "team", true, "rec-1", time.Now()).
-		AddRow("op-2", "globex", "delete", "", false, "", "", false, "", time.Now())
-	mock.ExpectQuery("SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set,\\s+audit_record_id, created_at\\s+FROM tenant_admin_ops").
+	rows := sqlmock.NewRows([]string{"op_id", "tenant_id", "op_type", "display_name", "display_name_set", "owner_email", "audit_record_id", "created_at"}).
+		AddRow("op-1", "acme", "provision", "Acme Inc", true, "o@acme.test", "rec-1", time.Now()).
+		AddRow("op-2", "globex", "delete", "", false, "", "", time.Now())
+	mock.ExpectQuery("SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email,\\s+audit_record_id, created_at\\s+FROM tenant_admin_ops").
 		WillReturnRows(rows)
 
 	resp, err := srv.ListPendingTenantOps(context.Background(), &daemonoperatorv1.ListPendingTenantOpsRequest{})
@@ -368,7 +368,7 @@ func TestListPendingTenantOps_ReturnsRows(t *testing.T) {
 		t.Fatalf("expected 2 ops, got %d", len(resp.GetOps()))
 	}
 	first := resp.GetOps()[0]
-	if first.GetOpId() != "op-1" || first.GetOpType() != "provision" || first.GetTier() != "team" || !first.GetTierSet() ||
+	if first.GetOpId() != "op-1" || first.GetOpType() != "provision" || !first.GetDisplayNameSet() ||
 		first.GetAuditRecordId() != "rec-1" {
 		t.Errorf("unexpected first op: %+v", first)
 	}
@@ -497,7 +497,7 @@ func TestAdminTenantRequests_NoRecordNoOp(t *testing.T) {
 	_, perr := srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme", OwnerEmail: "o@acme.test",
 	})
-	_, uerr := srv.AdminUpdateTenant(adminOpsCtx(), &tenantv1.AdminUpdateTenantRequest{TenantId: "acme", Tier: "org", TierSet: true})
+	_, uerr := srv.AdminUpdateTenant(adminOpsCtx(), &tenantv1.AdminUpdateTenantRequest{TenantId: "acme", DisplayName: "Acme", DisplayNameSet: true})
 	_, derr := srv.AdminDeleteTenant(adminOpsCtx(), &tenantv1.AdminDeleteTenantRequest{TenantId: "acme"})
 	for name, err := range map[string]error{"provision": perr, "update": uerr, "delete": derr} {
 		if status.Code(err) != codes.Unavailable {
