@@ -40,7 +40,7 @@ func settleRescan(w *World) {
 // which is how every Finding reaches `fixed` in production: an agent moves it
 // after the scan that raised it.
 func raiseInto(w *World, id, missionID, status string) {
-	Reduce(w, FindingRaised{ID: id, MissionID: missionID})
+	Reduce(w, FindingRaised{ID: id, MissionID: missionID, CheckKind: "scan"})
 	if status != "" && status != FindingStatusOpen {
 		walk(w, id, status, "mr-"+id)
 	}
@@ -446,7 +446,7 @@ func TestRescan_SecondRunOfOneScanRecord_FixedFindingEndsVerified(t *testing.T) 
 	w := NewWorld("t1")
 	w.clock = func() time.Time { return testScanTime }
 	scanRun(w, "run-1")
-	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1"})
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1", CheckKind: "scan"})
 	Reduce(w, MissionDone{ID: "scan", RunID: "run-1", Outcome: MissionCompleted})
 	settleRescan(w)
 	fix(w, "f1")
@@ -467,12 +467,12 @@ func TestRescan_LateFindingOfRun1DoesNotCountForRun2(t *testing.T) {
 	w := NewWorld("t1")
 	w.clock = func() time.Time { return testScanTime }
 	scanRun(w, "run-1")
-	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1"})
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1", CheckKind: "scan"})
 	Reduce(w, MissionDone{ID: "scan", RunID: "run-1", Outcome: MissionFailed, Reason: "stopped by user"})
 	fix(w, "f1")
 
 	scanRun(w, "run-2")
-	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1"}) // late
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1", CheckKind: "scan"}) // late
 	Reduce(w, MissionDone{ID: "scan", RunID: "run-2", Outcome: MissionCompleted})
 	settleRescan(w)
 

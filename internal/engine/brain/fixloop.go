@@ -222,10 +222,11 @@ func forEachFindingOfMR(w *World, key string, fn func(*Finding)) {
 }
 
 // effectiveCheck is the check of a Finding for the order of strength. A Finding
-// with no recorded check counts as the weakest, so any check can verify it.
+// with no recorded check counts as the strongest, so only an attack predicate
+// can verify it (fail closed, review m1).
 func effectiveCheck(f FindingSnapshot) finding.Check {
 	if f.CheckKind == "" {
-		return finding.Check{Kind: finding.CheckTool}
+		return finding.Check{Kind: finding.CheckPredicate}
 	}
 	return finding.Check{Kind: finding.CheckKind(f.CheckKind)}
 }

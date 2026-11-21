@@ -112,11 +112,17 @@ func TestVerify_NoHeldHealthSignalNoVerified(t *testing.T) {
 	}
 }
 
-// A finding with no recorded check counts as the weakest, so a scan verifies it.
-func TestVerify_NoRecordedCheckIsTheWeakest(t *testing.T) {
+// A finding with no recorded check counts as the strongest (fail closed,
+// review m1): a scan does not verify it, and an attack predicate does.
+func TestVerify_NoRecordedCheckIsTheStrongest(t *testing.T) {
 	w := fixedFinding(t, "")
 	Reduce(w, HealthObserved{MergeRequest: "mr-1", Held: true, At: at(3)})
 	Reduce(w, CheckRerun{ID: "f1", CheckKind: "scan", Found: false, EvidenceAt: at(4)})
+	verify(w)
+	if got := status(t, w); got != FindingStatusFixed {
+		t.Fatalf("a scan verified a finding with no check: status = %q", got)
+	}
+	Reduce(w, CheckRerun{ID: "f1", CheckKind: "predicate", Found: false, EvidenceAt: at(5)})
 	verify(w)
 	if got := status(t, w); got != FindingStatusVerified {
 		t.Fatalf("status = %q, want verified", got)
