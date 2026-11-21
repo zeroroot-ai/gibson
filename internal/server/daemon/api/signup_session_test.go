@@ -59,8 +59,7 @@ func signupHarnessWithOwner(t *testing.T) *signupHarness {
 
 // TestSignup_StepDependsOnlyOnTheConfig pins that the external signup step
 // depends on the config of the install. With a step URL, every signup waits
-// for the step. With no step URL, no signup waits. The response carries no
-// plan id.
+// for the step. With no step URL, no signup waits.
 func TestSignup_StepDependsOnlyOnTheConfig(t *testing.T) {
 	t.Run("step configured", func(t *testing.T) {
 		h := signupHarnessWithOwner(t)
@@ -73,9 +72,6 @@ func TestSignup_StepDependsOnlyOnTheConfig(t *testing.T) {
 		}
 		if resp.GetStepUrl() != "https://step.example/start" || resp.GetStepToken() == "" {
 			t.Fatal("Signup with a step configured returned no step")
-		}
-		if resp.GetPlanId() != "" {
-			t.Errorf("plan_id = %q, want empty: the product has no plan", resp.GetPlanId())
 		}
 		row, ok := h.queue.row(resp.GetTenantId())
 		if !ok || row.status != "waiting_step" {

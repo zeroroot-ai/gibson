@@ -15,7 +15,7 @@ import (
 	connectionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
 )
 
-// The step completer reads the tenant, the plan and the owner address of a
+// The step completer reads the tenant and the owner address of a
 // known token (gibson#943).
 func TestDescribeSignupStep_KnownToken(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -36,8 +36,8 @@ func TestDescribeSignupStep_KnownToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DescribeSignupStep: %v", err)
 	}
-	if got.GetTenantId() != "acme" || got.GetPlanId() != "" || got.GetOwnerEmail() != "owner@acme.example" {
-		t.Fatalf("DescribeSignupStep = %+v, want acme, no plan id, owner@acme.example", got)
+	if got.GetTenantId() != "acme" || got.GetOwnerEmail() != "owner@acme.example" {
+		t.Fatalf("DescribeSignupStep = %+v, want acme, owner@acme.example", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

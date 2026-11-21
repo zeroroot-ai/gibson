@@ -136,8 +136,7 @@ func completeSignupStep(ctx context.Context, db *sql.DB, token string, done bool
 
 // describeSignupStep reads the tenant and the owner address of the signup
 // that the token names. An unknown or expired token is
-// errSignupStepNotFound. The product has no plan, so plan_id stays empty
-// (gibson#1531).
+// errSignupStepNotFound.
 func describeSignupStep(ctx context.Context, db *sql.DB, token string, now time.Time) (*connectionv1.DescribeSignupStepResponse, error) {
 	var d connectionv1.DescribeSignupStepResponse
 	err := db.QueryRowContext(ctx, `

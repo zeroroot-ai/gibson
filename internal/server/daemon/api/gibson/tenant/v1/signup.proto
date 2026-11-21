@@ -354,9 +354,9 @@ message SignupResponse {
   // created. Same tag and same meaning it has always had.
   string owner_user_id = 3;
 
-  // plan_id is always empty. The product has no plan (gibson#1531). The
-  // field stays while the contract of the external signup step keeps it.
-  string plan_id = 4;
+  // Field 4 (plan_id) was removed. The product has no plan (gibson#1531).
+  reserved 4;
+  reserved "plan_id";
 
   // step_url is where the browser goes for the external signup step. Empty
   // when no step is configured: the tenant does not wait.
