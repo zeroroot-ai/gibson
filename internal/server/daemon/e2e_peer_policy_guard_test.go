@@ -80,55 +80,128 @@ func testNamesOf(pattern string) []string {
 	return tests
 }
 
-// e2eJobsOf reads the jobs of one workflow text. A job is one call of
-// run-e2e-job.sh, or one Job manifest with a -test.run argument.
-func e2eJobsOf(workflow, text string) []e2eJob {
-	lines := strings.Split(text, "\n")
-	var jobs []e2eJob
-	for i, line := range lines {
-		if m := runJobRe.FindStringSubmatch(line); m != nil {
-			// The command may continue over lines with a backslash, so the
-			// identity variable can sit on an earlier line of the same step.
-			identity := e2eAsRunner
-			for j := i; j >= 0; j-- {
-				if strings.Contains(lines[j], "E2E_RUNNER_COMPONENT=e2e-member") {
-					identity = e2eAsMember
-				}
-				if stepNameR.MatchString(lines[j]) {
-					break
-				}
-			}
-			jobs = append(jobs, e2eJob{workflow: workflow, tests: testNamesOf(m[1]), identity: identity})
-			continue
-		}
-		if m := manifestRunRe.FindStringSubmatch(line); m != nil {
-			// The identity is the service account of the pod of the same
-			// manifest. It sits above the args, in the same pod spec.
-			identity := e2eAsRunner
-			for j := i; j >= 0; j-- {
-				line := strings.TrimSpace(lines[j])
-				if strings.HasPrefix(line, "serviceAccountName:") {
-					if strings.Contains(line, "e2e-member") {
-						identity = e2eAsMember
-					}
-					break
-				}
-				// The start of the manifest: the pod spec is below it.
-				if strings.HasPrefix(line, "kind:") || line == "---" {
-					break
-				}
-			}
-			jobs = append(jobs, e2eJob{workflow: workflow, tests: testNamesOf(m[1]), identity: identity})
-		}
-	}
-	return jobs
+// e2eLaunches is what the guard finds in one workflow. Each launch of a test is
+// one call of run-e2e-job.sh or one -test.run argument. A launch that the guard
+// reads is a job. A launch that it cannot read is unread, and the guard fails
+// on it. A launch in a step that sets E2E_RUNNER_BINARY runs another test
+// binary, so it is exempt.
+type e2eLaunches struct {
+	jobs   []e2eJob
+	unread []string
+	exempt int
 }
 
-// hasSecretsBinary reports whether a workflow runs another test binary through
-// run-e2e-job.sh (E2E_RUNNER_BINARY). The cluster workflow does so for the
-// secrets suite, which this guard does not read.
-func hasSecretsBinary(text string) bool {
-	return strings.Contains(text, "E2E_RUNNER_BINARY")
+var (
+	// A call of the script, and a test argument, wherever they sit.
+	runCallRe = regexp.MustCompile(`run-e2e-job\.sh\s`)
+	testArgRe = regexp.MustCompile(`-test\.run`)
+)
+
+// logicalLine is a line of the workflow after the lines that a backslash
+// continues are joined. idx is the index of its first physical line.
+type logicalLine struct {
+	idx  int
+	text string
+}
+
+// logicalLines drops the comment lines and joins each continued line.
+func logicalLines(lines []string) []logicalLine {
+	var out []logicalLine
+	for i := 0; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "#") {
+			continue
+		}
+		start, text := i, lines[i]
+		for strings.HasSuffix(strings.TrimRight(text, " \t"), "\\") && i+1 < len(lines) {
+			i++
+			text = strings.TrimSuffix(strings.TrimRight(text, " \t"), "\\") + " " + strings.TrimSpace(lines[i])
+		}
+		out = append(out, logicalLine{idx: start, text: text})
+	}
+	return out
+}
+
+// stepBounds returns, for each line, the index of the first line of its step.
+// A step is a list item at the indent of the first list item that holds a name
+// or a uses key, so a container named in a manifest does not start a step.
+func stepBounds(lines []string) []int {
+	stepIndent := -1
+	for _, l := range lines {
+		if stepNameR.MatchString(l) {
+			if ind := len(l) - len(strings.TrimLeft(l, " ")); stepIndent < 0 || ind < stepIndent {
+				stepIndent = ind
+			}
+		}
+	}
+	bounds := make([]int, len(lines))
+	cur := 0
+	for i, l := range lines {
+		if stepNameR.MatchString(l) && len(l)-len(strings.TrimLeft(l, " ")) == stepIndent {
+			cur = i
+		}
+		bounds[i] = cur
+	}
+	return bounds
+}
+
+// e2eLaunchesOf reads the launches of one workflow text.
+func e2eLaunchesOf(workflow, text string) e2eLaunches {
+	lines := strings.Split(text, "\n")
+	bounds := stepBounds(lines)
+	var out e2eLaunches
+	for _, ll := range logicalLines(lines) {
+		calls := len(runCallRe.FindAllString(ll.text, -1))
+		args := len(testArgRe.FindAllString(ll.text, -1))
+		if calls == 0 && args == 0 {
+			continue
+		}
+		stepText := strings.Join(lines[bounds[ll.idx]:ll.idx+1], "\n")
+		if strings.Contains(stepText, "E2E_RUNNER_BINARY") {
+			out.exempt += calls + args
+			continue
+		}
+		runs := runJobRe.FindAllStringSubmatch(ll.text, -1)
+		manifests := manifestRunRe.FindAllStringSubmatch(ll.text, -1)
+		// The identity variable can sit on any earlier line of the step.
+		identity := e2eAsRunner
+		if strings.Contains(stepText, "E2E_RUNNER_COMPONENT=e2e-member") {
+			identity = e2eAsMember
+		}
+		for _, m := range runs {
+			out.jobs = append(out.jobs, e2eJob{workflow: workflow, tests: testNamesOf(m[1]), identity: identity})
+		}
+		for _, m := range manifests {
+			out.jobs = append(out.jobs, e2eJob{workflow: workflow, tests: testNamesOf(m[1]), identity: manifestIdentity(lines, ll.idx)})
+		}
+		if n := calls - len(runs); n > 0 {
+			out.unread = append(out.unread, fmt.Sprintf("%s:%d: %d call(s) of run-e2e-job.sh with no test name the guard reads: %s",
+				workflow, ll.idx+1, n, strings.TrimSpace(ll.text)))
+		}
+		if n := args - len(manifests); n > 0 {
+			out.unread = append(out.unread, fmt.Sprintf("%s:%d: %d -test.run argument(s) with no test name the guard reads: %s",
+				workflow, ll.idx+1, n, strings.TrimSpace(ll.text)))
+		}
+	}
+	return out
+}
+
+// manifestIdentity is the service account of the pod of the Job manifest that
+// holds the line. It sits above the args, in the same pod spec.
+func manifestIdentity(lines []string, at int) e2eIdentity {
+	for j := at; j >= 0; j-- {
+		line := strings.TrimSpace(lines[j])
+		if strings.HasPrefix(line, "serviceAccountName:") {
+			if strings.Contains(line, "e2e-member") {
+				return e2eAsMember
+			}
+			return e2eAsRunner
+		}
+		// The start of the manifest: the pod spec is below it.
+		if strings.HasPrefix(line, "kind:") || line == "---" {
+			break
+		}
+	}
+	return e2eAsRunner
 }
 
 // buildsSuite reports whether a workflow builds the e2e test binary. A comment
@@ -436,13 +509,18 @@ func TestE2EPeerPolicy_AllowsEachCallOfTheExitTests(t *testing.T) {
 	for _, w := range workflows {
 		raw, err := os.ReadFile(w)
 		require.NoError(t, err)
-		found := e2eJobsOf(filepath.Base(w), string(raw))
-		// A workflow that builds the suite and starts no job that the guard
-		// reads has changed how it starts its tests. It must not drop out.
-		if buildsSuite(string(raw)) && !hasSecretsBinary(string(raw)) {
-			require.NotEmpty(t, found, "%s builds the e2e test binary and the guard finds no job in it", filepath.Base(w))
+		found := e2eLaunchesOf(filepath.Base(w), string(raw))
+		// Each launch must be one that the guard reads, or one of another test
+		// binary. A launch in a form that the guard misses fails here, and a
+		// second launch cannot hide behind a first one.
+		require.Empty(t, found.unread, "%s holds a launch of a test that the guard cannot read", filepath.Base(w))
+		// A workflow that builds the suite and starts no test has changed how
+		// it starts them. It must not drop out.
+		if buildsSuite(string(raw)) {
+			require.NotZero(t, len(found.jobs)+found.exempt,
+				"%s builds the e2e test binary and the guard finds no launch in it", filepath.Base(w))
 		}
-		jobs = append(jobs, found...)
+		jobs = append(jobs, found.jobs...)
 	}
 	require.NotEmpty(t, jobs, "no exit workflow calls run-e2e-job.sh, so the guard would check nothing")
 
@@ -565,7 +643,7 @@ func TestE2EJobsOf_ReadsTheIdentityOfTheStep(t *testing.T) {
           E2E_RUNNER_COMPONENT=e2e-member E2E_RUNNER_ENV_FILE="x" \
             gibson/.github/scripts/run-e2e-job.sh job-b 'TestC$' 10m
 `
-	jobs := e2eJobsOf("w.yml", text)
+	jobs := e2eLaunchesOf("w.yml", text).jobs
 	require.Len(t, jobs, 2)
 	assert.Equal(t, []string{"TestA", "TestB"}, jobs[0].tests)
 	assert.Equal(t, e2eAsRunner, jobs[0].identity)
@@ -598,7 +676,7 @@ func TestE2EJobsOf_ReadsAJobManifest(t *testing.T) {
                     args: ["-test.run", "TestMember$|TestOther", "-test.v"]
           EOF
 `
-	jobs := e2eJobsOf("w.yml", text)
+	jobs := e2eLaunchesOf("w.yml", text).jobs
 	require.Len(t, jobs, 2)
 	assert.Equal(t, []string{"TestBank"}, jobs[0].tests)
 	assert.Equal(t, e2eAsRunner, jobs[0].identity)
@@ -652,4 +730,22 @@ func twiceMore(ctx context.Context) {
 	assert.Contains(t, calls, "/gibson.tenant.v1.MembershipService/ListMembers")
 	assert.Contains(t, calls, "/gibson.component.v1.ComponentService/Heartbeat",
 		"the second client with the name c is not lost")
+}
+
+// A second launch cannot hide behind a first one. The fixture holds one launch
+// that the guard reads and one with its pattern in a variable, and one launch
+// of another binary, which only an E2E_RUNNER_BINARY step may hold.
+func TestE2ELaunchesOf_CountsEachLaunch(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(gibsonRoot(t), "internal", "server", "daemon", "testdata", "e2e_guard", "hidden_launch.yml"))
+	require.NoError(t, err)
+
+	got := e2eLaunchesOf("hidden_launch.yml", string(raw))
+
+	require.Len(t, got.jobs, 2, "the launch and the continued launch are read")
+	assert.Equal(t, []string{"TestVisible"}, got.jobs[0].tests)
+	assert.Equal(t, []string{"TestContinued", "TestAlso"}, got.jobs[1].tests)
+	require.Len(t, got.unread, 2, "the launch with a variable and the manifest with a variable are unread")
+	assert.Contains(t, got.unread[0], "run-e2e-job.sh")
+	assert.Contains(t, got.unread[1], "-test.run")
+	assert.Equal(t, 1, got.exempt, "only the step that sets E2E_RUNNER_BINARY is exempt")
 }
