@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.169.0](https://github.com/zeroroot-ai/gibson/compare/v0.168.0...v0.169.0) (2026-11-21)
+
+
+### Features
+
+* build the blue team loop (integration of five epics) ([#1556](https://github.com/zeroroot-ai/gibson/issues/1556)) ([e3be058](https://github.com/zeroroot-ai/gibson/commit/e3be058712a1d0c4112c3b10e534106e039f6038))
+
+
+### Bug Fixes
+
+* **agent-skills:** retry the shared agent skill gate seed until it succeeds ([#1587](https://github.com/zeroroot-ai/gibson/issues/1587)) ([adaa555](https://github.com/zeroroot-ai/gibson/commit/adaa555ba67a223035c4454e62acc7f31fc72ee5))
+* **rework:** allow the e2e runner to call the shared agent skill rpcs ([#1590](https://github.com/zeroroot-ai/gibson/issues/1590)) ([d2f2bb6](https://github.com/zeroroot-ai/gibson/commit/d2f2bb6e4c4ab12ad48dce3522ea282fb0957538))
+
 ## [0.168.0](https://github.com/zeroroot-ai/gibson/compare/v0.167.0...v0.168.0) (2026-11-21)
 
 
