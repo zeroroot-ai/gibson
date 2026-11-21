@@ -498,12 +498,12 @@ func TestRescan_LateFindingOfRun1IsKeptWithNoScanProvenance(t *testing.T) {
 	}
 }
 
-// TestRescan_ASecurityTestDoesNotVerifyBySilence: a security-test or a
-// closed-loop run that ends without a proof for a fixed finding is no rerun of
+// TestRescan_ASecurityTestDoesNotVerifyBySilence: a mission that runs an attack
+// predicate and ends without a proof for a fixed finding is no rerun of
 // its check. The finding stays fixed (ADR-0178). Only the settlement of the
 // attack predicate can verify it.
 func TestRescan_ASecurityTestDoesNotVerifyBySilence(t *testing.T) {
-	for _, name := range []string{"security-test", "closed-loop"} {
+	for _, name := range []string{"attack-test", "red-team-run"} {
 		t.Run(name, func(t *testing.T) {
 			w := NewWorld("t1")
 			w.clock = func() time.Time { return testScanTime }
