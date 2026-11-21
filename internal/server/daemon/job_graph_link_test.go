@@ -576,3 +576,55 @@ func TestMergeRequestRefusal_NamesTheReasonOfTheHost(t *testing.T) {
 		t.Fatalf("refusal = %q, want the reason of the host", got)
 	}
 }
+
+// Run reads the pending links until the context ends. A pending link whose
+// claims ended is dropped. A daemon with no Git host reader refuses a close.
+func TestJobGraphLink_RunStopsWithTheContextAndASettledLinkIsDropped(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	l := &jobGraphLink{logger: testObsLogger().Slog()}
+	done := make(chan struct{})
+	go func() { l.Run(ctx); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not stop with its context")
+	}
+
+	// The claims of a pending link ended: the retry drops it and reads nothing.
+	mrs := jobMR()
+	mrs.failures = 1
+	held := true
+	l = &jobGraphLink{
+		submit: func(string, brain.Event) {},
+		findings: func(string) map[string]findingRef {
+			if held {
+				return heldWorld(map[string]string{"f-1": "s"})("")
+			}
+			return map[string]findingRef{}
+		},
+		mergeRequests: mrs, logger: testObsLogger().Slog(), // no clock: the real one is used
+	}
+	l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
+	held = false
+	l.RetryPending(context.Background())
+	if len(mrs.calls) != 1 || len(l.pending) != 0 {
+		t.Fatalf("reads = %d, pending = %d, want 1 read and no pending link", len(mrs.calls), len(l.pending))
+	}
+}
+
+func TestJobGraphLink_NoGitHostReaderRefusesTheClose(t *testing.T) {
+	var evs []brain.Event
+	l := &jobGraphLink{
+		submit:   func(_ string, ev brain.Event) { evs = append(evs, ev) },
+		findings: heldWorld(map[string]string{"f-1": "s"}), now: func() time.Time { return testNow },
+		logger: testObsLogger().Slog(),
+	}
+	l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
+	if len(evs) != 2 {
+		t.Fatalf("events = %+v, want the refusal and the release", evs)
+	}
+	if _, ok := evs[0].(brain.FixLinkRefused); !ok {
+		t.Fatalf("event 0 = %+v, want the refusal", evs[0])
+	}
+}

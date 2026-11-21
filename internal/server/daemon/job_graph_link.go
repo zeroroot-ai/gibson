@@ -121,7 +121,7 @@ func (l *jobGraphLink) JobClosed(ctx context.Context, c jobnode.ClosedJob) {
 	if len(held) > 0 {
 		reason, readErr := l.vet(ctx, c, mrKey, held, known)
 		if readErr != nil {
-			l.markPending(c, mrKey, claim, held, readErr, now)
+			l.markPending(c, mrKey, held, readErr, now)
 			return
 		}
 		if reason != "" {
@@ -156,7 +156,7 @@ func (l *jobGraphLink) link(c jobnode.ClosedJob, known map[string]findingRef, he
 // markPending keeps the close for RetryPending and records the wait on each
 // finding that the job holds. The claims stay, so no second job takes the
 // findings while the link waits.
-func (l *jobGraphLink) markPending(c jobnode.ClosedJob, mrKey, claim string, held []string, readErr error, now time.Time) {
+func (l *jobGraphLink) markPending(c jobnode.ClosedJob, mrKey string, held []string, readErr error, now time.Time) {
 	reason := "the daemon could not read the merge request on the Git host: " + readErr.Error()
 	l.logger.Warn("the read of the merge request of a fix job failed, so the link is pending",
 		"job_id", c.JobID, "merge_request", mrKey, "error", readErr)
@@ -281,7 +281,7 @@ func (l *jobGraphLink) vet(
 	}
 	fact, err := l.mergeRequests.MergeRequest(ctx, c.TenantID, c.MissionRunID, mrKey)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read merge request %s: %w", mrKey, err)
 	}
 	var claimedAt time.Time
 	for _, id := range held {
