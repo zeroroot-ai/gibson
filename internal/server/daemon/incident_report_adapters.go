@@ -36,7 +36,7 @@ func (d *daemonImpl) registerIncidentReport(ctx context.Context, srv *grpc.Serve
 	if err != nil {
 		return fmt.Errorf("daemon: IncidentReportService: %w", err)
 	}
-	tenantv1.RegisterIncidentReportServiceServer(srv, api.NewIncidentReportService(reader))
+	tenantv1.RegisterIncidentReportServiceServer(srv, api.NewIncidentReportService(reader, d.logger.WithComponent("incident-report").Slog()))
 	d.logger.Info(ctx, "IncidentReportService registered (ADR-0180)")
 	return nil
 }

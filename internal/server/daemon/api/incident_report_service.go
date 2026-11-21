@@ -23,11 +23,16 @@ type IncidentReportService struct {
 	tenantv1.UnimplementedIncidentReportServiceServer
 
 	reader *incidentreport.Reader
+	logger *slog.Logger
 }
 
-// NewIncidentReportService returns the service over reader.
-func NewIncidentReportService(reader *incidentreport.Reader) *IncidentReportService {
-	return &IncidentReportService{reader: reader}
+// NewIncidentReportService returns the service over reader. A nil logger
+// means slog.Default.
+func NewIncidentReportService(reader *incidentreport.Reader, logger *slog.Logger) *IncidentReportService {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &IncidentReportService{reader: reader, logger: logger}
 }
 
 // GetIncidentReport returns the report of one incident of the tenant of the caller.
@@ -36,12 +41,12 @@ func (s *IncidentReportService) GetIncidentReport(
 ) (*tenantv1.GetIncidentReportResponse, error) {
 	rep, err := s.reader.Report(ctx, req.GetIncidentKey())
 	if err != nil {
-		return nil, incidentReportStatus(err)
+		return nil, s.incidentReportStatus(ctx, err)
 	}
 	return incidentReportResponse(rep), nil
 }
 
-func incidentReportStatus(err error) error {
+func (s *IncidentReportService) incidentReportStatus(ctx context.Context, err error) error {
 	switch {
 	case errors.Is(err, incidentreport.ErrInvalidQuery):
 		return status_grpc.Error(codes.InvalidArgument, "GetIncidentReport: the incident key is empty or too long")
@@ -52,7 +57,7 @@ func incidentReportStatus(err error) error {
 	default:
 		// The cause stays in the daemon log. The caller gets a fixed text, so
 		// no internal detail leaves the daemon (review m20).
-		slog.Error("incident report read failed", "error", err)
+		s.logger.ErrorContext(ctx, "incident report read failed", "error", err)
 		return status_grpc.Error(codes.Unavailable, "GetIncidentReport: the report cannot be read now")
 	}
 }

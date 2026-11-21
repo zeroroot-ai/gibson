@@ -4,8 +4,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +66,8 @@ func TestIncidentReportResponse_MapsEachLineWithItsFrame(t *testing.T) {
 }
 
 func TestIncidentReportStatus_MapsEachErrorToACode(t *testing.T) {
+	var logged bytes.Buffer
+	svc := NewIncidentReportService(nil, slog.New(slog.NewTextHandler(&logged, nil)))
 	for _, tc := range []struct {
 		err  error
 		want codes.Code
@@ -73,13 +77,17 @@ func TestIncidentReportStatus_MapsEachErrorToACode(t *testing.T) {
 		{incidentreport.ErrNoTenant, codes.PermissionDenied},
 		{errors.New("graph down"), codes.Unavailable},
 	} {
-		if got := status_grpc.Code(incidentReportStatus(tc.err)); got != tc.want {
+		if got := status_grpc.Code(svc.incidentReportStatus(context.Background(), tc.err)); got != tc.want {
 			t.Errorf("%v -> %v, want %v", tc.err, got, tc.want)
 		}
 		// No internal text reaches the caller (review m20).
-		if msg := status_grpc.Convert(incidentReportStatus(tc.err)).Message(); strings.Contains(msg, "graph down") {
+		if msg := status_grpc.Convert(svc.incidentReportStatus(context.Background(), tc.err)).Message(); strings.Contains(msg, "graph down") {
 			t.Errorf("the message carries the internal error: %q", msg)
 		}
+	}
+	// The cause goes to the logger of the service (review r7).
+	if !strings.Contains(logged.String(), "graph down") {
+		t.Errorf("the service logger did not get the cause: %q", logged.String())
 	}
 }
 
@@ -122,7 +130,7 @@ func irService(t *testing.T, rows map[string][]map[string]any) *IncidentReportSe
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewIncidentReportService(reader)
+	return NewIncidentReportService(reader, nil)
 }
 
 func irContext(t *testing.T) context.Context {
