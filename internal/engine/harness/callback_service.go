@@ -256,6 +256,10 @@ type HarnessCallbackService struct {
 	// the load is not recorded on the Timeline.
 	skillLoadSink SkillLoadSink
 
+	// readMarkers backs WriteReadMarker and LastReadMarker (gibson#1569).
+	// nil means this daemon keeps no read markers.
+	readMarkers ReadMarkerStore
+
 	// agentSkills returns the Agent Skill store. It is nil when no store is wired.
 	agentSkills AgentSkillStoreSource
 

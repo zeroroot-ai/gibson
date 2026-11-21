@@ -275,6 +275,12 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	// limited, handle-named slice. It is part of the in-mission agent surface.
 	harnesspb.HarnessCallbackService_WorldView_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 
+	// Read markers (gibson#1569). An agent that reads a Connector in a loop
+	// records how far it read. Both calls key the marker by the tenant and the
+	// authenticated identity of the caller, never by a field of ContextInfo.
+	harnesspb.HarnessCallbackService_WriteReadMarker_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
+	harnesspb.HarnessCallbackService_LastReadMarker_FullMethodName:  {agentSurface: true, reason: reasonAgentCallbackSurface},
+
 	// Knowledge reads (sdk#496/#498, zerocool-plugins#33). The in-mission agent
 	// surface for reading what earlier work established: the tenant knowledge
 	// graph, previously submitted findings, and mission run history.

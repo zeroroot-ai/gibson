@@ -161,6 +161,7 @@ func init() {
 
 	// skill_load.go
 	registerEvent("agent_skill.loaded", func() Event { return &AgentSkillLoaded{} })
+	registerEvent("read_marker.written", func() Event { return &ReadMarkerWritten{} })
 
 	// outside_call.go
 	registerEvent("outside_agent.called", func() Event { return &OutsideAgentCalled{} })
@@ -307,6 +308,8 @@ func dereferenceEvent(ev Event) Event {
 	case *AgentToolCallObserved:
 		return *v
 	case *AgentSkillLoaded:
+		return *v
+	case *ReadMarkerWritten:
 		return *v
 	case *OutsideAgentCalled:
 		return *v
