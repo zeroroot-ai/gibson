@@ -48,18 +48,13 @@ def as_list(x):
     return x if isinstance(x, list) else [x]
 
 
-def main():
-    work, out = sys.argv[1], sys.argv[2]
-    if os.path.exists(work) and os.listdir(work):
-        raise SystemExit("work dir must be empty")
-    os.makedirs(os.path.join(work, "mappings"), exist_ok=True)
+def distill(onto):
+    """Return the countermeasures of the graph, with their NIST controls.
 
-    raw = get(ONTOLOGY_URL)
-    with open(os.path.join(work, "d3fend.json"), "wb") as f:
-        f.write(raw)
-    onto = json.loads(raw)["@graph"]
+    A D3 class with no tactic is no countermeasure, and a NIST control that
+    maps to one is skipped.
+    """
     by = {n["@id"]: n for n in onto}
-    meta = next(n for n in onto if n.get("@type") == "owl:Ontology")
 
     # Defensive techniques: the classes that carry a D3-xxx id.
     techs = {i: n for i, n in by.items() if str(n.get("d3f:d3fend-id", "")).startswith("D3-")}
@@ -117,6 +112,22 @@ def main():
                 if label not in cm["nist_controls"]:
                     cm["nist_controls"].append(label)
 
+    return countermeasures
+
+
+def main():
+    work, out = sys.argv[1], sys.argv[2]
+    if os.path.exists(work) and os.listdir(work):
+        raise SystemExit("work dir must be empty")
+    os.makedirs(os.path.join(work, "mappings"), exist_ok=True)
+
+    raw = get(ONTOLOGY_URL)
+    with open(os.path.join(work, "d3fend.json"), "wb") as f:
+        f.write(raw)
+    onto = json.loads(raw)["@graph"]
+    meta = next(n for n in onto if n.get("@type") == "owl:Ontology")
+    countermeasures = distill(onto)
+
     # ATT&CK techniques: the mapping of each one comes from the D3FEND API.
     attack = sorted(
         n["d3f:attack-id"] for n in onto
@@ -162,4 +173,5 @@ def main():
     print("release", extract["release"], "countermeasures", len(cms), "attack", fetched, "absent", len(absent))
 
 
-main()
+if __name__ == "__main__":
+    main()

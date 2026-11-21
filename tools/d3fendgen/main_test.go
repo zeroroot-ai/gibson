@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -186,19 +187,45 @@ func TestRun_ChecksWritesAndRefuses(t *testing.T) {
 	}
 }
 
-// fetch.py runs on Linux, where env takes one argument unless -S splits it,
-// and a NIST control that maps to a D3 class with no tactic is skipped, not a
-// KeyError (review m22).
-func TestFetchScript_RunsOnLinuxAndSkipsAClassWithNoTactic(t *testing.T) {
+// fetch.py runs on Linux, where env takes one argument unless -S splits it.
+// Its distill step keeps only the D3 classes with a tactic, and a NIST
+// control that maps to a class with no tactic is skipped, not a KeyError. The
+// test runs that step with python3 -I on a small graph (review m22, r6).
+func TestFetchScript_SkipsAClassWithNoTactic(t *testing.T) {
 	raw, err := os.ReadFile("fetch.py")
 	if err != nil {
 		t.Fatalf("read fetch.py: %v", err)
 	}
-	text := string(raw)
-	if first, _, _ := strings.Cut(text, "\n"); first != "#!/usr/bin/env -S python3 -I" {
+	if first, _, _ := strings.Cut(string(raw), "\n"); first != "#!/usr/bin/env -S python3 -I" {
 		t.Fatalf("shebang = %q", first)
 	}
-	if strings.Contains(text, `cm = countermeasures[t["d3f:d3fend-id"]]`) || !strings.Contains(text, "countermeasures.get(") {
-		t.Fatal("a NIST mapping to a class with no tactic must not index countermeasures directly")
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatalf("python3 is required to test fetch.py: %v", err)
+	}
+	script := `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("fetch", sys.argv[1])
+fetch = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fetch)
+graph = [
+    {"@id": "d3f:Isolate", "rdfs:label": "Isolate"},
+    {"@id": "_:r1", "@type": "owl:Restriction", "owl:onProperty": {"@id": "d3f:enables"},
+     "owl:someValuesFrom": {"@id": "d3f:Isolate"}},
+    {"@id": "d3f:NetIso", "d3f:d3fend-id": "D3-NI", "rdfs:label": "Network Isolation",
+     "rdfs:subClassOf": [{"@id": "_:r1"}]},
+    {"@id": "d3f:Model", "d3f:d3fend-id": "D3-ARMA", "rdfs:label": "A model"},
+    {"@id": "d3f:NIST_SP_800-53_R5_SC-7", "d3f:control-name": "Boundary Protection", "rdfs:label": "SC-7",
+     "d3f:broader": [{"@id": "d3f:NetIso"}, {"@id": "d3f:Model"}]},
+]
+print(json.dumps(fetch.distill(graph), sort_keys=True))
+`
+	out, err := exec.Command(python, "-I", "-c", script, "fetch.py").CombinedOutput() //nolint:gosec // G204: a fixed script and a file of this directory
+	if err != nil {
+		t.Fatalf("python3: %v\n%s", err, out)
+	}
+	text := string(out)
+	if !strings.Contains(text, `"D3-NI"`) || strings.Contains(text, `"D3-ARMA"`) || !strings.Contains(text, `"SC-7"`) {
+		t.Fatalf("distill = %s, want D3-NI with SC-7 and no D3-ARMA", text)
 	}
 }
