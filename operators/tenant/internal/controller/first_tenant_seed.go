@@ -49,7 +49,6 @@ type FirstTenantSeedRunnable struct {
 	TenantID    string
 	DisplayName string
 	OwnerEmail  string
-	Tier        string
 	// Interval between retries until the first successful enqueue. Zero uses
 	// defaultFirstTenantSeedInterval.
 	Interval time.Duration
@@ -92,7 +91,6 @@ func FirstTenantSeedFromEnv(getenv func(string) string, daemon TenantProvisionin
 		TenantID:    tenantID,
 		DisplayName: getenv("FIRST_TENANT_DISPLAY_NAME"),
 		OwnerEmail:  ownerEmail,
-		Tier:        getenv("FIRST_TENANT_TIER"),
 	}, true, nil
 }
 
@@ -162,7 +160,7 @@ func (r *FirstTenantSeedRunnable) seedOnce(ctx context.Context, logger logr.Logg
 		TenantID:   r.TenantID,
 		TargetType: "tenant",
 		TargetID:   r.TenantID,
-		Fields:     map[string]string{"owner_email": r.OwnerEmail, "tier": r.Tier},
+		Fields:     map[string]string{"owner_email": r.OwnerEmail},
 	}
 	var alreadyExisted bool
 	err := r.Audit.Change(ctx, ev, func() error {
@@ -171,7 +169,6 @@ func (r *FirstTenantSeedRunnable) seedOnce(ctx context.Context, logger logr.Logg
 			TenantID:      r.TenantID,
 			WorkspaceName: r.DisplayName,
 			OwnerEmail:    r.OwnerEmail,
-			Tier:          r.Tier,
 		})
 		if eerr != nil {
 			return fmt.Errorf("enqueue the first tenant %s: %w", r.TenantID, eerr)
@@ -187,7 +184,7 @@ func (r *FirstTenantSeedRunnable) seedOnce(ctx context.Context, logger logr.Logg
 		logger.Info("first tenant already seeded; nothing to do", "tenant_id", r.TenantID)
 	} else {
 		logger.Info("first tenant enqueued for provisioning",
-			"tenant_id", r.TenantID, "owner_email", r.OwnerEmail, "tier", r.Tier)
+			"tenant_id", r.TenantID, "owner_email", r.OwnerEmail)
 	}
 	return true
 }

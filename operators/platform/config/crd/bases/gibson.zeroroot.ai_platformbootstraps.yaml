@@ -250,37 +250,6 @@ spec:
                   - secretRef
                   type: object
                 type: array
-              planSync:
-                description: |-
-                  PlanSync is ignored. The operator has no plan-sync step (gibson#1531).
-                  The field stays while the chart still renders it. Step 2 of
-                  gibson#1531 deletes it.
-                properties:
-                  plansConfigMapRef:
-                    description: |-
-                      PlansConfigMapRef points at the ConfigMap + key holding the gibson
-                      plans data. The reconciler hashes the content and re-syncs only
-                      when the hash changes.
-                    properties:
-                      key:
-                        description: Key is the entry within the ConfigMap's data
-                          map.
-                        minLength: 1
-                        type: string
-                      name:
-                        description: Name is the ConfigMap name.
-                        minLength: 1
-                        type: string
-                      namespace:
-                        description: Namespace overrides the default namespace.
-                        type: string
-                    required:
-                    - key
-                    - name
-                    type: object
-                required:
-                - plansConfigMapRef
-                type: object
               platformOwner:
                 description: |-
                   PlatformOwner declares the ONE human Zitadel administrator this install

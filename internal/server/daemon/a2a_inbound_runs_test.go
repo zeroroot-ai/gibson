@@ -836,14 +836,14 @@ func TestInboundRuns_TheRowNamesTheMissionBeforeItStarts(t *testing.T) {
 	assert.Equal(t, id, pubs.reservedMission)
 }
 
-// A message over the limit gets a rejected Task, and no mission record is written.
-func TestInboundRuns_ARefusedPlaceIsRejectedAndNoMissionStarts(t *testing.T) {
+// A message to a publication that is gone gets a rejected Task, and no mission
+// record is written.
+func TestInboundRuns_ARefusedTaskIsRejectedAndNoMissionStarts(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
 		want string
 	}{
-		{"the publication has its most active missions", inboundmissionstore.ErrLimit, "most active missions"},
 		{"the publication is gone", inboundmissionstore.ErrNotFound, a2aserver.ReasonAgentNotAvailable},
 	}
 	for _, tt := range tests {
@@ -863,10 +863,10 @@ func TestInboundRuns_ARefusedPlaceIsRejectedAndNoMissionStarts(t *testing.T) {
 	r := newInboundRuns(&recordingStarter{})
 	r.published.(*fakePublished).reserveErr = errors.New("db down")
 	_, err := startInbound(r, "recon", inboundMessage(a2a.NewTextPart("x")))
-	require.ErrorContains(t, err, "reserve a place")
+	require.ErrorContains(t, err, "record the task")
 }
 
-func TestInboundRuns_AFailedStartGivesThePlaceBack(t *testing.T) {
+func TestInboundRuns_AFailedStartDeletesTheTaskRow(t *testing.T) {
 	starter := &recordingStarter{err: errors.New("boom")}
 	r := newInboundRuns(starter)
 	pubs := r.published.(*fakePublished)
@@ -880,7 +880,7 @@ func TestInboundRuns_AFailedStartGivesThePlaceBack(t *testing.T) {
 }
 
 // A mission record with an ID other than the one of the row has no row. It ends at
-// once, and the place goes back.
+// once, and the task row is deleted.
 func TestInboundRuns_AMissionWithAnotherIDThanItsRowEndsAtOnce(t *testing.T) {
 	starter := &recordingStarter{otherID: "m-other"}
 	r := newInboundRuns(starter)
@@ -896,32 +896,6 @@ func TestInboundRuns_AMissionWithAnotherIDThanItsRowEndsAtOnce(t *testing.T) {
 	assert.Nil(t, task)
 	assert.Equal(t, []string{"m-other"}, stopped)
 	assert.Contains(t, r.published.(*fakePublished).events, "release:slot-1")
-}
-
-func TestInboundRuns_MissionKnownReadsTheWorld(t *testing.T) {
-	f := newTaskFixture(t)
-	f.startMission(ownerRef)
-	known := f.runs.missionKnown("acme")
-	exists, terminal := known(f.mission)
-	assert.True(t, exists)
-	assert.False(t, terminal, "a running mission has not ended")
-	exists, _ = known("not-in-the-world")
-	assert.False(t, exists)
-	f.end(brain.MissionCompleted)
-	_, terminal = known(f.mission)
-	assert.True(t, terminal)
-}
-
-// A read that finds the mission ended gives its place back at once.
-func TestInboundRuns_AReadOfAnEndedMissionFinishesItsTask(t *testing.T) {
-	f := newTaskFixture(t)
-	f.startMission(ownerRef)
-	f.end(brain.MissionCompleted)
-
-	_, err := f.runs.Task(context.Background(), ownerCaller, "recon", a2a.TaskID(f.mission))
-
-	require.NoError(t, err)
-	assert.Contains(t, f.owners.events, "finish:"+f.mission)
 }
 
 // A finished mission builds its result one time. A repeated read comes from the

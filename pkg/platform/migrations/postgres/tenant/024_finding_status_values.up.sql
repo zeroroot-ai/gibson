@@ -1,4 +1,4 @@
--- 023_finding_status_values.up.sql
+-- 024_finding_status_values.up.sql
 --
 -- A finding has four statuses: open, fixing, fixed and verified (ADR-0178,
 -- gibson#1518). Rows that an older daemon wrote can hold one of the old

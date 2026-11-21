@@ -1,4 +1,4 @@
--- 023_finding_status_values.down.sql
+-- 024_finding_status_values.down.sql
 --
 -- Restore the old status of each row that the up step mapped, from
 -- document->>'legacy_status', and drop that key.

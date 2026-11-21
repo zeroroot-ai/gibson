@@ -90,12 +90,12 @@ func newMigratedDB(t *testing.T) (*pgxpool.Pool, *migrate.Migrate) {
 	return pool, m
 }
 
-// Migration 023 maps the old statuses to the four of ADR-0178 and keeps the
+// Migration 024 maps the old statuses to the four of ADR-0178 and keeps the
 // old value, and its down step restores it (review m11).
-func TestMigration023_MapsTheOldStatuses(t *testing.T) {
+func TestMigration024_MapsTheOldStatuses(t *testing.T) {
 	pool, m := newMigratedDB(t)
 	ctx := context.Background()
-	require.NoError(t, m.Migrate(22))
+	require.NoError(t, m.Migrate(23))
 	want := map[string]string{"confirmed": "open", "resolved": "fixed", "false_positive": "open", "fixing": "fixing"}
 	ids := map[string]string{}
 	for old := range want {
@@ -110,11 +110,11 @@ func TestMigration023_MapsTheOldStatuses(t *testing.T) {
 		require.NoError(t, pool.QueryRow(ctx, `SELECT document->>'status' FROM findings WHERE id = $1`, id).Scan(&s))
 		return s
 	}
-	require.NoError(t, m.Migrate(23))
+	require.NoError(t, m.Migrate(24))
 	for old, id := range ids {
 		assert.Equal(t, want[old], status(id), "up: %s", old)
 	}
-	require.NoError(t, m.Migrate(22))
+	require.NoError(t, m.Migrate(23))
 	for old, id := range ids {
 		assert.Equal(t, old, status(id), "down: %s", old)
 	}

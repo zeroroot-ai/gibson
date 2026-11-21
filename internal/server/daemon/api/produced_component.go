@@ -16,8 +16,8 @@
 //     with no owner cannot enroll.
 //   - The platform assigns the trust (gibson#554, ADR-0097). A produced
 //     component never takes a catalog name, so it is never trusted.
-//   - A quota for each tenant bounds the count. A quota read that fails
-//     refuses the enrollment.
+//   - One name for each kind in a tenant. A record read that fails refuses
+//     the enrollment. There is no count limit.
 //   - The bootstrap token is short-lived, for the new component only, and
 //     carries no session capability.
 //   - Each enrollment writes a durable audit record before any grant.
@@ -29,8 +29,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -41,34 +39,10 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 )
 
-const (
-	// ProducedComponentLimitEnv sets how many components agents may enroll
-	// in one tenant.
-	ProducedComponentLimitEnv = "GIBSON_PRODUCED_COMPONENT_LIMIT"
-
-	// DefaultProducedComponentLimit is the quota when the variable is empty.
-	DefaultProducedComponentLimit = 25
-
-	// producedComponentTokenTTL is the life of the bootstrap token of a
-	// produced component. The component starts at once after the build, so
-	// a short life is enough.
-	producedComponentTokenTTL = 15 * time.Minute
-)
-
-// ProducedComponentLimitFromEnv reads the quota. An empty variable gives the
-// default. A value that is not a positive number is an error, so the daemon
-// does not start with a quota that no one chose.
-func ProducedComponentLimitFromEnv() (int, error) {
-	raw := strings.TrimSpace(os.Getenv(ProducedComponentLimitEnv))
-	if raw == "" {
-		return DefaultProducedComponentLimit, nil
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("%s=%q is not a positive number", ProducedComponentLimitEnv, raw)
-	}
-	return n, nil
-}
+// producedComponentTokenTTL is the life of the bootstrap token of a produced
+// component. The component starts at once after the build, so a short life is
+// enough.
+const producedComponentTokenTTL = 15 * time.Minute
 
 // ProducedComponent is a component that an agent produced.
 type ProducedComponent struct {
@@ -87,18 +61,15 @@ type EnrolledComponent struct {
 	ExpiresAt      time.Time
 }
 
-// errProducedQuota reports a tenant whose agents enrolled the quota.
-var errProducedQuota = errors.New("the tenant reached its quota of components that agents enroll")
-
 // errProducedExists reports a name that a produced component of the same
 // kind already holds in the tenant.
 var errProducedExists = errors.New("a produced component with this kind and name exists")
 
 // producedComponentStore holds one row for each enrollment. Reserve takes the
-// quota and the name under a lock on the tenant. Bind records the identity.
-// Release removes a reservation whose identity was not created.
+// name. Bind records the identity. Release removes a reservation whose
+// identity was not created.
 type producedComponentStore interface {
-	Reserve(ctx context.Context, tenantID, ownerUserID, producer string, c ProducedComponent, limit int) error
+	Reserve(ctx context.Context, tenantID, ownerUserID, producer string, c ProducedComponent) error
 	Bind(ctx context.Context, tenantID, kind, name, principalID string) error
 	Release(ctx context.Context, tenantID, kind, name string) error
 }
@@ -107,28 +78,8 @@ type producedComponentStore interface {
 // Postgres (migration 042).
 type sqlProducedComponentStore struct{ db *sql.DB }
 
-func (st sqlProducedComponentStore) Reserve(ctx context.Context, tenantID, ownerUserID, producer string, c ProducedComponent, limit int) (err error) {
-	tx, err := st.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("produced component: begin: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('produced_component:' || $1))`, tenantID); err != nil {
-		return fmt.Errorf("produced component: lock tenant %q: %w", tenantID, err)
-	}
-	var count int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM produced_component WHERE tenant_id = $1`, tenantID).Scan(&count); err != nil {
-		return fmt.Errorf("produced component: count tenant %q: %w", tenantID, err)
-	}
-	if count >= limit {
-		err = errProducedQuota
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `
+func (st sqlProducedComponentStore) Reserve(ctx context.Context, tenantID, ownerUserID, producer string, c ProducedComponent) error {
+	res, err := st.db.ExecContext(ctx, `
 INSERT INTO produced_component (tenant_id, kind, name, version, image, producer_principal, owner_user_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (tenant_id, kind, name) DO NOTHING`,
@@ -141,11 +92,7 @@ ON CONFLICT (tenant_id, kind, name) DO NOTHING`,
 		return fmt.Errorf("produced component: reserve %s/%s: %w", c.Kind, c.Name, err)
 	}
 	if n == 0 {
-		err = errProducedExists
-		return err
-	}
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("produced component: commit: %w", err)
+		return errProducedExists
 	}
 	return nil
 }
@@ -169,12 +116,11 @@ func (st sqlProducedComponentStore) Release(ctx context.Context, tenantID, kind,
 }
 
 // WithProducedComponents wires the record of produced components on the
-// platform database, and the quota for each tenant.
-func (s *DaemonServer) WithProducedComponents(db *sql.DB, limit int) *DaemonServer {
+// platform database.
+func (s *DaemonServer) WithProducedComponents(db *sql.DB) *DaemonServer {
 	if db != nil {
 		s.producedComponents = sqlProducedComponentStore{db: db}
 	}
-	s.producedComponentLimit = limit
 	return s
 }
 
@@ -237,9 +183,9 @@ func (s *DaemonServer) EnrollProducedComponent(ctx context.Context, tenantID, pr
 	if s.authorizer == nil {
 		return EnrolledComponent{}, status_grpc.Error(codes.Unavailable, "authorization not configured")
 	}
-	if s.producedComponents == nil || s.producedComponentLimit < 1 {
-		// Fail closed: with no quota store, no enrollment is bounded.
-		return EnrolledComponent{}, status_grpc.Error(codes.Unavailable, "the quota of produced components is not configured")
+	if s.producedComponents == nil {
+		// Fail closed: with no record store, no enrollment is recorded.
+		return EnrolledComponent{}, status_grpc.Error(codes.Unavailable, "the record of produced components is not configured")
 	}
 
 	// The producer must be an identity of this tenant.
@@ -259,15 +205,12 @@ func (s *DaemonServer) EnrollProducedComponent(ctx context.Context, tenantID, pr
 			"the producer has no owner, so no person is accountable for what it enrolls")
 	}
 
-	switch err := s.producedComponents.Reserve(ctx, tenantID, owner, producer, c, s.producedComponentLimit); {
-	case errors.Is(err, errProducedQuota):
-		return EnrolledComponent{}, status_grpc.Errorf(codes.ResourceExhausted,
-			"the tenant reached its quota of %d components that agents enroll", s.producedComponentLimit)
+	switch err := s.producedComponents.Reserve(ctx, tenantID, owner, producer, c); {
 	case errors.Is(err, errProducedExists):
 		return EnrolledComponent{}, status_grpc.Errorf(codes.AlreadyExists,
 			"a produced %s named %q exists in this tenant", c.Kind, c.Name)
 	case err != nil:
-		return EnrolledComponent{}, status_grpc.Errorf(codes.Unavailable, "the quota could not be read: %v", err)
+		return EnrolledComponent{}, status_grpc.Errorf(codes.Unavailable, "the record of produced components could not be written: %v", err)
 	}
 
 	description := strings.TrimSpace(c.Description)
@@ -294,7 +237,7 @@ func (s *DaemonServer) EnrollProducedComponent(ctx context.Context, tenantID, pr
 		return EnrolledComponent{}, err
 	}
 	if err := s.producedComponents.Bind(ctx, tenantID, c.Kind, c.Name, provisioned.PrincipalID); err != nil {
-		// The identity exists and the reservation holds the quota. Only the
+		// The identity exists and the reservation holds the name. Only the
 		// link is missing, so the enrollment stands.
 		s.logger.ErrorContext(ctx, "EnrollComponent: the record of the produced component has no principal",
 			slog.String("tenant_id", tenantID), slog.String("principal_id", provisioned.PrincipalID), slog.String("error", err.Error()))

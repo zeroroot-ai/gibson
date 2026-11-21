@@ -25,7 +25,7 @@ func (q *fakePendingQueue) addRow(tenantID, state string) {
 	defer q.mu.Unlock()
 	q.clock++
 	q.rows = append(q.rows, fakeQueueRow{
-		tenantID: tenantID, ownerEmail: tenantID + "@example.test", workspaceName: tenantID, tier: "team",
+		tenantID: tenantID, ownerEmail: tenantID + "@example.test", workspaceName: tenantID,
 		status: state, createdAt: fakeQueueEpoch.Add(time.Duration(q.clock) * time.Microsecond),
 	})
 }
@@ -116,7 +116,7 @@ func (m microsEqual) Match(v driver.Value) bool {
 }
 
 var opsCols = []string{
-	"op_id", "tenant_id", "op_type", "display_name", "display_name_set", "owner_email", "tier", "tier_set",
+	"op_id", "tenant_id", "op_type", "display_name", "display_name_set", "owner_email",
 	"audit_record_id", "created_at",
 }
 
@@ -138,9 +138,9 @@ func TestListPendingTenantOps_KeysetPages(t *testing.T) {
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectQuery(`ORDER BY created_at ASC, op_id ASC\s+LIMIT \$1`).WithArgs(3).
 		WillReturnRows(sqlmock.NewRows(opsCols).
-			AddRow("op-1", "a", "update", "", false, "", "", false, "", t1).
-			AddRow("op-2", "b", "update", "", false, "", "", false, "", t2).
-			AddRow("op-3", "c", "update", "", false, "", "", false, "", t3))
+			AddRow("op-1", "a", "update", "", false, "", "", t1).
+			AddRow("op-2", "b", "update", "", false, "", "", t2).
+			AddRow("op-3", "c", "update", "", false, "", "", t3))
 	p1, err := srv.ListPendingTenantOps(ctx, &daemonoperatorv1.ListPendingTenantOpsRequest{PageSize: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +151,7 @@ func TestListPendingTenantOps_KeysetPages(t *testing.T) {
 
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectQuery(`AND \(created_at, op_id\) > \(\$2, \$3\)`).WithArgs(3, microsEqual(t2), "op-2").
-		WillReturnRows(sqlmock.NewRows(opsCols).AddRow("op-3", "c", "update", "", false, "", "", false, "", t3))
+		WillReturnRows(sqlmock.NewRows(opsCols).AddRow("op-3", "c", "update", "", false, "", "", t3))
 	p2, err := srv.ListPendingTenantOps(ctx, &daemonoperatorv1.ListPendingTenantOpsRequest{PageSize: 2, PageToken: p1.GetNextPageToken()})
 	if err != nil {
 		t.Fatal(err)
@@ -381,7 +381,7 @@ func TestListPendingTenantProvisioning_BadTimeKeyIsInvalidArgument(t *testing.T)
 // list returns no partial page.
 func TestPendingQueueLists_DatabaseFailuresAreInternal(t *testing.T) {
 	ctx := context.Background()
-	provCols := []string{"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier", "audit_record_id", "created_at"}
+	provCols := []string{"tenant_id", "owner_user_id", "owner_email", "workspace_name", "audit_record_id", "created_at"}
 	type listFn func(srv *DaemonServer) error
 	prov := func(srv *DaemonServer) error {
 		_, err := srv.ListPendingTenantProvisioning(ctx, &daemonoperatorv1.ListPendingTenantProvisioningRequest{})
@@ -412,7 +412,7 @@ func TestPendingQueueLists_DatabaseFailuresAreInternal(t *testing.T) {
 		"provisioning rows": {prov, func(m sqlmock.Sqlmock) {
 			ensureProv(m)
 			m.ExpectQuery("FROM pending_tenant_provisioning").
-				WillReturnRows(sqlmock.NewRows(provCols).AddRow("a", "u", "e", "w", "team", "", time.Now()).RowError(0, errors.New("row")))
+				WillReturnRows(sqlmock.NewRows(provCols).AddRow("a", "u", "e", "w", "", time.Now()).RowError(0, errors.New("row")))
 		}},
 		"ops ensure table": {ops, func(m sqlmock.Sqlmock) {
 			m.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_admin_ops").WillReturnError(errors.New("down"))
@@ -429,7 +429,7 @@ func TestPendingQueueLists_DatabaseFailuresAreInternal(t *testing.T) {
 			ensureOps(m)
 			m.ExpectQuery("FROM tenant_admin_ops").
 				WillReturnRows(sqlmock.NewRows(opsCols).
-					AddRow("op-1", "a", "update", "", false, "", "", false, "", time.Now()).RowError(0, errors.New("row")))
+					AddRow("op-1", "a", "update", "", false, "", "", time.Now()).RowError(0, errors.New("row")))
 		}},
 	}
 	for name, c := range cases {

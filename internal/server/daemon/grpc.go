@@ -745,13 +745,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// (gibson#1474, gibson#1478).
 		d.callback.SetConnectorGrants(capabilitygrant.NewCapabilityGrantStore(d.platformDB).ConnectorGrantID)
 	}
-	// The record and the quota of the components that agents enroll
-	// (gibson#33). A bad quota value stops the daemon.
-	producedLimit, err := api.ProducedComponentLimitFromEnv()
-	if err != nil {
-		return nil, fmt.Errorf("produced components: %w", err)
-	}
-	daemonSvc.WithProducedComponents(d.platformDB, producedLimit)
+	// The record of the components that agents enroll (gibson#33).
+	daemonSvc.WithProducedComponents(d.platformDB)
 	if err := startTimelineArchive(ctx, d.platformDB, func() timelinePoolForer { return d.pool }, d.logger.Slog()); err != nil {
 		return nil, err
 	}

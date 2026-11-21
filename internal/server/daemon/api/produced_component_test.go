@@ -10,6 +10,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -36,20 +37,11 @@ type memProducedStore struct {
 
 func newMemProducedStore() *memProducedStore { return &memProducedStore{rows: map[string]string{}} }
 
-func (m *memProducedStore) Reserve(_ context.Context, tenantID, _, _ string, c ProducedComponent, limit int) error {
+func (m *memProducedStore) Reserve(_ context.Context, tenantID, _, _ string, c ProducedComponent) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.err != nil {
 		return m.err
-	}
-	count := 0
-	for k := range m.rows {
-		if strings.HasPrefix(k, tenantID+"|") {
-			count++
-		}
-	}
-	if count >= limit {
-		return errProducedQuota
 	}
 	key := tenantID + "|" + c.Kind + "|" + c.Name
 	if _, ok := m.rows[key]; ok {
@@ -77,7 +69,7 @@ func (m *memProducedStore) Release(_ context.Context, tenantID, kind, name strin
 	return nil
 }
 
-func producedServer(t *testing.T, limit int) (*DaemonServer, *fakeAuthorizer, *memProducedStore, *fakeAuditWriter, *fakeIDPClient) {
+func producedServer(t *testing.T) (*DaemonServer, *fakeAuthorizer, *memProducedStore, *fakeAuditWriter, *fakeIDPClient) {
 	t.Helper()
 	az := newFakeAuthorizer().
 		allow("tenant:acme", "belongs_to", testProducer).
@@ -90,7 +82,6 @@ func producedServer(t *testing.T, limit int) (*DaemonServer, *fakeAuthorizer, *m
 		WithAuthorizer(az).
 		WithTenantAdminAuditWriter(aud)
 	srv.producedComponents = store
-	srv.producedComponentLimit = limit
 	return srv, az, store, aud, idpc
 }
 
@@ -116,7 +107,7 @@ func enrollmentTuples(tuples []authz.Tuple, principal string) (owner, belongs, e
 }
 
 func TestEnrollProducedComponent_EnrollsAnUntrustedComponentOwnedByTheProducerOwner(t *testing.T) {
-	srv, az, store, aud, _ := producedServer(t, 5)
+	srv, az, store, aud, _ := producedServer(t)
 
 	got, err := srv.EnrollProducedComponent(context.Background(), "acme", testProducer, tool("port-sniffer"))
 	if err != nil {
@@ -141,40 +132,40 @@ func TestEnrollProducedComponent_EnrollsAnUntrustedComponentOwnedByTheProducerOw
 	}
 }
 
-func TestEnrollProducedComponent_OverQuotaIsRefused(t *testing.T) {
-	srv, _, _, _, idpc := producedServer(t, 1)
-	if _, err := srv.EnrollProducedComponent(context.Background(), "acme", testProducer, tool("first-tool")); err != nil {
-		t.Fatalf("first enrollment: %v", err)
+// No count refuses an enrollment: a tenant enrolls more components than the
+// old cap of 25.
+func TestEnrollProducedComponent_NoCountLimit(t *testing.T) {
+	srv, _, store, _, idpc := producedServer(t)
+	for i := range 30 {
+		if _, err := srv.EnrollProducedComponent(context.Background(), "acme", testProducer, tool(fmt.Sprintf("tool-%02d", i))); err != nil {
+			t.Fatalf("enrollment %d: %v", i, err)
+		}
 	}
-	_, err := srv.EnrollProducedComponent(context.Background(), "acme", testProducer, tool("second-tool"))
-	if status.Code(err) != codes.ResourceExhausted {
-		t.Fatalf("want ResourceExhausted over the quota, got %v", err)
-	}
-	if idpc.createCalls != 1 {
-		t.Errorf("an enrollment over the quota must create no account, got %d creates", idpc.createCalls)
+	if idpc.createCalls != 30 || store.reserved != 30 {
+		t.Errorf("creates = %d, reserved = %d, want 30 of each", idpc.createCalls, store.reserved)
 	}
 }
 
-func TestEnrollProducedComponent_AQuotaReadErrorFailsClosed(t *testing.T) {
-	srv, _, store, _, _ := producedServer(t, 5)
+func TestEnrollProducedComponent_ARecordErrorFailsClosed(t *testing.T) {
+	srv, _, store, _, _ := producedServer(t)
 	store.err = errors.New("db down")
 	_, err := srv.EnrollProducedComponent(context.Background(), "acme", testProducer, tool("a-tool"))
 	if status.Code(err) != codes.Unavailable {
-		t.Fatalf("want Unavailable when the quota cannot be read, got %v", err)
+		t.Fatalf("want Unavailable when the record cannot be written, got %v", err)
 	}
 }
 
 func TestEnrollProducedComponent_NoStoreFailsClosed(t *testing.T) {
-	srv, _, _, _, _ := producedServer(t, 5)
+	srv, _, _, _, _ := producedServer(t)
 	srv.producedComponents = nil
 	_, err := srv.EnrollProducedComponent(context.Background(), "acme", testProducer, tool("a-tool"))
 	if status.Code(err) != codes.Unavailable {
-		t.Fatalf("want Unavailable with no quota store, got %v", err)
+		t.Fatalf("want Unavailable with no record store, got %v", err)
 	}
 }
 
 func TestEnrollProducedComponent_CrossTenantIsRefused(t *testing.T) {
-	srv, _, _, _, idpc := producedServer(t, 5)
+	srv, _, _, _, idpc := producedServer(t)
 	// The producer belongs to acme, not to beta.
 	_, err := srv.EnrollProducedComponent(context.Background(), "beta", testProducer, tool("a-tool"))
 	if status.Code(err) != codes.PermissionDenied {
@@ -200,7 +191,7 @@ func TestEnrollProducedComponent_Refusals(t *testing.T) {
 		"a catalog name":           {testProducer, tool("nmap"), codes.PermissionDenied},
 	} {
 		t.Run(name, func(t *testing.T) {
-			srv, _, _, _, idpc := producedServer(t, 5)
+			srv, _, _, _, idpc := producedServer(t)
 			_, err := srv.EnrollProducedComponent(context.Background(), "acme", tc.producer, tc.c)
 			if status.Code(err) != tc.want {
 				t.Fatalf("want %v, got %v", tc.want, err)
@@ -213,7 +204,7 @@ func TestEnrollProducedComponent_Refusals(t *testing.T) {
 }
 
 func TestEnrollProducedComponent_AProducerWithNoOwnerIsRefused(t *testing.T) {
-	srv, az, _, _, _ := producedServer(t, 5)
+	srv, az, _, _, _ := producedServer(t)
 	az.users = map[string][]string{}
 	_, err := srv.EnrollProducedComponent(context.Background(), "acme", testProducer, tool("a-tool"))
 	if status.Code(err) != codes.FailedPrecondition {
@@ -222,7 +213,7 @@ func TestEnrollProducedComponent_AProducerWithNoOwnerIsRefused(t *testing.T) {
 }
 
 func TestEnrollProducedComponent_AFailedProvisionReleasesTheReservation(t *testing.T) {
-	srv, _, store, _, _ := producedServer(t, 5)
+	srv, _, store, _, _ := producedServer(t)
 	srv.cgMinter = nil // the mint fails, so the account rolls back
 	_, err := srv.EnrollProducedComponent(context.Background(), "acme", testProducer, tool("a-tool"))
 	if err == nil {
@@ -233,28 +224,11 @@ func TestEnrollProducedComponent_AFailedProvisionReleasesTheReservation(t *testi
 	}
 }
 
-func TestProducedComponentLimitFromEnv(t *testing.T) {
-	t.Setenv(ProducedComponentLimitEnv, "")
-	if n, err := ProducedComponentLimitFromEnv(); err != nil || n != DefaultProducedComponentLimit {
-		t.Fatalf("empty: got %d, %v", n, err)
-	}
-	t.Setenv(ProducedComponentLimitEnv, "7")
-	if n, err := ProducedComponentLimitFromEnv(); err != nil || n != 7 {
-		t.Fatalf("7: got %d, %v", n, err)
-	}
-	for _, bad := range []string{"0", "-1", "many"} {
-		t.Setenv(ProducedComponentLimitEnv, bad)
-		if _, err := ProducedComponentLimitFromEnv(); err == nil {
-			t.Errorf("%q: want an error", bad)
-		}
-	}
-}
-
 // The enrollment refuses a call with no tenant, with no authorizer, with an
 // owner that cannot be read, and a name that a produced component holds.
 func TestEnrollProducedComponent_MoreRefusals(t *testing.T) {
 	ctx := context.Background()
-	srv, az, _, _, _ := producedServer(t, 5)
+	srv, az, _, _, _ := producedServer(t)
 	if _, err := srv.EnrollProducedComponent(ctx, "", testProducer, tool("a-tool")); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("no tenant: %v", err)
 	}

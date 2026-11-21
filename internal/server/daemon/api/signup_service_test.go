@@ -160,7 +160,7 @@ func (m *memVerificationStore) Issue(_ context.Context, p IssueParams) (SignupVe
 	m.rows[id] = &memRow{
 		SignupVerification: SignupVerification{
 			ID: id, AttemptID: p.AttemptID, Email: p.Email,
-			WorkspaceName: p.WorkspaceName, Tier: p.Tier,
+			WorkspaceName:  p.WorkspaceName,
 			OwnerFirstName: p.OwnerFirstName, OwnerLastName: p.OwnerLastName,
 			ExpiresAt: m.now().Add(SignupVerificationTTL),
 		},
@@ -279,7 +279,7 @@ func (m *memVerificationStore) IssuePendingApproval(_ context.Context, p IssuePa
 	m.rows[id] = &memRow{
 		SignupVerification: SignupVerification{
 			ID: id, AttemptID: p.AttemptID, Email: p.Email,
-			WorkspaceName: p.WorkspaceName, Tier: p.Tier,
+			WorkspaceName:  p.WorkspaceName,
 			OwnerFirstName: p.OwnerFirstName, OwnerLastName: p.OwnerLastName,
 			ExpiresAt: m.now().Add(SignupRegistrationTTL),
 			CreatedAt: m.now(), OwnerUserID: ownerUserID,
@@ -466,7 +466,6 @@ func validRequestReq() *tenantv1.RequestEmailVerificationRequest {
 		AttemptId:      testAttemptID,
 		OwnerEmail:     "owner@example.com",
 		WorkspaceName:  "Acme Red Team",
-		Tier:           "team",
 		OwnerFirstName: "Ada",
 		OwnerLastName:  "Lovelace",
 		ClientIp:       "203.0.113.7",
@@ -751,11 +750,6 @@ func TestSignup_SessionOverridesClientSuppliedIdentity(t *testing.T) {
 	}
 	if resp.GetTenantId() != "acme-red-team" {
 		t.Errorf("TenantId = %q, want the slug derived from the verified row", resp.GetTenantId())
-	}
-	// The response carries the plan id of the verification row, the same id
-	// the tenant was enqueued with (gibson#1325).
-	if resp.GetPlanId() != "team" {
-		t.Errorf("PlanId = %q, want the plan id of the verification row", resp.GetPlanId())
 	}
 	if len(h.idp.createHumanReqs) != 1 {
 		t.Fatalf("CreateHumanUser calls = %d", len(h.idp.createHumanReqs))

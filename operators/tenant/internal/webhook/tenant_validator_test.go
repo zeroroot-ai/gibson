@@ -218,21 +218,6 @@ func TestTenantValidator_ValidateCreate_InvalidOwner(t *testing.T) {
 	}
 }
 
-// TestTenantValidator_ValidateCreate_AcceptsAnyTier pins that the webhook
-// refuses no Tenant for its plan (gibson#1531): no tier, and any tier value.
-func TestTenantValidator_ValidateCreate_AcceptsAnyTier(t *testing.T) {
-	for _, tier := range []gibsonv1alpha1.TenantTier{"", "team", "gold"} {
-		t.Run(string(tier), func(t *testing.T) {
-			v := &TenantValidator{}
-			tn := validTenant()
-			tn.Spec.Tier = tier
-			if _, err := v.ValidateCreate(context.Background(), tn); err != nil {
-				t.Fatalf("a Tenant with tier %q must pass, got: %v", tier, err)
-			}
-		})
-	}
-}
-
 func TestTenantValidator_ValidateCreate_MissingDisplayName(t *testing.T) {
 	v := &TenantValidator{}
 	tn := validTenant()
@@ -262,8 +247,7 @@ func TestTenantValidator_ValidateUpdate_Valid(t *testing.T) {
 	v := &TenantValidator{}
 	oldTn := validTenant()
 	newTn := validTenant()
-	// Changing tier and displayName is allowed on update.
-	newTn.Spec.Tier = "enterprise"
+	// Changing displayName is allowed on update.
 	newTn.Spec.DisplayName = "Acme Corp Enterprise"
 	_, err := v.ValidateUpdate(context.Background(), oldTn, newTn)
 	if err != nil {
@@ -302,21 +286,6 @@ func TestTenantValidator_ValidateUpdate_ImmutableOwner(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "spec.owner") {
 		t.Errorf("expected 'spec.owner' in error, got: %v", err)
-	}
-}
-
-// TestTenantValidator_ValidateUpdate_AcceptsAnyTier pins that an update
-// refuses no tier change (gibson#1531): to any value, and to no tier.
-func TestTenantValidator_ValidateUpdate_AcceptsAnyTier(t *testing.T) {
-	for _, tier := range []gibsonv1alpha1.TenantTier{"", "diamond"} {
-		v := &TenantValidator{}
-		oldTn := validTenant()
-		oldTn.Spec.Tier = "team"
-		newTn := validTenant()
-		newTn.Spec.Tier = tier
-		if _, err := v.ValidateUpdate(context.Background(), oldTn, newTn); err != nil {
-			t.Fatalf("an update to tier %q must pass, got: %v", tier, err)
-		}
 	}
 }
 

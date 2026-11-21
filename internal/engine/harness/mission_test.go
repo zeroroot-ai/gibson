@@ -400,38 +400,20 @@ func TestCreateMission_InvalidTargetID(t *testing.T) {
 	}
 }
 
-// TestCreateMission_SpawnLimitExceeded tests that CreateMission enforces spawn limits.
+// TestCreateMission_SpawnLimitExceeded tests that CreateMission enforces the
+// depth bound.
 func TestCreateMission_SpawnLimitExceeded(t *testing.T) {
 	ctx := context.Background()
 	mockClient := newMockMissionOperator()
 
 	parentID := types.NewID()
-
-	// Create parent and max number of children
 	mockClient.records = append(mockClient.records, &MissionRecord{
-		ID:              parentID,
-		ParentMissionID: nil,
-		Depth:           0,
-		Status:          MissionStatusWorking,
+		ID:     parentID,
+		Depth:  2,
+		Status: MissionStatusWorking,
 	})
 
-	// Add 10 children (at limit)
-	for i := 0; i < 10; i++ {
-		mockClient.records = append(mockClient.records, &MissionRecord{
-			ID:              types.NewID(),
-			ParentMissionID: &parentID,
-			Depth:           1,
-			Status:          "pending",
-		})
-	}
-
-	limits := SpawnLimits{
-		MaxChildMissions:      10,
-		MaxConcurrentMissions: 100,
-		MaxMissionDepth:       5,
-	}
-
-	harness := createTestMissionHarness(mockClient, limits)
+	harness := createTestMissionHarness(mockClient, SpawnLimits{MaxMissionDepth: 3})
 	harness.missionCtx.ID = parentID
 
 	mission := map[string]any{"name": "test"}
@@ -443,8 +425,8 @@ func TestCreateMission_SpawnLimitExceeded(t *testing.T) {
 		t.Fatal("Expected spawn limit error, got nil")
 	}
 
-	if !stringContains(err.Error(), "maximum child limit") {
-		t.Errorf("Expected 'maximum child limit' error, got %v", err)
+	if !stringContains(err.Error(), "depth limit") {
+		t.Errorf("Expected 'depth limit' error, got %v", err)
 	}
 }
 
@@ -1071,51 +1053,25 @@ func TestSpawnLimitIntegration(t *testing.T) {
 			existingDepth:    0,
 			existingChildren: 2,
 			runningCount:     10,
-			limits: SpawnLimits{
-				MaxChildMissions:      10,
-				MaxConcurrentMissions: 50,
-				MaxMissionDepth:       3,
-			},
-			expectError: false,
+			limits:           SpawnLimits{MaxMissionDepth: 3},
+			expectError:      false,
 		},
 		{
-			name:             "child limit exceeded",
+			name:             "many children and many running missions",
 			existingDepth:    0,
-			existingChildren: 10,
-			runningCount:     10,
-			limits: SpawnLimits{
-				MaxChildMissions:      10,
-				MaxConcurrentMissions: 50,
-				MaxMissionDepth:       3,
-			},
-			expectError:   true,
-			errorContains: "maximum child limit",
+			existingChildren: 100,
+			runningCount:     500,
+			limits:           SpawnLimits{MaxMissionDepth: 3},
+			expectError:      false,
 		},
 		{
 			name:             "depth limit exceeded",
 			existingDepth:    2,
 			existingChildren: 2,
 			runningCount:     10,
-			limits: SpawnLimits{
-				MaxChildMissions:      10,
-				MaxConcurrentMissions: 50,
-				MaxMissionDepth:       3,
-			},
-			expectError:   true,
-			errorContains: "depth limit",
-		},
-		{
-			name:             "concurrent limit exceeded",
-			existingDepth:    0,
-			existingChildren: 2,
-			runningCount:     50,
-			limits: SpawnLimits{
-				MaxChildMissions:      10,
-				MaxConcurrentMissions: 50,
-				MaxMissionDepth:       3,
-			},
-			expectError:   true,
-			errorContains: "concurrent mission limit",
+			limits:           SpawnLimits{MaxMissionDepth: 3},
+			expectError:      true,
+			errorContains:    "depth limit",
 		},
 	}
 

@@ -115,8 +115,9 @@ message DescribeSignupStepRequest {
 message DescribeSignupStepResponse {
   // tenant_id is the slug of the new tenant.
   string tenant_id = 1;
-  // plan_id is the plan that the owner chose at signup.
-  string plan_id = 2;
+  // Field 2 (plan_id) was removed. The product has no plan (gibson#1531).
+  reserved 2;
+  reserved "plan_id";
   // owner_email is the address of the owner of the new tenant.
   string owner_email = 3;
 }

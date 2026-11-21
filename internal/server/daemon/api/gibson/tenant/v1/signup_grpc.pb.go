@@ -41,7 +41,7 @@
 //   the same thing, not a second completion path: approval runs exactly the
 //   work Signup runs.
 //
-//   Signup therefore takes NO owner email, workspace name, tier or profile from
+//   Signup therefore takes NO owner email, workspace name or profile from
 //   the client. Every one of those is read back from the verification row the
 //   session resolves to. A client that could supply them could point a redeemed
 //   session at a different address, which would defeat the verification it just

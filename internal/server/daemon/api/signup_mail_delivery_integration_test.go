@@ -289,7 +289,6 @@ func TestChain2_VerificationMailIsActuallyDelivered(t *testing.T) {
 		AttemptId:     uuid.NewString(),
 		OwnerEmail:    addr,
 		WorkspaceName: "Chain Two Ltd",
-		Tier:          "team",
 		ClientIp:      "203.0.113.10",
 	})
 	require.NoError(t, err, "RequestEmailVerification")
@@ -337,7 +336,6 @@ func TestChain2_NoTransportRefusesAndLeavesNothingBehind(t *testing.T) {
 		AttemptId:     uuid.NewString(),
 		OwnerEmail:    addr,
 		WorkspaceName: "No Transport Ltd",
-		Tier:          "team",
 		ClientIp:      "203.0.113.11",
 	})
 	require.Error(t, err, "a signup with no mail transport must be refused, not accepted")
