@@ -410,6 +410,7 @@ func TestJobGraphLink_RefusesAMergeRequestThatIsNotTheWorkOfTheJob(t *testing.T)
 		"older than the claim": {fact: fixloop.MergeFact{
 			State: fixloop.MROpen, SourceBranch: good.SourceBranch, CreatedAt: testClaimedAt.Add(-time.Minute)}},
 		"no time of creation":     {fact: fixloop.MergeFact{State: fixloop.MROpen, SourceBranch: good.SourceBranch}},
+		"an old connector":        {fact: fixloop.MergeFact{State: fixloop.MROpen}},
 		"the host cannot be read": {err: errors.New("connector down")},
 	}
 	for name, mrs := range cases {
@@ -457,6 +458,20 @@ func TestJobGraphLink_LinksOnlyTheFindingsThatTheJobHolds(t *testing.T) {
 		}
 		if e, ok := ev.(brain.EntityObserved); ok && e.Key == "f-other" {
 			t.Fatalf("a finding that the job does not hold took the link: %+v", e)
+		}
+	}
+}
+
+// A connector that sends no source_branch and no created_at gets a refusal
+// that names the cause, not a refusal about branch "" (review R2).
+func TestMergeRequestRefusal_NamesAnOldConnector(t *testing.T) {
+	for _, fact := range []fixloop.MergeFact{
+		{State: fixloop.MROpen},
+		{State: fixloop.MROpen, SourceBranch: "job/job-1"},
+		{State: fixloop.MROpen, CreatedAt: testNow},
+	} {
+		if got := mergeRequestRefusal(fact, "job/job-1", testClaimedAt); got != errConnectorLacksMergeFields {
+			t.Errorf("fact %+v: refusal = %q", fact, got)
 		}
 	}
 }

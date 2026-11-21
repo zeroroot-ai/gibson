@@ -169,6 +169,11 @@ func mergeRequestRefusal(fact fixloop.MergeFact, branch string, claimedAt time.T
 	switch {
 	case fact.State != fixloop.MROpen:
 		return fmt.Sprintf("the merge request is %q on the Git host, not open", fact.State)
+	case fact.SourceBranch == "" || fact.CreatedAt.IsZero():
+		// The check needs both fields, and an old connector server does not
+		// send them (review R2). The daemon keeps the check and names the
+		// cause, so the operator updates the connector.
+		return errConnectorLacksMergeFields
 	case fact.SourceBranch != branch:
 		return fmt.Sprintf("the merge request comes from branch %q, not from the job branch %q", fact.SourceBranch, branch)
 	case claimedAt.IsZero():
@@ -182,11 +187,22 @@ func mergeRequestRefusal(fact fixloop.MergeFact, branch string, claimedAt time.T
 	return ""
 }
 
+// errConnectorLacksMergeFields is the refusal when merge_request_state sends
+// no source_branch or no created_at.
+const errConnectorLacksMergeFields = "the Git host connector sent no source_branch or no created_at in " +
+	"merge_request_state, so the daemon cannot check that the merge request is the work of the job: " +
+	"update the connector server to a release that sends both fields"
+
 // refuse records the refusal on each finding that the job holds and ends the
 // claims. The next job can then work on the findings.
 func (l *jobGraphLink) refuse(c jobnode.ClosedJob, mrKey, claim string, held []string, reason string, now time.Time) {
-	l.logger.Warn("the daemon refused the merge request of a fix job",
-		"job_id", c.JobID, "merge_request", mrKey, "reason", reason)
+	if reason == errConnectorLacksMergeFields {
+		l.logger.Error("the Git host connector is too old for the fix loop",
+			"job_id", c.JobID, "merge_request", mrKey, "reason", reason)
+	} else {
+		l.logger.Warn("the daemon refused the merge request of a fix job",
+			"job_id", c.JobID, "merge_request", mrKey, "reason", reason)
+	}
 	for _, id := range held {
 		l.submit(c.TenantID, brain.FixLinkRefused{
 			ID: id, MergeRequest: mrKey, JobID: c.JobID, Reason: reason, MissionID: c.MissionRunID, At: now,
