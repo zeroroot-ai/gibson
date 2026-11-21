@@ -173,6 +173,31 @@ func TestStep_FullLoopVerifies(t *testing.T) {
 	}
 }
 
+// A connector that says done and held before the hold time ran gives no
+// verdict. The daemon checks the time itself (review m3).
+func TestStep_AHeldSignalMustCoverTheHoldTime(t *testing.T) {
+	g := newRig(t, "scan")
+	g.merged()
+	g.deployed()
+	since := g.w.FindingSnapshot()[0].DeployedAt
+	g.r.health = HealthFact{Known: true, Done: true, Held: true, At: since.Add(time.Minute)}
+	for _, e := range g.tick() {
+		if _, ok := e.(brain.HealthObserved); ok {
+			t.Fatalf("a held signal one minute after the deploy gave %+v", e)
+		}
+	}
+	g.r.health.At = since.Add(DefaultPolicy().HoldTime)
+	var held bool
+	for _, e := range g.tick() {
+		if h, ok := e.(brain.HealthObserved); ok && h.Held {
+			held = true
+		}
+	}
+	if !held {
+		t.Fatal("a held signal at the end of the hold time gave no verdict")
+	}
+}
+
 // The deploy of a merged fix is a Timeline event with its time, and the graph
 // gets the edge from the merge request to its Deployment (gibson#1460). A fix
 // that is merged and not deployed gets neither.

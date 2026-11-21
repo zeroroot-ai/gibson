@@ -297,6 +297,12 @@ func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.Fin
 	if !h.Done {
 		return nil, nil // the hold time still runs
 	}
+	// A held signal must cover the whole hold time. The daemon checks the
+	// time of the answer and does not take the done flag of the connector on
+	// trust (review m3). A failure ends the hold early, so it needs no check.
+	if h.Held && (h.At.IsZero() || h.At.Before(since.Add(pol.HoldTime))) {
+		return nil, nil
+	}
 	return []brain.Event{brain.HealthObserved{
 		MergeRequest: mr, Held: h.Held, At: w.stampOr(h.At), MissionID: f.FixMissionID,
 	}}, nil
