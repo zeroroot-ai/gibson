@@ -364,14 +364,42 @@ func TestIncidentStart_BoundsTheReadOfTheHistory(t *testing.T) {
 		{"alert_key": "a1", "incident_first_seen": first.Add(time.Minute).UnixMilli(), "alert_first_seen": first.UnixMilli()},
 		{"alert_key": "a2", "incident_first_seen": first.Add(time.Minute).UnixMilli(), "alert_first_seen": first.Add(time.Hour).UnixMilli()},
 	}
-	if got := incidentStart(rows); !got.Equal(first.Add(-historySlack)) {
+	now := first.Add(24 * time.Hour)
+	if got := incidentStart(rows, now); !got.Equal(first.Add(-historySlack)) {
 		t.Fatalf("start = %v, want the first alert less the slack", got)
 	}
-	if got := incidentStart([]map[string]any{{"alert_key": "a1", "incident_first_seen": int64(0)}}); !got.IsZero() {
-		t.Fatalf("an incident with no first sight: start = %v, want the whole history", got)
+	if got := incidentStart([]map[string]any{{"alert_key": "a1", "incident_first_seen": int64(0)}}, now); !got.Equal(now.Add(-historyLookback)) {
+		t.Fatalf("an incident with no first sight: start = %v, want the lookback window", got)
 	}
 	ix := BuildIndexFrom([]brain.Event{brain.FindingRaised{ID: "f-1"}}, 40)
 	if f := ix.findingFrame("f-1"); f.TimelineSeq != 40 || ix.total != 41 {
 		t.Fatalf("frame = %+v, total = %d, want the position in the whole history", f, ix.total)
+	}
+}
+
+type recordingHistory struct{ from []time.Time }
+
+func (h *recordingHistory) HistoryFrom(_ context.Context, from time.Time) ([]brain.Event, uint64, error) {
+	h.from = append(h.from, from)
+	return nil, 0, nil
+}
+
+// A node with no first-seen time does not make the report read the whole
+// history (gibson#1583). The read starts at the lookback window.
+func TestReport_ANodeWithNoFirstSeenDoesNotReadTheWholeHistory(t *testing.T) {
+	g := newGraph()
+	g.byQuery[alertsCypher] = []map[string]any{{"alert_key": "alert-1", "title": "Beacon"}} // no first-seen columns
+	h := &recordingHistory{}
+	r, err := NewReader(g, h, &fakeGrants{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	r.now = func() time.Time { return now }
+	if _, err := r.Report(tenantCtx(t), "inc-1"); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if len(h.from) != 1 || h.from[0].IsZero() || !h.from[0].Equal(now.Add(-historyLookback)) {
+		t.Fatalf("history read from %v, want %v (not the zero time)", h.from, now.Add(-historyLookback))
 	}
 }

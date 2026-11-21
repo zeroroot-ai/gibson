@@ -48,6 +48,12 @@ type HistoryReader interface {
 // alert (review R5).
 const historySlack = time.Hour
 
+// historyLookback is the window of the read of the history when the incident
+// or one of its alerts has no first sight. The read then starts at now less
+// this window, and never covers the whole history of the tenant (gibson#1583,
+// as review item r13 does for the views).
+const historyLookback = 90 * 24 * time.Hour
+
 // Grant is a grant of a capability to an agent, and the person who gave it.
 type Grant struct {
 	ID            string
@@ -69,6 +75,8 @@ type Reader struct {
 	graph   GraphReader
 	history HistoryReader
 	grants  GrantResolver
+	// now is the clock of the lookback window. A test replaces it.
+	now func() time.Time
 }
 
 // NewReader returns a Reader. Each source is required.
@@ -76,7 +84,7 @@ func NewReader(graph GraphReader, history HistoryReader, grants GrantResolver) (
 	if graph == nil || history == nil || grants == nil {
 		return nil, errors.New("incidentreport: the graph, the history and the grant resolver are required")
 	}
-	return &Reader{graph: graph, history: history, grants: grants}, nil
+	return &Reader{graph: graph, history: history, grants: grants, now: time.Now}, nil
 }
 
 // Report returns the report of one incident of the tenant of ctx.
@@ -112,8 +120,8 @@ func (r *Reader) Report(ctx context.Context, incidentKey string) (*Report, error
 	}
 	// The read of the history starts at the first sight of the incident and
 	// its alerts, so a report never reads the whole history of the tenant
-	// (review R5). A node with no time reads all of it.
-	history, offset, err := r.history.HistoryFrom(ctx, incidentStart(alertRows))
+	// (review R5). A node with no time reads the last historyLookback.
+	history, offset, err := r.history.HistoryFrom(ctx, incidentStart(alertRows, r.now()))
 	if err != nil {
 		return nil, fmt.Errorf("incidentreport: read the Timeline: %w", err)
 	}
@@ -275,16 +283,18 @@ func reachedLabel(row map[string]any) string {
 }
 
 // incidentStart is the time from which the report reads the history: the
-// first sight of the incident and of its alerts, less historySlack. It is the
-// zero time when a node has no first sight.
-func incidentStart(alertRows []map[string]any) time.Time {
+// first sight of the incident and of its alerts, less historySlack. When a
+// node has no first sight, it is now less historyLookback, never the zero
+// time, so the read keeps a bound (gibson#1583).
+func incidentStart(alertRows []map[string]any, now time.Time) time.Time {
+	fallback := now.Add(-historyLookback)
 	var first int64
 	for _, row := range alertRows {
 		for _, col := range []string{"incident_first_seen", "alert_first_seen"} {
 			v, ok := row[col].(int64)
 			if !ok || v <= 0 {
 				if col == "incident_first_seen" || str(row, "alert_key") != "" {
-					return time.Time{}
+					return fallback
 				}
 				continue
 			}
@@ -294,7 +304,7 @@ func incidentStart(alertRows []map[string]any) time.Time {
 		}
 	}
 	if first == 0 {
-		return time.Time{}
+		return fallback
 	}
 	return time.UnixMilli(first).Add(-historySlack)
 }
