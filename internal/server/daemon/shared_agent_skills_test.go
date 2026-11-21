@@ -131,7 +131,7 @@ func TestSeedSharedAgentSkillGate_OpensTheGateThatEnableChecks(t *testing.T) {
 	ctx := context.Background()
 	fga := newStoreGateFGA()
 	load := func(names ...string) *SharedAgentSkills {
-		var refs []config.SharedAgentSkillConfig
+		refs := make([]config.SharedAgentSkillConfig, 0, len(names))
 		for _, n := range names {
 			refs = append(refs, config.SharedAgentSkillConfig{Name: n, Reference: "r@sha256:" + n})
 		}
