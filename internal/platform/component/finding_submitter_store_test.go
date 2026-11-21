@@ -98,6 +98,13 @@ func TestFindingSubmitter_AnIdempotencyKeyNamesTheFinding(t *testing.T) {
 	assert.Equal(t, first, second)
 	assert.Equal(t, finding.ResultID(victimTenant, "agent_principal:sa-1", "qualys:host-9:qid-1").String(), first)
 	assert.NotEqual(t, first, submit("agent_principal:sa-2"))
+
+	// A subject with no typed prefix keeps its raw form in the id, as on the
+	// harness path, and not the "user:" form of the FGA principal.
+	raw, err := submitter.Submit(submitterCtx(victimTenant, "spiffe://zeroroot.ai/agent/x"),
+		victimTenant, "", `{"title":"x"}`, "", "", "k")
+	require.NoError(t, err)
+	assert.Equal(t, finding.ResultID(victimTenant, "spiffe://zeroroot.ai/agent/x", "k").String(), raw)
 }
 
 func TestNewGraphRAGFindingSubmitter_RequiresAStore(t *testing.T) {

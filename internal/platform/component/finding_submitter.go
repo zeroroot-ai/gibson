@@ -252,7 +252,7 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	findingID := types.NewID()
 	if idempotencyKey != "" {
 		// One result of a tool names one finding of this submitter (review R6).
-		findingID = finding.ResultID(tenant, submitter.principal, idempotencyKey)
+		findingID = finding.ResultID(tenant, submitter.subject, idempotencyKey)
 	}
 	baseFinding.ID = findingID
 	baseFinding.TenantID = tenant
@@ -319,6 +319,10 @@ func (s *GraphRAGFindingSubmitter) Submit(
 
 // findingSubmitter is the verified identity a finding is stamped with.
 type findingSubmitter struct {
+	// subject is the authenticated subject of the caller, as the identity
+	// holds it. finding.ResultID takes it in this form on both submit paths,
+	// so one key of one caller gives one id (review R6).
+	subject    string
 	principal  string // the FGA user ref ext-authz asserted, e.g. "agent_principal:<id>"
 	agentName  string // the name the agent registered under, from the capability-grant registry
 	enrolledBy string // the subject of the person who enrolled the agent
@@ -335,7 +339,7 @@ func (s *GraphRAGFindingSubmitter) resolveSubmitter(ctx context.Context, tenant 
 	if err != nil || id.Subject == "" {
 		return findingSubmitter{}, ErrNoSubmitterIdentity
 	}
-	sub := findingSubmitter{principal: componentFGAUser(id.Subject)}
+	sub := findingSubmitter{principal: componentFGAUser(id.Subject), subject: id.Subject}
 	if s.enrolledAgents == nil {
 		return sub, nil
 	}
