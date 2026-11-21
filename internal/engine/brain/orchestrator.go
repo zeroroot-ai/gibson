@@ -5,6 +5,7 @@ package brain
 
 import (
 	"sort"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 
@@ -115,6 +116,10 @@ type Mission struct {
 	// scan — which never saw that Finding — would verify it on the very next
 	// tick. Set only by ScanReconciled.
 	Reconciled bool
+
+	// StartedAt is when the current run started (MissionProjected). It is zero
+	// for a mission that no projection started.
+	StartedAt time.Time
 }
 
 // MissionStarted launches a mission. (CUE-mission projection lands later; this is
@@ -141,6 +146,9 @@ type MissionStarted struct {
 	// CreatedBy is the principal that created the mission (hosted#205). The
 	// World carries it so ListMissions serves it without a secondary store.
 	CreatedBy principal.Principal
+	// StartedAt is the start of the run. Only a snapshot restore sets it, so
+	// the restored mission keeps the start of its run.
+	StartedAt time.Time
 }
 
 func (MissionStarted) Kind() string { return "mission.started" }
@@ -242,6 +250,9 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		if !e.CreatedBy.IsZero() {
 			m.CreatedBy = e.CreatedBy
 		}
+		if m.StartedAt.IsZero() {
+			m.StartedAt = e.StartedAt
+		}
 		return
 	}
 	w.missions.NewEntity(&Mission{
@@ -256,6 +267,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		TargetID:       e.TargetID,
 		TenantID:       e.TenantID,
 		CreatedBy:      e.CreatedBy,
+		StartedAt:      e.StartedAt,
 	})
 }
 
@@ -396,6 +408,8 @@ type MissionSnapshot struct {
 	CreatedBy principal.Principal
 	// Reconciled reports that this scan's rescan reconciliation has run (gibson#1686).
 	Reconciled bool
+	// StartedAt is the start of the current run.
+	StartedAt time.Time
 
 	// Progress is the ratio of completed work nodes to total work nodes for the
 	// mission (0.0–1.0), derived from the World's WorkItem entities at snapshot time
@@ -467,6 +481,7 @@ func (w *World) MissionSnapshot() []MissionSnapshot {
 			TenantID:         m.TenantID,
 			CreatedBy:        m.CreatedBy,
 			Reconciled:       m.Reconciled,
+			StartedAt:        m.StartedAt,
 			Progress:         progress,
 			FindingsCount:    missionFindingsCount(w, m.ID),
 		})

@@ -218,6 +218,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			TargetID:    m.TargetID,
 			TenantID:    m.TenantID,
 			CreatedBy:   m.CreatedBy,
+			StartedAt:   m.StartedAt,
 		}
 		Reduce(w, startEv)
 		// The spend of the run is part of the folded state. A replay of the

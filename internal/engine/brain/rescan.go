@@ -132,7 +132,6 @@ func RescanReconciliationSystem(w *World) []Event {
 	}
 
 	findings := w.FindingSnapshot()
-	now := w.Now() // the scan finished before this System ran, so the evidence is no older
 
 	// One ScanReconciled per scan, plus at most one status change per Finding
 	// in its scope.
@@ -141,6 +140,12 @@ func RescanReconciliationSystem(w *World) []Event {
 		out = append(out, ScanReconciled{MissionID: m.ID})
 		if m.Status != MissionCompleted {
 			// An unfinished look is not evidence of absence.
+			continue
+		}
+		if m.StartedAt.IsZero() {
+			// The time of the evidence is not known. The run time of this
+			// System is not that time: a scan that started before the deploy
+			// would then verify a fix that it never saw (review B2).
 			continue
 		}
 		for _, f := range findings {
@@ -152,10 +157,11 @@ func RescanReconciliationSystem(w *World) []Event {
 			}
 			// The scan is a rerun of the check. It does not set a status. The
 			// VerificationSystem does, once the deploy and the health signal
-			// are known (gibson#1464).
+			// are known (gibson#1464). The evidence of the scan is no older
+			// than the start of its run, so that is the time of the evidence.
 			out = append(out, CheckRerun{
 				ID: f.ID, CheckKind: string(finding.CheckScan), Found: f.LastScan == m.RunID,
-				EvidenceAt: now, MissionID: m.ID,
+				EvidenceAt: m.StartedAt, MissionID: m.ID,
 			})
 		}
 	}
