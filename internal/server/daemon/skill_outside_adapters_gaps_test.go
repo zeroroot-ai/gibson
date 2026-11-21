@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
@@ -160,7 +161,7 @@ type stubSkillStore struct{ agentskillstore.Store }
 // answers nil, and not a typed nil, until the store is built.
 func TestSkillFileStore_IsNilUntilTheStoreIsBuilt(t *testing.T) {
 	d := &daemonImpl{}
-	assert.True(t, d.skillFileStore() == nil, "no store built: the provider must answer a nil interface")
+	assert.Equal(t, harness.SkillFileStore(nil), d.skillFileStore(), "no store built: the provider must answer a nil interface")
 	d.agentSkills = stubSkillStore{}
 	assert.NotNil(t, d.skillFileStore(), "a built store must be served")
 }

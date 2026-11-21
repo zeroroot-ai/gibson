@@ -6,7 +6,6 @@ package harness
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -361,7 +360,7 @@ func TestCallToolProto_SkillScriptLaunchesWithTheFilesAndTheEgressOfTheAgent(t *
 	}
 	h.componentAuthorizer = canExecuteAndLoad{mission: missionID, skill: skillObject}
 	h.sandboxedExecutor = exec
-	h.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	h.logger = slog.New(slog.DiscardHandler)
 	h.tracer = noop.NewTracerProvider().Tracer("test")
 	h.missionCtx.CurrentAgent = "cve-triage"
 
