@@ -142,18 +142,26 @@ func TestIndex_AReopenedFindingIsNotVerified(t *testing.T) {
 
 func TestClassify(t *testing.T) {
 	for _, tc := range []struct {
-		err, result string
-		want        Outcome
+		code, err, result string
+		want              Outcome
 	}{
-		{"", `{"ok":true}`, OutcomeDone},
-		{"permission denied", "", OutcomeRefused},
-		{"rpc error: code = PermissionDenied desc = not allowed by grant", "", OutcomeRefused},
-		{"", "pending authorization", OutcomePending},
-		{"PENDING_AUTHORIZATION", "", OutcomePending},
-		{"vendor returned HTTP 500", "", OutcomeFailed},
+		{"", "", `{"ok":true}`, OutcomeDone},
+		// The code decides. The words of "not authorized to invoke tool" hold
+		// none of the old match words, and the call is a refusal (gibson#1575).
+		{"not_authorized", "metatool: not authorized to invoke tool: mcp:edr:isolate_host", "", OutcomeRefused},
+		{"refused", "metatool: tool blocked", "", OutcomeRefused},
+		{"pending_authorization", "wait", "", OutcomePending},
+		{"merge_not_granted", "wait", "", OutcomePending},
+		{"failed", "grant lookup failed", "", OutcomeFailed},
+		// An event with no code falls back to the words of the error.
+		{"", "permission denied", "", OutcomeRefused},
+		{"", "rpc error: code = PermissionDenied desc = not allowed by grant", "", OutcomeRefused},
+		{"", "", "pending authorization", OutcomePending},
+		{"", "PENDING_AUTHORIZATION", "", OutcomePending},
+		{"", "vendor returned HTTP 500", "", OutcomeFailed},
 	} {
-		if got := classify(tc.err, tc.result); got != tc.want {
-			t.Errorf("classify(%q, %q) = %q, want %q", tc.err, tc.result, got, tc.want)
+		if got := classify(tc.code, tc.err, tc.result); got != tc.want {
+			t.Errorf("classify(%q, %q, %q) = %q, want %q", tc.code, tc.err, tc.result, got, tc.want)
 		}
 	}
 }

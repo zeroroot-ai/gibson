@@ -218,7 +218,7 @@ func (ix *Index) actions(incident string, alerts []string) []ActionLine {
 			ToolID: act.ToolID, Connector: connector, Tool: tool,
 			AgentName: ix.runs[c.ev.RunID],
 			GrantID:   c.ev.GrantID,
-			Outcome:   classify(c.ev.Err, c.ev.Result),
+			Outcome:   classify(c.ev.ErrCode, c.ev.Err, c.ev.Result),
 			Error:     c.ev.Err, Result: c.ev.Result,
 			Controls: append([]string(nil), act.Controls...),
 			Frame:    frameAt(c.seq),

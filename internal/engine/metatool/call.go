@@ -94,6 +94,47 @@ type CallRecord struct {
 	// the call was refused, when no lookup is wired, or when no grant row
 	// exists for the subject.
 	GrantID string
+	// ErrCode is the typed reason of a call that did not succeed. It is empty
+	// for a call that succeeded.
+	ErrCode ErrCode
+}
+
+// ErrCode is the typed reason of a call that did not succeed. An agent and the
+// incident report tell the kinds apart by the code and never by the words of
+// the message (gibson#1575). A call that succeeded has no code.
+type ErrCode string
+
+const (
+	// ErrCodeNotAuthorized means the caller has no grant for the tool.
+	ErrCodeNotAuthorized ErrCode = "not_authorized"
+	// ErrCodePendingAuthorization means a person has not approved the call yet.
+	ErrCodePendingAuthorization ErrCode = "pending_authorization"
+	// ErrCodeMergeNotGranted means the merge request has no merge slot yet.
+	ErrCodeMergeNotGranted ErrCode = "merge_not_granted"
+	// ErrCodeRefused means the daemon refused the call by policy: the mission
+	// deny list, an inactive run or the denial of a person.
+	ErrCodeRefused ErrCode = "refused"
+	// ErrCodeFailed means the call ran or could not run, and it returned an error.
+	ErrCodeFailed ErrCode = "failed"
+)
+
+// CodeOf returns the typed code of the error of a call. It returns the empty
+// code for a nil error.
+func CodeOf(err error) ErrCode {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrUnauthorized):
+		return ErrCodeNotAuthorized
+	case errors.Is(err, ErrApprovalPending):
+		return ErrCodePendingAuthorization
+	case errors.Is(err, ErrMergeNotGranted):
+		return ErrCodeMergeNotGranted
+	case errors.Is(err, ErrBlocked), errors.Is(err, ErrRunInactive), errors.Is(err, ErrApprovalDenied):
+		return ErrCodeRefused
+	default:
+		return ErrCodeFailed
+	}
 }
 
 // FlightRecorder receives the record of each call, ADR-0131: a call is recorded
@@ -190,6 +231,7 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 		if err != nil {
 			errText = err.Error()
 		}
+		rec.ErrCode = CodeOf(err)
 		_ = c.Recorder(ctx, rec, resultJSON, errText)
 		c.Observer.Result(ctx, rec, resultJSON, err)
 	}
