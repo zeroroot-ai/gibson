@@ -1377,3 +1377,15 @@ func TestStartConnectorAuthorization_ReadsTheManifestScope(t *testing.T) {
 		t.Errorf("pending scope = %+v", pa)
 	}
 }
+
+// The scheme counts when a URL is matched to the host of a connector
+// (review m17).
+func TestHostOfConnector_TheSchemeCounts(t *testing.T) {
+	entry := componentcatalog.ConnectorEntry{Endpoint: "https://mcp.vendor.example/mcp"}
+	if !hostOfConnector("https://mcp.vendor.example/authorize", entry, tenantconnector.Connector{}) {
+		t.Fatal("the same scheme and host must match")
+	}
+	if hostOfConnector("http://mcp.vendor.example/authorize", entry, tenantconnector.Connector{}) {
+		t.Fatal("http on the host of an https endpoint must not match")
+	}
+}

@@ -359,8 +359,11 @@ func hostOfConnector(rawURL string, entry componentcatalog.ConnectorEntry, row t
 	if err != nil || u.Hostname() == "" {
 		return false
 	}
+	// The scheme counts too (review m17): an http URL on the host of an
+	// https endpoint is not that endpoint.
 	for _, known := range []string{entry.Endpoint, entry.DefaultInstanceURL, row.Endpoint} {
 		if k, kerr := url.Parse(known); kerr == nil && k.Hostname() != "" &&
+			strings.EqualFold(k.Scheme, u.Scheme) &&
 			strings.EqualFold(k.Hostname(), u.Hostname()) && k.Port() == u.Port() {
 			return true
 		}
