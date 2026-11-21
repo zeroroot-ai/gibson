@@ -7,11 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // PostgresFindingStore implements FindingStore on the findings table of the
@@ -31,7 +33,9 @@ var _ FindingStore = (*PostgresFindingStore)(nil)
 
 // Store writes the finding as one row of the findings table.
 func (s *PostgresFindingStore) Store(ctx context.Context, tenantID string, missionID types.ID, f agent.Finding) error {
-	if err := s.store.Store(ctx, tenantID, finding.NewEnhancedFinding(f, missionID, "")); err != nil {
+	enhanced := finding.NewEnhancedFinding(f, missionID, "")
+	enhanced.Check = SubmittedFindingCheck(f, missionID)
+	if err := s.store.Store(ctx, tenantID, enhanced); err != nil {
 		return fmt.Errorf("store finding %s: %w", f.ID, err)
 	}
 	return nil
@@ -58,4 +62,22 @@ func (s *PostgresFindingStore) Get(
 // because an item is over the size limit.
 func evidenceRejected(err error) bool {
 	return errors.Is(err, finding.ErrEvidenceTooLarge)
+}
+
+// SubmittedFindingCheck is the check that raised a finding that an agent
+// submits (ADR-0178, review m2). A finding that names the daemon record of a
+// read of a connector tool was raised by that read: the check is the tool, and
+// its ref is the id of the tool. Any other finding was raised by its mission
+// run, and a rerun of the mission is the check. The tool comes from the record
+// of the daemon, never from a field that the agent sets.
+func SubmittedFindingCheck(f agent.Finding, missionID types.ID) finding.Check {
+	for _, ev := range f.Evidence {
+		if ev.GetTier() != typespb.EvidenceTier_EVIDENCE_TIER_RECORDED {
+			continue
+		}
+		if tool := ev.GetMetadata()["tool_name"]; strings.HasPrefix(tool, "mcp:") {
+			return finding.Check{Kind: finding.CheckTool, Ref: tool}
+		}
+	}
+	return finding.ScanCheck(missionID)
 }

@@ -145,6 +145,11 @@ type ComponentServiceServer struct {
 	// connectorCaller calls a connector tool for CallTool. Nil refuses a
 	// connector tool call.
 	connectorCaller metatool.ConnectorCaller
+	// toolApproval is the approval queue for a tool that the manifest of its
+	// connector marks (gibson#1474). Nil refuses a call of a marked tool.
+	toolApproval metatool.ApprovalGate
+	// connectorGrants names the grant of a connector call in its record.
+	connectorGrants metatool.GrantLookup
 
 	// missionPolicy returns the mission policy of a run for a connector call
 	// that names a work item. Nil refuses such a call.

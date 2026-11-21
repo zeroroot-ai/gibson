@@ -100,6 +100,27 @@ func init() {
 	registerEvent("finding.raised", func() Event { return &FindingRaised{} })
 	registerEvent("finding.status_changed", func() Event { return &FindingStatusChanged{} })
 
+	// fixloop.go and mergegate.go
+	registerEvent("deploy.observed", func() Event { return &DeployObserved{} })
+	registerEvent("health.observed", func() Event { return &HealthObserved{} })
+	registerEvent("health.unavailable", func() Event { return &HealthUnavailable{} })
+	registerEvent("fix.revert_requested", func() Event { return &RevertRequested{} })
+	registerEvent("finding.fix_claimed", func() Event { return &FixClaimed{} })
+	registerEvent("finding.fix_claim_released", func() Event { return &FixClaimReleased{} })
+	registerEvent("finding.fix_link_refused", func() Event { return &FixLinkRefused{} })
+	registerEvent("finding.fix_claim_expired", func() Event { return &FixClaimExpired{} })
+	registerEvent("fix.reverted", func() Event { return &FixReverted{} })
+	registerEvent("check.rerun", func() Event { return &CheckRerun{} })
+	registerEvent("merge_request.queued", func() Event { return &MergeRequestQueued{} })
+	registerEvent("merge_request.granted", func() Event { return &MergeGranted{} })
+	registerEvent("merge_request.slot_expired", func() Event { return &MergeSlotExpired{} })
+
+	// priority.go
+	registerEvent("finding.prioritized", func() Event { return &FindingPrioritized{} })
+
+	// mergerequest.go
+	registerEvent("merge_request.observed", func() Event { return &MergeRequestObserved{} })
+
 	// rescan.go
 	registerEvent("scan.reconciled", func() Event { return &ScanReconciled{} })
 
@@ -126,6 +147,7 @@ func init() {
 	// destructive_authz.go
 	registerEvent("destructive_action.requested", func() Event { return &DestructiveActionRequested{} })
 	registerEvent("destructive_action.decided", func() Event { return &DestructiveActionDecided{} })
+	registerEvent("destructive_action.consumed", func() Event { return &DestructiveActionConsumed{} })
 
 	// voi_planner.go
 	registerEvent("voi.plan.requested", func() Event { return &VoIPlanRequested{} })
@@ -273,6 +295,8 @@ func dereferenceEvent(ev Event) Event {
 	case *DestructiveActionRequested:
 		return *v
 	case *DestructiveActionDecided:
+		return *v
+	case *DestructiveActionConsumed:
 		return *v
 	case *VoIPlanRequested:
 		return *v

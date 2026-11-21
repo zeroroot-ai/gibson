@@ -49,7 +49,7 @@ func TestEntityUpsertParams_AFirstClassLabelIsIdentifiedTheSameWayItsProjectionI
 func TestEntityUpsertParams_ALifecycleLabelKeepsItsNaturalKey(t *testing.T) {
 	// The labels the entity path owns are identified by their natural key — a
 	// CVE id, an image digest, a repository path.
-	for _, label := range []string{"Application", "Repository", "Image", "Package", "Deployment", "Vulnerability", "MergeRequest", "Pipeline", "Control"} {
+	for _, label := range []string{"Application", "Repository", "Image", "Package", "Deployment", "Vulnerability", "MergeRequest", "Pipeline", "Control", "Alert", "Incident", "Countermeasure"} {
 		t.Run(label, func(t *testing.T) {
 			ident := identOf(t, label, "CVE-2025-1234")
 			if got, ok := ident["key"]; !ok || got != "CVE-2025-1234" {
@@ -154,5 +154,29 @@ func TestEntityUpsertParams_EveryIdentityPropertyIsReserved(t *testing.T) {
 	}
 	if props["owner"] != "platform-team" {
 		t.Errorf("a non-identity property must survive: %+v", props)
+	}
+}
+
+// The fix agent writes why it did not fix a Finding as a sighting of the
+// Finding (fix-agent internal/emit). The projector stores the property on the
+// Finding node, merged on brain_id, so ApplicationFinding can read it back.
+func TestEntityUpsertParams_AFindingKeepsTheFixBlockedReason(t *testing.T) {
+	params, err := entityUpsertParams(brain.EntitySnapshot{
+		Label: "Finding", Key: "f-1",
+		Props: map[string]string{"fix_blocked_reason": "the flaw is on a host", "brain_id": "f-2"},
+	})
+	if err != nil {
+		t.Fatalf("entityUpsertParams: %v", err)
+	}
+	ident, _ := params["ident"].(map[string]any)
+	if ident["brain_id"] != "f-1" {
+		t.Fatalf("ident = %v, want brain_id f-1", ident)
+	}
+	props, _ := params["props"].(map[string]any)
+	if props["fix_blocked_reason"] != "the flaw is on a host" {
+		t.Fatalf("props = %v, want the fix blocked reason", props)
+	}
+	if _, ok := props["brain_id"]; ok {
+		t.Fatal("a sighting rewrote the identity of the Finding")
 	}
 }

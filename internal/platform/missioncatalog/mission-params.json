@@ -10,6 +10,17 @@
         "manifestsProject"
       ]
     },
+    "fix": {
+      "version": "1.0.0",
+      "params": [
+        "bank",
+        "baseBranch",
+        "brief",
+        "finding",
+        "forgeConnector",
+        "project"
+      ]
+    },
     "scan": {
       "version": "1.0.0",
       "params": [

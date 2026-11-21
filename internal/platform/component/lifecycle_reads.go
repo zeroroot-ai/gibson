@@ -83,6 +83,17 @@ type ApplicationFinding struct {
 	Priority       string `json:"priority,omitempty"`
 	PriorityRule   string `json:"priority_rule,omitempty"`
 	PriorityReason string `json:"priority_reason,omitempty"`
+	// FixBlockedReason is why the fix agent did not fix this Finding, as the
+	// agent wrote it back on the Finding (the node property
+	// fix_blocked_reason). The next pass reads it and does not try the same
+	// Finding again. Empty means that no pass gave up on it.
+	FixBlockedReason string `json:"fix_blocked_reason,omitempty"`
+	// MergeRequest and MergeRequestURL name the merge request of the current
+	// fix of the Finding: the FIXED_BY edge to the node whose key the Finding
+	// records. The fix agent reads them to learn the merge request of its job.
+	// Both are empty for a Finding with no fix.
+	MergeRequest    string `json:"merge_request,omitempty"`
+	MergeRequestURL string `json:"merge_request_url,omitempty"`
 }
 
 // applicationFindingsCypher walks one Application's lifecycle subgraph.
@@ -102,18 +113,16 @@ const applicationFindingsCypher = `
 MATCH (app:Application {key: $application})
 MATCH (f:Finding)-[:AFFECTS]->(place)
 WHERE ($statuses = [] OR f.status IN $statuses)
-  AND (
-    EXISTS { (app)-[:HAS_DEPLOYMENT]->(:Deployment)-[:RUNS]->(:Image)-[:CONTAINS]->(place) }
-    OR EXISTS { (app)-[:HAS_REPOSITORY]->(:Repository)<-[:BUILT_FROM]-(:Image)-[:CONTAINS]->(place) }
-    OR EXISTS { (app)-[:HAS_REPOSITORY]->(place) }
-    OR EXISTS { (app)-[:HAS_DEPLOYMENT]->(:Deployment)-[:EXPOSES]->(:Host)-[:RUNS_SERVICE]->(place) }
-  )
+  AND (` + applicationReachesPlace + `)
 WITH app, f, place
+OPTIONAL MATCH (f)-[:FIXED_BY]->(mr:MergeRequest)
+WHERE mr.key = f.merge_request
+WITH app, f, place, mr
 OPTIONAL MATCH (f)-[:INSTANCE_OF]->(v:Vulnerability)
 OPTIONAL MATCH (app)-[:HAS_DEPLOYMENT]->(dep:Deployment)-[:RUNS]->(img:Image)-[:CONTAINS]->(place)
-WITH app, f, place, v, dep, img
+WITH app, f, place, mr, v, dep, img
 OPTIONAL MATCH (dep)-[:EXPOSES]->(host:Host)
-WITH f, place, v, dep, img, host
+WITH f, place, mr, v, dep, img, host
 RETURN
   f.brain_id                       AS finding_id,
   coalesce(f.status, '')           AS status,
@@ -127,7 +136,10 @@ RETURN
   coalesce(img.key, '')            AS image_key,
   coalesce(f.priority, '')         AS priority,
   coalesce(f.priority_rule, '')    AS priority_rule,
-  coalesce(f.priority_reason, '')  AS priority_reason
+  coalesce(f.priority_reason, '')  AS priority_reason,
+  coalesce(f.fix_blocked_reason, '') AS fix_blocked_reason,
+  coalesce(mr.key, '')             AS merge_request,
+  coalesce(mr.url, '')             AS merge_request_url
 ORDER BY finding_id
 LIMIT $limit`
 
@@ -192,6 +204,10 @@ func encodeApplicationFindings(rows []map[string]any) ([]byte, error) {
 			Priority:        stringField(r, "priority"),
 			PriorityRule:    stringField(r, "priority_rule"),
 			PriorityReason:  stringField(r, "priority_reason"),
+
+			FixBlockedReason: stringField(r, "fix_blocked_reason"),
+			MergeRequest:     stringField(r, "merge_request"),
+			MergeRequestURL:  stringField(r, "merge_request_url"),
 		})
 	}
 	encoded, err := json.Marshal(out)
@@ -199,6 +215,15 @@ func encodeApplicationFindings(rows []map[string]any) ([]byte, error) {
 		return nil, fmt.Errorf("graphrag: application findings: encode: %w", err)
 	}
 	return encoded, nil
+}
+
+// ReadGraph runs a read-only Cypher query on the graph of the tenant. It is
+// the one read of a raw query, for a reader outside this package such as the
+// incident report (gibson#1478).
+func (q *PoolGraphRAGQuerier) ReadGraph(
+	ctx context.Context, tenant, cypher string, params map[string]any,
+) ([]map[string]any, error) {
+	return q.readGraph(ctx, tenant, cypher, params)
 }
 
 // readGraph runs a read-only Cypher query on the tenant's graph.

@@ -1,0 +1,52 @@
+# Qualys VMDR connector. Zero Root builds the MCP server in zeroroot-ai/connectors
+# (qualys/, release v0.1.0), because the vendor publishes no server with these tools.
+# The image is public, signed and scanned, and the catalog pins it by digest.
+# Source of the environment: qualys/README.md of zeroroot-ai/connectors at v0.1.0.
+# The server speaks streamable HTTP on :8080 at /mcp.
+id: qualys-vmdr
+kind: connector
+displayName: Qualys VMDR
+description: >-
+  Reads the latest vulnerability detections of a host from Qualys VMDR. It
+  only reads.
+spec:
+  vendor: qualys
+  class: scanner
+  shape: Hosted
+  image: ghcr.io/zeroroot-ai/connectors-qualys@sha256:64701b13f99993b77e5494fca938d4adc499c02f03315b486449d26ee0c6cfc3
+  transport: streamable-http
+  port: 8080
+  auth: none
+  # Each credential is the name of a secret in the secret store of the
+  # tenant. The operator puts the value in the pod. No value is in this file.
+  credentials:
+    - secret: qualys-vmdr-username
+      env: QUALYS_USERNAME
+    - secret: qualys-vmdr-password
+      env: QUALYS_PASSWORD
+  # The tenant gives the API server URL of its Qualys platform. The patterns
+  # are the API servers of the shared platforms, as the Qualys page "Identify
+  # your Qualys platform" lists them. A private platform of Qualys has its
+  # own host, so the platform owner of the install states it
+  # (installPatterns).
+  # The egress allow-list of the pod holds the host of the value.
+  variables:
+    - name: api_url
+      env: QUALYS_API_URL
+      kind: endpoint
+      installPatterns: true
+      patterns:
+        - https://qualysapi.qualys.com
+        - https://qualysapi.qg2.apps.qualys.com
+        - https://qualysapi.qg3.apps.qualys.com
+        - https://qualysapi.qg4.apps.qualys.com
+        - https://qualysapi.gov1.qualys.us
+        - https://qualysapi.qualys.eu
+        - https://qualysapi.qg2.apps.qualys.eu
+        - https://qualysapi.qg3.apps.qualys.it
+        - https://qualysapi.qg1.apps.qualys.in
+        - https://qualysapi.qg1.apps.qualys.ca
+        - https://qualysapi.qg1.apps.qualys.ae
+        - https://qualysapi.qg1.apps.qualys.co.uk
+        - https://qualysapi.qg1.apps.qualys.com.au
+        - https://qualysapi.qg1.apps.qualysksa.com

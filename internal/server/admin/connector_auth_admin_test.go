@@ -28,7 +28,9 @@ import (
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
 )
 
 var fixedNow = time.Unix(1_700_000_000, 0).UTC()
@@ -1189,5 +1191,203 @@ func TestAuthStatus_UnreachableStoreIsNeverAuthorized(t *testing.T) {
 
 	if got.GetState() == tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_AUTHORIZED {
 		t.Fatal("an unreadable tenant store must never read as AUTHORIZED")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A client that the tenant registers (gibson#1538)
+// ---------------------------------------------------------------------------
+
+// noRegistrationVendor serves metadata with NO registration endpoint, like
+// Microsoft Entra ID, and the token endpoint.
+func noRegistrationVendor(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"issuer":                 srv.URL,
+			"authorization_endpoint": srv.URL + "/oauth/authorize",
+			"token_endpoint":         srv.URL + "/oauth/token",
+		})
+	})
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "at-vendor", "refresh_token": "rt-vendor", "expires_in": 3600,
+		})
+	})
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+type fakeTenantConnectors struct {
+	row tenantconnector.Connector
+	err error
+}
+
+func (f fakeTenantConnectors) Get(_ context.Context, _, _ string) (tenantconnector.Connector, error) {
+	return f.row, f.err
+}
+
+// The three Microsoft entries complete authorization with the client of the
+// tenant and no dynamic client registration. The authorization asks for the
+// scope of the manifest.
+func TestTenantOAuthClient_MicrosoftEntriesCompleteAuthorization(t *testing.T) {
+	for _, id := range []string{"microsoft-sentinel", "microsoft-defender-endpoint", "microsoft-entra"} {
+		t.Run(id, func(t *testing.T) {
+			vendor := noRegistrationVendor(t)
+			entry, err := componentcatalog.LookupConnector(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.OAuthClient != componentcatalog.OAuthClientTenant || entry.OAuthScope == "" {
+				t.Fatalf("entry %s: client %q scope %q", id, entry.OAuthClient, entry.OAuthScope)
+			}
+			// The mock stands in for the host of the vendor.
+			mocked := entry
+			mocked.Endpoint, mocked.DefaultInstanceURL = vendor.URL, vendor.URL
+
+			store := newFakeConnectorSecrets()
+			ctx := ctxWithTenant(t, "acme")
+			if err := store.Put(ctx, "entra-client-secret", []byte("the-client-secret\n")); err != nil {
+				t.Fatal(err)
+			}
+			pending := connectorauth.NewPendingStore(5*time.Minute, func() time.Time { return fixedNow })
+			srv, err := NewConnectorAuthAdminServer(ConnectorAuthAdminConfig{
+				Secrets: store, Prover: &fakeProver{store: store}, Status: connectorauth.NewStatusBook(),
+				Pending: pending, CallbackBaseURL: "https://api.example.com", HTTPClient: vendor.Client(),
+				Now: func() time.Time { return fixedNow },
+				Connectors: fakeTenantConnectors{row: tenantconnector.Connector{
+					TenantID: "acme", ConnectorID: id,
+					Config: tenantconnector.Config{OAuthClientID: "tenant-cid", OAuthClientSecretName: "entra-client-secret"}, //nolint:gosec // G101: the name of a secret, not a credential
+				}},
+				Catalog: func(string) (componentcatalog.ConnectorEntry, error) { return mocked, nil },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			resp, err := srv.StartConnectorAuthorization(ctx,
+				&tenantv1.StartConnectorAuthorizationRequest{Connector: id, InstanceUrl: vendor.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			u, _ := url.Parse(resp.GetAuthorizeUrl())
+			if q := u.Query(); q.Get("client_id") != "tenant-cid" || q.Get("scope") != entry.OAuthScope {
+				t.Errorf("authorize url query = %v, want client tenant-cid and scope %q", q, entry.OAuthScope)
+			}
+			if strings.Contains(resp.GetAuthorizeUrl(), "the-client-secret") {
+				t.Error("the authorize URL holds the client secret")
+			}
+			if _, err := srv.CompleteConnectorAuthorization(ctx, &tenantv1.CompleteConnectorAuthorizationRequest{
+				Connector: id, Code: "the-code", State: resp.GetState()}); err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			raw, _ := store.Resolve(ctx, connectorauth.GrantSecretName(id))
+			grant, err := connectorauth.UnmarshalGrant(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The grant keeps the name of the secret, not the secret, so a
+			// rotation reaches each refresh (review m13).
+			if grant.ClientID != "tenant-cid" || grant.ClientSecret != "" || grant.ClientSecretName != "entra-client-secret" {
+				t.Errorf("the grant does not hold the client of the tenant: %+v", grant)
+			}
+		})
+	}
+}
+
+func TestTenantOAuthClient_Refusals(t *testing.T) {
+	vendor := noRegistrationVendor(t)
+	entry, _ := componentcatalog.LookupConnector("microsoft-sentinel")
+	mocked := entry
+	mocked.Endpoint, mocked.DefaultInstanceURL = vendor.URL, vendor.URL
+	row := tenantconnector.Connector{TenantID: "acme", ConnectorID: "microsoft-sentinel",
+		Config: tenantconnector.Config{OAuthClientID: "cid", OAuthClientSecretName: "name"}}
+
+	cases := map[string]struct {
+		conns    TenantConnectors
+		secret   bool
+		instance string
+		want     codes.Code
+	}{
+		"not enabled":              {fakeTenantConnectors{err: tenantconnector.ErrNotEnabled}, true, vendor.URL, codes.FailedPrecondition},
+		"no client stored":         {fakeTenantConnectors{row: tenantconnector.Connector{}}, true, vendor.URL, codes.FailedPrecondition},
+		"secret not in the store":  {fakeTenantConnectors{row: row}, false, vendor.URL, codes.FailedPrecondition},
+		"instance url of an other": {fakeTenantConnectors{row: row}, true, "https://evil.example.com", codes.InvalidArgument},
+		"no table wired":           {nil, true, vendor.URL, codes.FailedPrecondition},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			store := newFakeConnectorSecrets()
+			ctx := ctxWithTenant(t, "acme")
+			if tc.secret {
+				_ = store.Put(ctx, "name", []byte("s"))
+			}
+			pending := connectorauth.NewPendingStore(5*time.Minute, func() time.Time { return fixedNow })
+			srv, err := NewConnectorAuthAdminServer(ConnectorAuthAdminConfig{
+				Secrets: store, Prover: &fakeProver{store: store}, Status: connectorauth.NewStatusBook(),
+				Pending: pending, CallbackBaseURL: "https://api.example.com", HTTPClient: vendor.Client(),
+				Connectors: tc.conns,
+				Catalog:    func(string) (componentcatalog.ConnectorEntry, error) { return mocked, nil },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = srv.StartConnectorAuthorization(ctx, &tenantv1.StartConnectorAuthorizationRequest{
+				Connector: "microsoft-sentinel", InstanceUrl: tc.instance})
+			if status.Code(err) != tc.want {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			if err != nil && strings.Contains(err.Error(), "secret-value") {
+				t.Error("the error holds a secret")
+			}
+		})
+	}
+}
+
+// The scope of the manifest reaches a dynamic registration and the authorize
+// URL: oauthScope has a reader.
+func TestStartConnectorAuthorization_ReadsTheManifestScope(t *testing.T) {
+	vendor := fakeVendor(t)
+	entry, _ := componentcatalog.LookupConnector("datadog")
+	mocked := entry
+	store := newFakeConnectorSecrets()
+	pending := connectorauth.NewPendingStore(5*time.Minute, func() time.Time { return fixedNow })
+	srv, err := NewConnectorAuthAdminServer(ConnectorAuthAdminConfig{
+		Secrets: store, Prover: &fakeProver{store: store}, Status: connectorauth.NewStatusBook(),
+		Pending: pending, CallbackBaseURL: "https://api.example.com", HTTPClient: vendor.Client(),
+		Catalog: func(string) (componentcatalog.ConnectorEntry, error) { return mocked, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := srv.StartConnectorAuthorization(ctxWithTenant(t, "acme"),
+		&tenantv1.StartConnectorAuthorizationRequest{Connector: "datadog", InstanceUrl: vendor.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(resp.GetAuthorizeUrl())
+	if u.Query().Get("scope") != "mcp_all" {
+		t.Errorf("scope = %q, want mcp_all", u.Query().Get("scope"))
+	}
+	pa, _ := pending.Take(resp.GetState())
+	if pa == nil || pa.Scope != "mcp_all" {
+		t.Errorf("pending scope = %+v", pa)
+	}
+}
+
+// The scheme counts when a URL is matched to the host of a connector
+// (review m17).
+func TestHostOfConnector_TheSchemeCounts(t *testing.T) {
+	entry := componentcatalog.ConnectorEntry{Endpoint: "https://mcp.vendor.example/mcp"}
+	if !hostOfConnector("https://mcp.vendor.example/authorize", entry, tenantconnector.Connector{}) {
+		t.Fatal("the same scheme and host must match")
+	}
+	if hostOfConnector("http://mcp.vendor.example/authorize", entry, tenantconnector.Connector{}) {
+		t.Fatal("http on the host of an https endpoint must not match")
 	}
 }

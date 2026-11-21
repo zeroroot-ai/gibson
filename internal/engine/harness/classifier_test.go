@@ -83,9 +83,9 @@ func TestSubmitFinding_ClassifierNormalizes(t *testing.T) {
 	// Create a mock classifier that normalizes categories
 	mockCls := &mockClassifier{
 		classifyFunc: func(ctx context.Context, proposed, description string) (string, error) {
-			// Normalize "jailbreaking" to "jailbreak"
-			if proposed == "jailbreaking" {
-				return "jailbreak", nil
+			// Normalize "exposed_svc" to "initial_access"
+			if proposed == "exposed_svc" {
+				return "initial_access", nil
 			}
 			// Return proposed for other categories
 			return proposed, nil
@@ -124,9 +124,9 @@ func TestSubmitFinding_ClassifierNormalizes(t *testing.T) {
 	defaultHarness, ok := harness.(*DefaultAgentHarness)
 	require.True(t, ok)
 
-	// Create a finding with category "jailbreaking"
-	finding := agent.NewFinding("Jailbreak Attempt", "LLM jailbreak vulnerability", agent.SeverityHigh)
-	finding.Category = "jailbreaking"
+	// Create a finding with category "exposed_svc"
+	finding := agent.NewFinding("Exposed Service", "An admin endpoint answers with no credential", agent.SeverityHigh)
+	finding.Category = "exposed_svc"
 
 	// Submit the finding
 	err = defaultHarness.SubmitFinding(context.Background(), finding)
@@ -138,10 +138,10 @@ func TestSubmitFinding_ClassifierNormalizes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, findings, 1)
 
-	// Verify category was normalized to "jailbreak"
-	assert.Equal(t, "jailbreak", findings[0].Category)
+	// Verify category was normalized to "initial_access"
+	assert.Equal(t, "initial_access", findings[0].Category)
 	// Verify original_category metadata was set
-	assert.Equal(t, "jailbreaking", findings[0].Metadata["original_category"])
+	assert.Equal(t, "exposed_svc", findings[0].Metadata["original_category"])
 }
 
 // TestSubmitFinding_ClassifierUnchanged tests that when the classifier returns

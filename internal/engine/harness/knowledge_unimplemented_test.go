@@ -50,16 +50,6 @@ func (UnimplementedKnowledgeReader) QueryNodes(context.Context, *graphragpb.Grap
 	return nil, ErrKnowledgeUnavailable
 }
 
-// FindSimilarAttacks reports ErrKnowledgeUnavailable: this harness serves no knowledge reads.
-func (UnimplementedKnowledgeReader) FindSimilarAttacks(context.Context, string, int) ([]*graphragpb.AttackPattern, error) {
-	return nil, ErrKnowledgeUnavailable
-}
-
-// GetAttackChains reports ErrKnowledgeUnavailable: this harness serves no knowledge reads.
-func (UnimplementedKnowledgeReader) GetAttackChains(context.Context, string, int) ([]*graphragpb.AttackChain, error) {
-	return nil, ErrKnowledgeUnavailable
-}
-
 // FindSimilarFindings reports ErrKnowledgeUnavailable: this harness serves no knowledge reads.
 func (UnimplementedKnowledgeReader) FindSimilarFindings(context.Context, string, int) ([]*graphragpb.FindingNode, error) {
 	return nil, ErrKnowledgeUnavailable

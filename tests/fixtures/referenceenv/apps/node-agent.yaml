@@ -1,0 +1,50 @@
+# Service node-agent. Flaw: the container runs privileged, so it holds every
+# Linux capability and sees every device of the node (flaw
+# "privileged-container").
+# Fix: remove privileged and drop all capabilities.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-agent
+  annotations:
+    refenv.zeroroot.ai/health-url: http://node-agent.refenv.svc.cluster.local:8080/healthz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: node-agent
+  template:
+    metadata:
+      labels:
+        app: node-agent
+    spec:
+      containers:
+        - name: node-agent
+          image: busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+          command:
+            - sh
+            - -c
+            - mkdir -p /www && echo ok > /www/healthz && exec httpd -f -p 8080 -h /www
+          ports:
+            - containerPort: 8080
+          securityContext:
+            privileged: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-agent
+spec:
+  selector:
+    app: node-agent
+  ports:
+    - port: 8080
+      targetPort: 8080

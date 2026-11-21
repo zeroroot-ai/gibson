@@ -48,6 +48,14 @@ var paramsByMission = map[string]map[string]string{
 		"pipelineUrl":   "https://gitlab.com/examplebank/customer-portal/-/pipelines/8891",
 		"imageRef":      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
 	},
+	"fix": {
+		"bank":           "bank/coding",
+		"finding":        "finding-42",
+		"forgeConnector": "gitlab-fixloop",
+		"project":        "examplebank/customer-portal",
+		"baseBranch":     "main",
+		"brief":          "Finding: \"finding-42\"\nWeakness: \"CVE-2025-1234\"",
+	},
 	"cluster-assessment": {
 		// kubeconfigParam rather than the literal: gosec's G101 matches an
 		// identifier or a map key against passwd|pass|secret|token|cred and

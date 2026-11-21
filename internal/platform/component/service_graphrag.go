@@ -35,40 +35,6 @@ func (s *ComponentServiceServer) QueryNodes(ctx context.Context, req *componentp
 // there is no request type left to implement against. The full unwind of the
 // now-callerless graphrag write surface is gibson#1265/gibson#1322.
 
-// FindSimilarAttacks returns attack patterns semantically similar to the given content.
-func (s *ComponentServiceServer) FindSimilarAttacks(ctx context.Context, req *componentpb.FindSimilarAttacksRequest) (*componentpb.FindSimilarAttacksResponse, error) {
-	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" || tenant == auth.SystemTenantString {
-		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
-	}
-	if s.graphrag == nil {
-		return nil, status.Error(codes.Unimplemented, "GraphRAG not configured")
-	}
-	resultsJSON, err := s.graphrag.FindSimilarAttacks(ctx, tenant, req.GetContent(), int(req.GetTopK()))
-	if err != nil {
-		s.logger.Error("FindSimilarAttacks failed", "tenant", tenant, "error", err)
-		return nil, status.Errorf(codes.Internal, "search failed: %v", err)
-	}
-	return &componentpb.FindSimilarAttacksResponse{ResultsJson: resultsJSON}, nil
-}
-
-// GetAttackChains returns multi-hop attack paths from a starting technique.
-func (s *ComponentServiceServer) GetAttackChains(ctx context.Context, req *componentpb.GetAttackChainsRequest) (*componentpb.GetAttackChainsResponse, error) {
-	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" || tenant == auth.SystemTenantString {
-		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
-	}
-	if s.graphrag == nil {
-		return nil, status.Error(codes.Unimplemented, "GraphRAG not configured")
-	}
-	resultsJSON, err := s.graphrag.GetAttackChains(ctx, tenant, req.GetTechniqueId(), int(req.GetMaxDepth()))
-	if err != nil {
-		s.logger.Error("GetAttackChains failed", "tenant", tenant, "error", err)
-		return nil, status.Errorf(codes.Internal, "chain query failed: %v", err)
-	}
-	return &componentpb.GetAttackChainsResponse{ResultsJson: resultsJSON}, nil
-}
-
 // FindSimilarFindings returns findings semantically similar to the given finding.
 func (s *ComponentServiceServer) FindSimilarFindings(ctx context.Context, req *componentpb.FindSimilarFindingsRequest) (*componentpb.FindSimilarFindingsResponse, error) {
 	tenant := auth.TenantStringFromContext(ctx)

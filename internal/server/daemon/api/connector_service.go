@@ -6,6 +6,8 @@ package api
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -33,7 +35,7 @@ const systemTenantRef = "system_tenant:_system"
 // ConnectorStore holds the connectors each tenant enabled (gibson#662).
 // *tenantconnector.Store satisfies it.
 type ConnectorStore interface {
-	Enable(ctx context.Context, tenantID, connectorID string) (tenantconnector.Connector, error)
+	Enable(ctx context.Context, tenantID, connectorID string, cfg tenantconnector.Config) (tenantconnector.Connector, error)
 	Disable(ctx context.Context, tenantID, connectorID string) error
 	List(ctx context.Context, tenantID string) ([]tenantconnector.Connector, error)
 }
@@ -113,6 +115,10 @@ func (s *ConnectorService) ListCatalog(
 			Shape:              string(e.Shape),
 			Auth:               string(e.Auth),
 			DefaultInstanceUrl: e.DefaultInstanceURL,
+			ToolClass:          e.Class,
+			EndpointPatterns:   e.EndpointPatterns,
+			OauthClient:        e.OAuthClient,
+			Variables:          catalogVariables(e),
 		})
 	}
 	return &tenantv1.ListCatalogResponse{Entries: out}, nil
@@ -143,7 +149,11 @@ func (s *ConnectorService) EnableConnector(
 		return nil, status_grpc.Errorf(codes.NotFound,
 			"EnableConnector: connector %q is not in the catalog", entry.ID)
 	}
-	c, err := s.store.Enable(ctx, tenant, entry.ID)
+	cfg, err := tenantChoice(entry, req)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.store.Enable(ctx, tenant, entry.ID, cfg)
 	if err != nil {
 		if errors.Is(err, tenantconnector.ErrAlreadyEnabled) {
 			return nil, status_grpc.Errorf(codes.AlreadyExists,
@@ -152,6 +162,78 @@ func (s *ConnectorService) EnableConnector(
 		return nil, status_grpc.Errorf(codes.Internal, "EnableConnector: %v", err)
 	}
 	return &tenantv1.EnableConnectorResponse{Connector: c.ConnectorID, Phase: c.Phase}, nil
+}
+
+// catalogVariables lists the variables that a tenant gives for an entry.
+func catalogVariables(e componentcatalog.ConnectorEntry) []*tenantv1.CatalogVariable {
+	out := make([]*tenantv1.CatalogVariable, 0, len(e.Variables))
+	for _, v := range e.Variables {
+		out = append(out, &tenantv1.CatalogVariable{Name: v.Name, Kind: v.Kind, Patterns: v.Patterns})
+	}
+	return out
+}
+
+// OAuthClientSecretPrefix is the start of the name of the secret that holds
+// the client secret of a tenant OAuth client of the connector.
+func OAuthClientSecretPrefix(connectorID string) string { return connectorID + "-oauth-" }
+
+// oauthClientIDRE bounds an OAuth client id: 1 to 256 printable ASCII
+// characters with no space. RFC 6749 allows any visible character.
+var oauthClientIDRE = regexp.MustCompile(`^[\x21-\x7e]{1,256}$`)
+
+// tenantChoice checks what the tenant chose against the catalog entry, and
+// returns what the store keeps. A tenant endpoint must match a pattern of the
+// entry (gibson#1534). A tenant OAuth client is required for an entry that has
+// no dynamic client registration, and refused for any other (gibson#1538).
+func tenantChoice(entry componentcatalog.ConnectorEntry, req *tenantv1.EnableConnectorRequest) (tenantconnector.Config, error) {
+	var cfg tenantconnector.Config
+	if req.GetEndpoint() != "" {
+		res, err := entry.ResolveEndpoint(req.GetEndpoint())
+		if err != nil {
+			return cfg, status_grpc.Errorf(codes.InvalidArgument, "EnableConnector: %v", err)
+		}
+		cfg.Endpoint = res.Endpoint
+	} else if entry.Shape == connectorv1alpha1.ConnectorShapeRemote && entry.Endpoint == "" {
+		return cfg, status_grpc.Errorf(codes.InvalidArgument,
+			"EnableConnector: connector %q needs an endpoint that matches %v", entry.ID, entry.EndpointPatterns)
+	}
+	if len(entry.Variables) > 0 || len(req.GetVariables()) > 0 {
+		// A value that the entry does not declare, or a missing one, is an
+		// error. The check also refuses a private or cluster host (gibson#1508).
+		if _, err := entry.ResolveVariables(req.GetVariables()); err != nil {
+			return cfg, status_grpc.Errorf(codes.InvalidArgument, "EnableConnector: %v", err)
+		}
+		cfg.Variables = req.GetVariables()
+	}
+	id, name := req.GetOauthClientId(), req.GetOauthClientSecretName()
+	switch {
+	case entry.OAuthClient == componentcatalog.OAuthClientTenant:
+		if id == "" || name == "" {
+			return cfg, status_grpc.Errorf(codes.InvalidArgument,
+				"EnableConnector: connector %q needs oauth_client_id and oauth_client_secret_name: "+
+					"the vendor has no dynamic client registration", entry.ID)
+		}
+		if !componentcatalog.ValidSecretName(name) {
+			return cfg, status_grpc.Error(codes.InvalidArgument,
+				"EnableConnector: oauth_client_secret_name is not a valid secret name")
+		}
+		// The secret must be one that the tenant made for this connector, so a
+		// tenant admin cannot send another secret of the tenant to a token
+		// endpoint (review m13).
+		if prefix := OAuthClientSecretPrefix(entry.ID); !strings.HasPrefix(name, prefix) {
+			return cfg, status_grpc.Errorf(codes.InvalidArgument,
+				"EnableConnector: oauth_client_secret_name must start with %q", prefix)
+		}
+		if !oauthClientIDRE.MatchString(id) {
+			return cfg, status_grpc.Error(codes.InvalidArgument,
+				"EnableConnector: oauth_client_id must be 1 to 256 printable characters with no space")
+		}
+		cfg.OAuthClientID, cfg.OAuthClientSecretName = id, name
+	case id != "" || name != "":
+		return cfg, status_grpc.Errorf(codes.InvalidArgument,
+			"EnableConnector: connector %q registers its own OAuth client and takes no client id or secret name", entry.ID)
+	}
+	return cfg, nil
 }
 
 // ListConnectors returns the tenant's enabled connectors with the state that
@@ -175,9 +257,12 @@ func (s *ConnectorService) ListConnectors(
 			Phase:           r.Phase,
 			DiscoveredTools: r.DiscoveredTools,
 			LastError:       r.LastError,
+			Endpoint:        r.Endpoint,
+			Variables:       r.Variables,
 		}
 		if entry, lerr := componentcatalog.LookupConnector(r.ConnectorID); lerr == nil {
 			c.Shape = string(entry.Shape)
+			c.ToolClass = entry.Class
 		}
 		out = append(out, c)
 	}

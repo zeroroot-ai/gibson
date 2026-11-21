@@ -273,6 +273,10 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	// Step 5: the one record. The store keeps it and the World folds it, so
 	// the two never disagree about who submitted what under which mission.
 	enhanced := finding.NewEnhancedFinding(baseFinding, missionID, submitter.agentName)
+	// An agent that submits a finding raised it in a mission run, and a rerun of
+	// that mission is the check that verifies the fix (ADR-0178). The daemon has
+	// no attack proof for this path, so it never records a predicate here.
+	enhanced.Check = finding.ScanCheck(missionID)
 
 	// Step 6: Acquire a per-tenant Conn and persist the finding. Postgres is the
 	// one home of the fields and the evidence of the finding. A failed write

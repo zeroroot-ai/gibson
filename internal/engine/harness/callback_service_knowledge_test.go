@@ -40,8 +40,6 @@ import (
 type stubQuerier struct {
 	queryErr error
 	nodes    []*graphragpb.QueryResult
-	attacks  []byte
-	chains   []byte
 	findings []byte
 	related  []byte
 	appFinds []byte
@@ -49,12 +47,6 @@ type stubQuerier struct {
 
 func (s *stubQuerier) QueryNodes(context.Context, string, *graphragpb.GraphQuery) ([]*graphragpb.QueryResult, error) {
 	return s.nodes, s.queryErr
-}
-func (s *stubQuerier) FindSimilarAttacks(context.Context, string, string, int) ([]byte, error) {
-	return s.attacks, nil
-}
-func (s *stubQuerier) GetAttackChains(context.Context, string, string, int) ([]byte, error) {
-	return s.chains, nil
 }
 func (s *stubQuerier) FindSimilarFindings(context.Context, string, string, int) ([]byte, error) {
 	return s.findings, nil
@@ -91,45 +83,6 @@ func mustJSON(t *testing.T, v any) []byte {
 	b, err := json.Marshal(v)
 	require.NoError(t, err)
 	return b
-}
-
-func TestFindSimilarAttacks(t *testing.T) {
-	svc, cinfo := knowledgeService(t, &stubQuerier{
-		attacks: mustJSON(t, []map[string]any{{"technique_id": "T1566", "name": "Phishing"}}),
-	})
-	resp, err := svc.FindSimilarAttacks(acmeCtx(), &harnesspb.FindSimilarAttacksRequest{
-		Context: cinfo, Content: "credential harvesting", TopK: 5,
-	})
-	require.NoError(t, err)
-	require.Len(t, resp.Results, 1)
-	assert.Equal(t, "T1566", resp.Results[0].TechniqueId)
-}
-
-func TestFindSimilarAttacks_UnavailableWhenNoQuerier(t *testing.T) {
-	svc, cinfo := knowledgeService(t, nil)
-	resp, err := svc.FindSimilarAttacks(acmeCtx(), &harnesspb.FindSimilarAttacksRequest{Context: cinfo, Content: "x"})
-	require.Error(t, err, "an absent querier must fail, never report zero attack patterns")
-	assert.Equal(t, codes.Unavailable, status.Code(err))
-	assert.Nil(t, resp)
-}
-
-func TestGetAttackChains(t *testing.T) {
-	svc, cinfo := knowledgeService(t, &stubQuerier{
-		chains: mustJSON(t, []map[string]any{{"id": "chain-1", "severity": "high"}}),
-	})
-	resp, err := svc.GetAttackChains(acmeCtx(), &harnesspb.GetAttackChainsRequest{
-		Context: cinfo, TechniqueId: "T1566", MaxDepth: 3,
-	})
-	require.NoError(t, err)
-	require.Len(t, resp.Results, 1)
-	assert.Equal(t, "chain-1", resp.Results[0].Id)
-}
-
-func TestGetAttackChains_UnavailableWhenNoQuerier(t *testing.T) {
-	svc, cinfo := knowledgeService(t, nil)
-	_, err := svc.GetAttackChains(acmeCtx(), &harnesspb.GetAttackChainsRequest{Context: cinfo, TechniqueId: "T1566"})
-	require.Error(t, err)
-	assert.Equal(t, codes.Unavailable, status.Code(err))
 }
 
 func TestFindSimilarFindings(t *testing.T) {
@@ -204,8 +157,6 @@ func knowledgeHarness(t *testing.T, q *stubQuerier) *DefaultAgentHarness {
 
 func TestDefaultAgentHarness_GraphReadsDecodeJSON(t *testing.T) {
 	h := knowledgeHarness(t, &stubQuerier{
-		attacks:  mustJSON(t, []map[string]any{{"technique_id": "T1566"}}),
-		chains:   mustJSON(t, []map[string]any{{"id": "c-1"}}),
 		findings: mustJSON(t, []map[string]any{{"id": "f-1"}}),
 		related:  mustJSON(t, []map[string]any{{"id": "f-2"}}),
 		nodes:    []*graphragpb.QueryResult{{Score: 1, Node: &graphragpb.GraphNode{Id: "n-1"}}},
@@ -215,15 +166,6 @@ func TestDefaultAgentHarness_GraphReadsDecodeJSON(t *testing.T) {
 	nodes, err := h.QueryNodes(ctx, &graphragpb.GraphQuery{Text: "x"})
 	require.NoError(t, err)
 	assert.Len(t, nodes, 1)
-
-	atk, err := h.FindSimilarAttacks(ctx, "phishing", 5)
-	require.NoError(t, err)
-	require.Len(t, atk, 1)
-	assert.Equal(t, "T1566", atk[0].TechniqueId)
-
-	ch, err := h.GetAttackChains(ctx, "T1566", 3)
-	require.NoError(t, err)
-	assert.Equal(t, "c-1", ch[0].Id)
 
 	sim, err := h.FindSimilarFindings(ctx, "f-0", 5)
 	require.NoError(t, err)
@@ -244,8 +186,6 @@ func TestDefaultAgentHarness_GraphReadsUnavailable(t *testing.T) {
 
 	checks := map[string]func() error{
 		"QueryNodes":          func() error { _, err := h.QueryNodes(ctx, nil); return err },
-		"FindSimilarAttacks":  func() error { _, err := h.FindSimilarAttacks(ctx, "x", 1); return err },
-		"GetAttackChains":     func() error { _, err := h.GetAttackChains(ctx, "T1", 1); return err },
 		"FindSimilarFindings": func() error { _, err := h.FindSimilarFindings(ctx, "f", 1); return err },
 		"GetRelatedFindings":  func() error { _, err := h.GetRelatedFindings(ctx, "f"); return err },
 		"ApplicationFindings": func() error {
@@ -272,16 +212,16 @@ func TestDefaultAgentHarness_GraphReadsRefuseSystemTenant(t *testing.T) {
 
 func TestDecodeGraphResults(t *testing.T) {
 	// Empty payload is an empty answer, not an error: a graph with no matching
-	// attack patterns is an ordinary result.
-	out, err := decodeGraphResults[graphragpb.AttackPattern](nil, "attack patterns")
+	// findings is an ordinary result.
+	out, err := decodeGraphResults[graphragpb.GraphNode](nil, "findings")
 	require.NoError(t, err)
 	assert.Empty(t, out)
 
 	// Malformed payload IS an error — silently returning nothing would look
 	// identical to "the graph knows nothing".
-	_, err = decodeGraphResults[graphragpb.AttackPattern]([]byte("{not json"), "attack patterns")
+	_, err = decodeGraphResults[graphragpb.GraphNode]([]byte("{not json"), "findings")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "decode attack patterns")
+	assert.Contains(t, err.Error(), "decode findings")
 }
 
 func TestRunSummariesToProto(t *testing.T) {
@@ -530,8 +470,6 @@ func TestUnimplementedKnowledgeReader(t *testing.T) {
 			return err
 		},
 		"QueryNodes":          func() error { _, err := u.QueryNodes(ctx, nil); return err },
-		"FindSimilarAttacks":  func() error { _, err := u.FindSimilarAttacks(ctx, "x", 1); return err },
-		"GetAttackChains":     func() error { _, err := u.GetAttackChains(ctx, "T1", 1); return err },
 		"FindSimilarFindings": func() error { _, err := u.FindSimilarFindings(ctx, "f", 1); return err },
 		"GetRelatedFindings":  func() error { _, err := u.GetRelatedFindings(ctx, "f"); return err },
 	}
@@ -609,14 +547,6 @@ func TestKnowledgeHandlers_AllRejectUnknownMission(t *testing.T) {
 	ctx := acmeCtx()
 
 	calls := map[string]func() error{
-		"FindSimilarAttacks": func() error {
-			_, err := svc.FindSimilarAttacks(ctx, &harnesspb.FindSimilarAttacksRequest{Context: s})
-			return err
-		},
-		"GetAttackChains": func() error {
-			_, err := svc.GetAttackChains(ctx, &harnesspb.GetAttackChainsRequest{Context: s})
-			return err
-		},
 		"FindSimilarFindings": func() error {
 			_, err := svc.FindSimilarFindings(ctx, &harnesspb.FindSimilarFindingsRequest{Context: s})
 			return err
@@ -651,8 +581,6 @@ func TestMiddlewareHarness_KnowledgeForwardsErrors(t *testing.T) {
 			return err
 		},
 		"QueryNodes":          func() error { _, err := h.QueryNodes(ctx, nil); return err },
-		"FindSimilarAttacks":  func() error { _, err := h.FindSimilarAttacks(ctx, "x", 1); return err },
-		"GetAttackChains":     func() error { _, err := h.GetAttackChains(ctx, "T1", 1); return err },
 		"FindSimilarFindings": func() error { _, err := h.FindSimilarFindings(ctx, "f", 1); return err },
 		"GetRelatedFindings":  func() error { _, err := h.GetRelatedFindings(ctx, "f"); return err },
 		"ApplicationFindings": func() error {
@@ -868,5 +796,33 @@ func TestApplicationFindingsToProto_CarriesThePriorityTriple(t *testing.T) {
 	if full.GetPriority() != "P2" || full.GetPriorityRule() != "R04" || full.GetPriorityReason() != "reachable and exposed" {
 		t.Errorf("the full triple did not survive: priority=%q rule=%q reason=%q",
 			full.GetPriority(), full.GetPriorityRule(), full.GetPriorityReason())
+	}
+}
+
+// The pinned SDK still declares the reads of attack patterns and attack
+// chains (gibson#1521). The daemon serves neither, so the embedded
+// UnimplementedHarnessCallbackServiceServer answers them. The tests reach the
+// RPC by its name through the service descriptor, so they compile against the
+// pinned SDK and against the SDK of zeroroot-ai/sdk#359, which deletes both.
+// After the SDK bump the descriptor holds neither, and both tests go.
+
+func TestFindSimilarAttacks_IsUnimplemented(t *testing.T) {
+	assertRetiredRPCIsUnimplemented(t, "FindSimilarAttacks")
+}
+
+func TestGetAttackChains_IsUnimplemented(t *testing.T) {
+	assertRetiredRPCIsUnimplemented(t, "GetAttackChains")
+}
+
+func assertRetiredRPCIsUnimplemented(t *testing.T, name string) {
+	t.Helper()
+	svc, _ := knowledgeService(t, &stubQuerier{})
+	for _, m := range harnesspb.HarnessCallbackService_ServiceDesc.Methods {
+		if m.MethodName != name {
+			continue
+		}
+		_, err := m.Handler(svc, acmeCtx(), func(any) error { return nil }, nil)
+		require.Equal(t, codes.Unimplemented, status.Code(err))
+		return
 	}
 }

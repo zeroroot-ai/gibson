@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
+package api
+
+import (
+	"slices"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+)
+
+// aapLikeEntry is a Hosted connector that needs the address of a host of the
+// customer (gibson#1508).
+func aapLikeEntry() componentcatalog.ConnectorEntry {
+	return componentcatalog.ConnectorEntry{
+		ID:          "aap-like",
+		Shape:       connectorv1alpha1.ConnectorShapeHosted,
+		Image:       "registry.example.com/aap/mcp@sha256:abc",
+		EgressAllow: []string{"registry-static.example.com:443"},
+		Env:         map[string]string{"ALLOW_WRITE_OPERATIONS": "false"},
+		Variables: []componentcatalog.TenantVariable{
+			{Name: "base_url", Env: "BASE_URL", Kind: componentcatalog.VariableKindEndpoint, Patterns: []string{
+				"https://aap.corp-example.com", "https://aap.corp-example.com:8443",
+			}},
+		},
+	}
+}
+
+func TestTenantChoice_HostedVariables(t *testing.T) {
+	entry := aapLikeEntry()
+	cfg, err := tenantChoice(entry, &tenantv1.EnableConnectorRequest{
+		CatalogId: "aap-like", Variables: map[string]string{"base_url": "https://aap.corp-example.com/"}})
+	require.NoError(t, err)
+	assert.Equal(t, "https://aap.corp-example.com/", cfg.Variables["base_url"])
+
+	for name, vars := range map[string]map[string]string{
+		"missing":         nil,
+		"private address": {"base_url": "https://10.1.2.3/"},
+		"cluster service": {"base_url": "https://gibson-daemon.gibson.svc.cluster.local/"},
+		"undeclared":      {"base_url": "https://aap.corp-example.com/", "other": "https://x.example.com/"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := tenantChoice(entry, &tenantv1.EnableConnectorRequest{CatalogId: "aap-like", Variables: vars})
+			assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+		})
+	}
+
+	// An entry that declares no variable takes none.
+	plain := componentcatalog.ConnectorEntry{ID: "p", Shape: connectorv1alpha1.ConnectorShapeHosted}
+	_, err = tenantChoice(plain, &tenantv1.EnableConnectorRequest{CatalogId: "p",
+		Variables: map[string]string{"base_url": "https://aap.corp-example.com/"}})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+// The pod gets the value as a variable, and the egress allow-list follows it.
+// A stored value that breaks the rules of a later manifest reaches no host.
+func TestDesiredConnector_HostedEgressFollowsTheVariable(t *testing.T) {
+	srv := newPendingServer()
+	entry := aapLikeEntry()
+
+	good, err := srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: "aap-like",
+		Config: tenantconnector.Config{Variables: map[string]string{"base_url": "https://aap.corp-example.com:8443/"}}}, entry)
+	require.NoError(t, err)
+	assert.Equal(t, "https://aap.corp-example.com:8443/", good.GetEnv()["BASE_URL"])
+	assert.Equal(t, "false", good.GetEnv()["ALLOW_WRITE_OPERATIONS"])
+	assert.True(t, slices.Contains(good.GetEgressAllow(), "aap.corp-example.com:8443"), "%v", good.GetEgressAllow())
+	assert.True(t, slices.Contains(good.GetEgressAllow(), "registry-static.example.com:443"), "%v", good.GetEgressAllow())
+	assert.Empty(t, entry.Env["BASE_URL"], "the catalog entry must not change")
+
+	// A stored value that the rules refuse fails loudly: no desired connector
+	// (review M10).
+	bad, err := srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: "aap-like",
+		Config: tenantconnector.Config{Variables: map[string]string{"base_url": "https://10.0.0.5/"}}}, entry)
+	require.Error(t, err)
+	assert.Nil(t, bad)
+}
+
+// A variable with a default takes it when the tenant gives none, so the egress
+// list holds the host that the server calls by default (review M10).
+func TestDesiredConnector_AVariableWithADefault(t *testing.T) {
+	srv := newPendingServer()
+	for id, want := range map[string]string{
+		"github-fixloop":             "api.github.com:443",
+		"crowdstrike-response":       "api.crowdstrike.com:443",
+		"defender-endpoint-response": "api.security.microsoft.com:443",
+	} {
+		entry, err := componentcatalog.LookupConnector(id)
+		require.NoError(t, err)
+		d, err := srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: id}, entry)
+		require.NoError(t, err, id)
+		assert.True(t, slices.Contains(d.GetEgressAllow(), want), "%s egress = %v", id, d.GetEgressAllow())
+	}
+}

@@ -125,8 +125,12 @@ func (r *Refresher) refreshGrant(ctx context.Context, connector string, grant *G
 		"refresh_token": {grant.RefreshToken},
 		"client_id":     {grant.ClientID},
 	}
-	if grant.ClientSecret != "" {
-		form.Set("client_secret", grant.ClientSecret)
+	secret, err := r.clientSecret(ctx, grant)
+	if err != nil {
+		return nil, err
+	}
+	if secret != "" {
+		form.Set("client_secret", secret)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, grant.TokenEndpoint,
@@ -273,4 +277,21 @@ func (r *Refresher) loadGrant(ctx context.Context, connector string) (*Grant, er
 		return nil, fmt.Errorf("connectorauth: grant %q: %w", grantName, err)
 	}
 	return grant, nil
+}
+
+// clientSecret returns the client secret of the grant. A grant of a tenant
+// OAuth client names the secret, and the secret is read on each refresh.
+func (r *Refresher) clientSecret(ctx context.Context, grant *Grant) (string, error) {
+	if grant.ClientSecretName == "" {
+		return grant.ClientSecret, nil
+	}
+	raw, err := r.store.Resolve(ctx, grant.ClientSecretName)
+	if err != nil {
+		return "", fmt.Errorf("connectorauth: read the client secret %q: %w", grant.ClientSecretName, err)
+	}
+	secret := strings.TrimSpace(string(raw))
+	if secret == "" {
+		return "", fmt.Errorf("connectorauth: the client secret %q is empty", grant.ClientSecretName)
+	}
+	return secret, nil
 }

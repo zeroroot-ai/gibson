@@ -7,13 +7,16 @@
 package componentcatalog
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
 func manifestFSWith(files map[string]string) fstest.MapFS {
@@ -28,7 +31,7 @@ func manifestFSWith(files map[string]string) fstest.MapFS {
 // discriminates into the right spec.
 func TestLoad_AllKinds(t *testing.T) {
 	fsys := manifestFSWith(map[string]string{
-		"conn.yaml": "id: gl\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x/mcp\n  auth: oauth\n",
+		"conn.yaml": "id: gl\nkind: connector\nspec:\n  class: git-host\n  shape: Remote\n  endpoint: https://x/mcp\n  auth: oauth\n",
 		"plug.yaml": "id: pl\nkind: plugin\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x/p@sha256:abc\n",
 		"tool.yaml": "id: nm\nkind: tool\nspec:\n  contentTrust: untrusted\n  dispatchMode: sandboxed\n  command: nmap\n  image: ghcr.io/x/t@sha256:abc\n",
 		"agnt.yaml": "id: zc\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x/a@sha256:abc\n  model: sonnet\n",
@@ -63,19 +66,24 @@ func TestLoad_FailLoud(t *testing.T) {
 		body string
 		want string
 	}{
-		"missing id":             {"kind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x@sha256:a\n", "id is required"},
-		"unknown kind":           {"id: x\nkind: gadget\nspec: {}\n", "must be one of"},
-		"agent bare image":       {"id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x:latest\n", "digest-pinned"},
-		"agent no image":         {"id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  model: sonnet\n", "digest-pinned"},
-		"plugin bare image":      {"id: x\nkind: plugin\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x:latest\n", "digest-pinned"},
-		"tool bare image":        {"id: x\nkind: tool\nspec:\n  dispatchMode: sandboxed\n  image: ghcr.io/x:latest\n", "digest-pinned"},
-		"tool no image":          {"id: x\nkind: tool\nspec:\n  dispatchMode: sandboxed\n  command: nmap\n", "digest-pinned"},
-		"sandboxed agent no cmd": {"id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  dispatchMode: sandboxed\n  image: ghcr.io/x@sha256:a\n", "must declare command"},
-		"connector no endpoint":  {"id: x\nkind: connector\nspec:\n  shape: Remote\n  auth: none\n", "needs an endpoint"},
-		"connector remote+image": {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  image: y\n  auth: none\n", "must not set image"},
-		"connector bad auth":     {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  auth: bogus\n", "must be none, secret, or oauth"},
-		"hosted first-party tag": {"id: x\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/zeroroot-ai/foo:v1\n  auth: none\n", "digest-pinned"},
-		"hosted third-party tag": {"id: x\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server\n  auth: none\n", "digest-pinned"},
+		"missing id":                      {"kind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x@sha256:a\n", "id is required"},
+		"unknown kind":                    {"id: x\nkind: gadget\nspec: {}\n", "must be one of"},
+		"agent bare image":                {"id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x:latest\n", "digest-pinned"},
+		"agent no image":                  {"id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  model: sonnet\n", "digest-pinned"},
+		"plugin bare image":               {"id: x\nkind: plugin\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x:latest\n", "digest-pinned"},
+		"tool bare image":                 {"id: x\nkind: tool\nspec:\n  dispatchMode: sandboxed\n  image: ghcr.io/x:latest\n", "digest-pinned"},
+		"tool no image":                   {"id: x\nkind: tool\nspec:\n  dispatchMode: sandboxed\n  command: nmap\n", "digest-pinned"},
+		"sandboxed agent no cmd":          {"id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  dispatchMode: sandboxed\n  image: ghcr.io/x@sha256:a\n", "must declare command"},
+		"connector no endpoint":           {"id: x\nkind: connector\nspec:\n  shape: Remote\n  auth: none\n", "needs an endpoint"},
+		"connector remote+image":          {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  image: y\n  auth: none\n", "must not set image"},
+		"connector bad auth":              {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  auth: bogus\n", "must be none, secret, or oauth"},
+		"hosted first-party tag":          {"id: x\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/zeroroot-ai/foo:v1\n  auth: none\n", "digest-pinned"},
+		"connector no class":              {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  auth: none\n", "class \"\" must be one of"},
+		"connector bad class":             {"id: x\nkind: connector\nspec:\n  class: firewall\n  shape: Remote\n  endpoint: https://x\n  auth: none\n", "class \"firewall\" must be one of"},
+		"wildcard host leaves the vendor": {"id: x\nkind: connector\nspec:\n  class: siem\n  shape: Remote\n  auth: none\n  endpointPatterns: ['https://*.herokuapp.com/mcp']\n", "public suffix"},
+		"credential header on oauth":      {"id: x\nkind: connector\nspec:\n  class: siem\n  shape: Remote\n  endpoint: https://x.example.com/mcp\n  auth: oauth\n  credentialHeader: {name: X-K}\n", "credentialHeader needs"},
+		"hosted plain credential":         {"id: x\nkind: connector\nspec:\n  class: edr\n  shape: Hosted\n  image: a@sha256:b\n  auth: none\n  env: {MY_PASSWORD: x}\n", "looks like a credential"},
+		"hosted third-party tag":          {"id: x\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server\n  auth: none\n", "digest-pinned"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -135,12 +143,12 @@ func TestManifestKinds_EachKindHasASpecCheck(t *testing.T) {
 // tenant data plane.
 func TestLoad_HostedConnectorImagePolicy(t *testing.T) {
 	if _, err := load(manifestFSWith(map[string]string{
-		"a.yaml": "id: fp\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/zeroroot-ai/foo@sha256:abc\n  auth: none\n",
+		"a.yaml": "id: fp\nkind: connector\nspec:\n  class: scanner\n  shape: Hosted\n  image: ghcr.io/zeroroot-ai/foo@sha256:abc\n  auth: none\n",
 	})); err != nil {
 		t.Fatalf("first-party digest-pinned image should load: %v", err)
 	}
 	if _, err := load(manifestFSWith(map[string]string{
-		"b.yaml": "id: tp\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server@sha256:abc\n  auth: none\n",
+		"b.yaml": "id: tp\nkind: connector\nspec:\n  class: scanner\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server@sha256:abc\n  auth: none\n",
 	})); err != nil {
 		t.Fatalf("third-party digest-pinned image should load: %v", err)
 	}
@@ -195,6 +203,92 @@ func TestConnectorProjection(t *testing.T) {
 	}
 	if _, err := LookupConnector("nope"); err == nil {
 		t.Error("LookupConnector(nope) should error")
+	}
+}
+
+// TestCatalog_EveryConnectorStatesAClass: each connector in the embedded
+// catalog states one tool class of the closed list, and the projection keeps
+// it (ADR-0177, gibson#1428).
+func TestCatalog_EveryConnectorStatesAClass(t *testing.T) {
+	entries := ListConnectors()
+	if len(entries) == 0 {
+		t.Fatal("the embedded catalog holds no connector")
+	}
+	for _, e := range entries {
+		if !slices.Contains(ConnectorClasses, e.Class) {
+			t.Errorf("connector %q has class %q, want one of %v", e.ID, e.Class, ConnectorClasses)
+		}
+	}
+	for _, id := range []string{"gitlab", "github"} {
+		e, err := LookupConnector(id)
+		if err != nil {
+			t.Fatalf("LookupConnector(%s): %v", id, err)
+		}
+		if e.Class != "git-host" {
+			t.Errorf("connector %q has class %q, want git-host", id, e.Class)
+		}
+	}
+}
+
+// TestCatalog_BlueTeamConnectors: each connector of a buyer tool loads from the
+// embedded catalog with its tool class, its shape and its auth (ADR-0177,
+// gibson#1426). A Remote entry names an https endpoint, and its egress list
+// names the host of that endpoint and no other host. A Hosted entry names an
+// image of the vendor, pinned by digest.
+func TestCatalog_BlueTeamConnectors(t *testing.T) {
+	const remote, hosted = connectorv1alpha1.ConnectorShapeRemote, connectorv1alpha1.ConnectorShapeHosted
+	const oauth, secret, none = connectorv1alpha1.ConnectorAuthOAuth, connectorv1alpha1.ConnectorAuthSecret, connectorv1alpha1.ConnectorAuthNone
+	cases := []struct {
+		id    string
+		class string
+		shape connectorv1alpha1.ConnectorShape
+		auth  connectorv1alpha1.ConnectorAuthKind
+	}{
+		{"microsoft-sentinel", "siem", remote, oauth},
+		{"microsoft-defender-endpoint", "edr", remote, oauth},
+		{"crowdstrike-falcon", "edr", hosted, none},
+		{"tenable", "scanner", remote, secret},
+		{"wiz", "scanner", remote, oauth},
+		{"microsoft-entra", "identity", remote, oauth},
+		{"aws-security-hub", "cloud", remote, oauth},
+		{"datadog", "observability", remote, oauth},
+		{"jira", "ticket", remote, oauth},
+		{"pagerduty", "paging", remote, oauth},
+		{"aws-systems-manager", "patch", remote, oauth},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			e, err := LookupConnector(tc.id)
+			if err != nil {
+				t.Fatalf("LookupConnector(%s): %v", tc.id, err)
+			}
+			if e.Class != tc.class || e.Shape != tc.shape || e.Auth != tc.auth {
+				t.Errorf("got class %q shape %q auth %q, want %q %q %q",
+					e.Class, e.Shape, e.Auth, tc.class, tc.shape, tc.auth)
+			}
+			if e.Vendor == "" || e.DisplayName == "" || e.Description == "" {
+				t.Errorf("the entry lost a display field: %+v", e)
+			}
+			if len(e.EgressAllow) == 0 {
+				t.Fatal("the entry names no egress host")
+			}
+			if tc.shape == hosted {
+				if strings.HasPrefix(e.Image, "ghcr.io/zeroroot-ai/") || !strings.Contains(e.Image, "@sha256:") {
+					t.Errorf("image %q must be a vendor image pinned by digest", e.Image)
+				}
+				return
+			}
+			u, err := url.Parse(e.Endpoint)
+			if err != nil || u.Scheme != "https" || u.Host == "" {
+				t.Fatalf("endpoint %q must be an https URL (parse error: %v)", e.Endpoint, err)
+			}
+			if want := []string{u.Hostname() + ":443"}; !slices.Equal(e.EgressAllow, want) {
+				t.Errorf("egressAllow = %v, want %v: only the host of the endpoint", e.EgressAllow, want)
+			}
+			if tc.auth == oauth && e.DefaultInstanceURL == "" {
+				t.Error("an oauth entry needs defaultInstanceUrl: the daemon starts OAuth discovery from it")
+			}
+		})
 	}
 }
 
@@ -830,5 +924,153 @@ func TestListAndLookupPlugin(t *testing.T) {
 	}
 	if _, ok := LookupPlugin("nmap"); ok {
 		t.Fatal("LookupPlugin must not return a tool")
+	}
+}
+
+// A connector with endpointPatterns lists one pattern for each Region or site
+// that the vendor documents, the default endpoint matches a pattern, and each
+// pattern resolves to an egress list with its own host only (gibson#1534).
+func TestCatalog_RegionalConnectors(t *testing.T) {
+	cases := map[string]int{
+		"datadog": 7, "pagerduty": 2, "aws-security-hub": 8, "aws-systems-manager": 8,
+	}
+	for id, want := range cases {
+		t.Run(id, func(t *testing.T) {
+			e, err := LookupConnector(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(e.EndpointPatterns) != want {
+				t.Fatalf("%d patterns, want %d", len(e.EndpointPatterns), want)
+			}
+			for _, p := range e.EndpointPatterns {
+				res, err := e.ResolveEndpoint(p)
+				if err != nil {
+					t.Fatalf("pattern %s: %v", p, err)
+				}
+				u, _ := url.Parse(p)
+				if len(res.EgressAllow) != 1 || res.EgressAllow[0] != u.Hostname()+":443" {
+					t.Errorf("pattern %s: egress %v", p, res.EgressAllow)
+				}
+			}
+			if _, err := e.ResolveEndpoint("https://mcp.evil.example/mcp"); err == nil {
+				t.Error("an endpoint outside the patterns was accepted")
+			}
+		})
+	}
+}
+
+// The three Microsoft entries need a client that the tenant registers, and
+// each OAuth entry that states a scope states a scope that has a reader
+// (gibson#1538).
+func TestCatalog_TenantOAuthClientAndScope(t *testing.T) {
+	for _, id := range []string{"microsoft-sentinel", "microsoft-defender-endpoint", "microsoft-entra"} {
+		e, err := LookupConnector(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.OAuthClient != OAuthClientTenant || !strings.Contains(e.OAuthScope, "offline_access") {
+			t.Errorf("%s: client %q scope %q", id, e.OAuthClient, e.OAuthScope)
+		}
+	}
+	for _, e := range ListConnectors() {
+		if e.Auth == connectorv1alpha1.ConnectorAuthOAuth && e.OAuthClient == "" {
+			t.Errorf("%s: an oauth entry has no client mode", e.ID)
+		}
+		if e.Auth != connectorv1alpha1.ConnectorAuthOAuth && (e.OAuthClient != "" || e.OAuthScope != "") {
+			t.Errorf("%s: a non-oauth entry has an OAuth field", e.ID)
+		}
+	}
+}
+
+// Tenable sends its two keys in the header X-ApiKeys (gibson#1535).
+func TestCatalog_TenableHeader(t *testing.T) {
+	e, err := LookupConnector("tenable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.CredentialHeader.Value([]byte(`{"accessKey":"AK","secretKey":"SK"}`))
+	if err != nil || e.CredentialHeader.Name != "X-ApiKeys" || string(got) != "accessKey=AK;secretKey=SK" {
+		t.Fatalf("header %q value %q err %v", e.CredentialHeader.Name, got, err)
+	}
+}
+
+// CrowdStrike runs with credentials from named secrets, plain variables and
+// an argument, and the manifest holds no credential value (gibson#1536).
+func TestCatalog_CrowdStrikeHostedConfiguration(t *testing.T) {
+	e, err := LookupConnector("crowdstrike-falcon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.Credentials) != 2 || e.Credentials[0].Env != "FALCON_CLIENT_ID" || e.Credentials[1].Env != "FALCON_CLIENT_SECRET" {
+		t.Errorf("credentials = %+v", e.Credentials)
+	}
+	if e.Env["FALCON_BASE_URL"] != "https://api.crowdstrike.com" || len(e.Args) != 1 || e.Args[0] != "--read-only" {
+		t.Errorf("env %v args %v", e.Env, e.Args)
+	}
+}
+
+// TestCatalog_ZeroRootConnectors: each connector that Zero Root builds in
+// zeroroot-ai/connectors (release v0.1.0) loads as a Hosted entry with its
+// tool class, an image of zeroroot-ai pinned by digest, streamable HTTP on
+// port 8080, credentials from named secrets, and the vendor base URL as a
+// tenant variable. A response connector names each tool, and no named tool
+// waits for a person (ADR-0180). Each fix loop server names its merge tool
+// with the merge role (gibson#1458).
+func TestCatalog_ZeroRootConnectors(t *testing.T) {
+	cases := []struct {
+		id, class string
+		response  bool
+		merge     string
+		variable  bool
+	}{
+		{"crowdstrike-response", "edr", true, "", true},
+		{"defender-endpoint-response", "edr", true, "", true},
+		{"sentinelone-response", "edr", true, "", true},
+		{"entra-id-response", "identity", true, "", false},
+		{"okta-response", "identity", true, "", true},
+		{"github-fixloop", "git-host", false, "merge_merge_request", true},
+		{"gitlab-fixloop", "git-host", false, "merge_merge_request", true},
+		{"prometheus-health", "observability", false, "", true},
+		{"qualys-vmdr", "scanner", false, "", true},
+		{"puppet-patch", "patch", true, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			e, err := LookupConnector(tc.id)
+			if err != nil {
+				t.Fatalf("LookupConnector(%s): %v", tc.id, err)
+			}
+			if e.Class != tc.class || e.Shape != connectorv1alpha1.ConnectorShapeHosted ||
+				e.Auth != connectorv1alpha1.ConnectorAuthNone {
+				t.Errorf("got class %q shape %q auth %q", e.Class, e.Shape, e.Auth)
+			}
+			if !strings.HasPrefix(e.Image, "ghcr.io/zeroroot-ai/connectors-") || !strings.Contains(e.Image, "@sha256:") {
+				t.Errorf("image %q must be a connectors image of zeroroot-ai pinned by digest", e.Image)
+			}
+			if e.Transport != connectorv1alpha1.ConnectorTransportStreamableHTTP || e.Port != 8080 {
+				t.Errorf("transport %q port %d, want streamable-http on 8080", e.Transport, e.Port)
+			}
+			if len(e.Credentials) == 0 {
+				t.Error("the entry names no credential secret")
+			}
+			if tc.variable && len(e.Variables) == 0 {
+				t.Error("the entry names no tenant variable for the base URL")
+			}
+			if e.ResponseActions != tc.response {
+				t.Errorf("responseActions = %v, want %v", e.ResponseActions, tc.response)
+			}
+			for name := range e.Tools {
+				if e.ApprovalFor(name).Required {
+					t.Errorf("tool %s waits for a person: only a tool that destroys data may", name)
+				}
+			}
+			if tc.response && !e.ApprovalFor("a-new-tool-of-the-vendor").Required {
+				t.Error("a tool that the manifest does not name must wait for a person (fail closed)")
+			}
+			if tc.merge != "" && !e.ApprovalFor(tc.merge).Merge {
+				t.Errorf("tool %s needs the merge role", tc.merge)
+			}
+		})
 	}
 }

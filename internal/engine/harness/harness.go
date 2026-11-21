@@ -389,17 +389,16 @@ type WorldEmitter interface {
 
 // KnowledgeReader is reading what earlier work established.
 //
-// It has nine reads: three finding and run reads (GetFindings,
-// GetMissionRunHistory, GetRunFindings), five graph reads (QueryNodes,
-// FindSimilarAttacks, GetAttackChains, FindSimilarFindings,
-// GetRelatedFindings) and ApplicationFindings. The graph reads of
-// DefaultAgentHarness are in knowledge_graph_reads.go.
+// It has seven reads: three finding and run reads (GetFindings,
+// GetMissionRunHistory, GetRunFindings), three graph reads (QueryNodes,
+// FindSimilarFindings, GetRelatedFindings) and ApplicationFindings. The graph
+// reads of DefaultAgentHarness are in knowledge_graph_reads.go.
 //
-// The SDK has a group with the same name and the same nine method names. The
+// The SDK has a group with the same name. The SDK release that deletes the
+// attack reads (zeroroot-ai/sdk#359) gives it the same seven method names. The
 // shared name makes a difference between the two sides a diff of two named
 // types. See ADR-0162.
 type KnowledgeReader interface {
-
 	// GetFindings retrieves findings for the current mission, optionally filtered.
 	// This enables agents to query previous findings and avoid duplicate work.
 	//
@@ -454,10 +453,6 @@ type KnowledgeReader interface {
 
 	// QueryNodes searches the knowledge graph with hybrid vector + graph scoring.
 	QueryNodes(ctx context.Context, query *graphragpb.GraphQuery) ([]*graphragpb.QueryResult, error)
-	// FindSimilarAttacks returns attack patterns semantically close to content.
-	FindSimilarAttacks(ctx context.Context, content string, topK int) ([]*graphragpb.AttackPattern, error)
-	// GetAttackChains returns multi-hop technique paths from a starting technique.
-	GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]*graphragpb.AttackChain, error)
 	// FindSimilarFindings returns findings semantically close to the given one.
 	FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]*graphragpb.FindingNode, error)
 	// GetRelatedFindings returns findings reachable from the given one by graph

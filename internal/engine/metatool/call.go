@@ -90,6 +90,10 @@ type CallRecord struct {
 	WorkID    string
 	MissionID string
 	RunID     string
+	// GrantID is the capability grant that allowed the call. It is empty when
+	// the call was refused, when no lookup is wired, or when no grant row
+	// exists for the subject.
+	GrantID string
 }
 
 // FlightRecorder receives the record of each call, ADR-0131: a call is recorded
@@ -124,6 +128,24 @@ type Call struct {
 	Recorder FlightRecorder
 	// Observer writes the audit records of the call. It is required.
 	Observer CallObserver
+	// Daemon is true only for a call that the daemon makes on its own
+	// governed path (CallConnectorForTenant). A tool with the role "daemon"
+	// runs only then. No agent request sets it.
+	Daemon bool
+}
+
+// grantOf names the grant of an allowed call. A failed read leaves the record
+// with no grant: the call is allowed already, and the report then shows the
+// grant as not recorded rather than a wrong one.
+func (h *Handler) grantOf(ctx context.Context, caller catalog.Caller, connector string) string {
+	if h.grants == nil {
+		return ""
+	}
+	id, err := h.grants(ctx, caller.Tenant, caller.Subject, connector)
+	if err != nil {
+		return ""
+	}
+	return id
 }
 
 // Call runs one tool call of an agent from start to end: the mission policy,
@@ -209,7 +231,13 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 	var result any
 	var err error
 	if _, err = h.Authorize(ctx, c.Caller, c.ID); err == nil {
-		result, err = h.Dispatch(ctx, c.Caller, tid, c.Args)
+		rec.GrantID = h.grantOf(ctx, c.Caller, tid.Connector)
+		// The grant is not enough for a tool that the manifest marks. A merge
+		// tool needs the merge slot, and a marked tool needs the approval of a
+		// person, before the call reaches the connector.
+		if err = h.gateCall(ctx, c, tid.Connector, tid.Tool); err == nil {
+			result, err = h.Dispatch(ctx, c.Caller, tid, c.Args)
+		}
 	}
 	var resultJSON []byte
 	if err == nil {

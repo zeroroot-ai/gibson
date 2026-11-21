@@ -73,6 +73,7 @@ func connectorComponentInfo(id string) *component.ComponentInfo {
 	if entry, err := componentcatalog.LookupConnector(id); err == nil {
 		info.Description = entry.Description
 		info.Metadata["display_name"] = entry.DisplayName
+		info.Metadata["tool_class"] = entry.Class
 	}
 	return info
 }

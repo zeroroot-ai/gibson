@@ -54,6 +54,12 @@ var projectedNodeLabels = []string{
 	// The proposed claim of an agent (gibson#670), materialised by
 	// upsertHypothesisCypher.
 	"Hypothesis",
+	// Incident response (gibson#1473): materialised by upsertEntityCypher
+	// with the label as a parameter.
+	"Alert", "Incident",
+	// Defensive countermeasures (gibson#1487): materialised by
+	// upsertEntityCypher with the label as a parameter.
+	"Countermeasure",
 }
 
 var projectedRelationshipTypes = []string{
@@ -68,6 +74,16 @@ var projectedRelationshipTypes = []string{
 	// FOUND_ON one in upsertFindingCypher.
 	"FOUND_ON", // Finding -> Target
 	"TARGETS",  // Mission -> Target
+	// Incident response (gibson#1473): travels as the e.type parameter of
+	// apoc.merge.relationship in upsertEntityCypher.
+	"CAUSED_BY", // Incident -> Finding
+	// Defensive countermeasures (gibson#1487): both travel as the e.type
+	// parameter of apoc.merge.relationship in upsertEntityCypher.
+	"APPLIES_COUNTERMEASURE", // MergeRequest -> Countermeasure
+	"COUNTERS",               // Countermeasure -> Technique
+	// Fix loop (gibson#1460): travels as the e.type parameter of
+	// apoc.merge.relationship in upsertEntityCypher.
+	"DEPLOYED_IN", // MergeRequest -> Deployment
 }
 
 // vocabularyDrift reports every label or relationship type in the given
@@ -350,6 +366,8 @@ MERGE (f:Finding {brain_id: $id})
   SET f.title = $title, f.description = $description, f.severity = $severity,
       f.scope = $scope, f.address = $address, f.status = $status,
       f.vulnerability_id = $vulnerability_id,
+      f.priority = $priority, f.priority_rule = $priority_rule, f.priority_reason = $priority_reason,
+      f.merge_request = $merge_request,
       f.submitted_by = $submitted_by, f.agent_name = $agent_name, f.enrolled_by = $enrolled_by,
       f.updated_at = timestamp()
 WITH f
@@ -496,6 +514,31 @@ var entityReservedProps = map[string]struct{}{
 	"brain_id": {}, "event_id": {}, "brain_host_id": {},
 }
 
+// findingReservedProps are the properties of a Finding node that the Finding
+// projection writes from the World (upsertFindingCypher). The daemon owns them:
+// the status, the merge request, the priority, the submitter and the times. An
+// agent that reports a Finding through the entity path must not set one of
+// them, or it could mark its own finding verified (review M5).
+var findingReservedProps = map[string]struct{}{
+	"title": {}, "description": {}, "severity": {}, "address": {}, "status": {},
+	"vulnerability_id": {}, "priority": {}, "priority_rule": {}, "priority_reason": {},
+	"merge_request": {}, "submitted_by": {}, "agent_name": {}, "enrolled_by": {},
+	"created_at": {}, "verified_at": {}, "verified_status": {}, "id": {},
+}
+
+// reservedProp reports whether the entity path must drop the property of a
+// node of the label.
+func reservedProp(label, prop string) bool {
+	if _, ok := entityReservedProps[prop]; ok {
+		return true
+	}
+	if label == labelFinding {
+		_, ok := findingReservedProps[prop]
+		return ok
+	}
+	return false
+}
+
 // entityUpsertParams builds the parameter set for upsertEntityCypher. Split
 // out so the labels-and-types-are-parameters property, the reserved-property
 // filter and the Taxonomy re-check on every label and edge type are testable
@@ -514,7 +557,7 @@ func entityUpsertParams(e brain.EntitySnapshot) (map[string]any, error) {
 	}
 	props := make(map[string]any, len(e.Props))
 	for k, v := range e.Props {
-		if _, reserved := entityReservedProps[k]; reserved {
+		if reservedProp(e.Label, k) {
 			continue
 		}
 		if !safeTaxonomyLabel.MatchString(k) {
@@ -916,6 +959,14 @@ func findingUpsertParams(f brain.FindingSnapshot) map[string]any {
 		"address":          f.Address,
 		"status":           status,
 		"vulnerability_id": f.VulnerabilityID,
+		// The typed priority (gibson#1522). Empty means no triage pass has decided.
+		"priority":        f.Priority,
+		"priority_rule":   f.PriorityRule,
+		"priority_reason": f.PriorityReason,
+		// The key of the merge request of the current fix. Empty means no fix.
+		// The read of a finding follows FIXED_BY to the node with this key, so
+		// an older fix of a reopened finding never answers (gibson#1454).
+		"merge_request": f.MergeRequest,
 		// The verified submitter (gibson#208): who raised the finding, under
 		// which registered name, and who enrolled that agent.
 		"submitted_by": f.SubmittedBy,

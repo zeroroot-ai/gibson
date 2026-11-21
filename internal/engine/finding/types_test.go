@@ -30,61 +30,18 @@ func TestEnhancedFinding_NewEnhancedFinding(t *testing.T) {
 	assert.Empty(t, enhanced.References)
 	assert.Empty(t, enhanced.ReproSteps)
 	assert.Empty(t, enhanced.GetMitreAttack())
-	assert.Empty(t, enhanced.GetMitreAtlas())
 	assert.Empty(t, enhanced.RelatedIDs)
-}
-
-func TestEnhancedFinding_WithClassification(t *testing.T) {
-	baseFinding := agent.NewFinding("Test Finding", "Test Description", agent.SeverityMedium)
-	enhanced := NewEnhancedFinding(baseFinding, types.NewID(), "test-agent")
-
-	classification := Classification{
-		Category:    CategoryJailbreak,
-		Subcategory: "instruction_override",
-		Severity:    agent.SeverityCritical,
-		Confidence:  0.95,
-		RiskScore:   9.5,
-		Remediation: "Implement input validation",
-		MitreAttack: []SimpleMitreMapping{
-			{
-				TechniqueID:   "AML.T0015",
-				TechniqueName: "Jailbreak",
-				Tactic:        "ML Attack Staging",
-			},
-		},
-	}
-
-	enhanced = enhanced.WithClassification(classification)
-
-	assert.Equal(t, "jailbreak", enhanced.Category)
-	assert.Equal(t, "instruction_override", enhanced.Subcategory)
-	assert.Equal(t, agent.SeverityCritical, enhanced.Severity)
-	assert.Equal(t, 0.95, enhanced.Confidence)
-	assert.Equal(t, 9.5, enhanced.RiskScore)
-	assert.Equal(t, "Implement input validation", enhanced.Remediation)
-
-	// Check MITRE mappings from Metadata
-	mitreAttack := enhanced.GetMitreAttack()
-	assert.Len(t, mitreAttack, 1)
-	assert.Equal(t, "AML.T0015", mitreAttack[0].TechniqueID)
 }
 
 func TestEnhancedFinding_WithStatus(t *testing.T) {
 	baseFinding := agent.NewFinding("Test", "Test", agent.SeverityLow)
 	enhanced := NewEnhancedFinding(baseFinding, types.NewID(), "agent")
 
-	enhanced = enhanced.WithStatus(StatusConfirmed)
-	assert.Equal(t, StatusConfirmed, enhanced.Status)
-	assert.True(t, enhanced.IsConfirmed())
-	assert.False(t, enhanced.IsResolved())
+	enhanced = enhanced.WithStatus(StatusFixing)
+	assert.Equal(t, StatusFixing, enhanced.Status)
 
-	enhanced = enhanced.WithStatus(StatusResolved)
-	assert.Equal(t, StatusResolved, enhanced.Status)
-	assert.True(t, enhanced.IsResolved())
-	assert.False(t, enhanced.IsConfirmed())
-
-	enhanced = enhanced.WithStatus(StatusFalsePositive)
-	assert.True(t, enhanced.IsFalsePositive())
+	enhanced = enhanced.WithStatus(StatusVerified)
+	assert.Equal(t, StatusVerified, enhanced.Status)
 }
 
 func TestEnhancedFinding_WithReproSteps(t *testing.T) {
@@ -117,7 +74,7 @@ func TestEnhancedFinding_WithReferences(t *testing.T) {
 
 	refs := []string{
 		"https://owasp.org/www-project-top-10-for-large-language-model-applications/",
-		"https://atlas.mitre.org/techniques/AML.T0015",
+		"https://attack.mitre.org/techniques/T1190/",
 	}
 
 	enhanced = enhanced.WithReferences(refs...)
@@ -179,13 +136,12 @@ func TestEnhancedFinding_NeedsAttention(t *testing.T) {
 		expected bool
 	}{
 		{"critical open", agent.SeverityCritical, StatusOpen, true},
-		{"critical confirmed", agent.SeverityCritical, StatusConfirmed, true},
-		{"critical resolved", agent.SeverityCritical, StatusResolved, false},
+		{"critical fixing", agent.SeverityCritical, StatusFixing, false},
+		{"critical fixed", agent.SeverityCritical, StatusFixed, false},
 		{"high open", agent.SeverityHigh, StatusOpen, true},
-		{"high confirmed", agent.SeverityHigh, StatusConfirmed, true},
 		{"medium open", agent.SeverityMedium, StatusOpen, false},
 		{"low open", agent.SeverityLow, StatusOpen, false},
-		{"high false positive", agent.SeverityHigh, StatusFalsePositive, false},
+		{"high verified", agent.SeverityHigh, StatusVerified, false},
 	}
 
 	for _, tt := range tests {
@@ -204,7 +160,7 @@ func TestEnhancedFinding_JSONSerialization(t *testing.T) {
 
 	missionID := types.NewID()
 	enhanced := NewEnhancedFinding(baseFinding, missionID, "test-agent")
-	enhanced = enhanced.WithStatus(StatusConfirmed)
+	enhanced = enhanced.WithStatus(StatusFixed)
 	enhanced = enhanced.WithReferences("https://example.com/ref1")
 
 	// Marshal to JSON
@@ -227,44 +183,17 @@ func TestEnhancedFinding_JSONSerialization(t *testing.T) {
 }
 
 func TestFindingStatus_Values(t *testing.T) {
-	assert.Equal(t, FindingStatus("open"), StatusOpen)
-	assert.Equal(t, FindingStatus("confirmed"), StatusConfirmed)
-	assert.Equal(t, FindingStatus("resolved"), StatusResolved)
-	assert.Equal(t, FindingStatus("false_positive"), StatusFalsePositive)
+	assert.Equal(t, StatusOpen, FindingStatus("open"))
+	assert.Equal(t, StatusFixing, FindingStatus("fixing"))
+	assert.Equal(t, StatusFixed, FindingStatus("fixed"))
+	assert.Equal(t, StatusVerified, FindingStatus("verified"))
+	assert.False(t, FindingStatus("resolved").IsValid())
 }
 
 func TestFindingCategory_Values(t *testing.T) {
-	assert.Equal(t, FindingCategory("jailbreak"), CategoryJailbreak)
-	assert.Equal(t, FindingCategory("prompt_injection"), CategoryPromptInjection)
-	assert.Equal(t, FindingCategory("data_extraction"), CategoryDataExtraction)
 	assert.Equal(t, FindingCategory("privilege_escalation"), CategoryPrivilegeEscalation)
 	assert.Equal(t, FindingCategory("dos"), CategoryDoS)
-	assert.Equal(t, FindingCategory("model_manipulation"), CategoryModelManipulation)
 	assert.Equal(t, FindingCategory("information_disclosure"), CategoryInformationDisclosure)
-}
-
-func TestClassification(t *testing.T) {
-	classification := Classification{
-		Category:    CategoryPromptInjection,
-		Subcategory: "indirect_injection",
-		Severity:    agent.SeverityHigh,
-		Confidence:  0.88,
-		RiskScore:   8.5,
-		Remediation: "Sanitize user inputs",
-		NeedsReview: false,
-		MitreAtlas: []SimpleMitreMapping{
-			{
-				TechniqueID:   "AML.T0051",
-				TechniqueName: "Prompt Injection",
-				Tactic:        "ML Attack Staging",
-			},
-		},
-	}
-
-	assert.Equal(t, CategoryPromptInjection, classification.Category)
-	assert.Equal(t, 0.88, classification.Confidence)
-	assert.False(t, classification.NeedsReview)
-	assert.Len(t, classification.MitreAtlas, 1)
 }
 
 func TestFindingErrorCode_Constants(t *testing.T) {

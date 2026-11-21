@@ -148,6 +148,40 @@ func TestEntityUpsertParams_CannotRewriteIdentityThroughProps(t *testing.T) {
 	}
 }
 
+// An agent that reports a Finding through the entity path cannot set a
+// property that the daemon owns, such as the status or the merge request
+// (review M5). Another label keeps such a name, because the daemon does not
+// own it there.
+func TestEntityUpsertParams_AFindingCannotSetTheFieldsOfTheDaemon(t *testing.T) {
+	t.Parallel()
+
+	owned := map[string]string{
+		"status": "verified", "merge_request": "https://git.example/mr/9", "priority": "P4",
+		"priority_rule": "r", "priority_reason": "x", "severity": "info", "verified_at": "2026-01-01",
+		"submitted_by": "someone", "title": "t",
+	}
+	withNote := map[string]string{"note": "kept"}
+	for k, v := range owned {
+		withNote[k] = v
+	}
+	params, err := entityUpsertParams(brain.EntitySnapshot{Label: "Finding", Key: "f-1", Props: withNote})
+	if err != nil {
+		t.Fatalf("entityUpsertParams: %v", err)
+	}
+	props, _ := params["props"].(map[string]any)
+	if len(props) != 1 || props["note"] != "kept" {
+		t.Fatalf("the props of the daemon must be dropped on a Finding, got %+v", props)
+	}
+
+	params, err = entityUpsertParams(brain.EntitySnapshot{Label: "Application", Key: "a", Props: map[string]string{"status": "up"}})
+	if err != nil {
+		t.Fatalf("entityUpsertParams: %v", err)
+	}
+	if props, _ := params["props"].(map[string]any); props["status"] != "up" {
+		t.Fatalf("another label keeps its status, got %+v", props)
+	}
+}
+
 // TestFindingUpsertParams_StatusAndVulnerability: status is never empty on a
 // projected node, and the vulnerability id drives the INSTANCE_OF merge.
 func TestFindingUpsertParams_StatusAndVulnerability(t *testing.T) {

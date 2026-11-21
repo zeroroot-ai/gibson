@@ -79,6 +79,11 @@ type Grant struct {
 	// produces.
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret,omitempty"`
+	// ClientSecretName names the secret of the tenant that holds the client
+	// secret of a tenant OAuth client. The refresh reads the secret by this
+	// name each time, so a rotation of the secret reaches the grant (review
+	// m13). ClientSecret is then empty.
+	ClientSecretName string `json:"client_secret_name,omitempty"`
 
 	// Scope is what the human consented to. Carried so a re-authorization can
 	// be compared against it, and so an operator can see it.

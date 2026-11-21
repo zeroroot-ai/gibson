@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -127,6 +128,10 @@ type ConnectorInstanceReconciler struct {
 	// Audit writes the record of each runtime, network or grant change
 	// before the change (gibson#583). Required.
 	Audit *audit.SagaEmitter
+	// ClusterCIDRs are the pod and the service ranges of the cluster. The
+	// egress policy of each connector denies them with the private ranges
+	// (review B3).
+	ClusterCIDRs []string
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=connectorinstances,verbs=get;list;watch;create;update;patch;delete
@@ -525,15 +530,37 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 		// breaks the run-config validation. Add a ToolHive host list as a
 		// second layer when a ToolHive version resolves a per-MCPServer profile.
 		permProfile := map[string]interface{}{"type": "builtin", "name": "network"}
+		mcpPort := int64(serverPort(ci))
 		spec := map[string]interface{}{
 			"image":             ci.Spec.Image,
 			"transport":         transport,
-			"mcpPort":           int64(proxyPort),
+			"mcpPort":           mcpPort,
 			"proxyPort":         int64(proxyPort),
 			"permissionProfile": permProfile,
-			"podTemplateSpec":   mcpServerPodTemplate(),
+			"podTemplateSpec":   mcpServerPodTemplate(ci),
 			"oidcConfig":        r.ProxyAuth.oidcConfig(ci),
 			"authzConfig":       r.ProxyAuth.authzConfig(),
+		}
+		// The plain variables and the arguments of the catalog entry
+		// (gibson#1536). Names are sorted, so the spec is stable.
+		if len(ci.Spec.Env) > 0 {
+			names := make([]string, 0, len(ci.Spec.Env))
+			for name := range ci.Spec.Env {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			env := make([]interface{}, 0, len(names))
+			for _, name := range names {
+				env = append(env, map[string]interface{}{"name": name, "value": ci.Spec.Env[name]})
+			}
+			spec["env"] = env
+		}
+		if len(ci.Spec.Args) > 0 {
+			args := make([]interface{}, 0, len(ci.Spec.Args))
+			for _, a := range ci.Spec.Args {
+				args = append(args, a)
+			}
+			spec["args"] = args
 		}
 		// The declared vendor credentials (spec.credentials, gibson#597): the
 		// daemon publishes each one as a key of the same connector-cred
@@ -581,7 +608,7 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 			spec["headerForward"] = map[string]interface{}{
 				"addHeadersFromSecret": []interface{}{
 					map[string]interface{}{
-						"headerName": "Authorization",
+						"headerName": credentialHeaderName(ci),
 						"valueSecretRef": map[string]interface{}{
 							"name": credentialSecretName(ci.Name),
 							"key":  "authorization",
@@ -683,32 +710,47 @@ func (r *ConnectorInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return nil
 }
 
+// credentialHeaderName is the header that carries the credential of a Remote
+// connector (gibson#1535).
+func credentialHeaderName(ci *connectorv1alpha1.ConnectorInstance) string {
+	if ci.Spec.CredentialHeader != "" {
+		return ci.Spec.CredentialHeader
+	}
+	return "Authorization"
+}
+
 // mcpServerPodTemplate makes the MCP server pod of a Hosted connector meet the
 // restricted Pod Security standard of its tenant namespace (gibson#767).
 // ToolHive v0.12.1 builds that pod from the MCPServer, and the install
 // setting that secures the proxy pods does not reach it, so each MCPServer
 // sets the fields itself. ToolHive names the server container "mcp".
-func mcpServerPodTemplate() map[string]interface{} {
+func mcpServerPodTemplate(ci *connectorv1alpha1.ConnectorInstance) map[string]interface{} {
 	seccomp := map[string]interface{}{"type": "RuntimeDefault"}
-	return map[string]interface{}{
-		"spec": map[string]interface{}{
-			// The MCP server runs third-party code and calls no Kubernetes
-			// API. Its ServiceAccount holds no Role today, but a mounted token
-			// is a credential that a later RoleBinding could give rights to,
-			// so the pod mounts none (gibson#1170).
-			"automountServiceAccountToken": false,
-			"securityContext": map[string]interface{}{
-				"runAsNonRoot":   true,
-				"seccompProfile": seccomp,
-			},
-			"containers": []interface{}{map[string]interface{}{
-				"name": "mcp",
-				"securityContext": map[string]interface{}{
-					"allowPrivilegeEscalation": false,
-					"capabilities":             map[string]interface{}{"drop": []interface{}{"ALL"}},
-					"seccompProfile":           map[string]interface{}{"type": "RuntimeDefault"},
-				},
-			}},
+	podSpec := map[string]interface{}{
+		// The MCP server runs third-party code and calls no Kubernetes
+		// API. Its ServiceAccount holds no Role today, but a mounted token
+		// is a credential that a later RoleBinding could give rights to,
+		// so the pod mounts none (gibson#1170).
+		"automountServiceAccountToken": false,
+		"securityContext": map[string]interface{}{
+			"runAsNonRoot":   true,
+			"seccompProfile": seccomp,
 		},
+		"containers": []interface{}{map[string]interface{}{
+			"name": "mcp",
+			"securityContext": map[string]interface{}{
+				"allowPrivilegeEscalation": false,
+				"capabilities":             map[string]interface{}{"drop": []interface{}{"ALL"}},
+				"seccompProfile":           map[string]interface{}{"type": "RuntimeDefault"},
+			},
+		}},
 	}
+	// The registry login of the image (gibson#1536). The operator writes the
+	// Secret from the pull secret that the catalog entry names.
+	if ci.Spec.ImagePullSecret != "" {
+		podSpec["imagePullSecrets"] = []interface{}{
+			map[string]interface{}{"name": pullSecretName(ci.Name)},
+		}
+	}
+	return map[string]interface{}{"spec": podSpec}
 }

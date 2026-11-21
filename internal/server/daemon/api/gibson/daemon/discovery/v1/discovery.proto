@@ -129,6 +129,11 @@ message CatalogItem {
   int64 started_at_unix = 13;
   // instances is how many instances are registered right now.
   int32 instances = 14;
+  // tool_class is the tool class of a connector (ADR-0177): siem, edr,
+  // scanner, identity, cloud, observability, git-host, ticket, paging or
+  // patch. Empty for every other kind, and for a connector that has left
+  // the embedded catalog.
+  string tool_class = 15;
 }
 
 // Source: where a catalog row comes from.

@@ -24,14 +24,15 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	// stored context window of the saved default model (gibson#1193), 017
 	// lets a finding have no mission (gibson#1378), 018 is the evidence of a
 	// finding (gibson#1380), 019 is the Agent Skill tables (gibson#1370), 020 is the outside agent table and 021 adds its CA
-	// bundle column (gibson#1403), and 022 is the mission definitions published for
-	// inbound A2A calls (gibson#1408).
+	// bundle column (gibson#1403), 022 is the mission definitions published for
+	// inbound A2A calls (gibson#1408), and 023 maps the old finding statuses to
+	// the four of ADR-0178 (gibson#1556 review m11).
 	upCount, downCount := countSQL(t, Tenant, tenantDir)
-	if upCount != 22 {
-		t.Errorf("tenant: expected 22 up.sql files, got %d", upCount)
+	if upCount != 23 {
+		t.Errorf("tenant: expected 23 up.sql files, got %d", upCount)
 	}
-	if downCount != 22 {
-		t.Errorf("tenant: expected 22 down.sql files, got %d", downCount)
+	if downCount != 23 {
+		t.Errorf("tenant: expected 23 down.sql files, got %d", downCount)
 	}
 }
 
@@ -49,15 +50,17 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// decision 4, hosted#195), 028 drops connector_sandbox and
 	// webhook_idempotency, which no Go code read (gibson#506), 041 drops
 	// the three component_install columns the plugin manifest fed (sdk#129),
-	// and 049 drops tenant_quotas, which no code reads (gibson#1530).
+	// 049 drops tenant_quotas, which no code reads (gibson#1530), and 050 and
+	// 051 add the endpoint, the OAuth client and the variables that a tenant
+	// gives for a connector (gibson#1534, gibson#1538, gibson#1508).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 49 {
-		t.Errorf("platform: expected 49 up.sql files, got %d", upCount)
+	if upCount != 51 {
+		t.Errorf("platform: expected 51 up.sql files, got %d", upCount)
 	}
-	if downCount != 49 {
-		t.Errorf("platform: expected 49 down.sql files, got %d", downCount)
+	if downCount != 51 {
+		t.Errorf("platform: expected 51 down.sql files, got %d", downCount)
 	}
 }
 
@@ -106,14 +109,15 @@ func TestEmbed_UpDownPairing(t *testing.T) {
 //	008 — provider_embedding_capability (BYO-embedder columns, gibson#937)
 //	009 — session_context (component session-context store, gibson#1184)
 //	010 — banks (banks of always-on coding agents, ADR-0119, gibson#1708)
+//	023 — finding_status_values (the old statuses to the four, gibson#1556)
 func TestTenantMaxVersion(t *testing.T) {
 	t.Parallel()
 	v, err := TenantMaxVersion()
 	if err != nil {
 		t.Fatalf("TenantMaxVersion: %v", err)
 	}
-	if v != 22 {
-		t.Errorf("TenantMaxVersion: got %d, want 22", v)
+	if v != 23 {
+		t.Errorf("TenantMaxVersion: got %d, want 23", v)
 	}
 }
 
@@ -151,6 +155,8 @@ func TestTenantMaxVersion(t *testing.T) {
 //	      decision 4, hosted#195)
 //	...
 //	049 — drop_tenant_quotas (no code reads the plan quotas, gibson#1530)
+//	050 — tenant_connector_config (endpoint and OAuth client of a tenant, gibson#1534)
+//	051 — tenant_connector_variables (variables of a Hosted connector, gibson#1508)
 //
 // The sequence must stay CONTIGUOUS. golang-migrate records a single integer
 // version, and `up` only ever moves forward from it — so a migration that lands
@@ -164,8 +170,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 49 {
-		t.Errorf("PlatformMaxVersion: got %d, want 49", v)
+	if v != 51 {
+		t.Errorf("PlatformMaxVersion: got %d, want 51", v)
 	}
 }
 

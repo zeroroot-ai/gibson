@@ -46,8 +46,26 @@ import (
 const (
 	daemonNamespace = "gibson"
 	dnsNamespace    = "kube-system"
-	mcpProxyPort    = 8080
 )
+
+// serverPort is the port that the MCP server of a connector listens on:
+// spec.port, or the proxy port when the spec names none (review m12).
+func serverPort(ci *connectorv1alpha1.ConnectorInstance) int {
+	if ci.Spec.Port != 0 {
+		return int(ci.Spec.Port)
+	}
+	return proxyPort
+}
+
+// connectorPorts are the ports of the pods of a connector: the proxy port, and
+// the port of the server when it differs.
+func connectorPorts(ci *connectorv1alpha1.ConnectorInstance) []networkingv1.NetworkPolicyPort {
+	ports := []networkingv1.NetworkPolicyPort{tcp(proxyPort)}
+	if p := serverPort(ci); p != proxyPort {
+		ports = append(ports, tcp(p))
+	}
+	return ports
+}
 
 // toolhivePodSelector selects every ToolHive pod of one connector.
 func toolhivePodSelector(ci *connectorv1alpha1.ConnectorInstance) *metav1.LabelSelector {
@@ -93,11 +111,11 @@ func desiredNetworkPolicy(ci *connectorv1alpha1.ConnectorInstance) *networkingv1
 			// pods reach each other (proxy -> server).
 			Ingress: []networkingv1.NetworkPolicyIngressRule{{
 				From:  append(daemonPeer, sameConnector...),
-				Ports: []networkingv1.NetworkPolicyPort{tcp(mcpProxyPort)},
+				Ports: connectorPorts(ci),
 			}},
 			Egress: []networkingv1.NetworkPolicyEgressRule{
 				// proxy -> server, within the connector.
-				{To: sameConnector, Ports: []networkingv1.NetworkPolicyPort{tcp(mcpProxyPort)}},
+				{To: sameConnector, Ports: connectorPorts(ci)},
 				// DNS.
 				{
 					To: []networkingv1.NetworkPolicyPeer{{

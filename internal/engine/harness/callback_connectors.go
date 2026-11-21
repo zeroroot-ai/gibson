@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 )
 
@@ -23,6 +24,14 @@ type ConnectorClient interface {
 func WithConnectors(c ConnectorClient) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.connectors = c
+	}
+}
+
+// WithConnectorGrants wires the read of the capability grant behind a
+// connector call, so the record of the call names it (gibson#1474).
+func WithConnectorGrants(g metatool.GrantLookup) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.connectorGrants = g
 	}
 }
 

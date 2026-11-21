@@ -12,26 +12,41 @@ import (
 	"github.com/zeroroot-ai/sdk/finding/security"
 )
 
-// FindingStatus represents the lifecycle status of a finding
+// FindingStatus is the lifecycle status of a finding. These four values are the
+// only statuses of a finding in the daemon. The brain, the graph and the
+// findings table all use them (gibson#1518).
 type FindingStatus string
 
 const (
-	StatusOpen          FindingStatus = "open"
-	StatusConfirmed     FindingStatus = "confirmed"
-	StatusResolved      FindingStatus = "resolved"
-	StatusFalsePositive FindingStatus = "false_positive"
+	// StatusOpen is a finding that nobody has started to fix.
+	StatusOpen FindingStatus = "open"
+	// StatusFixing is a finding with a merge request that is not yet merged.
+	StatusFixing FindingStatus = "fixing"
+	// StatusFixed is a finding whose merge request is merged.
+	StatusFixed FindingStatus = "fixed"
+	// StatusVerified is a finding whose fix the check that raised it has proved.
+	StatusVerified FindingStatus = "verified"
 )
+
+// String returns the string form of the status.
+func (s FindingStatus) String() string { return string(s) }
+
+// IsValid reports whether s is one of the four statuses.
+func (s FindingStatus) IsValid() bool {
+	switch s {
+	case StatusOpen, StatusFixing, StatusFixed, StatusVerified:
+		return true
+	default:
+		return false
+	}
+}
 
 // FindingCategory represents the type of security finding
 type FindingCategory string
 
 const (
-	CategoryJailbreak             FindingCategory = "jailbreak"
-	CategoryPromptInjection       FindingCategory = "prompt_injection"
-	CategoryDataExtraction        FindingCategory = "data_extraction"
 	CategoryPrivilegeEscalation   FindingCategory = "privilege_escalation"
 	CategoryDoS                   FindingCategory = "dos"
-	CategoryModelManipulation     FindingCategory = "model_manipulation"
 	CategoryInformationDisclosure FindingCategory = "information_disclosure"
 	CategoryUncategorized         FindingCategory = "uncategorized"
 )
@@ -44,8 +59,7 @@ func (fc FindingCategory) String() string {
 // IsValid checks if the category is a valid value
 func (fc FindingCategory) IsValid() bool {
 	switch fc {
-	case CategoryJailbreak, CategoryPromptInjection, CategoryDataExtraction,
-		CategoryPrivilegeEscalation, CategoryDoS, CategoryModelManipulation,
+	case CategoryPrivilegeEscalation, CategoryDoS,
 		CategoryInformationDisclosure, CategoryUncategorized:
 		return true
 	default:
@@ -61,6 +75,16 @@ type EnhancedFinding struct {
 	MissionID     types.ID `json:"mission_id"`
 	AgentName     string   `json:"agent_name"`
 	DelegatedFrom *string  `json:"delegated_from,omitempty"`
+
+	// Check is the check that raised the finding (ADR-0178). The same check
+	// verifies the fix. The store refuses a finding with no valid check.
+	Check Check `json:"check"`
+
+	// Priority is the rank that cve-triage gave, and PriorityRule is the rule
+	// that gave it. Priority is empty until a triage pass decides. The store
+	// refuses a priority outside P1 to P4.
+	Priority     Priority `json:"priority,omitempty"`
+	PriorityRule string   `json:"priority_rule,omitempty"`
 
 	// Classification
 	Subcategory string        `json:"subcategory"`
@@ -92,41 +116,9 @@ type ReproStep struct {
 
 // SimpleMitreMapping is a simplified MITRE mapping for JSON storage
 type SimpleMitreMapping struct {
-	TechniqueID   string `json:"technique_id"`     // e.g., "T1566", "AML.T0043"
+	TechniqueID   string `json:"technique_id"`     // e.g., "T1566"
 	TechniqueName string `json:"technique_name"`   // Human-readable name
 	Tactic        string `json:"tactic,omitempty"` // e.g., "Initial Access"
-}
-
-// Classification represents the output of the finding classifier
-type Classification struct {
-	Category    FindingCategory       `json:"category"`
-	Subcategory string                `json:"subcategory"`
-	Severity    agent.FindingSeverity `json:"severity"`
-	Confidence  float64               `json:"confidence"` // 0.0 - 1.0
-	MitreAttack []SimpleMitreMapping  `json:"mitre_attack,omitempty"`
-	MitreAtlas  []SimpleMitreMapping  `json:"mitre_atlas,omitempty"`
-	RiskScore   float64               `json:"risk_score"` // 0.0 - 10.0
-	Remediation string                `json:"remediation"`
-	NeedsReview bool                  `json:"needs_review"` // True if classifier is uncertain
-
-	// Metadata about the classification
-	Method    ClassificationMethod `json:"method"`    // Which classifier produced this result
-	Rationale string               `json:"rationale"` // Explanation for the classification
-}
-
-// ClassificationMethod indicates which classifier produced the classification
-type ClassificationMethod string
-
-const (
-	MethodHeuristic ClassificationMethod = "heuristic"
-	MethodLLM       ClassificationMethod = "llm"
-	MethodComposite ClassificationMethod = "composite"
-	MethodManual    ClassificationMethod = "manual"
-)
-
-// String returns the string representation of ClassificationMethod
-func (cm ClassificationMethod) String() string {
-	return string(cm)
 }
 
 // NewEnhancedFinding creates a new enhanced finding from a base finding
@@ -144,33 +136,6 @@ func NewEnhancedFinding(baseFinding agent.Finding, missionID types.ID, agentName
 		OccurrenceCount: 1,
 		UpdatedAt:       now,
 	}
-}
-
-// WithClassification applies classification results to the finding
-func (f EnhancedFinding) WithClassification(c Classification) EnhancedFinding {
-	f.Category = string(c.Category)
-	f.Subcategory = c.Subcategory
-	f.Severity = c.Severity
-	f.Confidence = c.Confidence
-	f.RiskScore = c.RiskScore
-	f.Remediation = c.Remediation
-
-	// Store MITRE mappings in Metadata
-	if len(c.MitreAttack) > 0 {
-		if f.Metadata == nil {
-			f.Metadata = make(map[string]any)
-		}
-		f.Metadata["mitre_attack"] = c.MitreAttack
-	}
-	if len(c.MitreAtlas) > 0 {
-		if f.Metadata == nil {
-			f.Metadata = make(map[string]any)
-		}
-		f.Metadata["mitre_atlas"] = c.MitreAtlas
-	}
-
-	f.UpdatedAt = time.Now()
-	return f
 }
 
 // WithStatus sets the finding status
@@ -214,21 +179,6 @@ func (f *EnhancedFinding) IncrementOccurrence() {
 	f.UpdatedAt = time.Now()
 }
 
-// IsConfirmed returns true if the finding has been confirmed
-func (f EnhancedFinding) IsConfirmed() bool {
-	return f.Status == StatusConfirmed
-}
-
-// IsResolved returns true if the finding has been resolved
-func (f EnhancedFinding) IsResolved() bool {
-	return f.Status == StatusResolved
-}
-
-// IsFalsePositive returns true if the finding is marked as a false positive
-func (f EnhancedFinding) IsFalsePositive() bool {
-	return f.Status == StatusFalsePositive
-}
-
 // IsCritical returns true if the finding is critical severity
 func (f EnhancedFinding) IsCritical() bool {
 	return f.Severity == agent.SeverityCritical
@@ -237,7 +187,7 @@ func (f EnhancedFinding) IsCritical() bool {
 // NeedsAttention returns true if the finding needs immediate attention
 func (f EnhancedFinding) NeedsAttention() bool {
 	return (f.Severity == agent.SeverityCritical || f.Severity == agent.SeverityHigh) &&
-		(f.Status == StatusOpen || f.Status == StatusConfirmed)
+		f.Status == StatusOpen
 }
 
 // GetMitreAttack retrieves the MITRE ATT&CK mappings from Metadata
@@ -247,21 +197,6 @@ func (f EnhancedFinding) GetMitreAttack() []SimpleMitreMapping {
 	}
 
 	val, ok := f.Metadata[security.MetaKeyMitreAttack]
-	if !ok {
-		return nil
-	}
-
-	// Handle various types from JSON deserialization
-	return convertToSimpleMappings(val)
-}
-
-// GetMitreAtlas retrieves the MITRE ATLAS mappings from Metadata
-func (f EnhancedFinding) GetMitreAtlas() []SimpleMitreMapping {
-	if f.Metadata == nil {
-		return nil
-	}
-
-	val, ok := f.Metadata[security.MetaKeyMitreAtlas]
 	if !ok {
 		return nil
 	}
@@ -348,7 +283,7 @@ func (f EnhancedFinding) GetCVSS() *agent.CVSSScore {
 }
 
 // MarshalJSON implements custom JSON marshaling to maintain backward compatibility
-// by including mitre_attack and mitre_atlas as top-level fields in the JSON output
+// by including mitre_attack as a top-level field in the JSON output
 func (f EnhancedFinding) MarshalJSON() ([]byte, error) {
 	// Create an alias type to avoid recursion
 	type Alias EnhancedFinding
@@ -357,16 +292,14 @@ func (f EnhancedFinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		*Alias
 		MitreAttack []SimpleMitreMapping `json:"mitre_attack,omitempty"`
-		MitreAtlas  []SimpleMitreMapping `json:"mitre_atlas,omitempty"`
 	}{
 		Alias:       (*Alias)(&f),
 		MitreAttack: f.GetMitreAttack(),
-		MitreAtlas:  f.GetMitreAtlas(),
 	})
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling to maintain backward compatibility
-// by reading mitre_attack and mitre_atlas from either top-level fields or metadata
+// by reading mitre_attack from either top-level fields or metadata
 func (f *EnhancedFinding) UnmarshalJSON(data []byte) error {
 	// Create an alias type to avoid recursion
 	type Alias EnhancedFinding
@@ -375,7 +308,6 @@ func (f *EnhancedFinding) UnmarshalJSON(data []byte) error {
 	aux := &struct {
 		*Alias
 		MitreAttack []SimpleMitreMapping `json:"mitre_attack,omitempty"`
-		MitreAtlas  []SimpleMitreMapping `json:"mitre_atlas,omitempty"`
 	}{
 		Alias: (*Alias)(f),
 	}
@@ -384,18 +316,12 @@ func (f *EnhancedFinding) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// If MITRE fields were in the JSON, store them in Metadata
+	// If the MITRE field was in the JSON, store them in Metadata
 	if len(aux.MitreAttack) > 0 {
 		if f.Metadata == nil {
 			f.Metadata = make(map[string]any)
 		}
 		f.Metadata["mitre_attack"] = aux.MitreAttack
-	}
-	if len(aux.MitreAtlas) > 0 {
-		if f.Metadata == nil {
-			f.Metadata = make(map[string]any)
-		}
-		f.Metadata["mitre_atlas"] = aux.MitreAtlas
 	}
 
 	return nil

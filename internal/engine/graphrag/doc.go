@@ -15,11 +15,9 @@
 //	api.go              — public GraphRAGStore interface + constructors
 //	store.go            — DefaultGraphRAGStore lifecycle (Query/GetNode/TraverseGraph/etc.)
 //	store_findings.go   — Finding reads (FindSimilarFindings, GetRelatedFindings, …)
-//	store_attacks.go    — AttackPattern reads (FindSimilarAttacks, GetAttackChains, …)
 //	query.go            — GraphRAGQuery input type + builders + Validate
 //	result.go           — GraphRAGResult output type + scoring helpers
 //	node_query.go       — NodeQuery (direct lookup), TraversalFilters, MissionScope
-//	attack_chain.go     — AttackChain + AttackStep types
 //	vector_result.go    — VectorResult (vector-only search result)
 //	query_pipeline.go   — QueryPipeline interface + DefaultQueryPipeline (hybrid pipeline)
 //	merge.go            — MergeReranker (vector + graph score combination)

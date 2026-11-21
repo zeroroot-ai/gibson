@@ -1,0 +1,47 @@
+# Okta response connector. Zero Root builds the MCP server in zeroroot-ai/connectors
+# (okta/, release v0.1.0), because the vendor publishes no server with these tools.
+# The image is public, signed and scanned, and the catalog pins it by digest.
+# Source of the environment: okta/README.md of zeroroot-ai/connectors at v0.1.0.
+# The server speaks streamable HTTP on :8080 at /mcp.
+id: okta-response
+kind: connector
+displayName: Okta response
+description: >-
+  Revokes the sessions of an Okta user, and suspends and unsuspends the user.
+  The vendor server of Okta only reads.
+spec:
+  vendor: okta
+  class: identity
+  shape: Hosted
+  image: ghcr.io/zeroroot-ai/connectors-okta@sha256:fdb00b175f5ee055805dbc00834cac4947ab821a428e6d5478d49060574f5066
+  transport: streamable-http
+  port: 8080
+  auth: none
+  # Each credential is the name of a secret in the secret store of the
+  # tenant. The operator puts the value in the pod. No value is in this file.
+  credentials:
+    - secret: okta-response-api-token
+      env: OKTA_API_TOKEN
+  # The tenant gives its Okta org URL, for example https://example.okta.com.
+  # The egress allow-list of the pod holds the host of the value.
+  variables:
+    - name: org_url
+      env: OKTA_ORG_URL
+      kind: endpoint
+      patterns:
+        - https://*.okta.com
+        - https://*.oktapreview.com
+        - https://*.okta-emea.com
+  # Each tool is a response action. Revoke a session, disable an account and
+  # isolate a host need no person (ADR-0180): only a tool that destroys data
+  # waits for one. A new tool of the server waits until this list names it.
+  responseActions: true
+  tools:
+    revoke_user_sessions:
+      approval: none
+    suspend_user:
+      approval: none
+      undo: unsuspend_user
+    unsuspend_user:
+      approval: none
+      undo: suspend_user

@@ -1,0 +1,150 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
+
+// IncidentReportService returns the report of one incident (ADR-0180,
+// gibson#1480). The report holds the alerts, what the incident reaches, each
+// response action with its result and the grant that allowed it, the cause, its
+// fix and the proof of the fix. Each line names its position on the Timeline.
+//
+// The tenant comes from the identity of the caller. No request field names a
+// tenant.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "buf/validate/validate.proto";
+import "gibson/auth/v1/options.proto";
+
+service IncidentReportService {
+  // GetIncidentReport reads the Incident node of the tenant and the Timeline of
+  // the tenant, and joins them. Any member of the tenant may read it, like the
+  // Timeline that it points into.
+  rpc GetIncidentReport(GetIncidentReportRequest) returns (GetIncidentReportResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+message GetIncidentReportRequest {
+  // incident_key is the key of the Incident node.
+  string incident_key = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+}
+
+// ReplayFrame is the position of one line on the Timeline of the tenant.
+// WorldService.GetTimeline gives the event at timeline_seq. WorldService.GetFrameAt
+// with replay_seq and no mission_id gives the World after that event.
+message ReplayFrame {
+  // known is false when the Timeline holds no event for the line.
+  bool known = 1;
+  uint64 timeline_seq = 2;
+  uint64 replay_seq = 3;
+}
+
+message IncidentAlert {
+  string key = 1;
+  string title = 2;
+  string source = 3;
+  string severity = 4;
+  ReplayFrame frame = 5;
+}
+
+message IncidentReached {
+  string label = 1;
+  string key = 2;
+  string alert_key = 3;
+  ReplayFrame frame = 4;
+}
+
+// IncidentGrant is the grant that allowed a response action.
+message IncidentGrant {
+  string id = 1;
+  string capability = 2;
+  // granted_by is the person who owns the agent and gave the grant.
+  string granted_by = 3;
+  int64 granted_at_unix = 4;
+}
+
+message IncidentAction {
+  // tool_id is the canonical tool id, "mcp:<connector>:<tool>".
+  string tool_id = 1;
+  string connector = 2;
+  string tool = 3;
+  string agent_name = 4;
+
+  enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    // OUTCOME_DONE: the connector accepted the call.
+    OUTCOME_DONE = 1;
+    // OUTCOME_REFUSED: the daemon refused the call, because the grant of the
+    // agent does not allow it.
+    OUTCOME_REFUSED = 2;
+    // OUTCOME_PENDING_AUTHORIZATION: the call waits in the approval queue.
+    OUTCOME_PENDING_AUTHORIZATION = 3;
+    // OUTCOME_FAILED: the call ran and returned an error.
+    OUTCOME_FAILED = 4;
+  }
+  Outcome outcome = 5;
+  string error = 6;
+  string result = 7;
+  // control_ids are the NIST 800-53 control ids that the action is evidence
+  // for, for example "ac-12". They state evidence and never a verdict.
+  repeated string control_ids = 8;
+  // grant is unset when the grant is not recorded. A refused call has no grant.
+  IncidentGrant grant = 9;
+  ReplayFrame frame = 10;
+}
+
+message IncidentStatusChange {
+  string status = 1;
+  ReplayFrame frame = 2;
+}
+
+// IncidentCause is a finding that the Incident node names with CAUSED_BY.
+message IncidentCause {
+  string finding_key = 1;
+  string title = 2;
+  string severity = 3;
+  // status is the status of the finding in the graph now.
+  string status = 4;
+  ReplayFrame raised = 5;
+  // history holds each change of status, in Timeline order.
+  repeated IncidentStatusChange history = 6;
+}
+
+// IncidentFix is a merge request that fixes the cause.
+message IncidentFix {
+  string finding_key = 1;
+  string merge_request_key = 2;
+  string url = 3;
+  string ref = 4;
+  ReplayFrame frame = 5;
+  // verified_by is the key of the pipeline that verified the finding.
+  string verified_by = 6;
+  // verified is the frame of the change of the finding to verified. known is
+  // false when the finding is not verified.
+  ReplayFrame verified = 7;
+}
+
+message GetIncidentReportResponse {
+  string incident_key = 1;
+  repeated IncidentAlert alerts = 2;
+  repeated IncidentReached reached = 3;
+  repeated IncidentAction actions = 4;
+  repeated IncidentCause causes = 5;
+  repeated IncidentFix fixes = 6;
+  // control_ids are the unique NIST 800-53 control ids of all actions, sorted.
+  repeated string control_ids = 7;
+  // timeline_total is the number of events of the Timeline when the report was
+  // read. A frame is valid for a Timeline with the same total or more.
+  uint64 timeline_total = 8;
+}

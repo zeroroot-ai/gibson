@@ -56,32 +56,6 @@ func (s *HarnessCallbackService) QueryNodes(ctx context.Context, req *harnesspb.
 	return &harnesspb.QueryNodesResponse{Results: results}, nil
 }
 
-// FindSimilarAttacks returns attack patterns semantically close to content.
-func (s *HarnessCallbackService) FindSimilarAttacks(ctx context.Context, req *harnesspb.FindSimilarAttacksRequest) (*harnesspb.FindSimilarAttacksResponse, error) {
-	h, err := s.getHarness(ctx, req.GetContext())
-	if err != nil {
-		return nil, err
-	}
-	results, err := h.FindSimilarAttacks(ctx, req.GetContent(), int(req.GetTopK()))
-	if err != nil {
-		return nil, knowledgeErr(err)
-	}
-	return &harnesspb.FindSimilarAttacksResponse{Results: results}, nil
-}
-
-// GetAttackChains returns multi-hop technique paths from a starting technique.
-func (s *HarnessCallbackService) GetAttackChains(ctx context.Context, req *harnesspb.GetAttackChainsRequest) (*harnesspb.GetAttackChainsResponse, error) {
-	h, err := s.getHarness(ctx, req.GetContext())
-	if err != nil {
-		return nil, err
-	}
-	results, err := h.GetAttackChains(ctx, req.GetTechniqueId(), int(req.GetMaxDepth()))
-	if err != nil {
-		return nil, knowledgeErr(err)
-	}
-	return &harnesspb.GetAttackChainsResponse{Results: results}, nil
-}
-
 // FindSimilarFindings returns findings semantically close to the given one.
 func (s *HarnessCallbackService) FindSimilarFindings(ctx context.Context, req *harnesspb.FindSimilarFindingsRequest) (*harnesspb.FindSimilarFindingsResponse, error) {
 	h, err := s.getHarness(ctx, req.GetContext())

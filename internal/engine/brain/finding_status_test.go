@@ -63,7 +63,7 @@ func TestFindingStatus_InvalidOrUnknownChangesNothing(t *testing.T) {
 func TestFindingStatus_RescanReopens(t *testing.T) {
 	w := NewWorld("t")
 	Reduce(w, FindingRaised{ID: "f1", Title: "t"})
-	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
+	walk(w, "f1", FindingStatusFixed, "")
 	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusOpen})
 
 	if got := w.FindingSnapshot(); got[0].Status != FindingStatusOpen {
@@ -82,6 +82,8 @@ func TestFindingStatus_ReplayAndRestore(t *testing.T) {
 		ID: "f1", Title: "vulnerable lodash", ScopeID: "s", Severity: "high",
 		VulnerabilityID: "CVE-2025-1234",
 	})
+	apply(FindingStatusChanged{ID: "f1", Status: FindingStatusFixing})
+	apply(FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
 	apply(FindingStatusChanged{ID: "f1", Status: FindingStatusVerified})
 
 	want := []FindingSnapshot{{
@@ -114,6 +116,34 @@ func TestValidFindingStatus(t *testing.T) {
 	for _, s := range []string{"", "OPEN", "closed", "resolved", "wharrgarbl"} {
 		if ValidFindingStatus(s) {
 			t.Errorf("%q must not be valid", s)
+		}
+	}
+}
+
+// The reducer allows only the moves of the lifecycle (review M4). Each other
+// move changes nothing, and the Finding records the refusal.
+func TestFindingStatus_OnlyTheMovesOfTheLifecycle(t *testing.T) {
+	allowed := map[[2]string]bool{
+		{FindingStatusOpen, FindingStatusFixing}: true, {FindingStatusFixing, FindingStatusFixed}: true,
+		{FindingStatusFixing, FindingStatusOpen}: true, {FindingStatusFixed, FindingStatusVerified}: true,
+		{FindingStatusFixed, FindingStatusOpen}: true,
+	}
+	all := []string{FindingStatusOpen, FindingStatusFixing, FindingStatusFixed, FindingStatusVerified}
+	for _, from := range all {
+		for _, to := range all {
+			w := NewWorld("t")
+			Reduce(w, FindingRaised{ID: "f1", Title: "t", Status: from})
+			Reduce(w, FindingStatusChanged{ID: "f1", Status: to})
+			got := w.FindingSnapshot()[0]
+			if allowed[[2]string{from, to}] {
+				if got.Status != to || got.RefusedMoves != 0 {
+					t.Errorf("%s -> %s: status %q, refused %d", from, to, got.Status, got.RefusedMoves)
+				}
+				continue
+			}
+			if got.Status != from || got.RefusedMoves != 1 || got.LastRefusedMove != from+" -> "+to {
+				t.Errorf("%s -> %s must be refused: %+v", from, to, got)
+			}
 		}
 	}
 }

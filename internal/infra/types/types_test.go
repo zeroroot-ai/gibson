@@ -109,30 +109,6 @@ func TestStatusEnumIntegration(t *testing.T) {
 			invalidVal: "invalid_credential_status",
 		},
 		{
-			name:       "MissionStatus",
-			statusType: "mission",
-			validValues: []interface{}{
-				MissionStatusSubmitted,
-				MissionStatusWorking,
-				MissionStatusCompleted,
-				MissionStatusFailed,
-				MissionStatusCanceled,
-			},
-			invalidVal: "bad_mission_status",
-		},
-		{
-			name:       "FindingStatus",
-			statusType: "finding",
-			validValues: []interface{}{
-				FindingStatusOpen,
-				FindingStatusConfirmed,
-				FindingStatusFixed,
-				FindingStatusFalsePositive,
-				FindingStatusWontFix,
-			},
-			invalidVal: "wrong_finding_status",
-		},
-		{
 			name:       "HealthState",
 			statusType: "health",
 			validValues: []interface{}{
@@ -168,20 +144,6 @@ func TestStatusEnumIntegration(t *testing.T) {
 					assert.True(t, decoded.IsValid())
 					assert.Equal(t, val, decoded)
 
-				case "mission":
-					var decoded MissionStatus
-					err = json.Unmarshal(jsonData, &decoded)
-					require.NoError(t, err)
-					assert.True(t, decoded.IsValid())
-					assert.Equal(t, val, decoded)
-
-				case "finding":
-					var decoded FindingStatus
-					err = json.Unmarshal(jsonData, &decoded)
-					require.NoError(t, err)
-					assert.True(t, decoded.IsValid())
-					assert.Equal(t, val, decoded)
-
 				case "health":
 					var decoded HealthState
 					err = json.Unmarshal(jsonData, &decoded)
@@ -201,16 +163,6 @@ func TestStatusEnumIntegration(t *testing.T) {
 
 			case "credential":
 				var decoded CredentialStatus
-				err := json.Unmarshal([]byte(invalidJSON), &decoded)
-				assert.Error(t, err)
-
-			case "mission":
-				var decoded MissionStatus
-				err := json.Unmarshal([]byte(invalidJSON), &decoded)
-				assert.Error(t, err)
-
-			case "finding":
-				var decoded FindingStatus
 				err := json.Unmarshal([]byte(invalidJSON), &decoded)
 				assert.Error(t, err)
 

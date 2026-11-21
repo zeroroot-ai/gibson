@@ -97,11 +97,11 @@ func TestWireReconciler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager.New: %v", err)
 	}
-	if err := wireReconciler(mgr, daemonclient.NewWithConn(nil), controller.ProxyAuth{}, (&audittest.Sink{}).Emitter(t)); err != nil {
+	if err := wireReconciler(mgr, daemonclient.NewWithConn(nil), controller.ProxyAuth{}, (&audittest.Sink{}).Emitter(t), nil); err != nil {
 		t.Fatalf("wireReconciler: %v", err)
 	}
 	// The controller does not start without the audit emitter (gibson#583).
-	if err := wireReconciler(mgr, daemonclient.NewWithConn(nil), controller.ProxyAuth{}, nil); err == nil {
+	if err := wireReconciler(mgr, daemonclient.NewWithConn(nil), controller.ProxyAuth{}, nil, nil); err == nil {
 		t.Fatal("wireReconciler accepted no audit emitter")
 	}
 }
@@ -119,5 +119,21 @@ func TestBuildDaemonClient_FailsLoud(t *testing.T) {
 	}
 	if _, err := buildDaemonClient(ctx, env(map[string]string{"GIBSON_DAEMON_GRPC_ADDRESS": "gibson-workloads:50051"})); err == nil {
 		t.Error("an unreachable SPIRE Workload API must fail the boot")
+	}
+}
+
+// The cluster ranges come from a comma list. An empty value adds none, and a
+// bad range fails the start (review B3).
+func TestClusterCIDRSettings(t *testing.T) {
+	env := func(v string) func(string) string { return func(string) string { return v } }
+	got, err := clusterCIDRSettings(env(" 10.244.0.0/16, 10.96.0.0/12 "))
+	if err != nil || len(got) != 2 || got[0] != "10.244.0.0/16" || got[1] != "10.96.0.0/12" {
+		t.Fatalf("ranges = %v, %v", got, err)
+	}
+	if got, err := clusterCIDRSettings(env("")); err != nil || got != nil {
+		t.Fatalf("empty = %v, %v", got, err)
+	}
+	if _, err := clusterCIDRSettings(env("10.244.0.0/16,nope")); err == nil {
+		t.Fatal("a bad range was accepted")
 	}
 }

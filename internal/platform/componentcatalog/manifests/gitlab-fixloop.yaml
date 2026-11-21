@@ -1,0 +1,46 @@
+# GitLab fix loop connector. Zero Root builds the MCP server in zeroroot-ai/connectors
+# (gitlab-fixloop/, release v0.1.0), because the vendor publishes no server with these tools.
+# The image is public, signed and scanned, and the catalog pins it by digest.
+# Source of the environment: gitlab-fixloop/README.md of zeroroot-ai/connectors at v0.1.0.
+# The server speaks streamable HTTP on :8080 at /mcp.
+id: gitlab-fixloop
+kind: connector
+displayName: GitLab fix loop
+description: >-
+  Reads the state and the deploy of a merge request, merges it on a green
+  pipeline, and reverts a merge, for the fix loop.
+spec:
+  vendor: gitlab
+  class: git-host
+  shape: Hosted
+  image: ghcr.io/zeroroot-ai/connectors-gitlab-fixloop@sha256:83564eaaaf5fdd577b6a00512c8cab7cc968276159a863a2dcfc78024545580e
+  transport: streamable-http
+  port: 8080
+  auth: none
+  # Each credential is the name of a secret in the secret store of the
+  # tenant. The operator puts the value in the pod. No value is in this file.
+  credentials:
+    - secret: gitlab-fixloop-token
+      env: GITLAB_TOKEN
+  env:
+    GITLAB_ENVIRONMENT: production
+  # The tenant gives the address of its GitLab, for example
+  # https://gitlab.com. The deploy environment is production.
+  # The egress allow-list of the pod holds the host of the value.
+  # A GitLab that the customer hosts has no vendor domain, so the platform
+  # owner of the install states its pattern in the chart (installPatterns).
+  variables:
+    - name: base_url
+      env: GITLAB_BASE_URL
+      kind: endpoint
+      patterns:
+        - https://gitlab.com
+      installPatterns: true
+  # The merge tool runs only when the merge request holds its merge slot
+  # (gibson#1458). Only the daemon calls the revert tool, after a failed
+  # health signal that it read. The other tools need only the grant.
+  tools:
+    merge_merge_request:
+      role: merge
+    revert_merge_request:
+      role: daemon

@@ -1,0 +1,44 @@
+# SentinelOne response connector. Zero Root builds the MCP server in zeroroot-ai/connectors
+# (sentinelone/, release v0.1.0), because the vendor publishes no server with these tools.
+# The image is public, signed and scanned, and the catalog pins it by digest.
+# Source of the environment: sentinelone/README.md of zeroroot-ai/connectors at v0.1.0.
+# The server speaks streamable HTTP on :8080 at /mcp.
+id: sentinelone-response
+kind: connector
+displayName: SentinelOne response
+description: >-
+  Disconnects a SentinelOne agent from the network and connects it again. The
+  vendor server purple-mcp only reads.
+spec:
+  vendor: sentinelone
+  class: edr
+  shape: Hosted
+  image: ghcr.io/zeroroot-ai/connectors-sentinelone@sha256:c4c48e268c91bafbd76af19514f612674f1c2f07259387c9d7b2ca2b176076c8
+  transport: streamable-http
+  port: 8080
+  auth: none
+  # Each credential is the name of a secret in the secret store of the
+  # tenant. The operator puts the value in the pod. No value is in this file.
+  credentials:
+    - secret: sentinelone-response-api-token
+      env: SENTINELONE_API_TOKEN
+  # The tenant gives the URL of its management console, for example
+  # https://usea1-example.sentinelone.net.
+  # The egress allow-list of the pod holds the host of the value.
+  variables:
+    - name: console_url
+      env: SENTINELONE_CONSOLE_URL
+      kind: endpoint
+      patterns:
+        - https://*.sentinelone.net
+  # Each tool is a response action. Revoke a session, disable an account and
+  # isolate a host need no person (ADR-0180): only a tool that destroys data
+  # waits for one. A new tool of the server waits until this list names it.
+  responseActions: true
+  tools:
+    disconnect_from_network:
+      approval: none
+      undo: reconnect_to_network
+    reconnect_to_network:
+      approval: none
+      undo: disconnect_from_network

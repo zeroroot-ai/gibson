@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 )
@@ -88,6 +89,17 @@ func (s *MemTimelineStore) LoadHistory(_ context.Context, _ string) ([]brain.Eve
 	return out, nil
 }
 
+// LoadHistoryRange returns the events of LoadHistory of the kinds named. The
+// store has no append time, so it keeps an event whose own time is from or
+// later, and an event with no time.
+func (s *MemTimelineStore) LoadHistoryRange(ctx context.Context, tenant string, from time.Time, kinds []string) ([]brain.Event, error) {
+	all, err := s.LoadHistory(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	return FilterHistory(all, from, kinds), nil
+}
+
 // WriteSnapshot keeps snap as the one snapshot. The handle is snap.AtSeq.
 func (s *MemTimelineStore) WriteSnapshot(_ context.Context, _ string, snap brain.WorldSnapshot) (string, error) {
 	s.mu.Lock()
@@ -155,4 +167,25 @@ func parseSeq(seq string) (int, error) {
 		return 0, fmt.Errorf("braintest: the seq %q is not a number: %w", seq, err)
 	}
 	return n, nil
+}
+
+// FilterHistory keeps the events of the kinds named whose own time is from or
+// later, in order. An event with no time is kept, because nothing shows that
+// it is older. A test store with no append time uses it for LoadHistoryRange.
+func FilterHistory(events []brain.Event, from time.Time, kinds []string) []brain.Event {
+	want := make(map[string]bool, len(kinds))
+	for _, k := range kinds {
+		want[k] = true
+	}
+	var out []brain.Event
+	for _, ev := range events {
+		if !want[ev.Kind()] {
+			continue
+		}
+		if t := brain.EventTime(ev); !t.IsZero() && t.Before(from) {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
 }

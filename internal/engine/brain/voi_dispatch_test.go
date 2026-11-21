@@ -10,16 +10,16 @@ import (
 )
 
 // dispatchTestHierarchy mirrors taxonomy's own coverage_test.go fixture: two
-// categories, two techniques rolling up to "prompt_injection", none rolling
+// categories, two techniques rolling up to "initial_access", none rolling
 // up to "data_exfiltration" — enough to exercise both a direct-technique
 // match and a category-rollup match.
 func dispatchTestHierarchy(t *testing.T) *taxonomy.TechniqueHierarchy {
 	t.Helper()
 	h, err := taxonomy.NewTechniqueHierarchy(
-		[]taxonomy.CategoryID{"prompt_injection", "data_exfiltration"},
+		[]taxonomy.CategoryID{"initial_access", "data_exfiltration"},
 		map[taxonomy.TechniqueID]taxonomy.CategoryID{
-			"direct_prompt_injection":   "prompt_injection",
-			"indirect_prompt_injection": "prompt_injection",
+			"exposed_admin_endpoint": "initial_access",
+			"exposed_debug_endpoint": "initial_access",
 		},
 	)
 	if err != nil {
@@ -46,10 +46,10 @@ func dispatchCoverage(t *testing.T, h *taxonomy.TechniqueHierarchy, categories [
 func TestCapabilitiesForTechnique_DirectTechniqueMatch(t *testing.T) {
 	h := dispatchTestHierarchy(t)
 	scanner := Capability{Kind: "tool", Name: "prompt-scanner",
-		Coverage: dispatchCoverage(t, h, nil, []taxonomy.TechniqueID{"direct_prompt_injection"})}
+		Coverage: dispatchCoverage(t, h, nil, []taxonomy.TechniqueID{"exposed_admin_endpoint"})}
 	unrelated := Capability{Kind: "tool", Name: "port-scanner", Coverage: taxonomy.EmptyCoverage()}
 
-	got := CapabilitiesForTechnique(h, "direct_prompt_injection", []Capability{scanner, unrelated})
+	got := CapabilitiesForTechnique(h, "exposed_admin_endpoint", []Capability{scanner, unrelated})
 
 	if len(got) != 1 || got[0].Name != "prompt-scanner" {
 		t.Fatalf("CapabilitiesForTechnique = %+v, want only %q", got, "prompt-scanner")
@@ -63,9 +63,9 @@ func TestCapabilitiesForTechnique_DirectTechniqueMatch(t *testing.T) {
 func TestCapabilitiesForTechnique_CategoryRollupMatch(t *testing.T) {
 	h := dispatchTestHierarchy(t)
 	generalist := Capability{Kind: "agent", Name: "injection-hunter",
-		Coverage: dispatchCoverage(t, h, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+		Coverage: dispatchCoverage(t, h, []taxonomy.CategoryID{"initial_access"}, nil)}
 
-	got := CapabilitiesForTechnique(h, "indirect_prompt_injection", []Capability{generalist})
+	got := CapabilitiesForTechnique(h, "exposed_debug_endpoint", []Capability{generalist})
 
 	if len(got) != 1 || got[0].Name != "injection-hunter" {
 		t.Fatalf("CapabilitiesForTechnique = %+v, want only %q via category rollup", got, "injection-hunter")
@@ -78,9 +78,9 @@ func TestCapabilitiesForTechnique_CategoryRollupMatch(t *testing.T) {
 func TestCapabilitiesForTechnique_MatchesOnceEvenWithBothCoverages(t *testing.T) {
 	h := dispatchTestHierarchy(t)
 	belt := Capability{Kind: "agent", Name: "belt-and-suspenders", Coverage: dispatchCoverage(t, h,
-		[]taxonomy.CategoryID{"prompt_injection"}, []taxonomy.TechniqueID{"direct_prompt_injection"})}
+		[]taxonomy.CategoryID{"initial_access"}, []taxonomy.TechniqueID{"exposed_admin_endpoint"})}
 
-	got := CapabilitiesForTechnique(h, "direct_prompt_injection", []Capability{belt})
+	got := CapabilitiesForTechnique(h, "exposed_admin_endpoint", []Capability{belt})
 
 	if len(got) != 1 {
 		t.Fatalf("CapabilitiesForTechnique = %+v, want exactly one match, not a duplicate", got)
@@ -95,7 +95,7 @@ func TestCapabilitiesForTechnique_NoCoveringCapabilityIsExplicitEmpty(t *testing
 	h := dispatchTestHierarchy(t)
 	unrelated := Capability{Kind: "tool", Name: "port-scanner", Coverage: taxonomy.EmptyCoverage()}
 
-	got := CapabilitiesForTechnique(h, "direct_prompt_injection", []Capability{unrelated})
+	got := CapabilitiesForTechnique(h, "exposed_admin_endpoint", []Capability{unrelated})
 
 	if len(got) != 0 {
 		t.Fatalf("CapabilitiesForTechnique = %+v, want none", got)
@@ -110,7 +110,7 @@ func TestCapabilitiesForTechnique_NoCoveringCapabilityIsExplicitEmpty(t *testing
 func TestCapabilitiesForTechnique_EmptyTechniqueIsExplicitEmpty(t *testing.T) {
 	h := dispatchTestHierarchy(t)
 	scanner := Capability{Kind: "tool", Name: "prompt-scanner",
-		Coverage: dispatchCoverage(t, h, nil, []taxonomy.TechniqueID{"direct_prompt_injection"})}
+		Coverage: dispatchCoverage(t, h, nil, []taxonomy.TechniqueID{"exposed_admin_endpoint"})}
 
 	got := CapabilitiesForTechnique(h, "", []Capability{scanner})
 
@@ -126,7 +126,7 @@ func TestCapabilitiesForTechnique_EmptyTechniqueIsExplicitEmpty(t *testing.T) {
 func TestCapabilitiesForTechnique_NilHierarchyNeverPanics(t *testing.T) {
 	scanner := Capability{Kind: "tool", Name: "prompt-scanner"}
 
-	got := CapabilitiesForTechnique(nil, "direct_prompt_injection", []Capability{scanner})
+	got := CapabilitiesForTechnique(nil, "exposed_admin_endpoint", []Capability{scanner})
 
 	if len(got) != 0 {
 		t.Fatalf("CapabilitiesForTechnique(hierarchy=nil) = %+v, want none", got)
@@ -145,14 +145,14 @@ func TestCapabilitiesForTechnique_UnadmittedTechniqueStillMatchesDirectly(t *tes
 	// that second hierarchy while the direct technique match still succeeds.
 	full := dispatchTestHierarchy(t)
 	scanner := Capability{Kind: "tool", Name: "prompt-scanner",
-		Coverage: dispatchCoverage(t, full, nil, []taxonomy.TechniqueID{"direct_prompt_injection"})}
+		Coverage: dispatchCoverage(t, full, nil, []taxonomy.TechniqueID{"exposed_admin_endpoint"})}
 
 	narrow, err := taxonomy.NewTechniqueHierarchy([]taxonomy.CategoryID{"data_exfiltration"}, nil)
 	if err != nil {
 		t.Fatalf("NewTechniqueHierarchy: %v", err)
 	}
 
-	got := CapabilitiesForTechnique(narrow, "direct_prompt_injection", []Capability{scanner})
+	got := CapabilitiesForTechnique(narrow, "exposed_admin_endpoint", []Capability{scanner})
 
 	if len(got) != 1 || got[0].Name != "prompt-scanner" {
 		t.Fatalf("CapabilitiesForTechnique = %+v, want the direct match despite no category rollup", got)
@@ -165,11 +165,11 @@ func TestCapabilitiesForTechnique_UnadmittedTechniqueStillMatchesDirectly(t *tes
 func TestCapabilitiesForTechnique_PreservesInputOrder(t *testing.T) {
 	h := dispatchTestHierarchy(t)
 	first := Capability{Kind: "agent", Name: "zzz-agent",
-		Coverage: dispatchCoverage(t, h, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+		Coverage: dispatchCoverage(t, h, []taxonomy.CategoryID{"initial_access"}, nil)}
 	second := Capability{Kind: "tool", Name: "aaa-tool",
-		Coverage: dispatchCoverage(t, h, nil, []taxonomy.TechniqueID{"direct_prompt_injection"})}
+		Coverage: dispatchCoverage(t, h, nil, []taxonomy.TechniqueID{"exposed_admin_endpoint"})}
 
-	got := CapabilitiesForTechnique(h, "direct_prompt_injection", []Capability{first, second})
+	got := CapabilitiesForTechnique(h, "exposed_admin_endpoint", []Capability{first, second})
 
 	if len(got) != 2 || got[0].Name != "zzz-agent" || got[1].Name != "aaa-tool" {
 		t.Fatalf("CapabilitiesForTechnique = %+v, want input order preserved [zzz-agent, aaa-tool]", got)

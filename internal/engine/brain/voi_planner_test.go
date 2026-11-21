@@ -225,7 +225,7 @@ func TestNewVoIWorker_NilCatalogAndHierarchyNeverPanic(t *testing.T) {
 	registry := liveBeliefRegistry(t)
 	e, w := voiEngineWithCatalog(substrate, registry, ExactVoIScorer(), DefaultVoITopK, nil, nil)
 	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
-	e.Submit(HypothesisObserved{ScopeID: "s", Claim: "c", Proposer: "agent-1", Technique: "indirect_prompt_injection"})
+	e.Submit(HypothesisObserved{ScopeID: "s", Claim: "c", Proposer: "agent-1", Technique: "exposed_debug_endpoint"})
 
 	voiSettle(e, w, 1)
 
@@ -249,7 +249,7 @@ func TestVoIWorker_ResolvesCoveringCapabilitiesFromItsLiveCatalog(t *testing.T) 
 	registry := liveBeliefRegistry(t)
 	hierarchy := dispatchTestHierarchy(t)
 	generalist := Capability{Kind: "agent", Name: "injection-hunter",
-		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"initial_access"}, nil)}
 
 	var gotMissionID string
 	catalog := func(missionID string) []Capability {
@@ -259,7 +259,7 @@ func TestVoIWorker_ResolvesCoveringCapabilitiesFromItsLiveCatalog(t *testing.T) 
 
 	e, w := voiEngineWithCatalog(substrate, registry, ExactVoIScorer(), DefaultVoITopK, catalog, hierarchy)
 	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
-	e.Submit(HypothesisObserved{ScopeID: "s", Claim: "the filter is bypassable", Proposer: "agent-1", Technique: "indirect_prompt_injection"})
+	e.Submit(HypothesisObserved{ScopeID: "s", Claim: "the debug endpoint is exposed", Proposer: "agent-1", Technique: "exposed_debug_endpoint"})
 
 	voiSettle(e, w, 1)
 
@@ -415,7 +415,7 @@ func TestTimelineCodec_EncodeDecode_VoIPlanned(t *testing.T) {
 		Candidates: []VoICandidate{
 			{
 				Kind: VoICandidateHypothesis, RefID: "hyp-1", InfoGain: 0.5, Value: 0.9,
-				Technique:            "indirect_prompt_injection",
+				Technique:            "exposed_debug_endpoint",
 				CoveringCapabilities: []CapabilityRef{{Kind: "agent", Name: "injection-hunter"}},
 			},
 			{Kind: VoICandidateEvidence, RefID: "host-1", InfoGain: 0.2, Value: 0.3},
@@ -473,7 +473,7 @@ func TestSnapshotRestore_RoundTripsVoIPlanState_Completed(t *testing.T) {
 		Candidates: []VoICandidate{
 			{
 				Kind: VoICandidateHypothesis, RefID: "hyp-1", Value: 0.9,
-				Technique:            "indirect_prompt_injection",
+				Technique:            "exposed_debug_endpoint",
 				CoveringCapabilities: []CapabilityRef{{Kind: "agent", Name: "injection-hunter"}},
 			},
 		},

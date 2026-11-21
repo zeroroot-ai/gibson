@@ -10,7 +10,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,14 +36,18 @@ import (
 // (ADR-0061) and the controller reads the credential state so the CR
 // reports Degraded rather than a silent Active (ADR-0061). One
 // client serves both, because both are the same SPIFFE-mTLS dial.
-func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client, proxyAuth controller.ProxyAuth, auditEmitter *audit.SagaEmitter) error {
+func wireReconciler(
+	mgr ctrl.Manager, daemon *daemonclient.Client, proxyAuth controller.ProxyAuth, auditEmitter *audit.SagaEmitter,
+	clusterCIDRs []string,
+) error {
 	if err := (&controller.ConnectorInstanceReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Revoker:    daemon,
-		AuthReader: daemon,
-		ProxyAuth:  proxyAuth,
-		Audit:      auditEmitter,
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		Revoker:      daemon,
+		AuthReader:   daemon,
+		ProxyAuth:    proxyAuth,
+		Audit:        auditEmitter,
+		ClusterCIDRs: clusterCIDRs,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("connectorinstance controller: %w", err)
 	}
@@ -172,7 +178,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := wireReconciler(mgr, daemon, proxyAuth, auditEmitter); err != nil {
+	clusterCIDRs, err := clusterCIDRSettings(os.Getenv)
+	if err != nil {
+		setupLog.Error(err, "cluster ranges")
+		os.Exit(1)
+	}
+
+	if err := wireReconciler(mgr, daemon, proxyAuth, auditEmitter, clusterCIDRs); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ConnectorInstance")
 		os.Exit(1)
 	}
@@ -216,4 +228,26 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// clusterCIDRSettings reads the pod and the service ranges of the cluster
+// from CONNECTOR_CLUSTER_CIDRS, a comma list. The egress policy of each
+// connector denies them (review B3). The chart sets them for the install. An
+// empty value adds no range: the private ranges of RFC 1918 and CGNAT, which
+// the policy always denies, hold the ranges of most clusters. A bad range
+// fails the start, so a typo never drops the deny rule.
+func clusterCIDRSettings(getenv func(string) string) ([]string, error) {
+	raw := strings.TrimSpace(getenv("CONNECTOR_CLUSTER_CIDRS"))
+	if raw == "" {
+		return nil, nil
+	}
+	var out []string
+	for _, c := range strings.Split(raw, ",") {
+		c = strings.TrimSpace(c)
+		if _, _, err := net.ParseCIDR(c); err != nil {
+			return nil, fmt.Errorf("CONNECTOR_CLUSTER_CIDRS: %q is not a CIDR: %w", c, err)
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }

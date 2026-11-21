@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 
@@ -375,6 +376,72 @@ func (s *TimelineStore) LoadHistory(ctx context.Context, tenant string) ([]brain
 	return append(out, tail...), nil
 }
 
+// selectHistoryRangeSQL is selectHistorySQL for the rows of the kinds named.
+// The cursor starts at the first stream id of the start time, so the primary
+// key bounds the scan.
+const selectHistoryRangeSQL = `
+SELECT stream_ms, stream_seq, event::text
+FROM timeline_events
+WHERE (stream_ms, stream_seq) > ($1, $2) AND kind = ANY($4)
+ORDER BY stream_ms, stream_seq
+LIMIT $3`
+
+// LoadHistoryRange returns the events of the kinds named that the store
+// appended at from or later, in order (review M6). The Postgres history and the
+// stream tail both carry the append time in the stream id, so the read starts
+// at the stream id of from and never reads the older history.
+func (s *TimelineStore) LoadHistoryRange(ctx context.Context, tenant string, from time.Time, kinds []string) ([]brain.Event, error) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	conn, release, err := s.acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("datapool/redis-timeline: acquire conn for the history of tenant %q: %w", tenant, err)
+	}
+	defer release()
+	if conn.SQL == nil {
+		return nil, fmt.Errorf("datapool/redis-timeline: tenant %q has no Postgres handle for the Timeline history", tenant)
+	}
+	fromMs := max(from.UnixMilli(), 0)
+	var out []brain.Event
+	lastMs, lastSeq := fromMs, int64(-1)
+	for {
+		rows, err := conn.SQL.Query(ctx, selectHistoryRangeSQL, lastMs, lastSeq, replayBatchSize, kinds)
+		if err != nil {
+			return nil, fmt.Errorf("datapool/redis-timeline: select the history range of tenant %q: %w", tenant, err)
+		}
+		page, err := scanHistoryRows(rows)
+		if err != nil {
+			return nil, fmt.Errorf("datapool/redis-timeline: read the history range of tenant %q: %w", tenant, err)
+		}
+		for _, row := range page {
+			out = append(out, row.event)
+			lastMs, lastSeq = row.ms, row.seq
+		}
+		if len(page) < replayBatchSize {
+			break
+		}
+	}
+	start := strconv.FormatInt(fromMs, 10) + "-0"
+	if lastSeq >= 0 {
+		start = "(" + strconv.FormatInt(lastMs, 10) + "-" + strconv.FormatInt(lastSeq, 10)
+	}
+	tail, err := streamEvents(ctx, conn.Redis, s.streamKey(tenant), start)
+	if err != nil {
+		return nil, fmt.Errorf("datapool/redis-timeline: read the stream tail of tenant %q: %w", tenant, err)
+	}
+	want := make(map[string]bool, len(kinds))
+	for _, k := range kinds {
+		want[k] = true
+	}
+	for _, ev := range tail {
+		if want[ev.Kind()] {
+			out = append(out, ev)
+		}
+	}
+	return out, nil
+}
+
 // historyRow is one decoded row of timeline_events.
 type historyRow struct {
 	ms, seq int64
@@ -388,6 +455,11 @@ func historyPage(ctx context.Context, db SQL, afterMs, afterSeq int64) ([]histor
 	if err != nil {
 		return nil, fmt.Errorf("select from timeline_events: %w", err)
 	}
+	return scanHistoryRows(rows)
+}
+
+// scanHistoryRows decodes one page of timeline_events rows and closes them.
+func scanHistoryRows(rows Rows) ([]historyRow, error) {
 	defer rows.Close()
 
 	var page []historyRow

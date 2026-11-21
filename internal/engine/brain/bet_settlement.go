@@ -515,6 +515,12 @@ func (e *Engine) SettleBetTrue(ctx context.Context, registry *settlement.Registr
 	if err != nil {
 		return false, fmt.Errorf("brain: settlement evaluation for hypothesis %q: %w", req.HypothesisID, err)
 	}
+	// The result is also a rerun of the check of each fixed Finding that the
+	// predicate raised on the target (review M11). VerificationSystem decides
+	// with it, on evidence newer than the deploy only.
+	for _, ev := range predicateReruns(e.Findings(), string(req.Technique), req.ScopeID, req.MissionID, ok, req.Evidence) {
+		e.Submit(ev)
+	}
 	if !ok {
 		return false, nil
 	}

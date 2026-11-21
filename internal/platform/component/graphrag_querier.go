@@ -139,24 +139,6 @@ func (q *PoolGraphRAGQuerier) QueryNodes(
 	return out, err
 }
 
-// FindSimilarAttacks returns JSON-encoded []graphrag.AttackPattern.
-func (q *PoolGraphRAGQuerier) FindSimilarAttacks(
-	ctx context.Context, tenant, content string, topK int,
-) ([]byte, error) {
-	return q.jsonResult(ctx, tenant, func(store graphrag.GraphRAGStore) (any, error) {
-		return store.FindSimilarAttacks(ctx, content, topK)
-	})
-}
-
-// GetAttackChains returns JSON-encoded []graphrag.AttackChain.
-func (q *PoolGraphRAGQuerier) GetAttackChains(
-	ctx context.Context, tenant, techniqueID string, maxDepth int,
-) ([]byte, error) {
-	return q.jsonResult(ctx, tenant, func(store graphrag.GraphRAGStore) (any, error) {
-		return store.GetAttackChains(ctx, techniqueID, maxDepth)
-	})
-}
-
 // FindSimilarFindings returns JSON-encoded []graphrag.FindingNode.
 func (q *PoolGraphRAGQuerier) FindSimilarFindings(
 	ctx context.Context, tenant, findingID string, topK int,

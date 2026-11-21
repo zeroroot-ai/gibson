@@ -6,8 +6,11 @@ package brain
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/mlange-42/ark/ecs"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 )
 
 // surpriseBoost is added to an entity's attention when it carries a Surprise, so
@@ -73,6 +76,27 @@ type Finding struct {
 	ScanScope string
 	LastScan  string
 
+	// MergeRequest is the key of the merge request that carries the fix
+	// (gibson#1505). MergeRequestState is what the Git host last reported for
+	// it: empty while it is open, then merged or closed.
+	MergeRequest      string
+	MergeRequestState string
+
+	// Priority, PriorityRule and PriorityReason are what the last triage pass
+	// decided (gibson#1522). Priority is P1 to P4 and is empty until a pass
+	// decides. Empty is a fact about the Finding and never a default.
+	Priority       string
+	PriorityRule   string
+	PriorityReason string
+
+	// FixFacts are the facts of the fix loop (gibson#1457, #1460, #1464).
+	FixFacts
+
+	// RefusedMoves counts the status changes that the lifecycle refused, and
+	// LastRefusedMove names the last one, as "from -> to" (review M4).
+	RefusedMoves    int
+	LastRefusedMove string
+
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208). See FindingRaised.
 	SubmittedBy string
@@ -80,22 +104,76 @@ type Finding struct {
 	EnrolledBy  string
 }
 
+// FixFacts are what the fix loop records about one Finding. Each time comes
+// from an event, never from the clock during Reduce, so a replay gives the same
+// World.
+type FixFacts struct {
+	// CheckKind and CheckRef name the check that raised the Finding (ADR-0178):
+	// predicate, scan or tool. Empty means that the producer recorded none. An
+	// empty kind counts as the weakest check, so any check can verify it.
+	CheckKind string
+	CheckRef  string
+	// FirstSeenAt is when the check first saw the flaw. RaisedAt is when Gibson
+	// read it. For a Finding from a tool of the buyer the two differ.
+	FirstSeenAt time.Time
+	RaisedAt    time.Time
+	// DeployedAt and DeploymentKey record the deploy of the merged fix. They are
+	// zero for a fix that is not deployed.
+	DeployedAt    time.Time
+	DeploymentKey string
+	// Health is what the health signal said after the deploy: empty, held or
+	// failed.
+	Health string
+	// HealthUnavailableAt is when the daemon found that the service has no
+	// health signal. It is zero when a signal exists or the daemon did not look.
+	HealthUnavailableAt time.Time
+	// RerunKind, RerunFound and RerunAt are the latest rerun of a check on the
+	// Finding. RerunAt is the time of the evidence.
+	RerunKind  string
+	RerunFound bool
+	RerunAt    time.Time
+	// FixMissionID is the mission of the job that opened the merge request of
+	// the fix (gibson#1465). The daemon writes each later event of the fix loop
+	// with it, so a replay of that mission shows the merge, the deploy, the
+	// health signal and the revert.
+	FixMissionID string
+	// RevertRequestedAt is when the daemon first asked the Git host to revert
+	// the fix, and RevertMergeRequest is the merge request of the revert. Both
+	// are zero until a failed health signal asks for a revert.
+	RevertRequestedAt  time.Time
+	RevertMergeRequest string
+	// FixClaim names the fix job that works on the Finding now: the mission
+	// run and the node of the job. Empty means that no job holds it.
+	// FixClaimedAt is the time of the claim. A merge request that the job
+	// delivers must be newer than it (review B1).
+	FixClaim     string
+	FixClaimedAt time.Time
+	// VerifiedAt is the time of the change to `verified`. A bounded reader
+	// of the history reads it to leave out an old fix (review M6).
+	VerifiedAt time.Time
+}
+
+// Health values of FixFacts.
+const (
+	HealthHeld   = "held"
+	HealthFailed = "failed"
+)
+
 // Finding statuses (gibson#1656). FindingStatusOpen is the default for a raised
 // Finding; the others are set by FindingStatusChanged.
+//
+// The values come from package finding, the one definition of the four
+// statuses (gibson#1518). The World stores a status as a plain string.
 const (
-	FindingStatusOpen     = "open"
-	FindingStatusFixing   = "fixing"
-	FindingStatusFixed    = "fixed"
-	FindingStatusVerified = "verified"
+	FindingStatusOpen     = string(finding.StatusOpen)
+	FindingStatusFixing   = string(finding.StatusFixing)
+	FindingStatusFixed    = string(finding.StatusFixed)
+	FindingStatusVerified = string(finding.StatusVerified)
 )
 
 // ValidFindingStatus reports whether s is one of the four Finding statuses.
 func ValidFindingStatus(s string) bool {
-	switch s {
-	case FindingStatusOpen, FindingStatusFixing, FindingStatusFixed, FindingStatusVerified:
-		return true
-	}
-	return false
+	return finding.FindingStatus(s).IsValid()
 }
 
 // FindingRaised promotes an observation/surprise into a confirmed Finding. The
@@ -133,6 +211,15 @@ type FindingRaised struct {
 	SubmittedBy string
 	AgentName   string
 	EnrolledBy  string
+
+	// CheckKind and CheckRef name the check that raised the Finding (ADR-0178).
+	CheckKind string
+	CheckRef  string
+	// At is when Gibson read the evidence. FirstSeenAt is when the check first
+	// saw the flaw, when that is earlier. A producer sets both. Reduce never
+	// reads the clock.
+	At          time.Time
+	FirstSeenAt time.Time
 }
 
 func (FindingRaised) Kind() string { return "finding.raised" }
@@ -151,6 +238,9 @@ func applyFindingRaised(w *World, e FindingRaised) {
 		// only the rescan provenance moves. That is what makes "this scan saw
 		// it again" expressible at all — without it, the second scan of an
 		// unchanged Application would be indistinguishable from no scan.
+		if f.RaisedAt.IsZero() {
+			f.RaisedAt = e.At
+		}
 		if scan != "" {
 			f.LastScan = scan
 			if f.ScanScope == "" {
@@ -168,8 +258,21 @@ func applyFindingRaised(w *World, e FindingRaised) {
 		ID: e.ID, Title: e.Title, Description: e.Description, ScopeID: e.ScopeID,
 		Address: e.Address, Severity: e.Severity, Status: status, VulnerabilityID: e.VulnerabilityID,
 		ScanScope: scope, LastScan: scan,
+		FixFacts: FixFacts{
+			CheckKind: e.CheckKind, CheckRef: e.CheckRef,
+			RaisedAt: e.At, FirstSeenAt: firstSeen(e),
+		},
 		SubmittedBy: e.SubmittedBy, AgentName: e.AgentName, EnrolledBy: e.EnrolledBy,
 	})
+}
+
+// firstSeen is the time a check first saw the flaw. A producer that has no
+// earlier time gives none, and the time of the read stands.
+func firstSeen(e FindingRaised) time.Time {
+	if !e.FirstSeenAt.IsZero() {
+		return e.FirstSeenAt
+	}
+	return e.At
 }
 
 // scanProvenance resolves the rescan scope and the scan id for a Finding raised
@@ -196,14 +299,37 @@ type FindingStatusChanged struct {
 	ID        string
 	Status    string
 	MissionID string
+	// MergeRequest is the key of the merge request behind the change
+	// (gibson#1505). When it is set, the Finding records it and forgets the
+	// state of any earlier merge request.
+	MergeRequest string
+	// At is the time of the change. A reader of the Timeline uses it.
+	At time.Time
 }
 
 // Kind identifies the finding.status_changed brain event.
 func (FindingStatusChanged) Kind() string { return "finding.status_changed" }
 
+// allowedStatusMoves are the moves of the lifecycle of a Finding (ADR-0178,
+// review M4). FixReverted is the one other event that sets a status: it
+// opens a Finding again because the revert undoes the fix.
+var allowedStatusMoves = map[[2]string]bool{
+	{FindingStatusOpen, FindingStatusFixing}:    true, // a fix job opened a merge request
+	{FindingStatusFixing, FindingStatusFixed}:   true, // the merge request merged
+	{FindingStatusFixing, FindingStatusOpen}:    true, // the merge request closed
+	{FindingStatusFixed, FindingStatusVerified}: true, // the check and the health signal proved the fix
+	{FindingStatusFixed, FindingStatusOpen}:     true, // the check found the flaw again
+}
+
+// AllowedStatusMove reports whether a Finding may move from one status to the
+// other with a FindingStatusChanged event.
+func AllowedStatusMove(from, to string) bool { return allowedStatusMoves[[2]string{from, to}] }
+
 // applyFindingStatusChanged updates the Finding in place. An unknown Finding
 // or an invalid status changes nothing: the event is recorded in the Timeline
-// either way, but the World never holds a status outside the four.
+// either way, but the World never holds a status outside the four. A move
+// that the lifecycle does not allow changes nothing, and the Finding records
+// the refusal (review M4).
 func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 	if !ValidFindingStatus(e.Status) {
 		return
@@ -212,7 +338,24 @@ func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 	for q.Next() {
 		f := q.Get()
 		if f.ID == e.ID {
+			if !AllowedStatusMove(f.Status, e.Status) {
+				f.RefusedMoves++
+				f.LastRefusedMove = f.Status + " -> " + e.Status
+				q.Close()
+				return
+			}
 			f.Status = e.Status
+			if e.MergeRequest != "" {
+				f.MergeRequest = e.MergeRequest
+				f.MergeRequestState = ""
+				f.FixMissionID = e.MissionID
+			}
+			if e.Status == FindingStatusOpen {
+				resetFix(f)
+			}
+			if e.Status == FindingStatusVerified {
+				f.VerifiedAt = e.At
+			}
 			q.Close()
 			return
 		}
@@ -233,6 +376,18 @@ type FindingSnapshot struct {
 	// recurring scan responsible for this Finding, and the scan that last saw it.
 	ScanScope string
 	LastScan  string
+	// MergeRequest and MergeRequestState: see Finding (gibson#1505).
+	MergeRequest      string
+	MergeRequestState string
+	// Priority, PriorityRule and PriorityReason: see Finding (gibson#1522).
+	Priority       string
+	PriorityRule   string
+	PriorityReason string
+	// FixFacts: see Finding.
+	FixFacts
+	// RefusedMoves and LastRefusedMove: see Finding.
+	RefusedMoves    int
+	LastRefusedMove string
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208). See FindingRaised.
 	SubmittedBy string
@@ -274,6 +429,9 @@ func SurpriseFindingSystem(w *World) []Event {
 			Address:     h.Address,
 			Severity:    "medium",
 			MissionID:   h.MissionID, // inherit the source host's mission attribution
+			CheckKind:   string(finding.CheckScan),
+			CheckRef:    h.MissionID,
+			At:          w.Now(),
 		})
 	}
 	return out
@@ -289,9 +447,29 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 			ID: f.ID, Title: f.Title, Description: f.Description, ScopeID: f.ScopeID,
 			Address: f.Address, Severity: f.Severity, Status: f.Status, VulnerabilityID: f.VulnerabilityID,
 			ScanScope: f.ScanScope, LastScan: f.LastScan,
+			MergeRequest: f.MergeRequest, MergeRequestState: f.MergeRequestState,
+			Priority: f.Priority, PriorityRule: f.PriorityRule, PriorityReason: f.PriorityReason,
+			FixFacts:     f.FixFacts,
+			RefusedMoves: f.RefusedMoves, LastRefusedMove: f.LastRefusedMove,
 			SubmittedBy: f.SubmittedBy, AgentName: f.AgentName, EnrolledBy: f.EnrolledBy,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// resetFix forgets the fix of a Finding that is open again. The next fix starts
+// from nothing: a new merge request, a new deploy and a new health signal.
+func resetFix(f *Finding) {
+	f.MergeRequest = ""
+	f.MergeRequestState = ""
+	f.DeployedAt = time.Time{}
+	f.DeploymentKey = ""
+	f.Health = ""
+	f.HealthUnavailableAt = time.Time{}
+	f.RerunKind, f.RerunFound, f.RerunAt = "", false, time.Time{}
+	f.FixMissionID = ""
+	f.RevertRequestedAt, f.RevertMergeRequest = time.Time{}, ""
+	f.FixClaim, f.FixClaimedAt = "", time.Time{}
+	f.VerifiedAt = time.Time{}
 }

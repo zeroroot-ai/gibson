@@ -1,0 +1,158 @@
+# The health signal of each service: Prometheus reads the blackbox exporter,
+# and the exporter probes the health URL of each service. The metric
+# probe_success{service="<name>"} is 1 when the service answers 2xx on its
+# health URL. An agent reads this metric through a connector of the class
+# observability (ADR-0179). The list of targets here and the annotation
+# refenv.zeroroot.ai/health-url of each Deployment name the same URLs, and the
+# test of this directory checks that they agree.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blackbox-config
+data:
+  blackbox.yml: |
+    modules:
+      http_2xx:
+        prober: http
+        timeout: 5s
+        http:
+          valid_status_codes: []
+          method: GET
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+    scrape_configs:
+      - job_name: health
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
+        static_configs:
+          - targets: ["http://catalog-api.refenv.svc.cluster.local:8080/healthz"]
+            labels: {service: catalog-api}
+          - targets: ["http://payments.refenv.svc.cluster.local:8080/healthz"]
+            labels: {service: payments}
+          - targets: ["http://node-agent.refenv.svc.cluster.local:8080/healthz"]
+            labels: {service: node-agent}
+          - targets: ["http://log-shipper.refenv.svc.cluster.local:8080/healthz"]
+            labels: {service: log-shipper}
+          - targets: ["http://ops-dashboard.refenv.svc.cluster.local:8080/healthz"]
+            labels: {service: ops-dashboard}
+          - targets: ["http://reports.refenv.svc.cluster.local:8080/healthz"]
+            labels: {service: reports}
+          - targets: ["http://gitea.refenv.svc.cluster.local:3000/api/healthz"]
+            labels: {service: gitea}
+          - targets: ["http://act-runner.refenv.svc.cluster.local:8080/healthz"]
+            labels: {service: act-runner}
+          - targets: ["http://blackbox-exporter.refenv.svc.cluster.local:9115/-/healthy"]
+            labels: {service: blackbox-exporter}
+          - targets: ["http://prometheus.refenv.svc.cluster.local:9090/-/healthy"]
+            labels: {service: prometheus}
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - target_label: __address__
+            replacement: blackbox-exporter:9115
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blackbox-exporter
+  annotations:
+    refenv.zeroroot.ai/health-url: http://blackbox-exporter.refenv.svc.cluster.local:9115/-/healthy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blackbox-exporter
+  template:
+    metadata:
+      labels:
+        app: blackbox-exporter
+    spec:
+      containers:
+        - name: blackbox-exporter
+          image: prom/blackbox-exporter@sha256:b04a9fef4fa086a02fc7fcd8dcdbc4b7b35cc30cdee860fdc6a19dd8b208d63e
+          args: ["--config.file=/etc/blackbox/blackbox.yml"]
+          ports:
+            - containerPort: 9115
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9115
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9115
+          volumeMounts:
+            - name: config
+              mountPath: /etc/blackbox
+      volumes:
+        - name: config
+          configMap:
+            name: blackbox-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blackbox-exporter
+spec:
+  selector:
+    app: blackbox-exporter
+  ports:
+    - port: 9115
+      targetPort: 9115
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  annotations:
+    refenv.zeroroot.ai/health-url: http://prometheus.refenv.svc.cluster.local:9090/-/healthy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3
+          args: ["--config.file=/etc/prometheus/prometheus.yml"]
+          ports:
+            - containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090

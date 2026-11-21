@@ -1,0 +1,10 @@
+# The namespace refenv holds the whole environment. It allows a privileged pod
+# on purpose: the app node-agent is the flaw "privileged container".
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: refenv
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

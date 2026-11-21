@@ -55,11 +55,11 @@ func TestWireBrainRegistry_ADeciderDispatchForACoveringCapabilityPassesTheGate(t
 
 	// The global hierarchy holds no technique until a Domain Pack can declare
 	// one (gibson#699), so the test adds one technique to it.
-	const category = taxonomy.CategoryID("prompt_injection")
+	const category = taxonomy.CategoryID("initial_access")
 	if !taxonomy.GlobalTechniques.HasCategory(category) {
 		t.Fatalf("the global hierarchy does not admit the category %q", category)
 	}
-	hierarchy, err := taxonomy.GlobalTechniques.WithTechnique("indirect_prompt_injection", category)
+	hierarchy, err := taxonomy.GlobalTechniques.WithTechnique("exposed_debug_endpoint", category)
 	if err != nil {
 		t.Fatalf("WithTechnique: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestWireBrainRegistry_ADeciderDispatchForACoveringCapabilityPassesTheGate(t
 	e.Submit(brain.MissionProjected{ID: "m1", Goal: "find a path"})
 	e.Submit(brain.HypothesisObserved{
 		MissionID: "m1", ScopeID: "s", Claim: "the filter is bypassable",
-		Proposer: "recon", Technique: "indirect_prompt_injection",
+		Proposer: "recon", Technique: "exposed_debug_endpoint",
 	})
 
 	deadline := time.Now().Add(5 * time.Second)

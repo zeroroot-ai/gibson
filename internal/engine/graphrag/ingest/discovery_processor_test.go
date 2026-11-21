@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -155,11 +156,16 @@ func TestProcessFoldsEveryTaxonomyEntityIntoTheWorld(t *testing.T) {
 
 	find := eventsByKind(rec.events, "finding.raised")
 	require.Len(t, find, 1)
+	raised := find[0].(brain.FindingRaised)
+	assert.False(t, raised.At.IsZero(), "the producer stamps the time of the read")
+	raised.At = time.Time{}
 	assert.Equal(t, brain.FindingRaised{
 		ID: findingID("mission-1", &graphragpb.Finding{Id: strp("f1")}), Title: "Exposed admin panel", Description: "no auth", Severity: "high",
 		ScopeID: "mission-1", Address: "10.0.0.1", MissionID: "mission-1", MissionRunID: "run-1",
 		Status: brain.FindingStatusOpen,
-	}, find[0], "a host-parented finding carries the host's coordinate, not its uuid")
+		// A tool that reports a discovery is a scan of the target (ADR-0178).
+		CheckKind: "scan", CheckRef: "mission-1",
+	}, raised, "a host-parented finding carries the host's coordinate, not its uuid")
 }
 
 // A discovery with no resolved tenant has no World that owns it. The processor

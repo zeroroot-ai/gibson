@@ -1,0 +1,32 @@
+# Datadog connector. Datadog runs the MCP server (ADR-0114, ADR-0177).
+# Source of the endpoint: https://docs.datadoghq.com/bits_ai/mcp_server/setup/
+# Source of the auth and the scope: https://mcp.datadoghq.com/.well-known/oauth-authorization-server
+# The endpoint is the server of the US1 site. A tenant picks the endpoint of
+# its own site from endpointPatterns (same docs page, table of sites). The
+# server does not run on the US1-FED and US2-FED sites. With no toolsets
+# parameter, the server offers only the core toolset.
+id: datadog
+kind: connector
+displayName: Datadog
+description: >-
+  The MCP server of Datadog. It reads monitors, metrics, logs and traces of
+  the Datadog organization of the customer.
+egressAllow:
+  - mcp.datadoghq.com:443
+spec:
+  vendor: datadog
+  class: observability
+  shape: Remote
+  endpoint: https://mcp.datadoghq.com/v1/mcp
+  transport: streamable-http
+  auth: oauth
+  oauthScope: mcp_all
+  endpointPatterns:
+    - https://mcp.datadoghq.com/v1/mcp
+    - https://mcp.us3.datadoghq.com/v1/mcp
+    - https://mcp.us5.datadoghq.com/v1/mcp
+    - https://mcp.datadoghq.eu/v1/mcp
+    - https://mcp.ap1.datadoghq.com/v1/mcp
+    - https://mcp.ap2.datadoghq.com/v1/mcp
+    - https://mcp.uk1.datadoghq.com/v1/mcp
+  defaultInstanceUrl: https://mcp.datadoghq.com/v1/mcp

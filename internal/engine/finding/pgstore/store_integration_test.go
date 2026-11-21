@@ -50,6 +50,16 @@ const adminDSNEnv = "FINDING_TEST_PG_DSN"
 // migration runner of the repo, and returns a store on it.
 func newStore(t *testing.T) (*pgstore.Store, *pgxpool.Pool) {
 	t.Helper()
+	pool, m := newMigratedDB(t)
+	require.NoError(t, m.Up(), "the tenant migrations apply")
+	tp := &tenantPool{pg: pool}
+	return pgstore.New(func() datapool.Pool { return tp }), pool
+}
+
+// newMigratedDB makes a fresh database and returns a pool on it and the
+// migration runner of the repo, with no migration applied yet.
+func newMigratedDB(t *testing.T) (*pgxpool.Pool, *migrate.Migrate) {
+	t.Helper()
 	ctx := context.Background()
 	adminDSN := os.Getenv(adminDSNEnv)
 	if adminDSN == "" {
@@ -77,55 +87,58 @@ func newStore(t *testing.T) (*pgstore.Store, *pgxpool.Pool) {
 	require.NoError(t, err)
 	m, err := migrate.NewWithInstance("iofs", src, dbName, driver)
 	require.NoError(t, err)
-	require.NoError(t, m.Up(), "the tenant migrations apply")
-
-	tp := &tenantPool{pg: pool}
-	return pgstore.New(func() datapool.Pool { return tp }), pool
+	return pool, m
 }
 
-func TestStore_Integration_RoundTrip(t *testing.T) {
-	s, pool := newStore(t)
+// Migration 023 maps the old statuses to the four of ADR-0178 and keeps the
+// old value, and its down step restores it (review m11).
+func TestMigration023_MapsTheOldStatuses(t *testing.T) {
+	pool, m := newMigratedDB(t)
 	ctx := context.Background()
-	mission := types.NewID()
-	now := time.Now().UTC().Truncate(time.Millisecond)
-
-	mk := func(m types.ID, title string, sev agent.FindingSeverity, at time.Time) finding.EnhancedFinding {
-		f := finding.NewEnhancedFinding(agent.NewFinding(title, "d", sev), m, "recon")
-		f.CreatedAt = at
-		return f
+	require.NoError(t, m.Migrate(22))
+	want := map[string]string{"confirmed": "open", "resolved": "fixed", "false_positive": "open", "fixing": "fixing"}
+	ids := map[string]string{}
+	for old := range want {
+		id := types.NewID().String()
+		ids[old] = id
+		_, err := pool.Exec(ctx, `INSERT INTO findings (id, mission_id, title, document) VALUES ($1, $2, 't', $3)`,
+			id, types.NewID().String(), `{"status":"`+old+`"}`)
+		require.NoError(t, err)
 	}
-	a := mk(mission, "a", agent.SeverityHigh, now)
-	b := mk(mission, "b", agent.SeverityLow, now.Add(time.Second))
-	orphan := mk("", "orphan", agent.SeverityHigh, now.Add(2*time.Second))
-	for _, f := range []finding.EnhancedFinding{a, b, orphan} {
-		require.NoError(t, s.Store(ctx, "acme", f))
+	status := func(id string) string {
+		var s string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT document->>'status' FROM findings WHERE id = $1`, id).Scan(&s))
+		return s
 	}
+	require.NoError(t, m.Migrate(23))
+	for old, id := range ids {
+		assert.Equal(t, want[old], status(id), "up: %s", old)
+	}
+	require.NoError(t, m.Migrate(22))
+	for old, id := range ids {
+		assert.Equal(t, old, status(id), "down: %s", old)
+	}
+}
 
-	var rows int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings`).Scan(&rows))
-	assert.Equal(t, 3, rows, "one row for each finding")
-
-	got, err := s.Get(ctx, "acme", a.ID)
+// Confidences reads the confidence of each finding of a list in one read. A
+// finding with no row and an ID that is no UUID are left out (review m9).
+func TestStore_Integration_Confidences(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	f.Confidence = 0.7
+	require.NoError(t, s.Store(ctx, "acme", f))
+	got, err := s.Confidences(ctx, "acme", []types.ID{f.ID, types.NewID(), "not-a-uuid"})
 	require.NoError(t, err)
-	assert.Equal(t, "a", got.Title)
-
-	list, err := s.List(ctx, "acme", mission, nil)
-	require.NoError(t, err)
-	require.Len(t, list, 2)
-	assert.Equal(t, "a", list[0].Title)
-
-	high, err := s.ListBySeverity(ctx, "acme", agent.SeverityHigh)
-	require.NoError(t, err)
-	assert.Len(t, high, 2)
-
-	_, err = s.Get(ctx, "acme", types.NewID())
-	require.ErrorIs(t, err, finding.ErrNotFound)
+	assert.Equal(t, map[types.ID]float64{f.ID: 0.7}, got)
 }
 
 func TestStore_Integration_EvidenceRowsAndCascade(t *testing.T) {
 	s, pool := newStore(t)
 	ctx := context.Background()
 	f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+	f.Check = finding.Check{Kind: finding.CheckScan}
 	f.Evidence = []*typespb.Evidence{
 		{
 			Title: "tool call httpx (call-1)", Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Content: "recorded",
@@ -164,6 +177,7 @@ func TestStore_Integration_EvidenceRowsAndCascade(t *testing.T) {
 
 	// The store refuses an invalid item and writes no finding row.
 	bad := finding.NewEnhancedFinding(agent.NewFinding("b", "d", agent.SeverityLow), types.NewID(), "recon")
+	bad.Check = finding.Check{Kind: finding.CheckScan}
 	bad.Evidence = []*typespb.Evidence{{Content: "x", Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED}}
 	require.Error(t, s.Store(ctx, "acme", bad))
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings WHERE id = $1`, bad.ID.String()).Scan(&n))
@@ -183,6 +197,7 @@ func TestStore_Integration_TransactionRollback(t *testing.T) {
 	s, pool := newStore(t)
 	ctx := context.Background()
 	f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+	f.Check = finding.Check{Kind: finding.CheckScan}
 	f.Evidence = []*typespb.Evidence{
 		{Title: "ok", Content: "fine", Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED},
 		{Title: "bad", Content: "nul\x00byte", Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED},
@@ -205,6 +220,7 @@ func TestStore_Integration_SizeLimit(t *testing.T) {
 	ctx := context.Background()
 	mk := func(size int) finding.EnhancedFinding {
 		f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+		f.Check = finding.Check{Kind: finding.CheckScan}
 		f.Evidence = []*typespb.Evidence{{
 			Content: strings.Repeat("x", size), Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, ToolCallId: "call-1",
 		}}
@@ -235,6 +251,7 @@ func TestStore_Integration_FindAndFindWithEvidence(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	mk := func(m types.ID, title, desc, cat string, sev agent.FindingSeverity, at time.Time) finding.EnhancedFinding {
 		f := finding.NewEnhancedFinding(agent.NewFinding(title, desc, sev).WithCategory(cat), m, "recon")
+		f.Check = finding.Check{Kind: finding.CheckScan}
 		f.CreatedAt = at
 		return f
 	}
@@ -315,6 +332,7 @@ func TestStore_Integration_CountsAndDailyCounts(t *testing.T) {
 	now := time.Now().UTC()
 	mk := func(sev agent.FindingSeverity, cat string, at time.Time) finding.EnhancedFinding {
 		f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", sev).WithCategory(cat), m, "recon")
+		f.Check = finding.Check{Kind: finding.CheckScan}
 		f.CreatedAt = at
 		return f
 	}
@@ -348,4 +366,31 @@ func TestStore_Integration_CountsAndDailyCounts(t *testing.T) {
 		sum += n
 	}
 	assert.Equal(t, uint64(2), sum, "the finding of ten days ago is outside five days")
+}
+
+// A second submit of one finding keeps the status, the check and the priority
+// that the daemon set, on a real Postgres (gibson#1448, ADR-0178).
+func TestStore_Integration_ASecondSubmitKeepsTheFieldsOfTheDaemon(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("open port", "d", agent.SeverityHigh), types.NewID(), "intake")
+	f.Check = finding.Check{Kind: finding.CheckTool, Ref: "wiz/r-1"}
+	require.NoError(t, s.Store(ctx, "acme", f))
+	_, err := s.SetStatus(ctx, "acme", f.ID, finding.StatusFixing)
+	require.NoError(t, err)
+	_, err = s.SetPriority(ctx, "acme", f.ID, finding.PriorityP1, "kev")
+	require.NoError(t, err)
+
+	again := f
+	again.Title = "open port 22"
+	again.Status = finding.StatusOpen
+	again.Priority, again.PriorityRule = "", ""
+	require.NoError(t, s.Store(ctx, "acme", again))
+
+	got, err := s.Get(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open port 22", got.Title)
+	assert.Equal(t, finding.StatusFixing, got.Status)
+	assert.Equal(t, finding.PriorityP1, got.Priority)
+	assert.Equal(t, finding.CheckTool, got.Check.Kind)
 }

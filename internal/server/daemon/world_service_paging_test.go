@@ -389,7 +389,7 @@ func TestWorldService_TimelineTokenIsBoundToTheMission(t *testing.T) {
 func TestWorldService_TimelineTokenWithABadSeq(t *testing.T) {
 	srv, _ := newWorldPageServer(t)
 	ctx := worldTenantCtx("acme")
-	pg, err := srv.pageOf(ctx, "GetTimeline", 2, "", "", "no-run")
+	pg, err := srv.pageOf(ctx, "GetTimeline", 2, "", "", "no-run", "")
 	require.NoError(t, err)
 	tok := pg.Token("not-a-number", true)
 	_, err = srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{PageSize: 2, PageToken: tok})
@@ -406,7 +406,7 @@ func TestWorldService_TimelineCursorPastTheEnd(t *testing.T) {
 		return err == nil && len(r.GetEvents()) == 1
 	}, 5*time.Second, 5*time.Millisecond)
 
-	pg, err := srv.pageOf(ctx, "GetTimeline", 2, "", "", "no-run")
+	pg, err := srv.pageOf(ctx, "GetTimeline", 2, "", "", "no-run", "")
 	require.NoError(t, err)
 	tok := pg.Token("99", true)
 	r, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{PageSize: 2, PageToken: tok})
@@ -490,4 +490,28 @@ func TestWorldService_TimelineTokenOfAnOldRunIsInvalidArgument(t *testing.T) {
 	r, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{MissionId: "A", PageSize: 1})
 	require.NoError(t, err)
 	require.Len(t, r.GetEvents(), 1)
+}
+
+// A finding filter keeps the events of one finding. Each event keeps its seq
+// in the Timeline and names its time, its replay frame and its finding
+// (dashboard#393).
+func TestWorldService_TimelineOfOneFinding(t *testing.T) {
+	srv, reg := newWorldPageServer(t)
+	ctx := worldTenantCtx("acme")
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	reg.For("acme").Submit(brain.FindingRaised{ID: "f1", At: at})
+	reg.For("acme").Submit(brain.FindingRaised{ID: "f2", At: at})
+	require.Eventually(t, func() bool {
+		r, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{})
+		return err == nil && len(r.GetEvents()) >= 2
+	}, 5*time.Second, 5*time.Millisecond)
+
+	r, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{FindingId: "f2"})
+	require.NoError(t, err)
+	require.Len(t, r.GetEvents(), 1)
+	ev := r.GetEvents()[0]
+	require.Equal(t, "f2", ev.GetFindingId())
+	require.Equal(t, ev.GetSeq()+1, ev.GetReplaySeq())
+	require.True(t, ev.GetTime().AsTime().Equal(at))
+	require.NotZero(t, ev.GetSeq(), "the event keeps its seq in the whole Timeline")
 }

@@ -3,7 +3,10 @@
 
 package harness
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // FindingRaised is the fact that an agent submitted a finding. The ID is the ID
 // of the finding row in the Postgres database of the tenant. The daemon wires a
@@ -21,6 +24,13 @@ type FindingRaised struct {
 	MissionID    string
 	MissionRunID string
 	AgentName    string
+	// CheckKind and CheckRef name the check that raised the finding
+	// (SubmittedFindingCheck, ADR-0178): the mission run, or the read of a
+	// connector tool.
+	CheckKind string
+	CheckRef  string
+	// At is the time of the read. The harness sets it.
+	At time.Time
 }
 
 // FindingSink folds a FindingRaised into the World. Optional. When nil, the

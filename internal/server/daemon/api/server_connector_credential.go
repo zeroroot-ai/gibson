@@ -31,13 +31,17 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // connectorCredSecretKey is the Secret data key the ToolHive MCPRemoteProxy
-// forwards as the Authorization header. The value is "Bearer <token>".
+// forwards as the credential header of a Remote connector. The header name and
+// the format of the value come from the catalog entry (gibson#1535). The
+// default is the header Authorization with the value "Bearer <token>". The key
+// keeps this name so that the operator and the daemon agree on it.
 const connectorCredSecretKey = "authorization"
 
 // ConnectorSecretResolver is the slice of the tenant secret store the
@@ -84,6 +88,11 @@ func (s *DaemonServer) GetConnectorCredential(
 		return nil, status.Error(codes.InvalidArgument, "connector_id is required")
 	}
 	reader := connectorCredentialReader{secrets: s.connectorCredStore, now: s.connectorCredNow}
+	// A connector that left the catalog gets the default header. The operator
+	// removes its ConnectorInstance on its next pass.
+	if entry, lerr := componentcatalog.LookupConnector(connector); lerr == nil {
+		reader.header = entry.CredentialHeader
+	}
 	data, withdraw, err := reader.read(auth.WithTenant(ctx, tenant), connector, req.GetCredentials())
 	if err != nil {
 		// The error names the connector and the secret key, never a value.
@@ -98,6 +107,9 @@ type connectorCredentialReader struct {
 	secrets ConnectorSecretResolver
 	// now is the clock the token expiry is measured on. Nil means time.Now.
 	now func() time.Time
+	// header is the header of the credential and its value format. The zero
+	// value is the default: Authorization with "Bearer {secret}".
+	header componentcatalog.CredentialHeader
 }
 
 func (r connectorCredentialReader) clock() time.Time {
@@ -146,21 +158,26 @@ func (r connectorCredentialReader) bearerHeader(
 	tctx context.Context, connector string,
 ) (header []byte, expired bool, err error) {
 	meta, err := r.secrets.Resolve(tctx, connectorauth.AccessMetaSecretName(connector))
-	if err != nil {
-		if status.Code(err) == codes.NotFound {
-			return nil, false, nil
+	switch {
+	case err != nil && status.Code(err) == codes.NotFound:
+		// An OAuth token always has metadata. A static credential has none,
+		// because it has no expiry: SetConnectorSecret deletes the metadata.
+		static, serr := r.hasStaticGrant(tctx, connector)
+		if serr != nil || !static {
+			return nil, false, serr
 		}
+	case err != nil:
 		return nil, false, fmt.Errorf("resolve access metadata for connector %q: %w", connector, err)
-	}
-	if len(meta) == 0 {
+	case len(meta) == 0:
 		return nil, false, nil
-	}
-	tok, err := connectorauth.UnmarshalAccessToken(meta)
-	if err != nil {
-		return nil, false, fmt.Errorf("connector %q: %w", connector, err)
-	}
-	if tok.Expired(r.clock()) {
-		return nil, true, nil
+	default:
+		tok, uerr := connectorauth.UnmarshalAccessToken(meta)
+		if uerr != nil {
+			return nil, false, fmt.Errorf("connector %q: %w", connector, uerr)
+		}
+		if tok.Expired(r.clock()) {
+			return nil, true, nil
+		}
 	}
 	raw, err := r.secrets.Resolve(tctx, connectorauth.AccessSecretName(connector))
 	if err != nil {
@@ -172,7 +189,29 @@ func (r connectorCredentialReader) bearerHeader(
 	if len(raw) == 0 {
 		return nil, false, nil
 	}
-	return append([]byte("Bearer "), raw...), false, nil
+	value, err := r.header.Value(raw)
+	if err != nil {
+		// The error names no value of the credential.
+		return nil, false, fmt.Errorf("connector %q: %w", connector, err)
+	}
+	return value, false, nil
+}
+
+// hasStaticGrant reports whether the grant of the connector is a static
+// credential that the tenant stored with SetConnectorSecret.
+func (r connectorCredentialReader) hasStaticGrant(tctx context.Context, connector string) (bool, error) {
+	raw, err := r.secrets.Resolve(tctx, connectorauth.GrantSecretName(connector))
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return false, nil
+		}
+		return false, fmt.Errorf("resolve grant for connector %q: %w", connector, err)
+	}
+	grant, err := connectorauth.UnmarshalGrant(raw)
+	if err != nil {
+		return false, fmt.Errorf("connector %q: %w", connector, err)
+	}
+	return grant.Static, nil
 }
 
 // errNoProperty reports a structured credential with no such property.

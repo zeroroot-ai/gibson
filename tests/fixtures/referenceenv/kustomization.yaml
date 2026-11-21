@@ -1,0 +1,30 @@
+# One command applies the whole reference environment: kubectl apply -k .
+# The script up.sh makes the kind cluster first and then runs this.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: refenv
+resources:
+  - base/namespace.yaml
+  - base/gitea.yaml
+  - base/pipeline.yaml
+  - base/observability.yaml
+  - apps/catalog-api.yaml
+  - apps/payments.yaml
+  - apps/node-agent.yaml
+  - apps/log-shipper.yaml
+  - apps/ops-dashboard.yaml
+  - apps/reports.yaml
+  - base/seed.yaml
+# The seed job pushes the files of apps/ to the Git host. The pipeline then
+# deploys the same files, so a fix is a commit to these files.
+configMapGenerator:
+  - name: app-manifests
+    options:
+      disableNameSuffixHash: true
+    files:
+      - apps/catalog-api.yaml
+      - apps/payments.yaml
+      - apps/node-agent.yaml
+      - apps/log-shipper.yaml
+      - apps/ops-dashboard.yaml
+      - apps/reports.yaml

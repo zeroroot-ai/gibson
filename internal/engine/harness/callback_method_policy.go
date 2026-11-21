@@ -288,8 +288,6 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	// These existed on ComponentService and had no callback equivalent, which is
 	// why a dispatched agent could not read the graph at all.
 	harnesspb.HarnessCallbackService_QueryNodes_FullMethodName:          {agentSurface: true, reason: reasonAgentCallbackSurface},
-	harnesspb.HarnessCallbackService_FindSimilarAttacks_FullMethodName:  {agentSurface: true, reason: reasonAgentCallbackSurface},
-	harnesspb.HarnessCallbackService_GetAttackChains_FullMethodName:     {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_FindSimilarFindings_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_GetRelatedFindings_FullMethodName:  {agentSurface: true, reason: reasonAgentCallbackSurface},
 	// The lifecycle read an agent cannot work without (gibson#1669): the open

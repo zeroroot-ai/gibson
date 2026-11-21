@@ -55,6 +55,10 @@ func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
 			SubmittedBy: f.SubmittedBy,
 			AgentName:   f.AgentName,
 			EnrolledBy:  f.EnrolledBy,
+			// The check that raised it (ADR-0178) and the time of the read.
+			CheckKind: string(f.Check.Kind),
+			CheckRef:  f.Check.Ref,
+			At:        time.Now().UTC(),
 		})
 	}
 }
@@ -127,6 +131,9 @@ func (d *daemonImpl) discoveredFindingWriter() ingest.FindingWriter {
 		}
 		enhanced := finding.NewEnhancedFinding(base, missionID, f.AgentName)
 		enhanced.Evidence = evidence
+		// A tool that reports a discovery is a scan of the target. The mission run
+		// is the scan (ADR-0178).
+		enhanced.Check = finding.ScanCheck(missionID)
 		if err := store.Store(ctx, tenant, enhanced); err != nil {
 			return fmt.Errorf("store discovered finding: %w", err)
 		}
@@ -183,6 +190,11 @@ func ingestHarnessFinding(reg *brain.Registry) harness.FindingSink {
 			MissionID:    f.MissionID,
 			MissionRunID: f.MissionRunID,
 			AgentName:    f.AgentName,
+			// The check that raised it (ADR-0178): the mission run, or the
+			// read of a connector tool (harness.SubmittedFindingCheck).
+			CheckKind: f.CheckKind,
+			CheckRef:  f.CheckRef,
+			At:        f.At,
 		})
 	}
 }
@@ -435,6 +447,7 @@ func ingestToolCall(reg *brain.Registry) harness.ToolCallSink {
 			Arguments:          call.Arguments,
 			Result:             call.Result,
 			Err:                call.Err,
+			GrantID:            call.GrantID,
 			RecordedAtUnixNano: call.RecordedAtUnixNano,
 		})
 		if err != nil {

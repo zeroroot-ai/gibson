@@ -26,6 +26,8 @@ import (
 	bankengine "github.com/zeroroot-ai/gibson/internal/engine/bank"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
+	"github.com/zeroroot-ai/gibson/internal/engine/fixloop"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -989,6 +991,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Record start time
 	d.startTime = time.Now()
 
+	// The platform owner states the host patterns of the connectors of a
+	// server that the customer hosts (review B3). A bad set fails the start.
+	if err := loadConnectorInstallPatterns(os.Getenv); err != nil {
+		return err
+	}
+
 	// Per unified-identity-and-authorization Requirement 8.4 the
 	// daemon no longer talks to ext-authz directly: ext-authz lives
 	// upstream of the daemon and consults the SDK-rendered registry +
@@ -1093,6 +1101,39 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.WithComponent("graph-projector").Slog(),
 	).Run(ctx)
 
+	// The findings table is a read model of the World too (gibson#1518): this
+	// copies each status and priority change to it.
+	go NewFindingRecordProjector(
+		d.brainRegistry,
+		pgstore.New(func() datapool.Pool { return d.pool }),
+		0, // default interval
+		d.logger.WithComponent("finding-record-projector").Slog(),
+	).Run(ctx)
+
+	// The fix loop reads the merge, the deploy and the health signal from the
+	// tools of the tenant. The daemon reads them and no agent states them.
+	// Each read and the revert take the governed path of every connector
+	// call: the grant, the audit records and the flight recorder (gibson#1465,
+	// ADR-0065).
+	connectors := fixloop.NewConnectorReader(d.connectorMCPClient(),
+		governedConnector{callback: func() *harness.CallbackManager { return d.callback }})
+	fixWatcher, err := fixloop.NewWatcher(
+		connectors, connectors,
+		applicationPlacer{querier: func() any { return d.graphragQuerier }},
+		nil, // the default policy until the constraints carry the hold time
+		d.logger.WithComponent("fix-loop").Slog(),
+	)
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("fix loop: %w", err)
+	}
+	go NewFixLoopRunner(
+		d.brainRegistry,
+		fixWatcher,
+		0, // default interval
+		d.logger.WithComponent("fix-loop").Slog(),
+	).Run(ctx)
+
 	// Initialize Redis stores (mission/run stores have been migrated to the
 	// per-tenant Pool path; only non-mission stores are initialized here).
 	d.missionAuthzStore = mission.NewRedisMissionAuthzStore(stateClient.Client())
@@ -1152,8 +1193,9 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.brainExecutor.models = d.modelClient
 		// A job node's jobs live in the tenant's data plane, which is built
 		// later in Start, so the store is read per dispatch (gibson#1713).
-		d.brainExecutor.jobClosed = newJobGraphLink(d.brainRegistry, d.logger.WithComponent("job-graph-link").Slog())
+		d.brainExecutor.jobClosed = newJobGraphLink(d.brainRegistry, connectors, d.logger.WithComponent("job-graph-link").Slog())
 		d.brainExecutor.jobFindings = openFindingsResolver(d.brainRegistry)
+		d.brainExecutor.jobClaims = newFixClaims(d.brainRegistry)
 		d.brainExecutor.jobs = func() (job.Store, error) {
 			if d.pool == nil {
 				return nil, errors.New("the data-plane pool is not up, so this daemon serves no jobs")
@@ -1408,9 +1450,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			// came to answer "no vector collection provisioned" on a cluster
 			// whose index existed.
 			//
-			// Without this, `recall`, QueryNodes, FindSimilarAttacks,
-			// FindSimilarFindings, GetRelatedFindings and GetAttackChains refuse
-			// for every tenant, so an agent can write a memory and never read
+			// Without this, `recall`, QueryNodes, FindSimilarFindings and
+			// GetRelatedFindings refuse for every tenant, so an agent can write a memory and never read
 			// one back.
 			// The XOR rule lives in wireVectorStore so it is testable.
 			if !wireVectorStore(&poolCfg, d.vectorIndexResolver()) {

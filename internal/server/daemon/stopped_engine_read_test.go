@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,6 +37,10 @@ func (downStore) WriteSnapshot(context.Context, string, brain.WorldSnapshot) (st
 }
 
 func (downStore) LoadHistory(context.Context, string) ([]brain.Event, error) {
+	return nil, errDownStore
+}
+
+func (downStore) LoadHistoryRange(context.Context, string, time.Time, []string) ([]brain.Event, error) {
 	return nil, errDownStore
 }
 

@@ -29,8 +29,8 @@ type secretResolver interface {
 // reach, so both stay unset and the caller logs it.
 //
 // Extracted from the daemon's startup path so the decision can be tested. It is
-// one XOR rule that gates `recall`, QueryNodes, FindSimilarAttacks,
-// FindSimilarFindings, GetRelatedFindings and GetAttackChains for every tenant,
+// one XOR rule that gates `recall`, QueryNodes, FindSimilarFindings and
+// GetRelatedFindings for every tenant,
 // and inline in a 2000-line startup function nothing could reach it.
 //
 // Reports whether the vector store was wired.
