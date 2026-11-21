@@ -222,10 +222,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// The daemon client closes when the manager stops. A setup failure above
-	// exits the process, which closes the connection.
-	defer func() { _ = daemon.Close() }()
-
 	// The egress policy has the shape of CVE-2024-47825. The operator refuses
 	// to start on a Cilium below the fixed release, and when it cannot read
 	// the version (gibson#1580).
@@ -233,6 +229,10 @@ func main() {
 		setupLog.Error(err, "cilium version")
 		os.Exit(1)
 	}
+
+	// The daemon client closes when the manager stops. A setup failure above
+	// exits the process, which closes the connection.
+	defer func() { _ = daemon.Close() }()
 
 	setupLog.Info("starting connector-operator")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

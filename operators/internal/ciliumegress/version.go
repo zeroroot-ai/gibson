@@ -65,9 +65,9 @@ func CheckVersion(version string) error {
 		return fmt.Errorf("%w: %s has no fix for CVE-2024-47825, use 1.14.16, 1.15.10, 1.16.3 or later",
 			ErrCiliumVersion, version)
 	}
-	min := fixedPatch[minor]
-	if patch < min || (patch == min && pre != "") {
-		return fmt.Errorf("%w: %s is below 1.%d.%d, which fixes CVE-2024-47825", ErrCiliumVersion, version, minor, min)
+	fixed := fixedPatch[minor]
+	if patch < fixed || (patch == fixed && pre != "") {
+		return fmt.Errorf("%w: %s is below 1.%d.%d, which fixes CVE-2024-47825", ErrCiliumVersion, version, minor, fixed)
 	}
 	return nil
 }
