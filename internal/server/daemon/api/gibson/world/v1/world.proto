@@ -258,9 +258,12 @@ service WorldService {
   // ListActionsByGrant returns the connector calls of the agents in a time
   // range, grouped by the grant that allowed each one and by the person who gave
   // the grant. A refused call shows the grant that it lacked (gibson#1499).
+  // The read shows the audit records of the whole tenant, so it takes the
+  // relation of the tenant audit log, admin, as ListAuditEvents does
+  // (gibson#1556 review m7).
   rpc ListActionsByGrant(ListActionsByGrantRequest) returns (ListActionsByGrantResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "member",
+      relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
       allowed_identities: 3  // USER | SERVICE

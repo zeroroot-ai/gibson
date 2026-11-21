@@ -144,6 +144,9 @@ type WorldServiceClient interface {
 	// ListActionsByGrant returns the connector calls of the agents in a time
 	// range, grouped by the grant that allowed each one and by the person who gave
 	// the grant. A refused call shows the grant that it lacked (gibson#1499).
+	// The read shows the audit records of the whole tenant, so it takes the
+	// relation of the tenant audit log, admin, as ListAuditEvents does
+	// (gibson#1556 review m7).
 	ListActionsByGrant(ctx context.Context, in *ListActionsByGrantRequest, opts ...grpc.CallOption) (*ListActionsByGrantResponse, error)
 	// ListWaitingOnPerson returns each item that waits on a person, with the wait
 	// time so far (gibson#1500).
@@ -470,6 +473,9 @@ type WorldServiceServer interface {
 	// ListActionsByGrant returns the connector calls of the agents in a time
 	// range, grouped by the grant that allowed each one and by the person who gave
 	// the grant. A refused call shows the grant that it lacked (gibson#1499).
+	// The read shows the audit records of the whole tenant, so it takes the
+	// relation of the tenant audit log, admin, as ListAuditEvents does
+	// (gibson#1556 review m7).
 	ListActionsByGrant(context.Context, *ListActionsByGrantRequest) (*ListActionsByGrantResponse, error)
 	// ListWaitingOnPerson returns each item that waits on a person, with the wait
 	// time so far (gibson#1500).

@@ -3993,7 +3993,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.world.v1.WorldService/ListActionsByGrant": {
     method: "/gibson.world.v1.WorldService/ListActionsByGrant",
     service: "gibson.world.v1.WorldService",
-    relation: "member",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,

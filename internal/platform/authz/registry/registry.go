@@ -3613,7 +3613,7 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.world.v1.WorldService/ListActionsByGrant": {
 		Service:           "gibson.world.v1.WorldService",
-		Relation:          "member",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,

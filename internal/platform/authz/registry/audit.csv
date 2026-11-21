@@ -396,7 +396,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.world.v1.WorldService/GetReputation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/GetRevertRate,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/GetTimeline,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
-/gibson.world.v1.WorldService/ListActionsByGrant,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
+/gibson.world.v1.WorldService/ListActionsByGrant,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListFindings,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListHosts,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListLabels,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule

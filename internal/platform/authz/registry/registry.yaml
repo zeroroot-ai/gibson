@@ -2557,7 +2557,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.world.v1.WorldService/ListActionsByGrant":
-    relation: "member"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
