@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -94,6 +95,10 @@ type historyFailStore struct{ memTimelineStore }
 var errHistoryDown = errors.New("the history is down")
 
 func (*historyFailStore) LoadHistory(context.Context, string) ([]Event, error) {
+	return nil, errHistoryDown
+}
+
+func (*historyFailStore) LoadHistoryRange(context.Context, string, time.Time, []string) ([]Event, error) {
 	return nil, errHistoryDown
 }
 

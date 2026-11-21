@@ -335,8 +335,21 @@ type RevertStats struct {
 	Rate float64
 }
 
-// RevertRate counts the merge requests that merged in [from, to) and, among
-// them, the merge requests that an agent reverted. A merge request counts once.
+// ExposureKinds are the kinds of the events that ExposureWindows reads. A
+// bounded reader of the history reads only these (review M6).
+var ExposureKinds = []string{
+	FindingRaised{}.Kind(), FindingStatusChanged{}.Kind(), MergeRequestObserved{}.Kind(),
+	DeployObserved{}.Kind(), RevertRequested{}.Kind(), FixReverted{}.Kind(), CheckRerun{}.Kind(),
+}
+
+// RevertKinds are the kinds of the events that RevertRate reads.
+var RevertKinds = []string{MergeRequestObserved{}.Kind(), FixReverted{}.Kind()}
+
+// RevertRate counts the merge requests that merged in [from, to), and the
+// merge requests that an agent reverted in [from, to). A revert counts in the
+// period of the revert, even when the merge was in the period before
+// (review m5). A merge request counts once in each count. A period with more
+// reverts than merges has a rate above 1.
 func RevertRate(events []Event, from, to time.Time) RevertStats {
 	merged := map[string]bool{}
 	reverted := map[string]bool{}
@@ -353,12 +366,7 @@ func RevertRate(events []Event, from, to time.Time) RevertStats {
 			}
 		}
 	}
-	stats := RevertStats{Merged: len(merged)}
-	for mr := range reverted {
-		if merged[mr] {
-			stats.Reverted++
-		}
-	}
+	stats := RevertStats{Merged: len(merged), Reverted: len(reverted)}
 	if stats.Merged > 0 {
 		stats.Rate = float64(stats.Reverted) / float64(stats.Merged)
 	}

@@ -40,6 +40,9 @@ type WaitItem struct {
 	Waited time.Duration
 }
 
+// WaitingKinds are the kinds of the history events that WaitingOnPerson reads.
+var WaitingKinds = []string{brain.MergeRequestObserved{}.Kind()}
+
 // WaitingOnPerson returns each item that waits on a person, the longest wait
 // first. history is the durable Timeline of the tenant. The in-memory Timeline
 // holds only the tail after a snapshot and cannot give the time of a refusal.

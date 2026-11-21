@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 )
@@ -86,6 +87,17 @@ func (s *MemTimelineStore) LoadHistory(_ context.Context, _ string) ([]brain.Eve
 		out = append(out, e.ev)
 	}
 	return out, nil
+}
+
+// LoadHistoryRange returns the events of LoadHistory of the kinds named. The
+// store has no append time, so it keeps an event whose own time is from or
+// later, and an event with no time.
+func (s *MemTimelineStore) LoadHistoryRange(ctx context.Context, tenant string, from time.Time, kinds []string) ([]brain.Event, error) {
+	all, err := s.LoadHistory(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	return brain.FilterHistory(all, from, kinds), nil
 }
 
 // WriteSnapshot keeps snap as the one snapshot. The handle is snap.AtSeq.

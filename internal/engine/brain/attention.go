@@ -148,6 +148,9 @@ type FixFacts struct {
 	// delivers must be newer than it (review B1).
 	FixClaim     string
 	FixClaimedAt time.Time
+	// VerifiedAt is the time of the change to `verified`. A bounded reader
+	// of the history reads it to leave out an old fix (review M6).
+	VerifiedAt time.Time
 }
 
 // Health values of FixFacts.
@@ -350,6 +353,9 @@ func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 			if e.Status == FindingStatusOpen {
 				resetFix(f)
 			}
+			if e.Status == FindingStatusVerified {
+				f.VerifiedAt = e.At
+			}
 			q.Close()
 			return
 		}
@@ -465,4 +471,5 @@ func resetFix(f *Finding) {
 	f.FixMissionID = ""
 	f.RevertRequestedAt, f.RevertMergeRequest = time.Time{}, ""
 	f.FixClaim, f.FixClaimedAt = "", time.Time{}
+	f.VerifiedAt = time.Time{}
 }

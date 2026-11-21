@@ -91,8 +91,15 @@ func periodOf(seconds int64) time.Duration {
 	return windowOf(uint64(seconds))
 }
 
-func (s *worldServer) history(ctx context.Context, e *brain.Engine) ([]brain.Event, error) {
-	evs, err := e.History(ctx)
+// historySlack is the time before the first fact of a finding that a bounded
+// read of the history still reads. The store dates an event by its append,
+// which is a little after the time that the event holds.
+const historySlack = time.Hour
+
+// rangeHistory reads the events of the kinds that the store appended at from
+// or later (review M6).
+func (s *worldServer) rangeHistory(ctx context.Context, e *brain.Engine, from time.Time, kinds []string) ([]brain.Event, error) {
+	evs, err := e.HistoryRange(ctx, from, kinds)
 	if err != nil {
 		s.logger.WarnContext(ctx, "world: durable history read failed", "error", err)
 		return nil, status.Error(codes.Unavailable, "the Timeline is not readable now")
@@ -100,13 +107,53 @@ func (s *worldServer) history(ctx context.Context, e *brain.Engine) ([]brain.Eve
 	return evs, nil
 }
 
-// GetExposure implements WorldServiceServer.
+// findingStart is the time of the first fact of a finding: the first sight of
+// the flaw, or the read by Gibson. It is zero when the World holds neither.
+func findingStart(f brain.FindingSnapshot) time.Time {
+	start := f.RaisedAt
+	if !f.FirstSeenAt.IsZero() && (start.IsZero() || f.FirstSeenAt.Before(start)) {
+		start = f.FirstSeenAt
+	}
+	return start
+}
+
+// readFrom is the start of a bounded read for the findings: the first fact of
+// the oldest one, less historySlack. A finding with no time gives the zero
+// time, which reads all of the history. With no finding it is fallback.
+func readFrom(findings []brain.FindingSnapshot, fallback time.Time) time.Time {
+	if len(findings) == 0 {
+		return fallback
+	}
+	var from time.Time
+	for i, f := range findings {
+		start := findingStart(f)
+		if start.IsZero() {
+			return time.Time{}
+		}
+		if i == 0 || start.Before(from) {
+			from = start
+		}
+	}
+	return from.Add(-historySlack)
+}
+
+// GetExposure implements WorldServiceServer. It reads the history from the
+// first fact of the finding on, and only the kinds of the exposure.
 func (s *worldServer) GetExposure(ctx context.Context, req *worldpb.GetExposureRequest) (*worldpb.GetExposureResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
 	}
-	evs, err := s.history(ctx, e)
+	var target []brain.FindingSnapshot
+	for _, f := range e.Findings() {
+		if f.ID == req.GetFindingId() {
+			target = append(target, f)
+		}
+	}
+	if len(target) == 0 {
+		return &worldpb.GetExposureResponse{Found: false, FindingId: req.GetFindingId()}, nil
+	}
+	evs, err := s.rangeHistory(ctx, e, readFrom(target, time.Time{}), brain.ExposureKinds)
 	if err != nil {
 		return nil, err
 	}
@@ -129,11 +176,20 @@ func (s *worldServer) GetExposureTrend(ctx context.Context, req *worldpb.GetExpo
 	if err != nil {
 		return nil, err
 	}
-	evs, err := s.history(ctx, e)
+	now, period := s.clockNow(), periodOf(req.GetPeriodSeconds())
+	// Only a finding that is open, or verified in the two periods, has a window
+	// that the trend counts. The read starts at the first fact of the oldest.
+	cutoff := now.Add(-2 * period)
+	var relevant []brain.FindingSnapshot
+	for _, f := range e.Findings() {
+		if f.Status != brain.FindingStatusVerified || f.VerifiedAt.IsZero() || !f.VerifiedAt.Before(cutoff) {
+			relevant = append(relevant, f)
+		}
+	}
+	evs, err := s.rangeHistory(ctx, e, readFrom(relevant, cutoff), brain.ExposureKinds)
 	if err != nil {
 		return nil, err
 	}
-	now, period := s.clockNow(), periodOf(req.GetPeriodSeconds())
 	t := brain.MedianExposure(brain.ExposureWindows(evs, now), now, period)
 	return &worldpb.GetExposureTrendResponse{
 		PeriodSeconds: seconds(period), Count: pagetoken.Int32(t.Count),
@@ -149,12 +205,12 @@ func (s *worldServer) GetRevertRate(ctx context.Context, req *worldpb.GetRevertR
 	if err != nil {
 		return nil, err
 	}
-	evs, err := s.history(ctx, e)
+	now, period := s.clockNow(), periodOf(req.GetPeriodSeconds())
+	evs, err := s.rangeHistory(ctx, e, now.Add(-2*period-historySlack), brain.RevertKinds)
 	if err != nil {
 		return nil, err
 	}
-	period := periodOf(req.GetPeriodSeconds())
-	t := brain.RevertRateTrend(evs, s.clockNow(), period)
+	t := brain.RevertRateTrend(evs, now, period)
 	return &worldpb.GetRevertRateResponse{
 		PeriodSeconds: seconds(period), Current: revertPeriod(t.Current), Previous: revertPeriod(t.Previous),
 	}, nil
@@ -280,15 +336,26 @@ func (s *worldServer) ListWaitingOnPerson(ctx context.Context, req *worldpb.List
 	if err != nil {
 		return nil, err
 	}
-	evs, err := s.history(ctx, e)
-	if err != nil {
-		return nil, err
+	findings := e.Findings()
+	// A refusal matters only for a finding that is fixing, so the read starts
+	// at the first fact of the oldest of them.
+	var fixing []brain.FindingSnapshot
+	for _, f := range findings {
+		if f.Status == brain.FindingStatusFixing {
+			fixing = append(fixing, f)
+		}
+	}
+	var evs []brain.Event
+	if len(fixing) > 0 {
+		if evs, err = s.rangeHistory(ctx, e, readFrom(fixing, time.Time{}), blueteam.WaitingKinds); err != nil {
+			return nil, err
+		}
 	}
 	pg, err := s.pageOf(ctx, "ListWaitingOnPerson", req.GetPageSize(), req.GetPageToken())
 	if err != nil {
 		return nil, err
 	}
-	items := blueteam.WaitingOnPerson(e.Findings(), e.DestructiveActionSnapshot(), evs, s.clockNow())
+	items := blueteam.WaitingOnPerson(findings, e.DestructiveActionSnapshot(), evs, s.clockNow())
 	page, next := pagetoken.Page(pg, items, waitingKey)
 	resp := &worldpb.ListWaitingOnPersonResponse{NextPageToken: next}
 	for _, it := range page {

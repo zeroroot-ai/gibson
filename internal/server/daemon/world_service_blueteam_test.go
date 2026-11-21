@@ -6,6 +6,8 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -216,4 +218,55 @@ func TestBlueTeamReadsRefuseACallerWithNoTenant(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	_, err = srv.ListActionsByGrant(ctx, &worldpb.ListActionsByGrantRequest{})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
+// rangeOnlyStore refuses the read of the whole history, so a test that passes
+// over it shows that the reader read only a bounded range (review M6).
+type rangeOnlyStore struct {
+	*braintest.MemTimelineStore
+	ranges *[]string
+}
+
+func (rangeOnlyStore) LoadHistory(context.Context, string) ([]brain.Event, error) {
+	return nil, errors.New("the whole history must not be read")
+}
+
+func (s rangeOnlyStore) LoadHistoryRange(ctx context.Context, tenant string, from time.Time, kinds []string) ([]brain.Event, error) {
+	*s.ranges = append(*s.ranges, from.UTC().Format(time.RFC3339))
+	evs, err := s.MemTimelineStore.LoadHistoryRange(ctx, tenant, from, kinds)
+	if err != nil {
+		return nil, fmt.Errorf("range: %w", err)
+	}
+	return evs, nil
+}
+
+// The four views of the blue team read a bounded range of the history: from
+// the first fact of the finding on, and for the revert rate the two periods
+// (review M6).
+func TestBlueTeamViews_ReadABoundedHistory(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var ranges []string
+	store := rangeOnlyStore{MemTimelineStore: braintest.NewMemTimelineStore(), ranges: &ranges}
+	reg := brain.NewRegistry(ctx, func(context.Context, string) (brain.TimelineStore, error) { return store, nil })
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
+	srv.blue.now = func() time.Time { return blueAt(10) }
+	submit(t, reg, "acme",
+		brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high", At: blueAt(2)},
+		brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", At: blueAt(3)},
+	)
+	wctx := worldTenantCtx("acme")
+
+	_, err := srv.GetExposure(wctx, &worldpb.GetExposureRequest{FindingId: "f1"})
+	require.NoError(t, err)
+	_, err = srv.GetExposureTrend(wctx, &worldpb.GetExposureTrendRequest{PeriodSeconds: 3600})
+	require.NoError(t, err)
+	_, err = srv.GetRevertRate(wctx, &worldpb.GetRevertRateRequest{PeriodSeconds: 3600})
+	require.NoError(t, err)
+	_, err = srv.ListWaitingOnPerson(wctx, &worldpb.ListWaitingOnPersonRequest{})
+	require.NoError(t, err)
+
+	start := blueAt(2).Add(-historySlack).UTC().Format(time.RFC3339)
+	revertFrom := blueAt(8).Add(-historySlack).UTC().Format(time.RFC3339)
+	require.Equal(t, []string{start, start, revertFrom, start}, ranges)
 }

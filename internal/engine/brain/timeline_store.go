@@ -5,7 +5,10 @@
 // event Timeline (ADR-0163, gibson#1112/#1113).
 package brain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // TimelineStore is the durable-log abstraction the brain writes through
 // (ADR-0163). The brain package depends only on this interface — no Redis
@@ -69,6 +72,13 @@ type TimelineStore interface {
 	// read it.
 	LoadHistory(ctx context.Context, tenant string) ([]Event, error)
 
+	// LoadHistoryRange returns the part of LoadHistory that a bounded reader
+	// needs (review M6): the events that the store appended at from or later,
+	// of the kinds named, in order. A reader of the blue team views reads the
+	// events of a few kinds in the last periods, not the whole history of the
+	// tenant.
+	LoadHistoryRange(ctx context.Context, tenant string, from time.Time, kinds []string) ([]Event, error)
+
 	// WriteSnapshot persists a serialised World snapshot for the tenant and
 	// returns an opaque snapshot handle. The handle is passed to TrimTo to
 	// prune the Timeline prefix the snapshot covers.
@@ -98,4 +108,25 @@ type WorldSnapshot struct {
 	// Data carries the serialised World: the JSON of the snapshot data that
 	// SnapshotWorld writes.
 	Data []byte
+}
+
+// FilterHistory keeps the events of the kinds named whose own time is from or
+// later, in order. An event with no time is kept, because nothing shows that
+// it is older. A store with no append time uses it for LoadHistoryRange.
+func FilterHistory(events []Event, from time.Time, kinds []string) []Event {
+	want := make(map[string]bool, len(kinds))
+	for _, k := range kinds {
+		want[k] = true
+	}
+	var out []Event
+	for _, ev := range events {
+		if !want[ev.Kind()] {
+			continue
+		}
+		if t := EventTime(ev); !t.IsZero() && t.Before(from) {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
 }

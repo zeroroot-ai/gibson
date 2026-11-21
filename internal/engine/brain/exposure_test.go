@@ -196,3 +196,17 @@ func TestRevertRate_ReplayAndTrend(t *testing.T) {
 		t.Fatalf("trend = %+v", live)
 	}
 }
+
+// A revert counts in the period of the revert, also when the merge was in the
+// period before (review m5).
+func TestRevertRate_ARevertCountsInThePeriodOfTheRevert(t *testing.T) {
+	events := []Event{
+		MergeRequestObserved{Key: "a", State: MergeRequestMerged, At: at(10)},
+		FixReverted{MergeRequest: "a", At: at(26)},
+		MergeRequestObserved{Key: "b", State: MergeRequestMerged, At: at(27)},
+	}
+	got := RevertRateTrend(events, at(40), hours(24))
+	if got.Current.Merged != 1 || got.Current.Reverted != 1 || got.Previous.Merged != 1 || got.Previous.Reverted != 0 {
+		t.Fatalf("trend = %+v, want the revert in the current period", got)
+	}
+}

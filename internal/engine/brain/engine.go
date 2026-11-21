@@ -718,6 +718,16 @@ func (e *Engine) History(ctx context.Context) ([]Event, error) {
 	return evs, nil
 }
 
+// HistoryRange returns the events of the kinds that the store appended at from
+// or later (review M6). See TimelineStore.LoadHistoryRange.
+func (e *Engine) HistoryRange(ctx context.Context, from time.Time, kinds []string) ([]Event, error) {
+	evs, err := e.store.LoadHistoryRange(ctx, e.World.Tenant, from, kinds)
+	if err != nil {
+		return nil, fmt.Errorf("brain/engine: history range of tenant %q: %w", e.World.Tenant, err)
+	}
+	return evs, nil
+}
+
 // MissionHistory returns the mission's slice of the full history
 // (gibson#1060), in order. An empty missionID returns the whole history.
 func (e *Engine) MissionHistory(ctx context.Context, missionID string) ([]Event, error) {

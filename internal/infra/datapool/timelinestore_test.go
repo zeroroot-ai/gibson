@@ -131,7 +131,16 @@ func (f *fakeHistorySQL) QueryRow(context.Context, string, ...any) Row {
 func (f *fakeHistorySQL) Query(_ context.Context, sql string, args ...any) (Rows, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if sql != selectHistorySQL || len(args) != 3 {
+	var kinds map[string]bool
+	switch {
+	case sql == selectHistorySQL && len(args) == 3:
+	case sql == selectHistoryRangeSQL && len(args) == 4:
+		ks, _ := args[3].([]string)
+		kinds = map[string]bool{}
+		for _, k := range ks {
+			kinds[k] = true
+		}
+	default:
 		return nil, fmt.Errorf("fakeHistorySQL: unexpected query %q with %d args", sql, len(args))
 	}
 	afterMs, _ := args[0].(int64)
@@ -139,6 +148,9 @@ func (f *fakeHistorySQL) Query(_ context.Context, sql string, args ...any) (Rows
 	limit, _ := args[2].(int)
 	var page []fakeHistoryRow
 	for _, r := range f.rows {
+		if kinds != nil && !kinds[r.kind] {
+			continue
+		}
 		if r.ms > afterMs || (r.ms == afterMs && r.seq > afterSeq) {
 			page = append(page, r)
 			if len(page) == limit {
@@ -902,6 +914,46 @@ func TestTimelineStore_TrimKeepsTheFullHistoryInPostgres(t *testing.T) {
 		want = append(want, fmt.Sprintf("10.0.%d.%d", i/250, i%250))
 	}
 	require.Equal(t, want, hostAddresses(t, history), "the history is each event, one time, in order")
+}
+
+// A bounded read returns only the events of the kinds named that the store
+// appended at the start time or later, from Postgres and from the stream tail,
+// one time each and in order (review M6).
+func TestTimelineStore_LoadHistoryRange(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	db := &fakeHistorySQL{}
+	store := NewTimelineStore(staticAcquireWith(rdb, db))
+	ctx := context.Background()
+	const tenant = "tenant-range"
+
+	before := time.Now()
+	seqs := appendHosts(t, store, tenant, 0, 30)
+	for i := range 5 {
+		_, err := store.Append(ctx, tenant, uuid.NewString(), brain.ScanReconciled{MissionID: fmt.Sprintf("scan-%d", i)})
+		require.NoError(t, err)
+	}
+	require.NoError(t, store.TrimTo(ctx, tenant, seqs[19]), "20 hosts move to Postgres")
+	appendHosts(t, store, tenant, 30, 5)
+
+	hosts, err := store.LoadHistoryRange(ctx, tenant, before.Add(-time.Minute), []string{"host.observed"})
+	require.NoError(t, err)
+	want := make([]string, 0, 35)
+	for i := range 35 {
+		want = append(want, fmt.Sprintf("10.0.0.%d", i))
+	}
+	require.Equal(t, want, hostAddresses(t, hosts), "each host, one time, in order")
+
+	scans, err := store.LoadHistoryRange(ctx, tenant, before.Add(-time.Minute), []string{"scan.reconciled"})
+	require.NoError(t, err)
+	require.Len(t, scans, 5)
+
+	later, err := store.LoadHistoryRange(ctx, tenant, time.Now().Add(time.Hour), []string{"host.observed"})
+	require.NoError(t, err)
+	require.Empty(t, later, "nothing was appended after the start time")
+
+	none, err := store.LoadHistoryRange(ctx, tenant, time.Time{}, nil)
+	require.NoError(t, err)
+	require.Empty(t, none, "no kind, no event")
 }
 
 // archiveErrorCount reads gibson_timeline_archive_errors_total for one tenant
