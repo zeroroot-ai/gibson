@@ -154,3 +154,30 @@ func seedSharedAgentSkillGate(
 	logger.Info("shared Agent Skill gate converged", "written", len(add), "deleted", len(retired))
 	return nil
 }
+
+// seedSharedAgentSkillGateUntilDone runs seedSharedAgentSkillGate until it
+// succeeds or ctx ends. A failed seed waits delay(n) before retry n (n starts
+// at 1). Without the retry, an OpenFGA that is not ready at start leaves the
+// gate closed, and each enable of a Shared Agent Skill returns NotFound until
+// the daemon restarts.
+func seedSharedAgentSkillGateUntilDone(
+	ctx context.Context, fga agentSkillGate, shared *SharedAgentSkills, logger *slog.Logger,
+	delay func(retry int) time.Duration,
+) {
+	for retry := 1; ; retry++ {
+		err := seedSharedAgentSkillGate(ctx, fga, shared, logger)
+		if err == nil {
+			return
+		}
+		wait := delay(retry)
+		logger.Warn("shared Agent Skill gate seed failed, will retry", "error", err, "retry", retry, "retry_in", wait)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			logger.Warn("shared Agent Skill gate seed stopped before it succeeded", "error", ctx.Err())
+			return
+		case <-timer.C:
+		}
+	}
+}

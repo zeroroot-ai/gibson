@@ -2010,12 +2010,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.registerComponentCatalogReadiness(ctx, catalogGate)
 
 		// Seed the platform gate of the Shared Agent Skills (epic gibson#1364):
-		// each offered name gets its platform_enabled tuple. Startup converge,
-		// best-effort, as for the connector gate above.
+		// each offered name gets its platform_enabled tuple. The seed retries
+		// with backoff until it succeeds or the daemon stops, so an OpenFGA that
+		// is not ready at start does not close the gate until a restart.
 		if d.sharedAgentSkills != nil {
-			if err := seedSharedAgentSkillGate(ctx, d.authorizer, d.sharedAgentSkills, d.logger.Slog()); err != nil {
-				d.logger.Warn(ctx, "shared Agent Skill gate seed failed (non-fatal)", "error", err)
-			}
+			go seedSharedAgentSkillGateUntilDone(ctx, d.authorizer, d.sharedAgentSkills, d.logger.Slog(),
+				missionGateRetryDelay)
 		}
 
 		// Seed the Domain Pack platform catalog gate (ADR-0133, gibson#381):
