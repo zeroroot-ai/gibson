@@ -1,0 +1,15 @@
+package e2e
+
+import (
+	"context"
+
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+)
+
+// A fixture of the guard in e2e_peer_policy_guard_test.go. It calls an RPC that
+// the runner policy does not allow, and the guard must name it. The file has the
+// extension .txt so that no build reads it.
+func callsAnRPCOutsideThePolicy(ctx context.Context) {
+	admin := tenantv1.NewAdminTenantServiceClient(nil)
+	_, _ = admin.AdminDeleteTenant(ctx, &tenantv1.AdminDeleteTenantRequest{})
+}
