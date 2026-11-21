@@ -108,10 +108,12 @@ func init() {
 	registerEvent("finding.fix_claimed", func() Event { return &FixClaimed{} })
 	registerEvent("finding.fix_claim_released", func() Event { return &FixClaimReleased{} })
 	registerEvent("finding.fix_link_refused", func() Event { return &FixLinkRefused{} })
+	registerEvent("finding.fix_claim_expired", func() Event { return &FixClaimExpired{} })
 	registerEvent("fix.reverted", func() Event { return &FixReverted{} })
 	registerEvent("check.rerun", func() Event { return &CheckRerun{} })
 	registerEvent("merge_request.queued", func() Event { return &MergeRequestQueued{} })
 	registerEvent("merge_request.granted", func() Event { return &MergeGranted{} })
+	registerEvent("merge_request.slot_expired", func() Event { return &MergeSlotExpired{} })
 
 	// priority.go
 	registerEvent("finding.prioritized", func() Event { return &FindingPrioritized{} })

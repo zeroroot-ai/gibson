@@ -103,3 +103,61 @@ func forFinding(w *World, id string, fn func(*Finding)) {
 		}
 	}
 }
+
+// FixClaimHold is how long a claim can hold a Finding that is still open. A
+// fix job that runs longer has lost its node: the node ended without a
+// release, or the job closed elsewhere (review M3).
+const FixClaimHold = 24 * time.Hour
+
+// FixClaimExpired records that the daemon ended a claim whose job is gone
+// (review M3): the claim is older than FixClaimHold, or the daemon restarted
+// and the job ended with it. The reducer ends the claim only for its holder.
+type FixClaimExpired struct {
+	ID        string
+	Claim     string
+	Reason    string
+	MissionID string
+	At        time.Time
+}
+
+// Kind identifies the finding.fix_claim_expired brain event.
+func (FixClaimExpired) Kind() string { return "finding.fix_claim_expired" }
+
+func applyFixClaimExpired(w *World, e FixClaimExpired) {
+	applyFixClaimReleased(w, FixClaimReleased{ID: e.ID, Claim: e.Claim})
+}
+
+// FixClaimExpirySystem ends each claim of an open Finding that is older than
+// FixClaimHold. It is quiescent: an ended claim is gone.
+func FixClaimExpirySystem(w *World) []Event {
+	now := w.Now()
+	var out []Event
+	for _, f := range w.FindingSnapshot() {
+		if f.FixClaim == "" || f.Status != FindingStatusOpen || f.FixClaimedAt.IsZero() {
+			continue
+		}
+		if now.Sub(f.FixClaimedAt) > FixClaimHold {
+			out = append(out, FixClaimExpired{
+				ID: f.ID, Claim: f.FixClaim, Reason: "the claim is older than " + FixClaimHold.String(), At: now,
+			})
+		}
+	}
+	return out
+}
+
+// ResumeReleaseFixClaims ends each claim of an open Finding when the daemon
+// starts. A claim is held by a job node that runs in the daemon, so a claim in
+// a World that the daemon just read from its store has no live job. Call once
+// on resume, after rebuilding the World, like ResumeFailInFlight.
+func ResumeReleaseFixClaims(w *World) []Event {
+	now := w.Now()
+	var out []Event
+	for _, f := range w.FindingSnapshot() {
+		if f.FixClaim != "" && f.Status == FindingStatusOpen {
+			out = append(out, FixClaimExpired{
+				ID: f.ID, Claim: f.FixClaim, Reason: "the daemon restarted, and the job of the claim ended with it", At: now,
+			})
+		}
+	}
+	return out
+}

@@ -540,6 +540,8 @@ func Reduce(w *World, ev Event) {
 		applyFixClaimed(w, e)
 	case FixClaimReleased:
 		applyFixClaimReleased(w, e)
+	case FixClaimExpired:
+		applyFixClaimExpired(w, e)
 	case FixReverted:
 		applyFixReverted(w, e)
 	case CheckRerun:
@@ -548,6 +550,8 @@ func Reduce(w *World, ev Event) {
 		applyMergeRequestQueued(w, e)
 	case MergeGranted:
 		applyMergeGranted(w, e)
+	case MergeSlotExpired:
+		applyMergeSlotExpired(w, e)
 	case MergeRequestObserved:
 		applyMergeRequestObserved(w, e)
 	case VoIPlanRequested:

@@ -194,13 +194,12 @@ func Run(ctx context.Context, in Input) (Outcome, error) {
 			if gerr != nil {
 				return Outcome{}, fmt.Errorf("jobnode: read a job closed elsewhere: %w", gerr)
 			}
+			// The node links no merge request of a job that it did not close,
+			// so nothing ends the claim later. It ends now (review M3).
+			in.release(ctx)
 			result, rerr := job.ResultOf(j)
 			if rerr != nil {
-				in.release(ctx)
 				return Outcome{}, fmt.Errorf("jobnode: %w", rerr)
-			}
-			if !hasMergeRequest(result.Deliverables) {
-				in.release(ctx)
 			}
 			return Outcome{Result: result, Passes: pass, Report: lastReport}, ErrClosedElsewhere
 		}

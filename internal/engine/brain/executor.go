@@ -36,7 +36,9 @@ func ExecutorSystems() []System {
 		VoIGateSystem,
 		MissionCompletionSystem,
 		MergeRequestReconciliationSystem, // merged → fixed, closed → open (gibson#1505)
+		MergeSlotExpirySystem,            // free a slot that nothing else frees (review M1)
 		MergeGateSystem,                  // one fix at a time for each Application (gibson#1466)
+		FixClaimExpirySystem,             // end a claim whose job is gone (review M3)
 		// Last: it judges what a scan did not see, so it must run after the
 		// completion System has decided the scan is finished looking (gibson#1686).
 		RescanReconciliationSystem,

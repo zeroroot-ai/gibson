@@ -90,8 +90,12 @@ func (s *scriptedJobs) Close(_ context.Context, _ string, in job.CloseInput) (*j
 func (s *scriptedJobs) Get(_ context.Context, _, id string) (*job.Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	d := s.deliverables
+	if d == nil {
+		d = []*jobpb.Deliverable{{Kind: jobpb.DeliverableKind_DELIVERABLE_KIND_PUSH_BRANCH, Ref: "fix"}}
+	}
 	return &job.Job{ID: id, BankID: "bank-1", MemberID: "m-1", State: s.state, Verdict: job.VerdictAccomplished, Score: 0.7,
-		Deliverables: []*jobpb.Deliverable{{Kind: jobpb.DeliverableKind_DELIVERABLE_KIND_PUSH_BRANCH, Ref: "fix"}}}, nil
+		Deliverables: d}, nil
 }
 
 func (s *scriptedJobs) Events(_ context.Context, _, _ string, since int64, _ int32) ([]*job.Event, error) {
@@ -322,6 +326,24 @@ func TestRun_AJobClosedElsewhereIsReportedNotOverwritten(t *testing.T) {
 	}
 	if out.Result.Verdict != job.VerdictAccomplished {
 		t.Errorf("the reported result is their close: %+v", out.Result)
+	}
+}
+
+// A job that a person closed with a merge request is not linked by the node,
+// so the node ends the claim. Before, the claim held the finding forever
+// (review M3).
+func TestRun_AJobClosedElsewhereWithAMergeRequestReleasesItsClaim(t *testing.T) {
+	ops := mergeRequestJobs()
+	ops.onTurn = func(int) []*job.Event { return closedByAPerson() }
+	ops.closedElsewhere = true
+	in := input(ops, &scriptedVerifier{}, spec(1, ""))
+	claims := &recordingClaims{}
+	in.Claims = claims
+	if _, err := Run(context.Background(), in); !errors.Is(err, ErrClosedElsewhere) {
+		t.Fatalf("err = %v, want ErrClosedElsewhere", err)
+	}
+	if len(claims.released) != 1 || claims.released[0] != "run-1/fix" {
+		t.Fatalf("releases = %v, want the claim of the job", claims.released)
 	}
 }
 

@@ -83,7 +83,11 @@ func applyHealthObserved(w *World, e HealthObserved) {
 		f.Health = health
 		f.HealthUnavailableAt = time.Time{}
 	})
-	releaseMergeSlot(w, e.MergeRequest)
+	// A failed signal keeps the slot until the revert merges (FixReverted), so
+	// no next fix of the Application ships on a broken service (review M2).
+	if e.Held {
+		releaseMergeSlot(w, e.MergeRequest)
+	}
 }
 
 // HealthUnavailable records that the service of the merge request has no health
@@ -110,6 +114,8 @@ func applyHealthUnavailable(w *World, e HealthUnavailable) {
 			f.HealthUnavailableAt = e.At
 		}
 	})
+	// No signal will answer, so the slot would never free (review M1).
+	releaseMergeSlot(w, e.MergeRequest)
 }
 
 // FixReverted records that an agent reverted its own merge because the health

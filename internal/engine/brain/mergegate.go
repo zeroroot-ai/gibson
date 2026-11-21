@@ -10,9 +10,13 @@ import "time"
 // An agent that holds a merge request asks for a slot with MergeRequestQueued.
 // MergeGateSystem grants the slot to the oldest request of an Application when no
 // other merge request of that Application holds a slot. The agent merges only
-// after MergeGranted. The slot is free again when the health signal answers,
-// when the merge is reverted, or when the merge request closes. Fixes for
-// different Applications never wait on each other.
+// after MergeGranted. The slot is free again when the health signal holds,
+// when the merge is reverted after a failed signal, when the service has no
+// health signal, or when the merge request closes. MergeSlotExpirySystem
+// frees a slot that no Finding carries any more, and a granted slot whose
+// merge request has no deploy after MergeSlotHold (review M1). A released slot
+// leaves the queue (review m10). Fixes for different Applications never wait
+// on each other.
 //
 // The time that a merge request waits in this queue is agent time. It is not an
 // explicit wait, so the exposure window counts it as agent time.
@@ -46,8 +50,29 @@ type MergeSlot struct {
 	Application  string
 	QueuedAt     time.Time
 	Granted      bool
-	Released     bool
+	// GrantedAt is the time of the grant. It is zero until the grant.
+	GrantedAt time.Time
 }
+
+// MergeSlotHold is how long a granted slot waits for the deploy of its merge
+// request. A merge request that is not merged, or a merge that is never
+// deployed, then frees the slot.
+const MergeSlotHold = 24 * time.Hour
+
+// MergeSlotExpired records that the daemon freed a slot that nothing else
+// frees (review M1). Reason says why.
+type MergeSlotExpired struct {
+	MergeRequest string
+	Application  string
+	Reason       string
+	At           time.Time
+	MissionID    string
+}
+
+// Kind identifies the merge_request.slot_expired brain event.
+func (MergeSlotExpired) Kind() string { return "merge_request.slot_expired" }
+
+func applyMergeSlotExpired(w *World, e MergeSlotExpired) { releaseMergeSlot(w, e.MergeRequest) }
 
 func findMergeSlot(w *World, mr string) *MergeSlot {
 	for i := range w.mergeSlots {
@@ -68,16 +93,19 @@ func applyMergeRequestQueued(w *World, e MergeRequestQueued) {
 }
 
 func applyMergeGranted(w *World, e MergeGranted) {
-	if s := findMergeSlot(w, e.MergeRequest); s != nil {
-		s.Granted = true
+	if s := findMergeSlot(w, e.MergeRequest); s != nil && !s.Granted {
+		s.Granted, s.GrantedAt = true, e.At
 	}
 }
 
-// releaseMergeSlot frees the slot of the merge request. An unknown merge request
-// changes nothing.
+// releaseMergeSlot frees the slot of the merge request and drops it from the
+// queue. An unknown merge request changes nothing.
 func releaseMergeSlot(w *World, mr string) {
-	if s := findMergeSlot(w, mr); s != nil {
-		s.Released = true
+	for i := range w.mergeSlots {
+		if w.mergeSlots[i].MergeRequest == mr {
+			w.mergeSlots = append(w.mergeSlots[:i:i], w.mergeSlots[i+1:]...)
+			return
+		}
 	}
 }
 
@@ -87,7 +115,7 @@ func (w *World) MergeSlots() []MergeSlot { return append([]MergeSlot(nil), w.mer
 // MayMerge reports whether the merge request holds a slot that is not free yet.
 func (w *World) MayMerge(mr string) bool {
 	s := findMergeSlot(w, mr)
-	return s != nil && s.Granted && !s.Released
+	return s != nil && s.Granted
 }
 
 // MergeGateSystem grants the slot of an Application to its oldest queued merge
@@ -95,17 +123,64 @@ func (w *World) MayMerge(mr string) bool {
 func MergeGateSystem(w *World) []Event {
 	busy := map[string]bool{}
 	for _, s := range w.mergeSlots {
-		if s.Granted && !s.Released {
+		if s.Granted {
 			busy[s.Application] = true
 		}
 	}
 	var out []Event
 	for _, s := range w.mergeSlots { // the slice is in Timeline order
-		if s.Granted || s.Released || busy[s.Application] {
+		if s.Granted || busy[s.Application] {
 			continue
 		}
 		busy[s.Application] = true
 		out = append(out, MergeGranted{MergeRequest: s.MergeRequest, Application: s.Application, At: w.Now()})
+	}
+	return out
+}
+
+// MergeSlotExpirySystem frees the slots that no other event frees (review M1):
+//
+//	no Finding carries the merge request          → free (a rerun opened the
+//	                                                 Finding again, or it moved on)
+//	granted, no deploy after MergeSlotHold         → free (not merged, or a merge
+//	                                                 that is never deployed)
+//
+// The System is quiescent: a freed slot leaves the queue.
+func MergeSlotExpirySystem(w *World) []Event {
+	if len(w.mergeSlots) == 0 {
+		return nil
+	}
+	now := w.Now()
+	carried := map[string]bool{}
+	deployed := map[string]bool{}
+	mission := map[string]string{}
+	for _, f := range w.FindingSnapshot() {
+		if f.MergeRequest == "" {
+			continue
+		}
+		carried[f.MergeRequest] = true
+		if !f.DeployedAt.IsZero() {
+			deployed[f.MergeRequest] = true
+		}
+		if f.FixMissionID != "" {
+			mission[f.MergeRequest] = f.FixMissionID
+		}
+	}
+	var out []Event
+	for _, s := range w.mergeSlots {
+		var reason string
+		switch {
+		case !carried[s.MergeRequest]:
+			reason = "no finding carries the merge request"
+		case s.Granted && !deployed[s.MergeRequest] && !s.GrantedAt.IsZero() && now.Sub(s.GrantedAt) > MergeSlotHold:
+			reason = "the merge request has no deploy " + MergeSlotHold.String() + " after the grant"
+		default:
+			continue
+		}
+		out = append(out, MergeSlotExpired{
+			MergeRequest: s.MergeRequest, Application: s.Application, Reason: reason, At: now,
+			MissionID: mission[s.MergeRequest],
+		})
 	}
 	return out
 }

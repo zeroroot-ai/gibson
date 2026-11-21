@@ -3,7 +3,10 @@
 
 package brain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func grants(w *World) []MergeGranted {
 	evs := MergeGateSystem(w)
@@ -77,5 +80,85 @@ func TestMergeGate_IsQuiescentAndIgnoresADuplicateRequest(t *testing.T) {
 	Reduce(w, grants(w)[0])
 	if len(grants(w)) != 0 {
 		t.Fatal("not quiescent")
+	}
+}
+
+// A failed health signal keeps the slot until the revert merges, so the next
+// fix of the Application does not ship on a broken service (review M2). A
+// service with no health signal frees the slot (review M1).
+func TestMergeGate_AFailedSignalKeepsTheSlotUntilTheRevert(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(0)})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "shop", At: at(1)})
+	Reduce(w, grants(w)[0])
+	Reduce(w, HealthObserved{MergeRequest: "mr-1", Held: false, At: at(2)})
+	if got := grants(w); len(got) != 0 {
+		t.Fatalf("grants after a failed signal = %+v, want none before the revert", got)
+	}
+	Reduce(w, FixReverted{MergeRequest: "mr-1", At: at(3)})
+	if got := grants(w); len(got) != 1 || got[0].MergeRequest != "mr-2" {
+		t.Fatalf("grants after the revert = %+v, want mr-2", got)
+	}
+
+	w = NewWorld("t1")
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(0)})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "shop", At: at(1)})
+	Reduce(w, grants(w)[0])
+	Reduce(w, HealthUnavailable{MergeRequest: "mr-1", At: at(2)})
+	if got := grants(w); len(got) != 1 || got[0].MergeRequest != "mr-2" {
+		t.Fatalf("grants after no health signal = %+v, want mr-2", got)
+	}
+}
+
+// A released slot leaves the queue, so the list does not grow (review m10).
+func TestMergeGate_AReleasedSlotLeavesTheQueue(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(0)})
+	Reduce(w, grants(w)[0])
+	Reduce(w, HealthObserved{MergeRequest: "mr-1", Held: true, At: at(1)})
+	if n := len(w.MergeSlots()); n != 0 {
+		t.Fatalf("slots = %d, want 0", n)
+	}
+}
+
+// The expiry frees a slot that no Finding carries (a rerun opened the Finding
+// again), and a granted slot with no deploy after MergeSlotHold. A deployed
+// merge request keeps its slot (review M1).
+func TestMergeSlotExpirySystem(t *testing.T) {
+	w := NewWorld("t1")
+	now := at(0).Add(MergeSlotHold + time.Hour)
+	w.clock = func() time.Time { return now }
+	for _, id := range []string{"f-1", "f-2", "f-3"} {
+		Reduce(w, FindingRaised{ID: id, At: at(0)})
+		Reduce(w, FindingStatusChanged{ID: id, Status: FindingStatusFixing, MergeRequest: "mr-" + id, At: at(0)})
+	}
+	for i, app := range []string{"a1", "a2", "a3"} {
+		mr := "mr-f-" + string(rune('1'+i))
+		Reduce(w, MergeRequestQueued{MergeRequest: mr, Application: app, At: at(0)})
+		Reduce(w, MergeGranted{MergeRequest: mr, Application: app, At: at(0)})
+	}
+	Reduce(w, FindingStatusChanged{ID: "f-1", Status: FindingStatusOpen, At: at(1)}) // a rerun found it again
+	Reduce(w, DeployObserved{MergeRequest: "mr-f-3", At: at(1)})
+
+	got := map[string]bool{}
+	for _, ev := range MergeSlotExpirySystem(w) {
+		e := ev.(MergeSlotExpired)
+		got[e.MergeRequest] = true
+		Reduce(w, e)
+	}
+	if !got["mr-f-1"] || !got["mr-f-2"] || got["mr-f-3"] {
+		t.Fatalf("expired = %v, want mr-f-1 and mr-f-2", got)
+	}
+	if len(MergeSlotExpirySystem(w)) != 0 {
+		t.Fatal("not quiescent")
+	}
+	if !w.MayMerge("mr-f-3") || w.MayMerge("mr-f-2") {
+		t.Fatal("the deployed slot must stay and the expired one must go")
+	}
+	w.clock = func() time.Time { return at(0).Add(time.Hour) }
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-f-2", Application: "a2", At: at(0)})
+	Reduce(w, MergeGranted{MergeRequest: "mr-f-2", Application: "a2", At: at(0)})
+	if len(MergeSlotExpirySystem(w)) != 0 {
+		t.Fatal("a young slot expired")
 	}
 }

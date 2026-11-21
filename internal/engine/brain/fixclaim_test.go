@@ -195,3 +195,32 @@ func TestFixClaim_KeepsTheTimeOfTheClaim(t *testing.T) {
 		t.Fatalf("claimed at after the release = %v", got)
 	}
 }
+
+// A claim older than FixClaimHold ends, and a young claim stays. A restart
+// ends each claim of an open Finding (review M3).
+func TestFixClaim_ExpiryAndRestartEndAClaimWithNoJob(t *testing.T) {
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	w := NewWorld("t1")
+	w.clock = func() time.Time { return at.Add(FixClaimHold + time.Minute) }
+	Reduce(w, FindingRaised{ID: "old", At: at})
+	Reduce(w, FindingRaised{ID: "young", At: at})
+	Reduce(w, FixClaimed{ID: "old", Claim: "run-1/fix", At: at})
+	Reduce(w, FixClaimed{ID: "young", Claim: "run-2/fix", At: at.Add(FixClaimHold)})
+	evs := FixClaimExpirySystem(w)
+	if len(evs) != 1 || evs[0].(FixClaimExpired).ID != "old" {
+		t.Fatalf("expired = %+v, want only the old claim", evs)
+	}
+	Reduce(w, evs[0])
+	if w.FixClaimOf("old") != "" || w.FixClaimOf("young") != "run-2/fix" {
+		t.Fatal("the expiry ended the wrong claim")
+	}
+	if len(FixClaimExpirySystem(w)) != 0 {
+		t.Fatal("not quiescent")
+	}
+	for _, ev := range ResumeReleaseFixClaims(w) {
+		Reduce(w, ev)
+	}
+	if w.FixClaimOf("young") != "" {
+		t.Fatal("a restart kept the claim of a job that is gone")
+	}
+}

@@ -514,6 +514,11 @@ func (e *Engine) Hydrate(ctx context.Context) error {
 		// events enter the next tick's drain without blocking.
 		e.intake <- failEv
 	}
+	// A claim of a fix job lives only as long as its job node, which ran in the
+	// daemon that stopped (review M3).
+	for _, ev := range ResumeReleaseFixClaims(e.World) {
+		e.intake <- ev
+	}
 
 	slog.Info("brain/engine: hydrated World from persisted store",
 		"tenant", e.World.Tenant,
