@@ -102,6 +102,10 @@ func (*historyFailStore) LoadHistoryRange(context.Context, string, time.Time, []
 	return nil, errHistoryDown
 }
 
+func (*historyFailStore) CountHistoryBefore(context.Context, string, time.Time) (int, error) {
+	return 0, errHistoryDown
+}
+
 // A history read that fails is an error for the reader, never a short history.
 func TestEngine_HistoryReturnsTheStoreError(t *testing.T) {
 	e := NewEngine("t", &historyFailStore{})

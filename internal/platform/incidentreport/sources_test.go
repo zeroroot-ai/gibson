@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
@@ -52,11 +53,11 @@ func TestBrainHistory_ReadsTheTimelineOfTheTenantOfTheContext(t *testing.T) {
 	if err := reg.For("acme").SubmitAndWait(ctx, brain.FindingRaised{ID: "f1"}); err != nil {
 		t.Fatal(err)
 	}
-	evs, err := BrainHistory{Registry: reg}.History(tenantCtx(t))
+	evs, _, err := BrainHistory{Registry: reg}.HistoryFrom(tenantCtx(t), time.Time{})
 	if err != nil || len(evs) != 1 {
 		t.Fatalf("history = %v, %v", evs, err)
 	}
-	if _, err := (BrainHistory{Registry: reg}).History(context.Background()); !errors.Is(err, ErrNoTenant) {
+	if _, _, err := (BrainHistory{Registry: reg}).HistoryFrom(context.Background(), time.Time{}); !errors.Is(err, ErrNoTenant) {
 		t.Errorf("no tenant: err = %v", err)
 	}
 }

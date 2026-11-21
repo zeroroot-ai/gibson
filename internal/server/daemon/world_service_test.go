@@ -841,6 +841,9 @@ func (historyDownStore) LoadHistory(context.Context, string) ([]brain.Event, err
 func (historyDownStore) LoadHistoryRange(context.Context, string, time.Time, []string) ([]brain.Event, error) {
 	return nil, errors.New("the history is down")
 }
+func (historyDownStore) CountHistoryBefore(context.Context, string, time.Time) (int, error) {
+	return 0, errors.New("the history is down")
+}
 func (historyDownStore) LoadSnapshot(context.Context, string) (*brain.WorldSnapshot, error) {
 	return nil, nil
 }

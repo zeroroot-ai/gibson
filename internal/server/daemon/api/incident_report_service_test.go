@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -99,7 +100,9 @@ func (g irGraph) Read(_ context.Context, cypher string, _ map[string]any) ([]map
 
 type irHistory struct{ evs []brain.Event }
 
-func (h irHistory) History(context.Context) ([]brain.Event, error) { return h.evs, nil }
+func (h irHistory) HistoryFrom(context.Context, time.Time) ([]brain.Event, uint64, error) {
+	return h.evs, 0, nil
+}
 
 type irGrants struct{}
 

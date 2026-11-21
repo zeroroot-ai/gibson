@@ -409,7 +409,8 @@ RETURN f.brain_id`
 // and the target's own pass fills it in.
 const upsertEntityCypher = `
 CALL apoc.merge.node([$label], $ident, $props, $props) YIELD node AS n
-SET n.scope = $scope, n.taxonomy_version = $taxonomy_version, n.updated_at = timestamp()
+SET n.scope = $scope, n.taxonomy_version = $taxonomy_version, n.updated_at = timestamp(),
+    n.first_seen = coalesce(n.first_seen, timestamp())
 WITH n
 UNWIND $edges AS e
 CALL apoc.merge.node([e.label], e.ident, {}, {}) YIELD node AS t
@@ -510,7 +511,7 @@ func identityPropertyFor(label string) string {
 // the property map could re-point a node at another node's identity
 // (gibson#1669).
 var entityReservedProps = map[string]struct{}{
-	"key": {}, "scope": {}, "taxonomy_version": {}, "updated_at": {},
+	"key": {}, "scope": {}, "taxonomy_version": {}, "updated_at": {}, "first_seen": {},
 	"brain_id": {}, "event_id": {}, "brain_host_id": {},
 }
 

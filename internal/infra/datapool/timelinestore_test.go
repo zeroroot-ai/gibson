@@ -124,8 +124,44 @@ func (f *fakeHistorySQL) Exec(_ context.Context, sql string, args ...any) (int64
 	return inserted, nil
 }
 
-func (f *fakeHistorySQL) QueryRow(context.Context, string, ...any) Row {
-	panic("fakeHistorySQL: the Timeline store reads no single row")
+func (f *fakeHistorySQL) QueryRow(_ context.Context, sql string, args ...any) Row {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch sql {
+	case countHistoryBeforeSQL:
+		before, _ := args[0].(int64)
+		var n int64
+		for _, r := range f.rows {
+			if r.ms < before {
+				n++
+			}
+		}
+		return fakeRow{vals: []int64{n}}
+	case lastHistoryIDSQL:
+		if len(f.rows) == 0 {
+			return fakeRow{vals: []int64{-1, -1}}
+		}
+		last := f.rows[len(f.rows)-1]
+		return fakeRow{vals: []int64{last.ms, last.seq}}
+	}
+	panic("fakeHistorySQL: unexpected single-row query " + sql)
+}
+
+// fakeRow scans int64 values.
+type fakeRow struct{ vals []int64 }
+
+func (r fakeRow) Scan(dest ...any) error {
+	if len(dest) != len(r.vals) {
+		return errors.New("fakeRow: wrong number of columns")
+	}
+	for i, d := range dest {
+		p, ok := d.(*int64)
+		if !ok {
+			return errors.New("fakeRow: Scan wants *int64")
+		}
+		*p = r.vals[i]
+	}
+	return nil
 }
 
 func (f *fakeHistorySQL) Query(_ context.Context, sql string, args ...any) (Rows, error) {
@@ -951,9 +987,19 @@ func TestTimelineStore_LoadHistoryRange(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, later, "nothing was appended after the start time")
 
-	none, err := store.LoadHistoryRange(ctx, tenant, time.Time{}, nil)
+	all, err := store.LoadHistoryRange(ctx, tenant, time.Time{}, nil)
 	require.NoError(t, err)
-	require.Empty(t, none, "no kind, no event")
+	require.Len(t, all, 40, "no kind means each kind")
+
+	// The count before a time plus the range from it is the whole history, so
+	// an index of the range plus the count is a position in the history
+	// (review R5).
+	n, err := store.CountHistoryBefore(ctx, tenant, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 40, n)
+	n, err = store.CountHistoryBefore(ctx, tenant, before.Add(-time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, 0, n)
 }
 
 // archiveErrorCount reads gibson_timeline_archive_errors_total for one tenant

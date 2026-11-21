@@ -42,6 +42,10 @@ func (failingTimelineStore) LoadHistoryRange(context.Context, string, time.Time,
 	return nil, errStoreDown
 }
 
+func (failingTimelineStore) CountHistoryBefore(context.Context, string, time.Time) (int, error) {
+	return 0, errStoreDown
+}
+
 func (failingTimelineStore) LoadSnapshot(context.Context, string) (*brain.WorldSnapshot, error) {
 	return nil, errStoreDown
 }

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
@@ -206,7 +207,9 @@ func (f *fakeGraph) Read(_ context.Context, cypher string, params map[string]any
 
 type fakeHistory struct{ evs []brain.Event }
 
-func (f fakeHistory) History(context.Context) ([]brain.Event, error) { return f.evs, nil }
+func (f fakeHistory) HistoryFrom(context.Context, time.Time) ([]brain.Event, uint64, error) {
+	return f.evs, 0, nil
+}
 
 type fakeGrants struct{ asked []string }
 
@@ -349,5 +352,26 @@ func TestBuildIndex_ReadsPointerEvents(t *testing.T) {
 	ptr := BuildIndex([]brain.Event{&brain.FindingRaised{ID: "f-1"}, &brain.FindingStatusChanged{ID: "f-1", Status: "fixing"}})
 	if value.findingFrame("f-1") != ptr.findingFrame("f-1") || len(ptr.statusHistory("f-1")) != 1 {
 		t.Fatalf("pointer events: frame %+v, history %+v", ptr.findingFrame("f-1"), ptr.statusHistory("f-1"))
+	}
+}
+
+// The report reads the history from the first sight of the incident and of its
+// alerts, less historySlack. A node with no first sight reads all of it. A
+// part of the history keeps the positions of the whole history (review R5).
+func TestIncidentStart_BoundsTheReadOfTheHistory(t *testing.T) {
+	first := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	rows := []map[string]any{
+		{"alert_key": "a1", "incident_first_seen": first.Add(time.Minute).UnixMilli(), "alert_first_seen": first.UnixMilli()},
+		{"alert_key": "a2", "incident_first_seen": first.Add(time.Minute).UnixMilli(), "alert_first_seen": first.Add(time.Hour).UnixMilli()},
+	}
+	if got := incidentStart(rows); !got.Equal(first.Add(-historySlack)) {
+		t.Fatalf("start = %v, want the first alert less the slack", got)
+	}
+	if got := incidentStart([]map[string]any{{"alert_key": "a1", "incident_first_seen": int64(0)}}); !got.IsZero() {
+		t.Fatalf("an incident with no first sight: start = %v, want the whole history", got)
+	}
+	ix := BuildIndexFrom([]brain.Event{brain.FindingRaised{ID: "f-1"}}, 40)
+	if f := ix.findingFrame("f-1"); f.TimelineSeq != 40 || ix.total != 41 {
+		t.Fatalf("frame = %+v, total = %d, want the position in the whole history", f, ix.total)
 	}
 }

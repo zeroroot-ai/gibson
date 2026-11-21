@@ -25,7 +25,9 @@ RETURN
   coalesce(a.key, a.brain_id, '') AS alert_key,
   coalesce(a.title, a.name, '')   AS title,
   coalesce(a.source, '')          AS source,
-  coalesce(a.severity, '')        AS severity
+  coalesce(a.severity, '')        AS severity,
+  coalesce(i.first_seen, 0)       AS incident_first_seen,
+  coalesce(a.first_seen, 0)       AS alert_first_seen
 ORDER BY alert_key
 LIMIT $limit`
 

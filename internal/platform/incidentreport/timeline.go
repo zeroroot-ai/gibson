@@ -47,9 +47,13 @@ func entityKey(label, key string) string { return label + "\x00" + key }
 // BuildIndex walks the history of the tenant once. The position of an event is
 // its index in the history, which is the number that GetTimeline gives when the
 // request names no mission.
-func BuildIndex(history []brain.Event) *Index {
+func BuildIndex(history []brain.Event) *Index { return BuildIndexFrom(history, 0) }
+
+// BuildIndexFrom is BuildIndex for a part of the history that starts at the
+// position offset of the whole history (review R5).
+func BuildIndexFrom(history []brain.Event, offset uint64) *Index {
 	ix := &Index{
-		total:    uint64(len(history)),
+		total:    offset + uint64(len(history)),
 		entity:   map[string]uint64{},
 		raised:   map[string]uint64{},
 		status:   map[string][]statusEvent{},
@@ -57,7 +61,7 @@ func BuildIndex(history []brain.Event) *Index {
 		missions: map[string]map[string]bool{},
 	}
 	for i, ev := range history {
-		seq := uint64(i)
+		seq := offset + uint64(i)
 		// The codec decodes an event of the durable history as a pointer, and a
 		// live Submit carries a value. Both forms count (review m23).
 		switch e := derefEvent(ev).(type) {

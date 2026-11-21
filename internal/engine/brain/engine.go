@@ -728,6 +728,21 @@ func (e *Engine) HistoryRange(ctx context.Context, from time.Time, kinds []strin
 	return evs, nil
 }
 
+// HistoryFrom returns the events that the store appended at from or later, of
+// each kind, and the position of the first of them in the whole history
+// (review R5).
+func (e *Engine) HistoryFrom(ctx context.Context, from time.Time) (evs []Event, offset int, err error) {
+	offset, err = e.store.CountHistoryBefore(ctx, e.World.Tenant, from)
+	if err != nil {
+		return nil, 0, fmt.Errorf("brain/engine: count the history of tenant %q: %w", e.World.Tenant, err)
+	}
+	evs, err = e.HistoryRange(ctx, from, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	return evs, offset, nil
+}
+
 // MissionHistory returns the mission's slice of the full history
 // (gibson#1060), in order. An empty missionID returns the whole history.
 func (e *Engine) MissionHistory(ctx context.Context, missionID string) ([]Event, error) {

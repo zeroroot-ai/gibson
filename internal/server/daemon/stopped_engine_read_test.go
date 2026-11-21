@@ -44,6 +44,10 @@ func (downStore) LoadHistoryRange(context.Context, string, time.Time, []string) 
 	return nil, errDownStore
 }
 
+func (downStore) CountHistoryBefore(context.Context, string, time.Time) (int, error) {
+	return 0, errDownStore
+}
+
 func (downStore) LoadSnapshot(context.Context, string) (*brain.WorldSnapshot, error) {
 	return nil, errDownStore
 }

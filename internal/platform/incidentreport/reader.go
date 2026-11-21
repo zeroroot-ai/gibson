@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
@@ -34,11 +35,18 @@ type GraphReader interface {
 	Read(ctx context.Context, cypher string, params map[string]any) ([]map[string]any, error)
 }
 
-// HistoryReader returns the full ordered history of the Timeline of the tenant
-// of ctx. The implementation takes the tenant from ctx and from nothing else.
+// HistoryReader returns the events of the Timeline of the tenant of ctx that
+// the store appended at from or later, in order, and the position of the
+// first of them in the whole history. The zero time reads the whole history.
+// The implementation takes the tenant from ctx and from nothing else.
 type HistoryReader interface {
-	History(ctx context.Context) ([]brain.Event, error)
+	HistoryFrom(ctx context.Context, from time.Time) (evs []brain.Event, offset uint64, err error)
 }
+
+// historySlack is how much earlier than the first sight of the incident the
+// read of the history starts. The events of an incident start with its first
+// alert (review R5).
+const historySlack = time.Hour
 
 // Grant is a grant of a capability to an agent, and the person who gave it.
 type Grant struct {
@@ -102,12 +110,15 @@ func (r *Reader) Report(ctx context.Context, incidentKey string) (*Report, error
 	if err != nil {
 		return nil, fmt.Errorf("incidentreport: read fixes: %w", err)
 	}
-	history, err := r.history.History(ctx)
+	// The read of the history starts at the first sight of the incident and
+	// its alerts, so a report never reads the whole history of the tenant
+	// (review R5). A node with no time reads all of it.
+	history, offset, err := r.history.HistoryFrom(ctx, incidentStart(alertRows))
 	if err != nil {
 		return nil, fmt.Errorf("incidentreport: read the Timeline: %w", err)
 	}
 
-	ix := BuildIndex(history)
+	ix := BuildIndexFrom(history, offset)
 	rep := Assemble(incidentKey, ix, alertRows, reachedRows, causeRows, fixRows)
 	for i := range rep.Actions {
 		a := &rep.Actions[i]
@@ -261,4 +272,29 @@ func reachedLabel(row map[string]any) string {
 		return labels[0]
 	}
 	return ""
+}
+
+// incidentStart is the time from which the report reads the history: the
+// first sight of the incident and of its alerts, less historySlack. It is the
+// zero time when a node has no first sight.
+func incidentStart(alertRows []map[string]any) time.Time {
+	var first int64
+	for _, row := range alertRows {
+		for _, col := range []string{"incident_first_seen", "alert_first_seen"} {
+			v, ok := row[col].(int64)
+			if !ok || v <= 0 {
+				if col == "incident_first_seen" || str(row, "alert_key") != "" {
+					return time.Time{}
+				}
+				continue
+			}
+			if first == 0 || v < first {
+				first = v
+			}
+		}
+	}
+	if first == 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(first).Add(-historySlack)
 }

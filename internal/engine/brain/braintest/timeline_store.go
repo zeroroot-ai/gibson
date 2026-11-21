@@ -100,6 +100,22 @@ func (s *MemTimelineStore) LoadHistoryRange(ctx context.Context, tenant string, 
 	return FilterHistory(all, from, kinds), nil
 }
 
+// CountHistoryBefore counts the events of LoadHistory whose own time is before
+// the time. An event with no time counts as after, as in LoadHistoryRange.
+func (s *MemTimelineStore) CountHistoryBefore(ctx context.Context, tenant string, before time.Time) (int, error) {
+	all, err := s.LoadHistory(ctx, tenant)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, ev := range all {
+		if t := brain.EventTime(ev); !t.IsZero() && t.Before(before) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // WriteSnapshot keeps snap as the one snapshot. The handle is snap.AtSeq.
 func (s *MemTimelineStore) WriteSnapshot(_ context.Context, _ string, snap brain.WorldSnapshot) (string, error) {
 	s.mu.Lock()
@@ -169,7 +185,8 @@ func parseSeq(seq string) (int, error) {
 	return n, nil
 }
 
-// FilterHistory keeps the events of the kinds named whose own time is from or
+// FilterHistory keeps the events of the kinds named (each kind when none is
+// named) whose own time is from or
 // later, in order. An event with no time is kept, because nothing shows that
 // it is older. A test store with no append time uses it for LoadHistoryRange.
 func FilterHistory(events []brain.Event, from time.Time, kinds []string) []brain.Event {
@@ -179,7 +196,7 @@ func FilterHistory(events []brain.Event, from time.Time, kinds []string) []brain
 	}
 	var out []brain.Event
 	for _, ev := range events {
-		if !want[ev.Kind()] {
+		if len(kinds) > 0 && !want[ev.Kind()] {
 			continue
 		}
 		if t := brain.EventTime(ev); !t.IsZero() && t.Before(from) {

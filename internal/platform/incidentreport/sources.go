@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -49,19 +50,19 @@ type BrainHistory struct {
 	Registry *brain.Registry
 }
 
-// History implements HistoryReader.
-func (b BrainHistory) History(ctx context.Context) ([]brain.Event, error) {
+// HistoryFrom implements HistoryReader.
+func (b BrainHistory) HistoryFrom(ctx context.Context, from time.Time) ([]brain.Event, uint64, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok || tenant.IsZero() {
-		return nil, ErrNoTenant
+		return nil, 0, ErrNoTenant
 	}
 	eng := b.Registry.For(tenant.String())
 	if err := eng.Err(); err != nil {
-		return nil, fmt.Errorf("incidentreport: the brain of the tenant is not available: %w", err)
+		return nil, 0, fmt.Errorf("incidentreport: the brain of the tenant is not available: %w", err)
 	}
-	evs, err := eng.History(ctx)
+	evs, offset, err := eng.HistoryFrom(ctx, from)
 	if err != nil {
-		return nil, fmt.Errorf("incidentreport: %w", err)
+		return nil, 0, fmt.Errorf("incidentreport: %w", err)
 	}
-	return evs, nil
+	return evs, uint64(offset), nil //nolint:gosec // G115: a count is never negative
 }
