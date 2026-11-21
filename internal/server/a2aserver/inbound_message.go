@@ -22,9 +22,11 @@ var ErrAmbiguousTargets = fmt.Errorf("%w: the message holds more than one target
 // that is not a list of strings, an empty list, and two lists. An empty list is a
 // refusal and never means all targets. A message that is well formed and that the
 // policy refuses gets a Task in the state rejected, and no mission starts: a target
-// outside the publication, a definition or a target that changed or was deleted, a
-// publication over its limit, a tenant that is suspended,
-// and an agent that is not published.
+// outside the publication, a definition that changed, was deleted or is no longer
+// valid, a target that changed or was deleted, two or more targets for a definition
+// with no for_each node, a tenant that is suspended, and an agent that is not
+// published or a caller with no grant to the agent. A publication has no count
+// limit (gibson#1567).
 
 // TargetsOf reads the target list of an inbound message (epic gibson#1367). It
 // reads data parts only. It never reads a text part, a file part or the metadata
