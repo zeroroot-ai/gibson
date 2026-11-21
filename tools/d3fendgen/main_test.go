@@ -220,7 +220,7 @@ graph = [
 ]
 print(json.dumps(fetch.distill(graph), sort_keys=True))
 `
-	out, err := exec.Command(python, "-I", "-c", script, "fetch.py").CombinedOutput() //nolint:gosec // G204: a fixed script and a file of this directory
+	out, err := exec.Command(python, "-I", "-B", "-c", script, "fetch.py").CombinedOutput() //nolint:gosec // G204: a fixed script and a file of this directory
 	if err != nil {
 		t.Fatalf("python3: %v\n%s", err, out)
 	}
