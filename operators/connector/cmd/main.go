@@ -232,14 +232,15 @@ func main() {
 
 // clusterCIDRSettings reads the pod and the service ranges of the cluster
 // from CONNECTOR_CLUSTER_CIDRS, a comma list. The egress policy of each
-// connector denies them (review B3). The chart sets them for the install. An
-// empty value adds no range: the private ranges of RFC 1918 and CGNAT, which
-// the policy always denies, hold the ranges of most clusters. A bad range
+// connector denies them (review B3). The chart sets them for the install. The
+// value is required (review R7): a cluster range outside RFC 1918 and CGNAT
+// would otherwise stay open with no word. A missing value or a bad range
 // fails the start, so a typo never drops the deny rule.
 func clusterCIDRSettings(getenv func(string) string) ([]string, error) {
 	raw := strings.TrimSpace(getenv("CONNECTOR_CLUSTER_CIDRS"))
 	if raw == "" {
-		return nil, nil
+		return nil, errors.New("CONNECTOR_CLUSTER_CIDRS is required: set the pod and the service ranges of the cluster, " +
+			"for example 10.244.0.0/16,10.96.0.0/12")
 	}
 	var out []string
 	for _, c := range strings.Split(raw, ",") {

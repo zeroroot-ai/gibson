@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,16 +123,17 @@ func TestBuildDaemonClient_FailsLoud(t *testing.T) {
 	}
 }
 
-// The cluster ranges come from a comma list. An empty value adds none, and a
-// bad range fails the start (review B3).
+// The cluster ranges come from a comma list. A missing value and a bad range
+// fail the start (review B3, R7).
 func TestClusterCIDRSettings(t *testing.T) {
 	env := func(v string) func(string) string { return func(string) string { return v } }
 	got, err := clusterCIDRSettings(env(" 10.244.0.0/16, 10.96.0.0/12 "))
 	if err != nil || len(got) != 2 || got[0] != "10.244.0.0/16" || got[1] != "10.96.0.0/12" {
 		t.Fatalf("ranges = %v, %v", got, err)
 	}
-	if got, err := clusterCIDRSettings(env("")); err != nil || got != nil {
-		t.Fatalf("empty = %v, %v", got, err)
+	// The value is required (review R7).
+	if _, err := clusterCIDRSettings(env("")); err == nil || !strings.Contains(err.Error(), "CONNECTOR_CLUSTER_CIDRS is required") {
+		t.Fatalf("empty: err = %v, want the required error", err)
 	}
 	if _, err := clusterCIDRSettings(env("10.244.0.0/16,nope")); err == nil {
 		t.Fatal("a bad range was accepted")
