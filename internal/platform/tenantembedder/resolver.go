@@ -1,25 +1,21 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package tenantembedder resolves a tenant's configured embedding provider into
-// a live, per-tenant embedder.Embedder — the source of truth for vector recall,
-// GraphRAG, belief-RAG and finding-classification embedding (E11 BYO-embedder,
-// ADR-0059, gibson#810).
+// Package tenantembedder resolves the embedding provider of a tenant into a
+// per-tenant embedder.Embedder. It is the one source of embeddings for vector
+// recall, GraphRAG, belief-RAG and finding classification (ADR-0059,
+// gibson#810).
 //
-// It is the embedding analogue of tenantprovider.Resolver (which scopes the LLM
-// chat registry per tenant): each tenant's embedder is built lazily from the
-// broker-backed providerconfig store and cached. The embedder is NOT a daemon
-// startup singleton — it cannot be, because the model (and therefore the vector
-// dimension) is per-tenant. A tenant with no embedding-capable provider hits the
-// onboarding gate: Resolve returns embedder.ErrNoEmbeddingProvider so callers
-// surface a graceful "configure an embedding provider" prompt rather than
-// falling back to a bundled mock (the bundled MockEmbedder is retained strictly
-// for tests/fixtures).
+// The resolver reads the provider records of the tenant from the providerconfig
+// store and builds the embedder on first use. It caches one embedder for each
+// tenant. The embedder is not a startup singleton of the daemon, because the
+// model, and so the vector dimension, belongs to the tenant. A tenant with no
+// embedding provider hits the onboarding gate: Resolve returns
+// embedder.ErrNoEmbeddingProvider, and the caller asks the user to configure a
+// provider. No bundled model is a fallback. MockEmbedder is for tests only.
 //
-// SECURITY: decrypted credentials obtained from Store.Resolve are used only to
-// construct the embedder and never logged, persisted, or cached as raw maps. The
-// constructed embedder (which holds its key in process memory) is cached per
-// tenant; the plaintext credential map is not.
+// The resolver and the embedder hold no credential and no endpoint. Each
+// embedding call goes to the model gateway, which holds both (ADR-0172).
 package tenantembedder
 
 import (
