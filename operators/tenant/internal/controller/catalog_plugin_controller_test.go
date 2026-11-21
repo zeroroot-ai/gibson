@@ -323,6 +323,15 @@ func TestCatalogPlugins_EgressIsTheHostList(t *testing.T) {
 	if !reflect.DeepEqual(egress, want) {
 		t.Errorf("egress = %v, want %v", egress, want)
 	}
+	// The private ranges are denied, as for a connector (review r3).
+	deny, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egressDeny")
+	wantDeny, err := ciliumegress.DenyRules(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(deny, wantDeny) {
+		t.Errorf("egressDeny = %v, want %v", deny, wantDeny)
+	}
 	if cnp.GetLabels()[labelManagedBy] != catalogPluginManagedBy {
 		t.Errorf("labels = %v, want the label of the loop", cnp.GetLabels())
 	}
