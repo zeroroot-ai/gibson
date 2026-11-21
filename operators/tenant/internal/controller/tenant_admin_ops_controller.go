@@ -162,7 +162,7 @@ func (r *TenantAdminOpsRunnable) ack(ctx context.Context, opID string) error {
 // applyProvision creates the Tenant CR for a provision op. Mirrors exactly what
 // the dashboard's applyTenant wrote (src/lib/k8s/tenants.ts) and what
 // PendingProvisioningRunnable.createTenant builds: cluster-scoped,
-// metadata.name=slug, spec {displayName, owner, tier}. Idempotent: an existing
+// metadata.name=slug, spec {displayName, owner}. Idempotent: an existing
 // CR (by name) is a no-op (AlreadyExists treated as success).
 func (r *TenantAdminOpsRunnable) applyProvision(ctx context.Context, op provision.TenantAdminOp) error {
 	logger := log.FromContext(ctx).WithName("tenant-admin-ops")
@@ -184,7 +184,6 @@ func (r *TenantAdminOpsRunnable) applyProvision(ctx context.Context, op provisio
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: op.DisplayName,
 			Owner:       op.OwnerEmail,
-			Tier:        gibsonv1alpha1.TenantTier(op.Tier),
 		},
 	}
 	if err := r.Client.Create(ctx, tenant); err != nil {
@@ -193,13 +192,13 @@ func (r *TenantAdminOpsRunnable) applyProvision(ctx context.Context, op provisio
 		}
 		return err
 	}
-	logger.Info("created Tenant CR from admin provision op", "tenant_id", op.TenantID, "tier", op.Tier)
+	logger.Info("created Tenant CR from admin provision op", "tenant_id", op.TenantID)
 	return nil
 }
 
-// applyUpdate patches Tenant.spec.tier / spec.displayName for the fields the op
-// marks set, leaving unset fields untouched. Mirrors the dashboard's
-// updateTenantAction patchTenant({spec:{tier?,displayName?}}). Idempotent: if the
+// applyUpdate patches Tenant.spec.displayName when the op marks it set.
+// Mirrors the dashboard's updateTenantAction
+// patchTenant({spec:{displayName}}). Idempotent: if the
 // spec already holds the target values the Update is still issued but converges.
 // A missing Tenant CR (NotFound) is treated as success — there is nothing to
 // patch, and an update racing a delete must not wedge the queue.
@@ -215,19 +214,11 @@ func (r *TenantAdminOpsRunnable) applyUpdate(ctx context.Context, op provision.T
 		return fmt.Errorf("get Tenant CR %q: %w", op.TenantID, err)
 	}
 
-	changed := false
-	if op.TierSet && string(tenant.Spec.Tier) != op.Tier {
-		tenant.Spec.Tier = gibsonv1alpha1.TenantTier(op.Tier)
-		changed = true
-	}
-	if op.DisplayNameSet && tenant.Spec.DisplayName != op.DisplayName {
-		tenant.Spec.DisplayName = op.DisplayName
-		changed = true
-	}
-	if !changed {
+	if !op.DisplayNameSet || tenant.Spec.DisplayName == op.DisplayName {
 		logger.Info("Tenant CR already matches update op; no patch needed", "tenant_id", op.TenantID)
 		return nil
 	}
+	tenant.Spec.DisplayName = op.DisplayName
 	// The spec change and the audit link of its request land in one write,
 	// so the saga pass of the new generation names the request (gibson#583).
 	annotations := tenant.GetAnnotations()
@@ -243,7 +234,7 @@ func (r *TenantAdminOpsRunnable) applyUpdate(ctx context.Context, op provision.T
 	if err := r.Client.Update(ctx, &tenant); err != nil {
 		return fmt.Errorf("update Tenant CR %q: %w", op.TenantID, err)
 	}
-	logger.Info("patched Tenant CR from admin update op", "tenant_id", op.TenantID, "tier_set", op.TierSet, "display_name_set", op.DisplayNameSet)
+	logger.Info("patched Tenant CR from admin update op", "tenant_id", op.TenantID)
 	return nil
 }
 

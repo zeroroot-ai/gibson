@@ -135,7 +135,7 @@ func (r *PendingProvisioningRunnable) reconcileOne(ctx context.Context, p provis
 		if err := r.createTenant(ctx, p); err != nil {
 			return fmt.Errorf("create Tenant CR %q: %w", p.TenantID, err)
 		}
-		logger.Info("created Tenant CR from pending-provisioning record", "tenant_id", p.TenantID, "tier", p.Tier)
+		logger.Info("created Tenant CR from pending-provisioning record", "tenant_id", p.TenantID)
 	default:
 		return fmt.Errorf("get Tenant CR %q: %w", p.TenantID, getErr)
 	}
@@ -243,7 +243,7 @@ func tenantNamespace(slug string) string {
 // createTenant builds and creates the Tenant CR from a pending record. The spec
 // shape mirrors exactly what the dashboard's applyTenant wrote
 // (src/lib/k8s/tenants.ts): cluster-scoped, metadata.name=slug, spec
-// displayName/owner/tier. AlreadyExists is treated as success (a concurrent
+// displayName/owner. AlreadyExists is treated as success (a concurrent
 // create won the race).
 func (r *PendingProvisioningRunnable) createTenant(ctx context.Context, p provision.PendingTenant) error {
 	tenant := &gibsonv1alpha1.Tenant{
@@ -254,7 +254,6 @@ func (r *PendingProvisioningRunnable) createTenant(ctx context.Context, p provis
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: p.WorkspaceName,
 			Owner:       p.OwnerEmail,
-			Tier:        gibsonv1alpha1.TenantTier(p.Tier),
 		},
 	}
 	if err := r.Client.Create(ctx, tenant); err != nil {

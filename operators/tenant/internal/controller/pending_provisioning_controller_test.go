@@ -55,7 +55,6 @@ func TestDrain_CreatesTenantCRAndAcks(t *testing.T) {
 		OwnerUserID:   "u-1",
 		OwnerEmail:    "owner@acme.test",
 		WorkspaceName: "Acme Inc",
-		Tier:          "team",
 	}}}
 
 	r := newRunnable(t, c, d)
@@ -73,34 +72,6 @@ func TestDrain_CreatesTenantCRAndAcks(t *testing.T) {
 	if got.Spec.Owner != "owner@acme.test" {
 		t.Errorf("owner: got %q", got.Spec.Owner)
 	}
-	if string(got.Spec.Tier) != "team" {
-		t.Errorf("tier: got %q", got.Spec.Tier)
-	}
-	if len(d.acked) != 1 || d.acked[0] != "acme" {
-		t.Errorf("expected acme acked, got %v", d.acked)
-	}
-}
-
-// TestDrain_NoTier_CreatesTenantWithNoTier pins that a queued tenant with no
-// plan gets a Tenant with no spec.tier (gibson#1531).
-func TestDrain_NoTier_CreatesTenantWithNoTier(t *testing.T) {
-	scheme := setupScheme(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	d := &stubDaemon{pending: []provision.PendingTenant{{
-		TenantID: "acme", OwnerUserID: "u-1", OwnerEmail: "owner@acme.test", WorkspaceName: "Acme Inc",
-	}}}
-
-	r := newRunnable(t, c, d)
-	if err := r.drain(context.Background()); err != nil {
-		t.Fatalf("drain: %v", err)
-	}
-	var got gibsonv1alpha1.Tenant
-	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
-		t.Fatalf("expected Tenant CR created: %v", err)
-	}
-	if got.Spec.Tier != "" {
-		t.Errorf("tier: got %q, want empty", got.Spec.Tier)
-	}
 	if len(d.acked) != 1 || d.acked[0] != "acme" {
 		t.Errorf("expected acme acked, got %v", d.acked)
 	}
@@ -115,7 +86,6 @@ func TestDrain_ExistingTenant_NoDoubleCreateButAcks(t *testing.T) {
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: "Original Acme",
 			Owner:       "original@acme.test",
-			Tier:        "enterprise",
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
@@ -123,7 +93,6 @@ func TestDrain_ExistingTenant_NoDoubleCreateButAcks(t *testing.T) {
 		TenantID:      "acme",
 		OwnerEmail:    "new@acme.test",
 		WorkspaceName: "New Acme",
-		Tier:          "team",
 	}}}
 
 	if err := newRunnable(t, c, d).drain(context.Background()); err != nil {
@@ -136,7 +105,7 @@ func TestDrain_ExistingTenant_NoDoubleCreateButAcks(t *testing.T) {
 	}
 	// Spec must be the ORIGINAL — the runnable saw an existing CR and did not
 	// re-create or mutate it.
-	if got.Spec.DisplayName != "Original Acme" || string(got.Spec.Tier) != "enterprise" {
+	if got.Spec.DisplayName != "Original Acme" || got.Spec.Owner != "original@acme.test" {
 		t.Errorf("existing Tenant CR was overwritten: %+v", got.Spec)
 	}
 	// But the record is still acked so it leaves the queue (recovers from a
@@ -168,7 +137,6 @@ func TestReconcileOne_AckFails_RecordStaysPending(t *testing.T) {
 		TenantID:      "acme",
 		OwnerEmail:    "owner@acme.test",
 		WorkspaceName: "Acme",
-		Tier:          "team",
 	})
 	if err == nil {
 		t.Fatalf("expected error when ack fails")
@@ -197,7 +165,7 @@ func TestDrain_OneBadRecordDoesNotAbortOthers(t *testing.T) {
 	// must still be created + acked.
 	d := &stubDaemon{pending: []provision.PendingTenant{
 		{TenantID: ""},
-		{TenantID: "globex", OwnerEmail: "ceo@globex.test", WorkspaceName: "Globex", Tier: "org"},
+		{TenantID: "globex", OwnerEmail: "ceo@globex.test", WorkspaceName: "Globex"},
 	}}
 	if err := newRunnable(t, c, d).drain(context.Background()); err != nil {
 		t.Fatalf("drain should not fail on a single bad record: %v", err)

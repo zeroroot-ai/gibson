@@ -38,7 +38,7 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 
 func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	t.Parallel()
-	// 49: 020 is bootstrap-token-consumption, 021 is signup-verification
+	// 50: 020 is bootstrap-token-consumption, 021 is signup-verification
 	// (gibson#1228, merged), 022 is audit_log hash chain, 023 indexes
 	// capability_grant_agents(tenant_id, principal_ref) for the mission:delegate
 	// / mission:originate capability check (gibson#1186 slice C), 024 adds the
@@ -50,15 +50,16 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// decision 4, hosted#195), 028 drops connector_sandbox and
 	// webhook_idempotency, which no Go code read (gibson#506), 041 drops
 	// the three component_install columns the plugin manifest fed (sdk#129),
-	// and 049 drops tenant_quotas, which no code reads (gibson#1530).
+	// 049 drops tenant_quotas, which no code reads (gibson#1530), and 050
+	// drops the tier columns, which no code reads (gibson#1531).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 49 {
-		t.Errorf("platform: expected 49 up.sql files, got %d", upCount)
+	if upCount != 50 {
+		t.Errorf("platform: expected 50 up.sql files, got %d", upCount)
 	}
-	if downCount != 49 {
-		t.Errorf("platform: expected 49 down.sql files, got %d", downCount)
+	if downCount != 50 {
+		t.Errorf("platform: expected 50 down.sql files, got %d", downCount)
 	}
 }
 
@@ -152,6 +153,7 @@ func TestTenantMaxVersion(t *testing.T) {
 //	      decision 4, hosted#195)
 //	...
 //	049 — drop_tenant_quotas (no code reads the plan quotas, gibson#1530)
+//	050 — drop_plan_tier_columns (no code reads a tier, gibson#1531)
 //
 // The sequence must stay CONTIGUOUS. golang-migrate records a single integer
 // version, and `up` only ever moves forward from it — so a migration that lands
@@ -165,8 +167,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 49 {
-		t.Errorf("PlatformMaxVersion: got %d, want 49", v)
+	if v != 50 {
+		t.Errorf("PlatformMaxVersion: got %d, want 50", v)
 	}
 }
 

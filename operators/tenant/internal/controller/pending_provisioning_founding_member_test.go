@@ -58,7 +58,6 @@ func TestDrain_CreatesFoundingOwnerMember(t *testing.T) {
 		OwnerUserID:   "zitadel-user-9",
 		OwnerEmail:    "owner@acme.test",
 		WorkspaceName: "Acme Inc",
-		Tier:          "team",
 	}}}
 
 	if err := newRunnable(t, c, d).drain(context.Background()); err != nil {
@@ -137,7 +136,6 @@ func TestReconcileOne_MemberCreateNamespaceMissing_NoAck(t *testing.T) {
 		OwnerUserID:   "zitadel-user-9",
 		OwnerEmail:    "owner@acme.test",
 		WorkspaceName: "Acme Inc",
-		Tier:          "team",
 	})
 	if err == nil {
 		t.Fatalf("expected reconcileOne to error when founding-member create fails")

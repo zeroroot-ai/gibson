@@ -22,10 +22,6 @@ const (
 	TenantPhaseTerminated   TenantPhase = "Terminated"
 )
 
-// TenantTier is the optional plan id of a Tenant. Gibson does not read it.
-// It leaves the API in step 2 of gibson#1531.
-type TenantTier string
-
 // TenantDataPlaneResources carries per-tenant data-plane resource limits that
 // override the operator defaults. The Tenant reconciler copies the block onto
 // the TenantDataPlane, and the data-plane provisioner applies it on every
@@ -120,12 +116,6 @@ type TenantSpec struct {
 	// +kubebuilder:validation:Format=email
 	// +required
 	Owner string `json:"owner"`
-
-	// Tier is the optional plan id of the tenant. Gibson does not read it and
-	// refuses no value. The field stays while the chart and the dashboard
-	// still write it. Step 2 of gibson#1531 deletes it.
-	// +optional
-	Tier TenantTier `json:"tier,omitempty"`
 
 	// Resources allows overriding per-tenant data-plane resource limits. When
 	// absent, operator Helm-chart defaults apply. See TenantDataPlaneResources.
@@ -260,7 +250,6 @@ type TenantStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=tn
-// +kubebuilder:printcolumn:name="Tier",type=string,JSONPath=`.spec.tier`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.status.namespace`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

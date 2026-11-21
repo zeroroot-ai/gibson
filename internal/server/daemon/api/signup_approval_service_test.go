@@ -47,7 +47,6 @@ func registerRequest() *tenantv1.RegisterRequest {
 		AttemptId:      approvalAttemptID,
 		OwnerEmail:     "Owner@Example.com",
 		WorkspaceName:  "Acme Research",
-		Tier:           "team",
 		OwnerFirstName: "Ada",
 		OwnerLastName:  "Lovelace",
 		Password:       "correct horse battery staple",
@@ -221,40 +220,6 @@ func TestRegister_ValidatesItsInput(t *testing.T) {
 	}
 }
 
-// A registration needs no plan, and gibson refuses no plan id. The plan id
-// that the person gave goes unchanged to the queue at approval
-// (gibson#1531, step 1).
-func TestRegister_PlanIsOptional(t *testing.T) {
-	for _, tier := range []string{"", "enterprise-deploy"} {
-		t.Run("tier="+tier, func(t *testing.T) {
-			h, _ := newApprovalHarness(t)
-			req := registerRequest()
-			req.Tier = tier
-			if _, err := h.srv.Register(context.Background(), req); err != nil {
-				t.Fatalf("Register(tier=%q): %v", tier, err)
-			}
-			pending, err := h.srv.AdminListPendingRegistrations(adminCtx("admin-1"),
-				&tenantv1.AdminListPendingRegistrationsRequest{})
-			if err != nil || len(pending.GetRegistrations()) == 0 {
-				t.Fatalf("the registration is not in the queue: %v", err)
-			}
-			regID := pending.GetRegistrations()[0].GetRegistrationId()
-			resp, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-				&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
-			if err != nil {
-				t.Fatalf("AdminApproveRegistration(tier=%q): %v", tier, err)
-			}
-			if resp.GetPlanId() != tier {
-				t.Errorf("plan_id = %q, want %q", resp.GetPlanId(), tier)
-			}
-			row, ok := h.queue.row(resp.GetTenantId())
-			if !ok || row.tier != tier || row.status != "pending" {
-				t.Errorf("queued row = %+v, want tier %q and status pending", row, tier)
-			}
-		})
-	}
-}
-
 // Approval is what provisions: it lets the owner sign in and enqueues the
 // tenant, and it is attributable to the administrator who made it.
 func TestAdminApproveRegistration_ActivatesTheOwnerAndProvisions(t *testing.T) {
@@ -268,9 +233,6 @@ func TestAdminApproveRegistration_ActivatesTheOwnerAndProvisions(t *testing.T) {
 	}
 	if resp.GetTenantId() != "acme-research" {
 		t.Errorf("tenant_id = %q, want the slug of the workspace name", resp.GetTenantId())
-	}
-	if resp.GetPlanId() != "team" {
-		t.Errorf("plan_id = %q, want the plan id of the registration", resp.GetPlanId())
 	}
 	if len(h.idp.reactivated) != 1 {
 		t.Fatalf("reactivations = %v, want the approved owner able to sign in", h.idp.reactivated)
@@ -300,8 +262,8 @@ func TestAdminApproveRegistration_ActivatesTheOwnerAndProvisions(t *testing.T) {
 	if !ok {
 		t.Fatal("the approval queued no tenant")
 	}
-	if row.ownerUserID != resp.GetOwnerUserId() || row.tier != "team" || row.status != "pending" {
-		t.Errorf("queued row = %+v, want owner %q, tier team, status pending", row, resp.GetOwnerUserId())
+	if row.ownerUserID != resp.GetOwnerUserId() || row.status != "pending" {
+		t.Errorf("queued row = %+v, want owner %q, status pending", row, resp.GetOwnerUserId())
 	}
 	listed, err := h.srv.ListPendingTenantProvisioning(context.Background(),
 		&daemonoperatorv1.ListPendingTenantProvisioningRequest{})
@@ -469,7 +431,7 @@ func TestRungsAreExclusive(t *testing.T) {
 		if _, err := h.srv.RequestEmailVerification(context.Background(),
 			&tenantv1.RequestEmailVerificationRequest{
 				AttemptId: approvalAttemptID, OwnerEmail: "a@b.com",
-				WorkspaceName: "W", Tier: "team",
+				WorkspaceName: "W",
 			}); status.Code(err) != codes.PermissionDenied {
 			t.Errorf("RequestEmailVerification code = %v, want PermissionDenied", status.Code(err))
 		}

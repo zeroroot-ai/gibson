@@ -54,8 +54,6 @@ func TestAdminDrain_Provision_CreatesTenantCRAndAcks(t *testing.T) {
 		DisplayName:    "Acme Inc",
 		DisplayNameSet: true,
 		OwnerEmail:     "owner@acme.test",
-		Tier:           "team",
-		TierSet:        true,
 	}}}
 
 	r := newAdminOpsRunnable(c, d)
@@ -67,34 +65,8 @@ func TestAdminDrain_Provision_CreatesTenantCRAndAcks(t *testing.T) {
 	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
 		t.Fatalf("expected Tenant CR created: %v", err)
 	}
-	if got.Spec.DisplayName != "Acme Inc" || got.Spec.Owner != "owner@acme.test" || string(got.Spec.Tier) != "team" {
+	if got.Spec.DisplayName != "Acme Inc" || got.Spec.Owner != "owner@acme.test" {
 		t.Errorf("unexpected spec: %+v", got.Spec)
-	}
-	if len(d.acked) != 1 || d.acked[0] != "op-1" {
-		t.Errorf("expected op-1 acked, got %v", d.acked)
-	}
-}
-
-// TestAdminDrain_Provision_NoTier pins that an admin provision op with no
-// tier creates a Tenant with no spec.tier (gibson#1531).
-func TestAdminDrain_Provision_NoTier(t *testing.T) {
-	scheme := setupScheme(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	d := &stubAdminDaemon{ops: []provision.TenantAdminOp{{
-		OpID: "op-1", TenantID: "acme", OpType: "provision", DisplayName: "Acme Inc",
-		DisplayNameSet: true, OwnerEmail: "owner@acme.test", TierSet: true,
-	}}}
-
-	r := newAdminOpsRunnable(c, d)
-	if err := r.drain(context.Background()); err != nil {
-		t.Fatalf("drain: %v", err)
-	}
-	var got gibsonv1alpha1.Tenant
-	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
-		t.Fatalf("expected Tenant CR created: %v", err)
-	}
-	if got.Spec.Tier != "" {
-		t.Errorf("tier: got %q, want empty", got.Spec.Tier)
 	}
 	if len(d.acked) != 1 || d.acked[0] != "op-1" {
 		t.Errorf("expected op-1 acked, got %v", d.acked)
@@ -105,12 +77,12 @@ func TestAdminDrain_Provision_Idempotent_ExistingCRNoOp(t *testing.T) {
 	scheme := setupScheme(t)
 	existing := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "acme"},
-		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Old", Owner: "old@acme.test", Tier: "org"},
+		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Old", Owner: "old@acme.test"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
 	d := &stubAdminDaemon{ops: []provision.TenantAdminOp{{
 		OpID: "op-1", TenantID: "acme", OpType: "provision",
-		DisplayName: "New", DisplayNameSet: true, OwnerEmail: "new@acme.test", Tier: "team", TierSet: true,
+		DisplayName: "New", DisplayNameSet: true, OwnerEmail: "new@acme.test",
 	}}}
 
 	r := newAdminOpsRunnable(c, d)
@@ -123,7 +95,7 @@ func TestAdminDrain_Provision_Idempotent_ExistingCRNoOp(t *testing.T) {
 		t.Fatalf("get: %v", err)
 	}
 	// Provision must NOT clobber an existing CR.
-	if got.Spec.DisplayName != "Old" || string(got.Spec.Tier) != "org" {
+	if got.Spec.DisplayName != "Old" || got.Spec.Owner != "old@acme.test" {
 		t.Errorf("provision clobbered existing CR: %+v", got.Spec)
 	}
 	if len(d.acked) != 1 || d.acked[0] != "op-1" {
@@ -131,17 +103,17 @@ func TestAdminDrain_Provision_Idempotent_ExistingCRNoOp(t *testing.T) {
 	}
 }
 
-func TestAdminDrain_Update_PatchesMarkedFieldsOnly(t *testing.T) {
+func TestAdminDrain_Update_LeavesAnUnsetDisplayName(t *testing.T) {
 	scheme := setupScheme(t)
 	existing := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "acme"},
-		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Acme Inc", Owner: "owner@acme.test", Tier: "team"},
+		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Acme Inc", Owner: "owner@acme.test"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
-	// tier-only update: tier_set=true, display_name_set=false.
+	// display_name_set=false: the op changes nothing.
 	d := &stubAdminDaemon{ops: []provision.TenantAdminOp{{
 		OpID: "op-2", TenantID: "acme", OpType: "update",
-		Tier: "org", TierSet: true, DisplayName: "IGNORED", DisplayNameSet: false,
+		DisplayName: "IGNORED", DisplayNameSet: false,
 	}}}
 
 	r := newAdminOpsRunnable(c, d)
@@ -153,12 +125,36 @@ func TestAdminDrain_Update_PatchesMarkedFieldsOnly(t *testing.T) {
 	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if string(got.Spec.Tier) != "org" {
-		t.Errorf("tier not patched: %q", got.Spec.Tier)
-	}
 	// display_name_set=false → displayName must be untouched.
 	if got.Spec.DisplayName != "Acme Inc" {
 		t.Errorf("displayName clobbered by unset field: %q", got.Spec.DisplayName)
+	}
+	if len(d.acked) != 1 || d.acked[0] != "op-2" {
+		t.Errorf("expected op-2 acked, got %v", d.acked)
+	}
+}
+
+func TestAdminDrain_Update_PatchesTheDisplayName(t *testing.T) {
+	scheme := setupScheme(t)
+	existing := &gibsonv1alpha1.Tenant{
+		ObjectMeta: metav1.ObjectMeta{Name: "acme"},
+		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Acme Inc", Owner: "owner@acme.test"},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+	d := &stubAdminDaemon{ops: []provision.TenantAdminOp{{
+		OpID: "op-2", TenantID: "acme", OpType: "update",
+		DisplayName: "Acme Two", DisplayNameSet: true,
+	}}}
+
+	if err := newAdminOpsRunnable(c, d).drain(context.Background()); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	var got gibsonv1alpha1.Tenant
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Spec.DisplayName != "Acme Two" || got.Spec.Owner != "owner@acme.test" {
+		t.Errorf("display name not patched: %+v", got.Spec)
 	}
 	if len(d.acked) != 1 || d.acked[0] != "op-2" {
 		t.Errorf("expected op-2 acked, got %v", d.acked)
@@ -169,7 +165,7 @@ func TestAdminDrain_Update_MissingCR_NoOpAcks(t *testing.T) {
 	scheme := setupScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	d := &stubAdminDaemon{ops: []provision.TenantAdminOp{{
-		OpID: "op-2", TenantID: "ghost", OpType: "update", Tier: "org", TierSet: true,
+		OpID: "op-2", TenantID: "ghost", OpType: "update",
 	}}}
 
 	r := newAdminOpsRunnable(c, d)
@@ -185,7 +181,7 @@ func TestAdminDrain_Delete_DeletesCRAndAcks(t *testing.T) {
 	scheme := setupScheme(t)
 	existing := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "acme"},
-		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Acme Inc", Owner: "owner@acme.test", Tier: "team"},
+		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Acme Inc", Owner: "owner@acme.test"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
 	d := &stubAdminDaemon{ops: []provision.TenantAdminOp{{
@@ -228,8 +224,8 @@ func TestAdminDrain_PerOpErrorIsolation(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	// First op has empty op_id (errors before apply); second is a valid provision.
 	d := &stubAdminDaemon{ops: []provision.TenantAdminOp{
-		{OpID: "", TenantID: "bad", OpType: "provision", DisplayName: "Bad", OwnerEmail: "b@x.test", Tier: "team"},
-		{OpID: "op-ok", TenantID: "good", OpType: "provision", DisplayName: "Good", OwnerEmail: "g@x.test", Tier: "team", DisplayNameSet: true, TierSet: true},
+		{OpID: "", TenantID: "bad", OpType: "provision", DisplayName: "Bad", OwnerEmail: "b@x.test"},
+		{OpID: "op-ok", TenantID: "good", OpType: "provision", DisplayName: "Good", OwnerEmail: "g@x.test", DisplayNameSet: true},
 	}}
 
 	r := newAdminOpsRunnable(c, d)

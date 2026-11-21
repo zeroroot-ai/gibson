@@ -46,7 +46,7 @@ import "buf/validate/validate.proto";
 service AdminTenantService {
   // AdminProvisionTenant records intent to create a new tenant. Replaces
   // provisionTenantAction's applyTenant() Tenant-CR create. The operator creates
-  // a Tenant CR with spec {displayName, owner, tier}. Idempotent on tenant_id:
+  // a Tenant CR with spec {displayName, owner}. Idempotent on tenant_id:
   // re-recording a provision for a slug whose Tenant CR the operator already
   // created is a no-op at apply time (the operator's existence check), so a
   // double-submit cannot double-provision.
@@ -59,11 +59,10 @@ service AdminTenantService {
     };
   }
 
-  // AdminUpdateTenant records intent to patch a tenant's tier and/or display
-  // name. Replaces updateTenantAction's patchTenant({spec}). The operator
-  // patches Tenant.spec.tier / spec.displayName for the fields the request marks
-  // set; unset fields are left untouched. Idempotent: applying the same patch
-  // twice converges.
+  // AdminUpdateTenant records intent to patch a tenant's display name.
+  // Replaces updateTenantAction's patchTenant({spec}). The operator patches
+  // Tenant.spec.displayName when the request marks it set. Idempotent:
+  // applying the same patch twice converges.
   rpc AdminUpdateTenant(AdminUpdateTenantRequest) returns (AdminUpdateTenantResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "platform_owner",
@@ -171,9 +170,9 @@ message PendingRegistration {
   string owner_email = 2;
   // workspace_name is the workspace they asked for.
   string workspace_name = 3;
-  // tier is the optional plan they asked for, as they typed it. Gibson does
-  // not judge it. Step 2 of gibson#1531 deletes it.
-  string tier = 4;
+  // Field 4 (tier) was removed. The product has no plan (gibson#1531).
+  reserved 4;
+  reserved "tier";
   // owner_first_name / owner_last_name are the profile fields they supplied.
   string owner_first_name = 5;
   string owner_last_name = 6;
@@ -215,9 +214,9 @@ message AdminApproveRegistrationResponse {
   string tenant_id = 1;
   // owner_user_id is the identity-provider id of the now-active owner.
   string owner_user_id = 2;
-  // plan_id is the plan id of the registration, the same value enqueued for
-  // the operator. Empty when the person gave none.
-  string plan_id = 3;
+  // Field 3 (plan_id) was removed. The product has no plan (gibson#1531).
+  reserved 3;
+  reserved "plan_id";
 }
 
 // AdminRejectRegistrationRequest names the registration to refuse.
@@ -246,9 +245,9 @@ message AdminProvisionTenantRequest {
   string display_name = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // owner_email becomes Tenant.spec.owner. Required.
   string owner_email = 3 [(buf.validate.field).string = { min_len: 1, max_len: 4096 }];
-  // tier becomes Tenant.spec.tier. It is optional, and an empty tier gives
-  // a Tenant with no spec.tier. Step 2 of gibson#1531 deletes it.
-  string tier = 4 [(buf.validate.field).string = { max_len: 4096 }];
+  // Field 4 (tier) was removed. The product has no plan (gibson#1531).
+  reserved 4;
+  reserved "tier";
 }
 
 // AdminProvisionTenantResponse confirms the op was recorded.
@@ -258,17 +257,15 @@ message AdminProvisionTenantResponse {
   string op_id = 1;
 }
 
-// AdminUpdateTenantRequest patches a tenant's tier and/or display name. At least
-// one of the *_set flags must be true. Mirrors updateTenantInput's optional
-// {tier?, displayName?}.
+// AdminUpdateTenantRequest patches a tenant's display name. display_name_set
+// must be true. Mirrors updateTenantInput's {displayName}.
 message AdminUpdateTenantRequest {
   // tenant_id is the Tenant CR name to patch. Required.
   string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
-  // tier is the new Tenant.spec.tier; applied only when tier_set is true.
-  string tier = 2 [(buf.validate.field).string = { max_len: 4096 }];
-  // tier_set marks tier for application (distinguishes "set tier" from "leave
-  // tier untouched").
-  bool tier_set = 3;
+  // Fields 2 (tier) and 3 (tier_set) were removed. The product has no plan
+  // (gibson#1531).
+  reserved 2, 3;
+  reserved "tier", "tier_set";
   // display_name is the new Tenant.spec.displayName; applied only when
   // display_name_set is true.
   string display_name = 4 [(buf.validate.field).string = { max_len: 1024 }];
