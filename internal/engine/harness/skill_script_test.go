@@ -324,15 +324,23 @@ func (l *launchRecorder) Launch(_ context.Context, r sandboxed.LaunchRequest) (s
 	return sandboxed.LaunchResponse{}, errors.New("stop after the launch")
 }
 
-// canExecuteAndLoad allows can_execute on the tool and can_load on the Agent
-// Skill for the mission.
+// canExecuteAndLoad allows can_execute on the skill-script tool for anyone, and
+// can_load on one Agent Skill for one mission. Each answer is keyed on the user,
+// the relation and the object of the question.
 type canExecuteAndLoad struct {
 	authz.Authorizer
 	mission string
+	skill   string
 }
 
-func (a canExecuteAndLoad) Check(_ context.Context, user, relation, _ string) (bool, error) {
-	return relation == "can_execute" || (relation == "can_load" && user == "mission:"+a.mission), nil
+func (a canExecuteAndLoad) Check(_ context.Context, user, relation, object string) (bool, error) {
+	switch relation {
+	case "can_execute":
+		return object == authz.ComponentObject(authz.KindTool, SkillScriptTool), nil
+	case "can_load":
+		return user == "mission:"+a.mission && object == a.skill, nil
+	}
+	return false, nil
 }
 
 // A skill-script call through CallToolProto reaches the sandbox launch with the
@@ -347,7 +355,11 @@ func TestCallToolProto_SkillScriptLaunchesWithTheFilesAndTheEgressOfTheAgent(t *
 	}
 	store := &fakeSkillFiles{files: webRecon()}
 	h, _, missionID := skillHarness(t, store, nil, "mission")
-	h.componentAuthorizer = canExecuteAndLoad{mission: missionID}
+	skillObject, err := authz.AgentSkillObject(skillTenant, "web-recon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.componentAuthorizer = canExecuteAndLoad{mission: missionID, skill: skillObject}
 	h.sandboxedExecutor = exec
 	h.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	h.tracer = noop.NewTracerProvider().Tracer("test")
@@ -374,7 +386,7 @@ func TestCallToolProto_SkillScriptLaunchesWithTheFilesAndTheEgressOfTheAgent(t *
 
 	// A call that the check refuses never reaches the launch.
 	rec.got = sandboxed.LaunchRequest{}
-	h.componentAuthorizer = canExecuteAndLoad{mission: "another-mission"}
+	h.componentAuthorizer = canExecuteAndLoad{mission: "another-mission", skill: skillObject}
 	if err := h.CallToolProto(skillCtx(t), SkillScriptTool, req, &resp); err == nil {
 		t.Fatal("a mission with no grant ran the script")
 	}
