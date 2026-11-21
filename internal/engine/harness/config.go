@@ -100,6 +100,14 @@ type HarnessConfig struct {
 	// feature that learned that.
 	MissionSecrets func() CredentialStore
 
+	// SkillFiles provides the Agent Skill store that a skill-script call reads
+	// its files from, and MissionDenyList reads the deny list of a mission.
+	// Both are providers or late sources for the reason MissionSecrets is: the
+	// data plane starts after the harness factory. A daemon with no Agent Skill
+	// store refuses a skill-script call.
+	SkillFiles      func() SkillFileStore
+	MissionDenyList MissionDenyList
+
 	// Tracer for distributed tracing (OpenTelemetry).
 	// Used for creating spans around LLM operations, tool execution, etc.
 	// Optional: defaults to no-op tracer if nil.

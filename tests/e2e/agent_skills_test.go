@@ -36,12 +36,16 @@
 // name in its config at start. The tenant lists it, enables it, and still no
 // agent loads it before a grant.
 //
-// Point 5 covers what exists. The sandbox files of an Agent Skill are not built
-// (gibson#1373). So the test loads the script as text with invoke_tool, reads the
-// command in it, and runs that command with the nmap tool in a sandbox, as a
-// mission TOOL node. The workflow then reads the Cilium drop records and fails
-// when the network let a packet reach the host. The agent that loads the script
-// and the node that runs it are two parts of the test, not one agent.
+// Point 5 runs a script of an Agent Skill. A mission of two nodes starts: the
+// held agent, and a TOOL node that runs the skill-script tool. The test grants
+// the probe Agent Skill to the mission while the agent node is open, then
+// releases the node. The daemon reads the pinned version of the Agent Skill,
+// places its files in the sandbox of the call through the files field of the
+// sandbox launch, and the tool runs the probe script there (the file probe.sh in the scripts folder
+// of tests/fixtures/agentskills/probe/e2e-probe). The script scans a
+// host outside the egress limit of a sandbox. The workflow then reads the
+// Cilium drop records and fails when the network let a packet reach the host.
+// The text of the script is never served: invoke_tool refuses it.
 //
 // It needs GIBSON_TEST_FIXTURES_ENABLED=true and DAEMON_GRPC_ADDR, and the
 // variables that exit-test-agent-skills.yml writes (agentSkillEnv* below).
@@ -52,7 +56,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -535,47 +538,48 @@ func TestAgentSkills(t *testing.T) {
 		require.Equal(t, "mission_completed", runE.Wait(t, agentSkillMissionTimeout).EventType)
 	})
 
-	t.Run("a script of an Agent Skill cannot reach a host outside the egress limit", func(t *testing.T) {
-		runD, workD := newMission("agent-skills-exit-d", nil)
-		grantMission(agentSkillProbe, workD.MissionID)
-		var script string
-		helpers.Eventually(t, time.Minute, "the probe Agent Skill loads", func() (bool, string) {
-			got, e := invoke(ctx, t, comp, workD.WorkID, agentSkillProbe, "scripts/probe.sh")
-			if e != nil {
-				return false, e.GetMessage()
-			}
-			script = got.Result.Content
-			return true, ""
-		})
-		m := regexp.MustCompile(`(?m)^nmap -Pn -p (\d+) (\S+)$`).FindStringSubmatch(script)
-		require.NotNil(t, m, "the script must hold the nmap command; got:\n%s", script)
-		require.Equal(t, egressPort, m[1], "the script names the port of the workflow")
-		require.Equal(t, egressIP, m[2], "the script names the host of the workflow")
-		workD.Complete()
-		require.Equal(t, "mission_completed", runD.Wait(t, agentSkillMissionTimeout).EventType)
-
-		// The execution tool: the nmap tool in a sandbox runs the command of the
-		// script. The mission completes when the sandbox ran the scan. The
-		// workflow checks that the network dropped each packet to the host.
-		_, serr := membership.SetCatalogEnabled(ctx, &tenantv1.SetCatalogEnabledRequest{ComponentRef: toolComponentRef, Enabled: true})
-		require.NoError(t, serr, "SetCatalogEnabled(%s)", toolComponentRef)
+	t.Run("a script of an Agent Skill runs in the sandbox and cannot reach a host outside the egress limit", func(t *testing.T) {
+		// The probe Agent Skill holds a script (tests/fixtures/agentskills/probe/e2e-probe/scripts/probe.sh). The script scans a host
+		// that is outside the egress limit of a sandbox. The skill-script tool
+		// runs it: the daemon places the files of the pinned Agent Skill in the
+		// sandbox of the call, and the tool runs the script there, as any tool.
+		_, serr := membership.SetCatalogEnabled(ctx, &tenantv1.SetCatalogEnabledRequest{ComponentRef: skillScriptRef, Enabled: true})
+		require.NoError(t, serr, "SetCatalogEnabled(%s)", skillScriptRef)
 		t.Cleanup(func() {
 			c, cancel := context.WithTimeout(auth.ContextWithTenantString(context.Background(), agentSkillTenant), 15*time.Second)
 			defer cancel()
-			_, _ = membership.SetCatalogEnabled(c, &tenantv1.SetCatalogEnabledRequest{ComponentRef: toolComponentRef, Enabled: false})
+			_, _ = membership.SetCatalogEnabled(c, &tenantv1.SetCatalogEnabledRequest{ComponentRef: skillScriptRef, Enabled: false})
 		})
-		cidrTarget, terr := helpers.RegisterTestTargetOfType(ctx, clients.Daemon, "skill-egress-e2e", "network", m[2]+"/32")
-		require.NoError(t, terr, "register the target that holds the host of the script")
-		t.Cleanup(func() {
-			c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			helpers.DeleteTestTarget(auth.ContextWithTenantString(c, agentSkillTenant), clients.Daemon, cidrTarget)
+
+		// The agent node holds the mission open while the test grants the Agent
+		// Skill to the mission. The tool node then runs the script.
+		defID := createSkillScriptMissionDefinition(t, ctx, clients.Daemon, "agent-skills-exit-d", agentSkillAgent,
+			agentSkillProbe+"/scripts/probe.sh")
+		runD := helpers.StartMission(ctx, t, clients.Daemon, defID, targetID)
+		workD := agent.Next(t, agentSkillMissionTimeout)
+		require.NotEmpty(t, workD.MissionID, "the work item of the mission names no mission")
+		grantMission(agentSkillProbe, workD.MissionID)
+		helpers.Eventually(t, time.Minute, "the grant reaches the mission", func() (bool, string) {
+			got, e := invoke(ctx, t, comp, workD.WorkID, agentSkillProbe, "")
+			if e != nil {
+				return false, e.GetMessage()
+			}
+			return got.Result.Digest != "", ""
 		})
-		defID := createToolMissionDefinitionWithInput(t, ctx, clients.Daemon, "agent-skill-script-e2e", toolName,
-			map[string]string{"target": m[2], "ports": m[1], "args": `["-Pn"]`})
-		terminal, reason := runProbeMission(t, ctx, clients.Daemon, defID, cidrTarget)
+
+		// The text of a script is not served. The script runs with the tool.
+		_, e := invoke(ctx, t, comp, workD.WorkID, agentSkillProbe, "scripts/probe.sh")
+		require.NotNil(t, e, "the text of a script must not be served")
+		require.Contains(t, e.GetMessage(), "skill-script", "the refusal must name the tool that runs a script")
+
+		workD.Complete()
+		terminal := runD.Wait(t, agentSkillMissionTimeout)
 		require.Equal(t, "mission_completed", terminal.EventType,
-			"the sandbox must run the command of the script and the scan must end; reason: %s", reason)
+			"the sandbox must run the script and the scan must end; the script exits with 0 even when the network drops its packets")
+		// The workflow reads the Cilium drop records after this test and fails
+		// when the network let a packet reach the blocked host.
+		t.Logf("the sandbox ran the script of %s against %s:%s; the workflow checks that the network dropped each packet",
+			agentSkillProbe, egressIP, egressPort)
 	})
 }
 

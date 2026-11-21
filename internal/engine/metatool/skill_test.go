@@ -175,6 +175,31 @@ func TestCall_SkillFileArgument(t *testing.T) {
 	}
 }
 
+// A script is run with the skill-script tool. Its text is never served, and the
+// store is not read for the request.
+func TestCall_SkillScriptIsNotServedAsText(t *testing.T) {
+	obs := &seqObserver{}
+	store := &fakeSkills{digest: "sha256:aa"}
+	h := NewHandler(nil, allowAll("skill:web-recon"), nil).WithSkills(store, noRecord)
+	for _, path := range []string{"scripts/probe.sh", "scripts/a/b.py"} {
+		before := len(store.reads)
+		_, err := h.Call(context.Background(), skillCall(obs, map[string]any{"file": path}, MissionPolicy{}))
+		if !errors.Is(err, ErrSkillScript) {
+			t.Errorf("file %q: err = %v, want ErrSkillScript", path, err)
+		}
+		if len(store.reads) != before {
+			t.Errorf("file %q reached the store", path)
+		}
+	}
+	// A reference file still loads, and so does a file whose name only starts
+	// like the folder.
+	for _, path := range []string{"references/a.md", "scripts-notes.md"} {
+		if _, err := h.Call(context.Background(), skillCall(obs, map[string]any{"file": path}, MissionPolicy{})); errors.Is(err, ErrSkillScript) {
+			t.Errorf("file %q was taken for a script", path)
+		}
+	}
+}
+
 func TestCall_SkillNeedsAMissionAndAStore(t *testing.T) {
 	obs := &seqObserver{}
 	store := &fakeSkills{digest: "sha256:aa"}

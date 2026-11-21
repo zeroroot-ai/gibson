@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agentskill"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
@@ -67,6 +68,16 @@ func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server, p
 // because its options are assembled before the services are registered.
 func (d *daemonImpl) agentSkillStore() agentskillstore.Store {
 	return d.agentSkills
+}
+
+// skillFileStore returns the Agent Skill store for the files of a skill-script
+// call, or nil while the store is not built. It answers a nil interface, not an
+// interface that holds a nil store, so the caller can test it for nil.
+func (d *daemonImpl) skillFileStore() harness.SkillFileStore {
+	if store := d.agentSkillStore(); store != nil {
+		return store
+	}
+	return nil
 }
 
 // daemonSecretReader reads a tenant secret through the secrets broker. The

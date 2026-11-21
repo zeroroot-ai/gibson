@@ -78,18 +78,29 @@ func TestIsDiscoveryTool_AnUnknownToolIsNotOne(t *testing.T) {
 	}
 }
 
-// Every tool the executor ships today emits a DiscoveryResult, so the catalog
-// answer is "yes" for all of them. Asserted so the day one does not, this test
+// Every graph tool the executor ships emits a DiscoveryResult, so the catalog
+// answer is "yes" for all of them. The one tool that does not is skill-script:
+// it runs a script of an Agent Skill, and its result is the exit code, stdout
+// and stderr. Asserted so the day another tool stops emitting one, this test
 // says so rather than the classification quietly changing.
-func TestIsDiscoveryTool_EveryShippedToolEmitsADiscoveryResult(t *testing.T) {
+func TestIsDiscoveryTool_EveryShippedGraphToolEmitsADiscoveryResult(t *testing.T) {
 	v := NewToolValidator(slog.Default())
 	for _, ref := range componentcatalog.Refs() {
-		if ref.Kind != authz.KindTool {
+		if ref.Kind != authz.KindTool || ref.ID == SkillScriptTool {
 			continue
 		}
 		assert.True(t, v.isDiscoveryTool(ref.ID),
 			"tool %q no longer emits a DiscoveryResult; update this test and check the dispatch path still reports it", ref.ID)
 	}
+}
+
+// The skill-script tool is in the catalog and is not a discovery tool, so the
+// validator does not ask its result for field 100.
+func TestIsDiscoveryTool_SkillScriptIsNotOne(t *testing.T) {
+	entry, ok := componentcatalog.LookupTool(SkillScriptTool)
+	require.True(t, ok, "the catalog must list %s", SkillScriptTool)
+	assert.NotEqual(t, componentcatalog.DiscoveryResultProtoType, entry.OutputProtoType)
+	assert.False(t, NewToolValidator(slog.Default()).isDiscoveryTool(SkillScriptTool))
 }
 
 func TestValidateDiscoveryCompliance(t *testing.T) {
