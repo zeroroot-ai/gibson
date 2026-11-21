@@ -284,3 +284,21 @@ func TestBlueTeamViews_ReadABoundedHistory(t *testing.T) {
 	revertFrom := blueAt(8).Add(-historySlack).UTC().Format(time.RFC3339)
 	require.Equal(t, []string{start, start, revertFrom, start}, ranges)
 }
+
+// The stores of the blue team reads resolve on the call. With no graph
+// querier and no platform database, each read fails, and a page of findings
+// with no UUID reads no row of the findings table (review m9).
+func TestBlueTeamWorldServer_TheStoresResolveOnTheCall(t *testing.T) {
+	d := &daemonImpl{}
+	srv := d.blueTeamWorldServer(&worldServer{})
+	ctx := context.Background()
+	if _, err := srv.blue.places(ctx, "acme", []string{"f1"}); err == nil {
+		t.Fatal("places with no graph querier: want an error")
+	}
+	got, err := srv.blue.confidence(ctx, "acme", []string{"anomaly-host-3"})
+	require.NoError(t, err)
+	require.Empty(t, got)
+	if _, _, _, err := srv.blue.actions(ctx, "acme", blueAt(0), blueAt(1)); err == nil {
+		t.Fatal("actions with no platform database: want an error")
+	}
+}
