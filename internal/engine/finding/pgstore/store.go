@@ -359,6 +359,47 @@ func (s *Store) Get(ctx context.Context, tenantID string, id types.ID) (*finding
 	return decodeFinding(doc)
 }
 
+// Confidences returns the confidence of each finding of the list that the
+// table holds, in one read (review m9). A finding with no row has no key in
+// the map. An ID that is not a UUID is left out.
+func (s *Store) Confidences(ctx context.Context, tenantID string, ids []types.ID) (map[types.ID]float64, error) {
+	out := map[types.ID]float64{}
+	keys := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id.Validate() == nil {
+			keys = append(keys, id.String())
+		}
+	}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	c, err := s.conns.For(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("finding store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	rows, err := c.SQL().Query(ctx, `SELECT document FROM findings WHERE id = ANY($1)`, keys)
+	if err != nil {
+		return nil, fmt.Errorf("finding store: read the confidences: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var doc []byte
+		if err := rows.Scan(&doc); err != nil {
+			return nil, fmt.Errorf("finding store: scan a finding: %w", err)
+		}
+		f, err := decodeFinding(doc)
+		if err != nil {
+			return nil, err
+		}
+		out[f.ID] = f.Confidence
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("finding store: read the confidences: %w", err)
+	}
+	return out, nil
+}
+
 // GetWithEvidence returns the finding with the ID and all of its evidence, as
 // stored, in the order that the items had when the finding was stored. Each
 // item shows its tier and, on a tier 1 item, its tool call ID. It is the one

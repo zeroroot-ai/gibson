@@ -60,6 +60,43 @@ RETURN
   coalesce(place.key, place.brain_id, '') AS place_key,
   coalesce(app.key, '')                   AS application`
 
+// findingPlacesManyCypher is findingPlacesCypher for a list of findings, in one
+// read (review m9). Each row names its finding.
+const findingPlacesManyCypher = `
+UNWIND $findings AS fid
+MATCH (f:Finding {brain_id: fid})
+OPTIONAL MATCH (f)-[:AFFECTS]->(place)
+OPTIONAL MATCH (app:Application)
+  WHERE place IS NOT NULL AND (` + applicationReachesPlace + `)
+RETURN
+  fid                                     AS finding,
+  coalesce(head(labels(place)), '')       AS place_label,
+  coalesce(place.key, place.brain_id, '') AS place_key,
+  coalesce(app.key, '')                   AS application`
+
+// FindingPlacesMany returns the places of each finding of the list, in one
+// read of the graph. A finding that the graph does not hold has no key in the
+// map. A finding that affects nothing has an empty list.
+func (q *PoolGraphRAGQuerier) FindingPlacesMany(ctx context.Context, tenant string, findingIDs []string) (map[string][]Place, error) {
+	out := map[string][]Place{}
+	if len(findingIDs) == 0 {
+		return out, nil
+	}
+	rows, err := q.readGraph(ctx, tenant, findingPlacesManyCypher, map[string]any{"findings": findingIDs})
+	if err != nil {
+		return nil, fmt.Errorf("finding places: %w", err)
+	}
+	byFinding := map[string][]map[string]any{}
+	for _, r := range rows {
+		id := stringField(r, "finding")
+		byFinding[id] = append(byFinding[id], r)
+	}
+	for id, rs := range byFinding {
+		out[id] = placesFromRows(rs)
+	}
+	return out, nil
+}
+
 // FindingPlaces returns the places that one finding touches. A place is an
 // Application when one reaches the thing that the finding affects. It is the
 // Host itself when the finding affects a Host and no Application reaches it. A

@@ -123,6 +123,20 @@ func TestStore_Integration_RoundTrip(t *testing.T) {
 	require.ErrorIs(t, err, finding.ErrNotFound)
 }
 
+// Confidences reads the confidence of each finding of a list in one read. A
+// finding with no row and an ID that is no UUID are left out (review m9).
+func TestStore_Integration_Confidences(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	f.Confidence = 0.7
+	require.NoError(t, s.Store(ctx, "acme", f))
+	got, err := s.Confidences(ctx, "acme", []types.ID{f.ID, types.NewID(), "not-a-uuid"})
+	require.NoError(t, err)
+	assert.Equal(t, map[types.ID]float64{f.ID: 0.7}, got)
+}
+
 func TestStore_Integration_EvidenceRowsAndCascade(t *testing.T) {
 	s, pool := newStore(t)
 	ctx := context.Background()

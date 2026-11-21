@@ -43,3 +43,10 @@ func TestApplicationFindingsCypherUsesTheSharedRoutes(t *testing.T) {
 	assert.Contains(t, applicationFindingsCypher, strings.TrimSpace(applicationReachesPlace))
 	assert.Contains(t, findingPlacesCypher, strings.TrimSpace(applicationReachesPlace))
 }
+
+// The batch read of the places is the read of one finding for each id of the
+// list, so the two cannot disagree about an Application (review m9).
+func TestFindingPlacesManyCypher_IsTheOneFindingReadForEachID(t *testing.T) {
+	assert.Contains(t, findingPlacesManyCypher, "UNWIND $findings AS fid")
+	assert.Contains(t, findingPlacesManyCypher, strings.TrimSpace(applicationReachesPlace))
+}

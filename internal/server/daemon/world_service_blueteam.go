@@ -47,12 +47,14 @@ const (
 	auditMaxPages = 10
 )
 
-// FindingPlacesFunc returns the places that one finding of a tenant touches.
-type FindingPlacesFunc func(ctx context.Context, tenant, findingID string) ([]component.Place, error)
+// FindingPlacesFunc returns the places of each finding of a list, in one read.
+// A finding that the graph does not hold has no key in the map.
+type FindingPlacesFunc func(ctx context.Context, tenant string, findingIDs []string) (map[string][]component.Place, error)
 
-// FindingConfidenceFunc returns the confidence of the check that raised a
-// finding, from the findings table. ok is false when the table has no row.
-type FindingConfidenceFunc func(ctx context.Context, tenant, findingID string) (confidence float64, ok bool, err error)
+// FindingConfidenceFunc returns the confidence of the check that raised each
+// finding of a list, from the findings table, in one read. A finding with no
+// row has no key in the map.
+type FindingConfidenceFunc func(ctx context.Context, tenant string, findingIDs []string) (map[string]float64, error)
 
 // ActionAuditFunc returns the audit records that the action read joins: the
 // connector calls in [from, to] and the grant changes up to to. truncated is
@@ -238,42 +240,47 @@ func (s *worldServer) ListOpenFindings(ctx context.Context, req *worldpb.ListOpe
 	// its own list and never fails.
 	page, next := pagetoken.Page(pg, blueteam.OpenRanked(e.Findings(), e.Hosts()), blueteam.Key)
 	resp := &worldpb.ListOpenFindingsResponse{NextPageToken: next}
+	ids := make([]string, 0, len(page))
 	for _, r := range page {
-		view := &worldpb.OpenFindingView{
+		ids = append(ids, r.ID)
+		resp.Findings = append(resp.Findings, &worldpb.OpenFindingView{
 			Id: r.ID, Title: r.Title, ScopeId: r.ScopeID, Address: r.Address, Severity: r.Severity,
 			Status: r.Status, Priority: r.Priority, PriorityRule: r.PriorityRule,
 			MergeRequest: r.MergeRequest, MergeRequestUrl: urlOf(r.MergeRequest),
 			TargetBelief: r.Belief, CheckKind: r.CheckKind,
-		}
-		s.fillPlacesAndConfidence(ctx, tenant, view)
-		resp.Findings = append(resp.Findings, view)
+		})
 	}
+	s.fillPlacesAndConfidence(ctx, tenant, ids, resp.Findings)
 	return resp, nil
 }
 
-// fillPlacesAndConfidence reads the place and the confidence of a finding from
-// the graph and from the findings table. A read that fails leaves the field
-// empty and logs the failure, so one bad store does not hide the list.
-func (s *worldServer) fillPlacesAndConfidence(ctx context.Context, tenant string, v *worldpb.OpenFindingView) {
+// fillPlacesAndConfidence reads the places and the confidence of the findings
+// of one page, with one read of the graph and one of the findings table
+// (review m9). A read that fails leaves the fields empty and logs the
+// failure, so one bad store does not hide the list.
+func (s *worldServer) fillPlacesAndConfidence(ctx context.Context, tenant string, ids []string, views []*worldpb.OpenFindingView) {
+	if len(ids) == 0 {
+		return
+	}
+	var places map[string][]component.Place
 	if s.blue.places != nil {
-		places, err := s.blue.places(ctx, tenant, v.Id)
-		switch {
-		case err == nil:
-			for _, p := range places {
-				v.Places = append(v.Places, &worldpb.FindingPlace{Label: p.Label, Key: p.Key})
-			}
-		case !errors.Is(err, component.ErrFindingNotFound):
-			s.logger.WarnContext(ctx, "world: finding places read failed", "finding_id", v.Id, "error", err)
+		var err error
+		if places, err = s.blue.places(ctx, tenant, ids); err != nil {
+			s.logger.WarnContext(ctx, "world: finding places read failed", "error", err)
 		}
 	}
+	var confidence map[string]float64
 	if s.blue.confidence != nil {
-		c, ok, err := s.blue.confidence(ctx, tenant, v.Id)
-		switch {
-		case err != nil:
-			s.logger.WarnContext(ctx, "world: finding confidence read failed", "finding_id", v.Id, "error", err)
-		case ok:
-			v.Confidence = c
+		var err error
+		if confidence, err = s.blue.confidence(ctx, tenant, ids); err != nil {
+			s.logger.WarnContext(ctx, "world: finding confidence read failed", "error", err)
 		}
+	}
+	for _, v := range views {
+		for _, p := range places[v.Id] {
+			v.Places = append(v.Places, &worldpb.FindingPlace{Label: p.Label, Key: p.Key})
+		}
+		v.Confidence = confidence[v.Id]
 	}
 }
 
@@ -402,30 +409,41 @@ func auditActionReader(q *audit.Query) ActionAuditFunc {
 	}
 }
 
+// findingPlacerMany is the batch read of the places of findings.
+// PoolGraphRAGQuerier serves it.
+type findingPlacerMany interface {
+	FindingPlacesMany(ctx context.Context, tenant string, findingIDs []string) (map[string][]component.Place, error)
+}
+
 // blueTeamWorldServer gives the WorldService the stores of the blue team reads.
 // Each store resolves on the call, because the daemon builds the graph querier
 // and the platform database after it builds the server.
 func (d *daemonImpl) blueTeamWorldServer(s *worldServer) *worldServer {
-	places := func(ctx context.Context, tenant, id string) ([]component.Place, error) {
-		fp, ok := any(d.graphragQuerier).(findingPlacer)
+	places := func(ctx context.Context, tenant string, ids []string) (map[string][]component.Place, error) {
+		fp, ok := any(d.graphragQuerier).(findingPlacerMany)
 		if !ok {
 			return nil, errors.New("the graph querier is not wired")
 		}
-		return fp.FindingPlaces(ctx, tenant, id)
-	}
-	confidence := func(ctx context.Context, tenant, id string) (float64, bool, error) {
-		fid := types.ID(id)
-		if hasRow := fid.Validate() == nil; !hasRow {
-			return 0, false, nil // a World finding with no UUID has no row
-		}
-		rec, err := pgstore.New(func() datapool.Pool { return d.pool }).Get(ctx, tenant, fid)
+		out, err := fp.FindingPlacesMany(ctx, tenant, ids)
 		if err != nil {
-			return 0, false, fmt.Errorf("read the finding record: %w", err)
+			return nil, fmt.Errorf("read the finding places: %w", err)
 		}
-		if rec == nil {
-			return 0, false, nil
+		return out, nil
+	}
+	confidence := func(ctx context.Context, tenant string, ids []string) (map[string]float64, error) {
+		fids := make([]types.ID, 0, len(ids))
+		for _, id := range ids {
+			fids = append(fids, types.ID(id)) // a World finding with no UUID has no row
 		}
-		return rec.Confidence, true, nil
+		got, err := pgstore.New(func() datapool.Pool { return d.pool }).Confidences(ctx, tenant, fids)
+		if err != nil {
+			return nil, fmt.Errorf("read the finding records: %w", err)
+		}
+		out := make(map[string]float64, len(got))
+		for id, c := range got {
+			out[id.String()] = c
+		}
+		return out, nil
 	}
 	actions := func(ctx context.Context, tenant string, from, to time.Time) ([]audit.PgEntry, []audit.PgEntry, bool, error) {
 		if d.platformDB == nil {

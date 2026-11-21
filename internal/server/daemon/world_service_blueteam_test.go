@@ -47,11 +47,25 @@ func submit(t *testing.T, reg *brain.Registry, tenant string, evs ...brain.Event
 
 func TestListOpenFindings_RanksAndLeavesOutVerified(t *testing.T) {
 	srv, reg := newBlueServer(t, blueAt(10))
-	srv.blue.places = func(_ context.Context, tenant, id string) ([]component.Place, error) {
+	var placeReads, confidenceReads int
+	srv.blue.places = func(_ context.Context, tenant string, ids []string) (map[string][]component.Place, error) {
 		require.Equal(t, "acme", tenant)
-		return []component.Place{{Label: component.PlaceApplication, Key: "app-" + id}}, nil
+		placeReads++
+		out := map[string][]component.Place{}
+		for _, id := range ids {
+			out[id] = []component.Place{{Label: component.PlaceApplication, Key: "app-" + id}}
+		}
+		return out, nil
 	}
-	srv.blue.confidence = func(_ context.Context, _, id string) (float64, bool, error) { return 0.9, id == "p1", nil }
+	srv.blue.confidence = func(_ context.Context, _ string, ids []string) (map[string]float64, error) {
+		confidenceReads++
+		return map[string]float64{"p1": 0.9}, nil
+	}
+	t.Cleanup(func() {
+		// One read of each store for the page, not two for each row (review m9).
+		require.Equal(t, 1, placeReads)
+		require.Equal(t, 1, confidenceReads)
+	})
 	submit(t, reg, "acme",
 		brain.FindingRaised{ID: "p2", Title: "b", ScopeID: "s", Severity: "critical", Address: "h"},
 		brain.FindingRaised{ID: "p1", Title: "a", ScopeID: "s", Severity: "low", Address: "h"},
