@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -55,7 +56,10 @@ func (b *BrainReadMarkerStore) WriteReadMarker(ctx context.Context, tenant strin
 	if b.reg == nil {
 		return errors.New("harness: no Timeline for the read marker")
 	}
-	return b.reg.For(tenant).SubmitAndWait(ctx, brain.ReadMarkerWritten(m))
+	if err := b.reg.For(tenant).SubmitAndWait(ctx, brain.ReadMarkerWritten(m)); err != nil {
+		return fmt.Errorf("fold the read marker: %w", err)
+	}
+	return nil
 }
 
 // LastReadMarker implements ReadMarkerStore.
