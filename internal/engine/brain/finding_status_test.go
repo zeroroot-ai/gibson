@@ -126,7 +126,7 @@ func TestFindingStatus_OnlyTheMovesOfTheLifecycle(t *testing.T) {
 	allowed := map[[2]string]bool{
 		{FindingStatusOpen, FindingStatusFixing}: true, {FindingStatusFixing, FindingStatusFixed}: true,
 		{FindingStatusFixing, FindingStatusOpen}: true, {FindingStatusFixed, FindingStatusVerified}: true,
-		{FindingStatusFixed, FindingStatusOpen}: true,
+		{FindingStatusFixed, FindingStatusOpen}: true, {FindingStatusVerified, FindingStatusOpen}: true,
 	}
 	all := []string{FindingStatusOpen, FindingStatusFixing, FindingStatusFixed, FindingStatusVerified}
 	for _, from := range all {

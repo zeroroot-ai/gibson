@@ -152,7 +152,7 @@ func RescanReconciliationSystem(w *World) []Event {
 			if f.ScanScope == "" || f.ScanScope != m.TargetID {
 				continue // not this recurring scan's responsibility
 			}
-			if f.Status != FindingStatusFixed {
+			if f.Status != FindingStatusFixed && f.Status != FindingStatusVerified {
 				continue // only a fix is waiting on a rescan's verdict
 			}
 			// The scan is a rerun of the check. It does not set a status. The

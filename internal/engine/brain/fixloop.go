@@ -248,6 +248,14 @@ func VerificationSystem(w *World) []Event {
 	now := w.Now()
 	var out []Event
 	for _, f := range w.FindingSnapshot() {
+		// A verified Finding opens again when the check finds the flaw on
+		// evidence newer than the verification (review r8).
+		if f.Status == FindingStatusVerified {
+			if f.RerunFound && !f.VerifiedAt.IsZero() && f.RerunAt.After(f.VerifiedAt) {
+				out = append(out, FindingStatusChanged{ID: f.ID, Status: FindingStatusOpen, At: now})
+			}
+			continue
+		}
 		if f.Status != FindingStatusFixed || f.DeployedAt.IsZero() {
 			continue
 		}

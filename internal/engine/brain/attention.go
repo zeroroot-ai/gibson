@@ -319,6 +319,7 @@ var allowedStatusMoves = map[[2]string]bool{
 	{FindingStatusFixing, FindingStatusOpen}:    true, // the merge request closed
 	{FindingStatusFixed, FindingStatusVerified}: true, // the check and the health signal proved the fix
 	{FindingStatusFixed, FindingStatusOpen}:     true, // the check found the flaw again
+	{FindingStatusVerified, FindingStatusOpen}:  true, // the check found the flaw again after the verification (review r8)
 }
 
 // AllowedStatusMove reports whether a Finding may move from one status to the

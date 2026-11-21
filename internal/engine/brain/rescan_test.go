@@ -565,3 +565,30 @@ func TestRescan_AScanWithNoStartGivesNoRerun(t *testing.T) {
 		}
 	}
 }
+
+// A scan that sees a verified Finding again, on evidence newer than the
+// verification, opens it again. A scan that started before the verification
+// decides nothing (review r8).
+func TestRescan_AVerifiedFindingSeenAgainOpens(t *testing.T) {
+	for _, tc := range []struct {
+		start time.Time
+		want  string
+	}{{testScanTime.Add(2 * time.Hour), FindingStatusOpen}, {testScanTime.Add(-time.Minute), FindingStatusVerified}} {
+		w := scanWorld(t, "scan-1", "target-a", MissionWorking)
+		raiseInto(w, "f1", "scan-1", FindingStatusFixed)
+		Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+		Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
+		settleRescan(w)
+		if got := findingByID(t, w, "f1").Status; got != FindingStatusVerified {
+			t.Fatalf("status = %q, want verified before the next scan", got)
+		}
+		w.clock = func() time.Time { return testScanTime.Add(3 * time.Hour) }
+		Reduce(w, MissionStarted{ID: "scan-3", RunID: "run-scan-3", Name: ScanMissionName, StartedAt: tc.start, TargetID: "target-a"})
+		Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-3", MissionRunID: "run-scan-3"})
+		Reduce(w, MissionDone{ID: "scan-3", Outcome: MissionCompleted})
+		settleRescan(w)
+		if got := findingByID(t, w, "f1").Status; got != tc.want {
+			t.Fatalf("scan from %v: status = %q, want %q", tc.start, got, tc.want)
+		}
+	}
+}
