@@ -1,10 +1,14 @@
 # ----------------------------------------------------------------------------
-# The Agent Skills exit test (epic gibson#1377).
+# The Agent Skills exit test (epic gibson#1377, and gibson#1376 for the Shared
+# Agent Skill).
 #
 # In plain words: a tenant publishes a folder as an Agent Skill. An agent that
 # holds a grant finds it and loads it. An agent with no grant does not see it and
 # cannot load it. A running mission keeps the version that it loaded first. The
 # Timeline holds one event for each load.
+#
+# The operator also offers one Shared Agent Skill. The test enables it for the
+# tenant and checks that no agent loads it before a grant.
 #
 # The steps:
 #   1. The kind bring-up of the AAIF exit tests (the action aaif-exit-cluster).
@@ -43,6 +47,7 @@ on:
       - 'internal/engine/harness/callback_searchtools.go'
       - 'internal/platform/component/service_metatool.go'
       - 'internal/server/daemon/agent_skill_adapters.go'
+      - 'internal/server/daemon/shared_agent_skills.go'
       - 'internal/server/daemon/api/agent_skill_service.go'
       - 'tests/e2e/agent_skills_test.go'
       - 'tests/e2e/helpers/**'
@@ -131,12 +136,32 @@ jobs:
       - name: Raise the inotify limits
         uses: zeroroot-ai/.github/.github/actions/raise-inotify-limits@88cbc77697ff7143c98f29f3c4d80a93a666d601 # v0.23.0
 
+      # The Shared Agent Skill is a name and a digest reference in the config of
+      # the daemon. The daemon pulls it at start, so the image has to exist before
+      # the cluster starts. The daemon pulls it with its own registry credential,
+      # the one of GHCR_RO_PAT.
+      - name: Pack the Shared Agent Skill and push it to ghcr.io
+        id: shared-skill
+        working-directory: gibson
+        env:
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${REGISTRY_PASSWORD}"
+          ref=$(go run ./tests/fixtures/agentskills/pack \
+                  -dir tests/fixtures/agentskills/shared/e2e-shared \
+                  -repo ghcr.io/zeroroot-ai/gibson-e2e-skill-shared)
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+
       - name: Stand up the cluster with the images of the checkout
         uses: ./gibson/.github/actions/aaif-exit-cluster
         with:
           ghcr-ro-pat: ${{ secrets.GHCR_RO_PAT }}
           with-kvm: "true"
           image-tag: aaif-skills
+          shared-skill-name: e2e-shared
+          shared-skill-reference: ${{ steps.shared-skill.outputs.ref }}
 
       # Pack each folder, push it by digest, and write the references and the
       # registry credential for the suite. The registry credential is the token
@@ -147,6 +172,7 @@ jobs:
         env:
           REGISTRY_USERNAME: ${{ github.actor }}
           REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          SHARED_REF: ${{ steps.shared-skill.outputs.ref }}
         run: |
           set -euo pipefail
           echo "::add-mask::${REGISTRY_PASSWORD}"
@@ -169,6 +195,7 @@ jobs:
             echo "E2E_SKILL_REF_ALPHA_V2=${alpha_v2}"
             echo "E2E_SKILL_REF_PROBE=${probe}"
             echo "E2E_SKILL_REF_TOOLNAMER=${toolnamer}"
+            echo "E2E_SKILL_REF_SHARED=${SHARED_REF}"
             echo "E2E_SKILL_REGISTRY=ghcr.io"
             echo "E2E_SKILL_REGISTRY_USERNAME=${REGISTRY_USERNAME}"
             echo "E2E_SKILL_REGISTRY_PASSWORD=${REGISTRY_PASSWORD}"

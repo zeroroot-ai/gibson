@@ -31,6 +31,11 @@
 //	9  a mission that denies the Agent Skill cannot load it         "a mission that denies ..."
 //	10 the Timeline holds one load event with the digest            "the Timeline ..."
 //
+// The Shared Agent Skill of the operator (gibson#1376) has one more subtest:
+// "a Shared Agent Skill ...". The daemon writes the platform_enabled tuple of the
+// name in its config at start. The tenant lists it, enables it, and still no
+// agent loads it before a grant.
+//
 // Point 5 covers what exists. The sandbox files of an Agent Skill are not built
 // (gibson#1373). So the test loads the script as text with invoke_tool, reads the
 // command in it, and runs that command with the nmap tool in a sandbox, as a
@@ -75,7 +80,10 @@ const (
 	agentSkillAlpha     = "e2e-alpha"
 	agentSkillProbe     = "e2e-probe"
 	agentSkillToolnamer = "e2e-toolnamer"
-	phantomTool         = "e2e-phantom-tool"
+	// agentSkillShared is the Shared Agent Skill that the operator config offers.
+	// The workflow writes its name and its reference into the daemon config.
+	agentSkillShared = "e2e-shared"
+	phantomTool      = "e2e-phantom-tool"
 
 	// The tenant secret that holds the registry credential, as a docker config.
 	agentSkillRegistrySecret = "e2e-skill-registry"
@@ -86,6 +94,7 @@ const (
 	agentSkillEnvAlphaV2       = "E2E_SKILL_REF_ALPHA_V2"
 	agentSkillEnvProbe         = "E2E_SKILL_REF_PROBE"
 	agentSkillEnvToolnamer     = "E2E_SKILL_REF_TOOLNAMER"
+	agentSkillEnvShared        = "E2E_SKILL_REF_SHARED"
 	agentSkillEnvRegistry      = "E2E_SKILL_REGISTRY"
 	agentSkillEnvRegistryUser  = "E2E_SKILL_REGISTRY_USERNAME"
 	agentSkillEnvRegistryToken = "E2E_SKILL_REGISTRY_PASSWORD"
@@ -217,12 +226,14 @@ func TestAgentSkills(t *testing.T) {
 	refAlphaV2 := requireEnv(t, agentSkillEnvAlphaV2)
 	refProbe := requireEnv(t, agentSkillEnvProbe)
 	refToolnamer := requireEnv(t, agentSkillEnvToolnamer)
+	refShared := requireEnv(t, agentSkillEnvShared)
 	registry := requireEnv(t, agentSkillEnvRegistry)
 	registryUser := requireEnv(t, agentSkillEnvRegistryUser)
 	registryToken := requireEnv(t, agentSkillEnvRegistryToken)
 	egressIP := requireEnv(t, agentSkillEnvEgressIP)
 	egressPort := requireEnv(t, agentSkillEnvEgressPort)
 	digestV1, digestV2 := digestOf(t, refAlphaV1), digestOf(t, refAlphaV2)
+	digestShared := digestOf(t, refShared)
 	require.NotEqual(t, digestV1, digestV2, "the two versions of the alpha Agent Skill must differ in their digest")
 
 	clients, err := helpers.NewGRPCClients()
@@ -237,7 +248,7 @@ func TestAgentSkills(t *testing.T) {
 	world := worldpb.NewWorldServiceClient(clients.Conn())
 
 	// A clean start: no version and no grant of an earlier run.
-	for _, n := range []string{agentSkillAlpha, agentSkillProbe, agentSkillToolnamer} {
+	for _, n := range []string{agentSkillAlpha, agentSkillProbe, agentSkillToolnamer, agentSkillShared} {
 		_, derr := skills.DeleteAgentSkill(ctx, &tenantv1.DeleteAgentSkillRequest{Name: n})
 		if derr != nil && status.Code(derr) != codes.NotFound {
 			require.NoError(t, derr, "DeleteAgentSkill(%s) before the run", n)
@@ -246,7 +257,7 @@ func TestAgentSkills(t *testing.T) {
 	t.Cleanup(func() {
 		c, cancel := context.WithTimeout(auth.ContextWithTenantString(context.Background(), agentSkillTenant), 30*time.Second)
 		defer cancel()
-		for _, n := range []string{agentSkillAlpha, agentSkillProbe, agentSkillToolnamer} {
+		for _, n := range []string{agentSkillAlpha, agentSkillProbe, agentSkillToolnamer, agentSkillShared} {
 			_, _ = skills.DeleteAgentSkill(c, &tenantv1.DeleteAgentSkillRequest{Name: n})
 		}
 	})
@@ -463,6 +474,65 @@ func TestAgentSkills(t *testing.T) {
 		require.Empty(t, skillLoads(ctx, t, world, workC.MissionID, agentSkillAlpha), "a denied load must leave no event")
 		workC.Complete()
 		require.Equal(t, "mission_completed", runC.Wait(t, agentSkillMissionTimeout).EventType)
+	})
+
+	t.Run("a Shared Agent Skill reaches the tenant and loads only after a grant", func(t *testing.T) {
+		// The daemon wrote the platform_enabled tuple of each name in its config
+		// at start. The operator source lists the name with the digest that the
+		// daemon pulled, and the tenant holds no copy yet.
+		list, lerr := skills.ListSharedAgentSkills(ctx, &tenantv1.ListSharedAgentSkillsRequest{})
+		require.NoError(t, lerr, "ListSharedAgentSkills")
+		var offer *tenantv1.SharedAgentSkillEntry
+		for _, e := range list.GetEntries() {
+			if e.GetName() == agentSkillShared {
+				offer = e
+			}
+		}
+		require.NotNil(t, offer, "the operator config names %s, so the daemon must offer it", agentSkillShared)
+		require.Equal(t, digestShared, offer.GetDigest(), "the offer must hold the digest of the configured reference")
+		require.False(t, offer.GetEnabled(), "the tenant holds no copy before it enables the Agent Skill")
+
+		// The platform gate is closed for a name that the config does not hold.
+		_, nerr := skills.EnableSharedAgentSkill(ctx, &tenantv1.EnableSharedAgentSkillRequest{Name: "e2e-not-offered"})
+		require.Error(t, nerr, "a name that the operator does not offer must not be enabled")
+		require.Equal(t, codes.NotFound, status.Code(nerr), "a name that the operator does not offer: %v", nerr)
+
+		// The gate is open for the configured name. The call copies the Agent
+		// Skill into the tenant and writes no grant.
+		resp, eerr := skills.EnableSharedAgentSkill(ctx, &tenantv1.EnableSharedAgentSkillRequest{Name: agentSkillShared})
+		require.NoError(t, eerr, "EnableSharedAgentSkill: the platform_enabled tuple of %s must exist", agentSkillShared)
+		require.Equal(t, agentSkillShared, resp.GetEntry().GetName())
+		require.Equal(t, digestShared, resp.GetEntry().GetDigest())
+		require.Equal(t, tenantv1.AgentSkillSource_AGENT_SKILL_SOURCE_SHARED, resp.GetEntry().GetSource())
+		catalog, cerr := skills.ListAgentSkills(ctx, &tenantv1.ListAgentSkillsRequest{Name: agentSkillShared})
+		require.NoError(t, cerr, "ListAgentSkills")
+		require.Len(t, catalog.GetEntries(), 1, "the catalog of the tenant must hold the Shared Agent Skill")
+		list, lerr = skills.ListSharedAgentSkills(ctx, &tenantv1.ListSharedAgentSkillsRequest{})
+		require.NoError(t, lerr)
+		for _, e := range list.GetEntries() {
+			if e.GetName() == agentSkillShared {
+				require.True(t, e.GetEnabled(), "the offer must show the copy of the tenant")
+			}
+		}
+
+		// An enabled Agent Skill is still not loadable. A mission needs a grant.
+		runE, workE := newMission("agent-skills-exit-e", nil)
+		ids := searchIDs(ctx, t, comp, workE.WorkID, agentSkillShared)
+		require.NotContains(t, ids, "skill:"+agentSkillShared, "a Shared Agent Skill with no grant must not be in a search")
+		_, e := invoke(ctx, t, comp, workE.WorkID, agentSkillShared, "")
+		requireDenied(t, e, "a load of a Shared Agent Skill with no grant")
+		require.Empty(t, skillLoads(ctx, t, world, workE.MissionID, agentSkillShared), "a refused load must leave no event")
+
+		grantMission(agentSkillShared, workE.MissionID)
+		helpers.Eventually(t, time.Minute, "the granted mission loads the Shared Agent Skill", func() (bool, string) {
+			got, le := invoke(ctx, t, comp, workE.WorkID, agentSkillShared, "")
+			if le != nil {
+				return false, le.GetMessage()
+			}
+			return got.Result.Digest == digestShared && strings.Contains(got.Result.Body, "SHARED-BODY"), got.Result.Digest
+		})
+		workE.Complete()
+		require.Equal(t, "mission_completed", runE.Wait(t, agentSkillMissionTimeout).EventType)
 	})
 
 	t.Run("a script of an Agent Skill cannot reach a host outside the egress limit", func(t *testing.T) {

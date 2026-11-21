@@ -24,6 +24,16 @@ inputs:
     description: The kind node.
     required: false
     default: gibson-control-plane
+  shared-skill-name:
+    description: >
+      The name of one Shared Agent Skill that the operator offers. Set it with
+      shared-skill-reference. The action writes both into the daemon config.
+    required: false
+    default: ""
+  shared-skill-reference:
+    description: The digest reference of the Shared Agent Skill, <registry>/<repository>@sha256:<hex>.
+    required: false
+    default: ""
   namespace:
     description: The release namespace.
     required: false
@@ -138,8 +148,21 @@ runs:
       env:
         NS: ${{ inputs.namespace }}
         TAG: ${{ inputs.image-tag }}
+        SHARED_SKILL_NAME: ${{ inputs.shared-skill-name }}
+        SHARED_SKILL_REF: ${{ inputs.shared-skill-reference }}
       run: |
         set -euo pipefail
+        # The operator source of Agent Skills: one entry in the daemon config.
+        # The daemon pulls it at start, so it has to be in the first rollout.
+        if [ -n "${SHARED_SKILL_NAME}" ] || [ -n "${SHARED_SKILL_REF}" ]; then
+          if [ -z "${SHARED_SKILL_NAME}" ] || [ -z "${SHARED_SKILL_REF}" ]; then
+            echo "::error::shared-skill-name and shared-skill-reference go together"
+            exit 1
+          fi
+          shared_params=',{"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.config.sharedAgentSkills[0].name","value":"'"${SHARED_SKILL_NAME}"'","forceString":true}},{"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.config.sharedAgentSkills[0].reference","value":"'"${SHARED_SKILL_REF}"'","forceString":true}}'
+        else
+          shared_params=""
+        fi
         kubectl -n argocd patch application gibson --type json -p '[
             {"op":"add","path":"/spec/source/helm/values","value":"gateway:\n  inClusterProviders:\n    - namespace: gibson-e2e-mock\n      podLabels:\n        app: mock-provider\n      ports:\n        - 8443\ngibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n      - platform/e2e-member\n"},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
@@ -155,7 +178,7 @@ runs:
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.repository","value":"ghcr.io/zeroroot-ai/tenant-operator","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.tag","value":"'"${TAG}"'","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.digest","value":"","forceString":true}},
-            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}'"${shared_params}"'
           ]'
 
         wait_image() { # kind name jsonpath suffix
