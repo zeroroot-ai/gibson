@@ -28,8 +28,11 @@ type AgentToolCall struct {
 	ToolCallID string // identity + stable projection key (ToolExecutionId)
 	MissionID  string
 	RunID      string // the AgentRun that made this call ("" for a mission-level call)
-	ScopeID    string
-	ToolName   string
+	// Agent is the name of the agent that made the call. It is empty for a
+	// call that no agent made.
+	Agent    string
+	ScopeID  string
+	ToolName string
 	// Arguments/Result: the full JSON the agent sent and the tool returned.
 	// Set once on first observation, like an LlmCall transcript — a completed
 	// tool call is immutable.
@@ -59,11 +62,13 @@ type AgentToolCallObserved struct {
 	// the event is not run-scoped.
 	MissionRunID string
 	RunID        string
-	ScopeID      string
-	ToolName     string
-	Arguments    string
-	Result       string
-	Err          string
+	// Agent is the name of the agent that made the call.
+	Agent     string
+	ScopeID   string
+	ToolName  string
+	Arguments string
+	Result    string
+	Err       string
 	// GrantID is the capability grant that allowed the call. The incident
 	// report reads it from this event (gibson#1478).
 	GrantID            string
@@ -90,6 +95,9 @@ func applyAgentToolCallObserved(w *World, e AgentToolCallObserved) {
 			}
 			if c.RunID == "" && e.RunID != "" {
 				c.RunID = e.RunID
+			}
+			if c.Agent == "" && e.Agent != "" {
+				c.Agent = e.Agent
 			}
 			if c.ScopeID == "" && e.ScopeID != "" {
 				c.ScopeID = e.ScopeID
@@ -120,6 +128,7 @@ func applyAgentToolCallObserved(w *World, e AgentToolCallObserved) {
 		ToolCallID:         e.ToolCallID,
 		MissionID:          e.MissionID,
 		RunID:              e.RunID,
+		Agent:              e.Agent,
 		ScopeID:            e.ScopeID,
 		ToolName:           e.ToolName,
 		Arguments:          redactForTenant(w, e.Arguments),
@@ -132,9 +141,11 @@ func applyAgentToolCallObserved(w *World, e AgentToolCallObserved) {
 
 // AgentToolCallSnapshot is a stable, comparable view of an AgentToolCall.
 type AgentToolCallSnapshot struct {
-	ToolCallID         string
-	MissionID          string
-	RunID              string
+	ToolCallID string
+	MissionID  string
+	RunID      string
+	// Agent is the name of the agent that made the call.
+	Agent              string
 	ScopeID            string
 	ToolName           string
 	Arguments          string
@@ -154,6 +165,7 @@ func (w *World) AgentToolCallSnapshot() []AgentToolCallSnapshot {
 			ToolCallID:         c.ToolCallID,
 			MissionID:          c.MissionID,
 			RunID:              c.RunID,
+			Agent:              c.Agent,
 			ScopeID:            c.ScopeID,
 			ToolName:           c.ToolName,
 			Arguments:          c.Arguments,

@@ -24,8 +24,10 @@
 #   4. The script of the probe Agent Skill names the pod of the daemon, which is a
 #      host outside the egress limit of a sandbox. The test runs that script with
 #      the skill-script tool: the daemon places the files of the Agent Skill in
-#      the sandbox of the call (gibson#1373). A step then reads the Cilium drop
-#      records and fails when the network let a packet through.
+#      the sandbox of the call (gibson#1373). The script also names a public host
+#      that the network scope of the node excludes and that the mode external-only
+#      would allow. A step then reads the Cilium drop records and fails when the
+#      network let a packet through to either host.
 #
 # ADR-0080: NEVER on pull_request and never on a schedule. It needs a live cluster.
 # It runs on main and on dispatch.
@@ -81,6 +83,11 @@ env:
   E2E_OUT: ${{ github.workspace }}/e2e-out
   # The port of the daemon gRPC listener. The sandbox must not reach it.
   EGRESS_BLOCKED_PORT: "50051"
+  # A public host that the network scope of the node excludes, and that the mode
+  # external-only would allow. A sandbox that took the class default in place of
+  # the scope of its node would reach it, and the drop check below would fail.
+  EGRESS_PUBLIC_IP: "1.1.1.1"
+  EGRESS_PUBLIC_PORT: "443"
 
 jobs:
   agent-skills:
@@ -190,7 +197,8 @@ jobs:
           alpha_v1=$(pack -dir tests/fixtures/agentskills/v1/e2e-alpha -repo "$base/gibson-e2e-skill-alpha")
           alpha_v2=$(pack -dir tests/fixtures/agentskills/v2/e2e-alpha -repo "$base/gibson-e2e-skill-alpha")
           probe=$(pack -dir tests/fixtures/agentskills/probe/e2e-probe -repo "$base/gibson-e2e-skill-probe" \
-                    -set "@EGRESS_HOST@=${pod_ip}" -set "@EGRESS_PORT@=${EGRESS_BLOCKED_PORT}")
+                    -set "@EGRESS_HOST@=${pod_ip}" -set "@EGRESS_PORT@=${EGRESS_BLOCKED_PORT}" \
+                    -set "@PUBLIC_HOST@=${EGRESS_PUBLIC_IP}" -set "@PUBLIC_PORT@=${EGRESS_PUBLIC_PORT}")
           toolnamer=$(pack -dir tests/fixtures/agentskills/toolnamer/e2e-toolnamer -repo "$base/gibson-e2e-skill-toolnamer")
           {
             echo "E2E_SKILL_REF_ALPHA_V1=${alpha_v1}"
@@ -244,6 +252,7 @@ jobs:
           pkill -f 'get pods --watch' || true
           cat /tmp/sandbox-pods/*.txt > /tmp/sandbox-pods.txt
           bash tests/fixtures/mcp-tools/check-proxy-drops.sh "$EGRESS_BLOCKED_IP" "$EGRESS_BLOCKED_PORT" /tmp/sandbox-pods.txt /tmp/cilium-drops/*.log
+          bash tests/fixtures/mcp-tools/check-proxy-drops.sh "$EGRESS_PUBLIC_IP" "$EGRESS_PUBLIC_PORT" /tmp/sandbox-pods.txt /tmp/cilium-drops/*.log
 
       - name: Upload the logs
         if: always()

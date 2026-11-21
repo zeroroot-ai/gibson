@@ -443,6 +443,7 @@ func ingestToolCall(reg *brain.Registry) harness.ToolCallSink {
 			MissionID:          call.MissionID,
 			MissionRunID:       call.MissionRunID,
 			RunID:              call.RunID,
+			Agent:              call.Agent,
 			ToolName:           call.ToolName,
 			Arguments:          call.Arguments,
 			Result:             call.Result,

@@ -769,6 +769,11 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 		"mission_id": h.missionCtx.ID.String(),
 		"agent":      h.missionCtx.CurrentAgent,
 	}
+	if kind == "agent" {
+		// Enqueue binds the task to the work id with the agent, so a call that
+		// the daemon runs for the agent finds the harness of this node.
+		workCtx[component.WorkTaskContextKey] = grantTask
+	}
 	for k, v := range extraCtx {
 		workCtx[k] = v
 	}

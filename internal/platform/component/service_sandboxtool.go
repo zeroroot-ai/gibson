@@ -22,13 +22,16 @@ type SandboxToolReply struct {
 	// ErrorCode and ErrorMessage describe a failed call. Both are empty on success.
 	ErrorCode    string
 	ErrorMessage string
+	// ToolCallID is the id of the flight recorder record of the call.
+	ToolCallID string
 }
 
 // SandboxToolCaller runs a sandboxed catalog tool for an agent in pull mode. The
-// daemon implements it with the harness of the run, so the call takes the same
-// gates and the same sandbox launch as the call of an agent in callback mode.
+// callback service implements it with the path of a tool call from an agent, so
+// the call has the harness of the node of the agent, with its network scope,
+// and the gates and the record of any call of an agent.
 type SandboxToolCaller interface {
-	CallSandboxedTool(ctx context.Context, tenant, missionID, runID, name string, input []byte) (SandboxToolReply, error)
+	CallSandboxedTool(ctx context.Context, tenant, missionID, runID, agent, task, name string, input []byte) (SandboxToolReply, error)
 }
 
 // WithSandboxTools wires the caller of sandboxed catalog tools. A server with
@@ -47,9 +50,10 @@ func isSandboxedCatalogTool(name string) bool {
 
 // callSandboxedTool serves a sandboxed catalog tool on CallTool. The work id
 // that the caller names must be claimed by the caller, and it selects the
-// mission and the run. A call with no mission run is refused, because the
-// sandbox launch belongs to a run. The record of the call is the flight
-// recorder record of a native tool call, and the reply carries its id.
+// mission, the run and the agent node. A call with no mission run, or with a
+// work item that is not agent work, is refused: the scope of the network is the
+// scope of the node, and it is never guessed. The caller of the daemon applies
+// the deny list, the run check, the events and the flight recorder record.
 func (s *ComponentServiceServer) callSandboxedTool(
 	ctx context.Context, tenant string, req *componentpb.CallToolRequest,
 ) (*componentpb.CallToolResponse, error) {
@@ -63,18 +67,25 @@ func (s *ComponentServiceServer) callSandboxedTool(
 	if bound.RunID == "" || bound.MissionID == "" {
 		return nil, status.Error(codes.FailedPrecondition, "a sandboxed tool call needs the work item of a mission run")
 	}
-	reply, err := s.sandboxTools.CallSandboxedTool(ctx, tenant, bound.MissionID, bound.RunID, req.GetToolName(), []byte(req.GetInputJson()))
+	reg, ok := s.workContext.(WorkAgentRegistry)
+	if !ok {
+		return nil, status.Error(codes.FailedPrecondition, "the work-context registry cannot name the agent of a work item")
+	}
+	agentName, task, err := reg.WorkAgent(ctx, bound.WorkID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "call tool: the agent of the work item is unknown",
+			slog.String("work_id", bound.WorkID), slog.String("error", err.Error()))
+		return nil, status.Error(codes.FailedPrecondition, "a sandboxed tool call needs the work item of an agent node")
+	}
+	reply, err := s.sandboxTools.CallSandboxedTool(ctx, tenant, bound.MissionID, bound.RunID, agentName, task, req.GetToolName(), []byte(req.GetInputJson()))
 	if err != nil {
 		s.logger.WarnContext(ctx, "call tool: sandboxed tool failed",
 			slog.String("tool", req.GetToolName()), slog.String("error", err.Error()))
 		return nil, status.Errorf(codes.Internal, "sandboxed tool %s failed", req.GetToolName())
 	}
-	out := &componentpb.CallToolResponse{OutputJson: reply.OutputJSON}
-	errText := ""
+	out := &componentpb.CallToolResponse{OutputJson: reply.OutputJSON, ToolCallId: reply.ToolCallID}
 	if reply.ErrorCode != "" || reply.ErrorMessage != "" {
 		out.Error = &componentpb.ComponentError{Code: "[" + reply.ErrorCode + "]", Message: reply.ErrorMessage}
-		errText = reply.ErrorMessage
 	}
-	out.ToolCallId = s.recordNativeToolCall(ctx, tenant, req, reply.OutputJSON, errText)
 	return out, nil
 }

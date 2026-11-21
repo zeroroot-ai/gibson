@@ -639,7 +639,8 @@ func TestAgentSkills(t *testing.T) {
 		require.NotEmpty(t, ran.GetToolCallId(), "the reply must carry the id of the flight recorder record")
 
 		// The Timeline holds the load of the Agent Skill with the script, and the
-		// flight recorder record of the call with the same id.
+		// flight recorder record of the call with the same id and the name of the
+		// agent that made it.
 		helpers.Eventually(t, time.Minute, "the Timeline holds the load and the call", func() (bool, string) {
 			loaded := false
 			for _, ev := range skillLoads(ctx, t, world, workF.MissionID, agentSkillProbe) {
@@ -653,7 +654,8 @@ func TestAgentSkills(t *testing.T) {
 			}
 			recorded := false
 			for _, ev := range helpers.OfKind(events, "agent_tool_call.observed") {
-				if strings.Contains(ev.Summary, ran.GetToolCallId()) && strings.Contains(ev.Summary, skillScriptTool) {
+				if strings.Contains(ev.Summary, ran.GetToolCallId()) && strings.Contains(ev.Summary, skillScriptTool) &&
+					strings.Contains(ev.Summary, agentSkillAgent) {
 					recorded = true
 				}
 			}

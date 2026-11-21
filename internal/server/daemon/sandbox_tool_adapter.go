@@ -5,70 +5,36 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
-	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
-	"github.com/zeroroot-ai/sdk/auth"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
 
-// sandboxToolAdapter runs a sandboxed catalog tool for an agent in pull mode. It
-// builds the harness of the run with the factory of the daemon and calls the
-// same CallToolProto that an agent in callback mode reaches. So the execute
-// gate, the files of an Agent Skill and the sandbox launch have one code path.
-type sandboxToolAdapter struct{ d *daemonImpl }
+// sandboxToolAdapter serves the sandboxed catalog tools of ComponentService with
+// the call path of the callback service, so an agent in pull mode and an agent
+// in callback mode share one implementation of the gates, the network scope and
+// the flight recorder record.
+type sandboxToolAdapter struct{ svc pullToolCaller }
+
+// pullToolCaller is the part of the callback manager that the adapter uses.
+type pullToolCaller interface {
+	CallPullTool(ctx context.Context, tenant, missionID, runID, agent, task, name string, input []byte) (*harnesspb.CallToolProtoResponse, error)
+}
 
 var _ component.SandboxToolCaller = sandboxToolAdapter{}
 
-// CallSandboxedTool runs the tool. A refusal or a failure of the call is a reply
-// with an error, so the agent reads why. A daemon with no harness factory, and a
-// mission id that is not an id, are errors of the call itself.
+// CallSandboxedTool maps the reply of the callback path to a SandboxToolReply.
 func (a sandboxToolAdapter) CallSandboxedTool(
-	ctx context.Context, tenant, missionID, runID, name string, input []byte,
+	ctx context.Context, tenant, missionID, runID, agent, task, name string, input []byte,
 ) (component.SandboxToolReply, error) {
-	if a.d.infrastructure == nil || a.d.infrastructure.harnessFactory == nil {
-		return component.SandboxToolReply{}, errors.New("the daemon has no harness factory")
-	}
-	mid, err := types.ParseID(missionID)
+	resp, err := a.svc.CallPullTool(ctx, tenant, missionID, runID, agent, task, name, input)
 	if err != nil {
-		return component.SandboxToolReply{}, fmt.Errorf("mission id %q: %w", missionID, err)
+		return component.SandboxToolReply{}, fmt.Errorf("sandboxed tool %s: %w", name, err)
 	}
-	agent := callerAgentName(ctx)
-	h, err := a.d.infrastructure.harnessFactory.Create(agent, harness.MissionContext{
-		ID: mid, TenantID: tenant, MissionRunID: runID, AgentRunID: runID,
-	}, harness.TargetInfo{})
-	if err != nil {
-		return component.SandboxToolReply{}, fmt.Errorf("create the harness of run %q: %w", runID, err)
-	}
-	req := &componentpb.CallToolRequest{ToolName: name, InputJson: string(input)}
-	resp := &componentpb.CallToolResponse{}
-	if err := h.CallToolProto(ctx, name, req, resp); err != nil {
-		code := "TOOL_FAILED"
-		var ge *types.GibsonError
-		if errors.As(err, &ge) {
-			code = string(ge.Code)
-		}
-		return component.SandboxToolReply{ErrorCode: code, ErrorMessage: err.Error()}, nil
-	}
-	reply := component.SandboxToolReply{OutputJSON: resp.GetOutputJson()}
+	out := component.SandboxToolReply{OutputJSON: string(resp.GetOutputJson()), ToolCallID: resp.GetToolCallId()}
 	if e := resp.GetError(); e != nil {
-		reply.ErrorCode, reply.ErrorMessage = e.GetCode(), e.GetMessage()
+		out.ErrorCode, out.ErrorMessage = e.GetCode().String(), e.GetMessage()
 	}
-	return reply, nil
-}
-
-// callerAgentName is the name of the agent that makes the call: the name of its
-// principal when the identity is an agent principal, else "agent". The name only
-// selects the egress ceiling that the catalog states for an agent of that name.
-func callerAgentName(ctx context.Context) string {
-	if id, err := auth.IdentityFromContext(ctx); err == nil {
-		if name, ok := strings.CutPrefix(id.Subject, "agent_principal:"); ok && name != "" {
-			return name
-		}
-	}
-	return "agent"
+	return out, nil
 }
