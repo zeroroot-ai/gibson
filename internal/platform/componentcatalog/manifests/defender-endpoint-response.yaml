@@ -28,16 +28,21 @@ spec:
       env: DEFENDER_CLIENT_ID
     - secret: defender-endpoint-response-client-secret
       env: DEFENDER_CLIENT_SECRET
-  # The tenant gives the API URL, for example
-  # https://api.security.microsoft.com or a regional host.
+  # The tenant gives the API URL. The default is
+  # https://api.security.microsoft.com, as the README of the server states.
+  # A regional host (us., eu., uk., au. and the others) and the two US
+  # Government hosts are allowed.
   # The egress allow-list of the pod holds the host of the value.
   variables:
     - name: api_url
       env: DEFENDER_API_URL
       kind: endpoint
+      default: https://api.security.microsoft.com
       patterns:
         - https://api.security.microsoft.com
         - https://*.api.security.microsoft.com
+        - https://api-gcc.security.microsoft.us
+        - https://api-gov.security.microsoft.us
   # Each tool is a response action. Revoke a session, disable an account and
   # isolate a host need no person (ADR-0180): only a tool that destroys data
   # waits for one. A new tool of the server waits until this list names it.

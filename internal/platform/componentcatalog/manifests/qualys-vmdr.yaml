@@ -24,17 +24,29 @@ spec:
       env: QUALYS_USERNAME
     - secret: qualys-vmdr-password
       env: QUALYS_PASSWORD
-  # The tenant gives the API server URL of its Qualys platform, for example
-  # https://qualysapi.qualys.com.
+  # The tenant gives the API server URL of its Qualys platform. The patterns
+  # are the API servers of the shared platforms, as the Qualys page "Identify
+  # your Qualys platform" lists them. A private platform of Qualys has its
+  # own host, so the platform owner of the install states it
+  # (installPatterns).
   # The egress allow-list of the pod holds the host of the value.
   variables:
     - name: api_url
       env: QUALYS_API_URL
       kind: endpoint
+      installPatterns: true
       patterns:
         - https://qualysapi.qualys.com
-        - https://*.qualys.com
-        - https://*.qualys.eu
-        - https://*.qualys.in
-        - https://*.qualys.ca
-        - https://*.qualys.ae
+        - https://qualysapi.qg2.apps.qualys.com
+        - https://qualysapi.qg3.apps.qualys.com
+        - https://qualysapi.qg4.apps.qualys.com
+        - https://qualysapi.gov1.qualys.us
+        - https://qualysapi.qualys.eu
+        - https://qualysapi.qg2.apps.qualys.eu
+        - https://qualysapi.qg3.apps.qualys.it
+        - https://qualysapi.qg1.apps.qualys.in
+        - https://qualysapi.qg1.apps.qualys.ca
+        - https://qualysapi.qg1.apps.qualys.ae
+        - https://qualysapi.qg1.apps.qualys.co.uk
+        - https://qualysapi.qg1.apps.qualys.com.au
+        - https://qualysapi.qg1.apps.qualysksa.com

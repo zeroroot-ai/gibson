@@ -83,6 +83,11 @@ type TenantVariable struct {
 	// the patterns (SetInstallPatterns). A variable needs Patterns,
 	// InstallPatterns or both.
 	InstallPatterns bool `yaml:"installPatterns"`
+	// Default is the value when the tenant gives none. It is the default of
+	// the server, as its README states, so the egress allow-list holds the host
+	// that the server calls (review M10). It must match a pattern of the
+	// manifest. Empty means that the tenant must give a value.
+	Default string `yaml:"default"`
 }
 
 // installPatterns are the patterns that the platform owner set for this
@@ -201,8 +206,33 @@ func validateTenantVariables(id string, s ConnectorSpec) error {
 				return fmt.Errorf("%s: variable %q pattern %q: %w", id, v.Name, p, err)
 			}
 		}
+		if v.Default != "" {
+			if _, err := checkVariableValue(v.Default, v.Patterns); err != nil {
+				return fmt.Errorf("%s: variable %q default %q: %w", id, v.Name, v.Default, err)
+			}
+		}
 	}
 	return nil
+}
+
+// checkVariableValue applies the rules of a tenant variable to one value and
+// returns its parts.
+func checkVariableValue(raw string, pats []string) (endpointParts, error) {
+	ep, err := parseEndpointURL(raw, false)
+	if err == nil {
+		err = checkPublicHost(ep.host)
+	}
+	if err == nil {
+		err = checkVariablePort(ep.port)
+	}
+	switch {
+	case err != nil:
+	case len(pats) == 0:
+		err = errors.New("no host pattern allows a value: the platform owner of this install states the patterns")
+	case !matchesAnyPattern(pats, ep):
+		err = errors.New("the value is outside the patterns " + strings.Join(pats, ", "))
+	}
+	return ep, err
 }
 
 // checkPublicHost refuses a host that a cluster or a private network can own.
@@ -249,25 +279,14 @@ func (e ConnectorEntry) ResolveVariables(values map[string]string) (ResolvedVari
 	}
 	seen := map[string]bool{}
 	for _, v := range e.Variables {
-		raw, ok := values[v.Name]
-		if !ok || raw == "" {
+		raw := values[v.Name]
+		if raw == "" {
+			raw = v.Default
+		}
+		if raw == "" {
 			return ResolvedVariables{}, fmt.Errorf("connector %q needs a value for the variable %q", e.ID, v.Name)
 		}
-		ep, err := parseEndpointURL(raw, false)
-		if err == nil {
-			err = checkPublicHost(ep.host)
-		}
-		if err == nil {
-			err = checkVariablePort(ep.port)
-		}
-		pats := patternsOf(e.ID, v)
-		switch {
-		case err != nil:
-		case len(pats) == 0:
-			err = errors.New("no host pattern allows a value: the platform owner of this install states the patterns")
-		case !matchesAnyPattern(pats, ep):
-			err = errors.New("the value is outside the patterns " + strings.Join(pats, ", "))
-		}
+		ep, err := checkVariableValue(raw, patternsOf(e.ID, v))
 		if err != nil {
 			return ResolvedVariables{}, fmt.Errorf("variable %q of connector %q: %w", v.Name, e.ID, err)
 		}

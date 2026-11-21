@@ -207,3 +207,54 @@ func TestSetInstallPatterns(t *testing.T) {
 		t.Fatalf("a refused set changed the patterns: %v", err)
 	}
 }
+
+// The patterns hold the API hosts of the vendor clouds that the server READMEs
+// and the vendor docs name (review M9).
+func TestVariables_TheVendorCloudsAreAllowed(t *testing.T) {
+	cases := map[string][]string{
+		"crowdstrike-response": {
+			"https://api.crowdstrike.com", "https://api.us-2.crowdstrike.com", "https://api.eu-1.crowdstrike.com",
+			"https://api.laggar.gcw.crowdstrike.com", "https://api.us-gov-2.crowdstrike.mil",
+		},
+		"qualys-vmdr": {
+			"https://qualysapi.qualys.com", "https://qualysapi.qg2.apps.qualys.com", "https://qualysapi.qg3.apps.qualys.com",
+			"https://qualysapi.qg4.apps.qualys.com", "https://qualysapi.gov1.qualys.us", "https://qualysapi.qualys.eu",
+			"https://qualysapi.qg2.apps.qualys.eu", "https://qualysapi.qg3.apps.qualys.it",
+			"https://qualysapi.qg1.apps.qualys.in", "https://qualysapi.qg1.apps.qualys.ca",
+			"https://qualysapi.qg1.apps.qualys.ae", "https://qualysapi.qg1.apps.qualys.co.uk",
+			"https://qualysapi.qg1.apps.qualys.com.au", "https://qualysapi.qg1.apps.qualysksa.com",
+		},
+		"defender-endpoint-response": {
+			"https://api.security.microsoft.com", "https://eu.api.security.microsoft.com",
+			"https://api-gcc.security.microsoft.us", "https://api-gov.security.microsoft.us",
+		},
+	}
+	for id, values := range cases {
+		e, err := LookupConnector(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range values {
+			if _, err := e.ResolveVariables(map[string]string{e.Variables[0].Name: v}); err != nil {
+				t.Errorf("%s refuses %s: %v", id, v, err)
+			}
+		}
+		if _, err := e.ResolveVariables(map[string]string{e.Variables[0].Name: "https://evil.example.com"}); err == nil {
+			t.Errorf("%s accepts a host of no vendor", id)
+		}
+	}
+}
+
+// A default must match a pattern of the manifest, and it applies when the
+// tenant gives no value (review M10).
+func TestVariables_ADefault(t *testing.T) {
+	e := aapEntry(t, aapPatterns+"      default: https://aap.example.com\n")
+	got, err := e.ResolveVariables(nil)
+	if err != nil || got.EgressAllow[0] != "aap.example.com:443" {
+		t.Fatalf("resolve with the default = %+v, %v", got, err)
+	}
+	if _, err := loadOne(t, hostedWithVariable+"      default: https://other.example.net\n"); err == nil ||
+		!strings.Contains(err.Error(), "default") {
+		t.Fatalf("a default outside the patterns: err = %v", err)
+	}
+}

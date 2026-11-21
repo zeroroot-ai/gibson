@@ -156,6 +156,7 @@ variables:
     patterns:             # the hosts of the vendor, same grammar as endpointPatterns
       - https://*.vendor.example
     installPatterns: true # the platform owner of the install adds patterns
+    default: https://api.vendor.example # optional: the default of the server
 ```
 
 The tenant gives a value for each variable in `EnableConnector` (`variables`). The pod gets the canonical value as the variable `env`. The egress allow-list of the pod holds the exact `host:port` of the value, in addition to the `egressAllow` of the manifest.
@@ -166,8 +167,9 @@ The daemon applies these rules at enable time and again each time it hands the c
 - The host is a public DNS name. Its last label must be a public suffix of the ICANN list. This refuses `localhost`, `.svc`, `.cluster.local`, `.local`, `.internal`, `.lan` and `.corp`.
 - The port is 443 or a number from 1024 to 65535.
 - The value must match a host pattern. The loader refuses a variable with no `patterns` and no `installPatterns`. The egress entry is never a wildcard.
-- The daemon refuses a missing value and a value that the manifest does not declare.
-- A stored value that a later manifest or rule refuses gives the pod no value and no egress host.
+- A variable with a `default` takes it when the tenant gives no value. The default is the default of the server, as its README states, so the egress list holds the host that the server calls. The default must match a pattern of the manifest.
+- The daemon refuses a missing value with no default, and a value that the manifest does not declare.
+- A stored value that a later manifest or rule refuses fails loudly. The daemon does not hand the connector to the operator, and it sets the status of the connector to `Failed` with the cause.
 
 ### A server that the customer hosts
 

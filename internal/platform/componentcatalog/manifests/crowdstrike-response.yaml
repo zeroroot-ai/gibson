@@ -24,16 +24,22 @@ spec:
       env: FALCON_CLIENT_ID
     - secret: crowdstrike-response-client-secret
       env: FALCON_CLIENT_SECRET
-  # The tenant gives the API base URL of its Falcon cloud, for example
-  # https://api.crowdstrike.com (US-1).
+  # The tenant gives the API base URL of its Falcon cloud. The default is
+  # https://api.crowdstrike.com (US-1), as the README of the server states.
+  # The patterns are the API hosts of the Falcon clouds: US-1, US-2, EU-1,
+  # US-GOV-1 and US-GOV-2 (CrowdStrike FalconPy, "Base URLs").
   # The egress allow-list of the pod holds the host of the value.
   variables:
     - name: api_url
       env: FALCON_BASE_URL
       kind: endpoint
+      default: https://api.crowdstrike.com
       patterns:
         - https://api.crowdstrike.com
-        - https://*.crowdstrike.com
+        - https://api.us-2.crowdstrike.com
+        - https://api.eu-1.crowdstrike.com
+        - https://api.laggar.gcw.crowdstrike.com
+        - https://api.us-gov-2.crowdstrike.mil
   # Each tool is a response action. Revoke a session, disable an account and
   # isolate a host need no person (ADR-0180): only a tool that destroys data
   # waits for one. A new tool of the server waits until this list names it.

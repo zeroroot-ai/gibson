@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -76,9 +77,38 @@ func (s *DaemonServer) ListDesiredConnectors(
 		if lerr != nil {
 			continue
 		}
-		out.Connectors = append(out.Connectors, s.desiredConnector(r, entry))
+		d, derr := s.desiredConnector(r, entry)
+		if derr != nil {
+			// A stored value that the rules of this release refuse fails
+			// loudly: the connector is not desired, and its status names the
+			// cause (review M10). A pod with no value would call the default
+			// host of its server, which the egress list does not hold.
+			s.failConnector(ctx, store, r, derr)
+			continue
+		}
+		out.Connectors = append(out.Connectors, d)
 	}
 	return out, nil
+}
+
+// failConnector records why the daemon does not hand a connector to the
+// operator.
+func (s *DaemonServer) failConnector(ctx context.Context, store connectorStatusWriter, r tenantconnector.Connector, cause error) {
+	s.logger.Error("connector is not desired: its stored values break the catalog rules",
+		"tenant", r.TenantID, "connector", r.ConnectorID, "error", cause)
+	if _, err := store.ReportStatus(ctx, r.TenantID, r.ConnectorID, tenantconnector.Status{
+		Phase: connectorPhaseFailed, LastError: cause.Error(),
+	}); err != nil {
+		s.logger.Error("connector status could not be written", "tenant", r.TenantID, "connector", r.ConnectorID, "error", err)
+	}
+}
+
+// connectorPhaseFailed is the phase of a connector that cannot run.
+const connectorPhaseFailed = "Failed"
+
+// connectorStatusWriter writes the status of one tenant connector.
+type connectorStatusWriter interface {
+	ReportStatus(ctx context.Context, tenantID, connectorID string, st tenantconnector.Status) (bool, error)
 }
 
 // ReportConnectorStatus records the state that the connector operator reads
@@ -140,10 +170,12 @@ func (s *DaemonServer) AdoptConnector(
 // release, not the manifest of the day when the tenant enabled the connector.
 // When the check fails, the connector gets no endpoint and no egress host. The
 // operator then reports it as Failed, and the connector never reaches a host
-// that the manifest does not allow.
+// that the manifest does not allow. The values of the variables of a Hosted
+// connector are checked the same way, and a refused value is an error: the
+// connector is then not desired at all (review M10).
 func (s *DaemonServer) desiredConnector(
 	r tenantconnector.Connector, entry componentcatalog.ConnectorEntry,
-) *daemonoperatorv1.DesiredConnector {
+) (*daemonoperatorv1.DesiredConnector, error) {
 	res, err := entry.ResolveEndpoint(r.Endpoint)
 	if err != nil {
 		s.logger.Warn("connector endpoint is outside the catalog patterns",
@@ -151,25 +183,22 @@ func (s *DaemonServer) desiredConnector(
 		res = componentcatalog.ResolvedEndpoint{}
 	}
 	// The values that the tenant gave for the variables of a Hosted connector
-	// are checked again, like the endpoint. When the check fails, the pod gets
-	// no value and no egress host for them (gibson#1508).
+	// are checked again, like the endpoint (gibson#1508).
 	env := entry.Env
 	egress := res.EgressAllow
 	if len(entry.Variables) > 0 {
 		vars, verr := entry.ResolveVariables(r.Variables)
 		if verr != nil {
-			s.logger.Warn("connector variables are outside the catalog rules",
-				"connector", r.ConnectorID, "error", verr)
-		} else {
-			env = make(map[string]string, len(entry.Env)+len(vars.Env))
-			for k, v := range entry.Env {
-				env[k] = v
-			}
-			for k, v := range vars.Env {
-				env[k] = v
-			}
-			egress = append(append([]string{}, egress...), vars.EgressAllow...)
+			return nil, fmt.Errorf("connector %s of tenant %s: %w", r.ConnectorID, r.TenantID, verr)
 		}
+		env = make(map[string]string, len(entry.Env)+len(vars.Env))
+		for k, v := range entry.Env {
+			env[k] = v
+		}
+		for k, v := range vars.Env {
+			env[k] = v
+		}
+		egress = append(append([]string{}, egress...), vars.EgressAllow...)
 	}
 	d := &daemonoperatorv1.DesiredConnector{
 		TenantId:    r.TenantID,
@@ -191,5 +220,5 @@ func (s *DaemonServer) desiredConnector(
 			Key: c.Secret, Property: c.Property, TargetEnv: c.Env,
 		})
 	}
-	return d
+	return d, nil
 }

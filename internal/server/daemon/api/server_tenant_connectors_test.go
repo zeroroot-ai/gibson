@@ -54,6 +54,28 @@ func TestListDesiredConnectors_ReturnsCatalogFields(t *testing.T) {
 	}
 }
 
+// A stored value that the catalog rules refuse fails loudly: the connector is
+// not desired, and its status says Failed with the cause (review M10).
+func TestListDesiredConnectors_ARefusedValueFailsTheConnector(t *testing.T) {
+	srv, mock := connectorServer(t)
+	mock.ExpectQuery("FROM tenant_connectors ORDER BY tenant_id, connector_id").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error", "endpoint", "oauth_client_id", "oauth_client_secret_name", "variables"}).
+			AddRow("acme", "github-fixloop", "Ready", 3, "", "", "", "", `{"api_url":"https://169.254.169.254.nip.io/"}`))
+	mock.ExpectExec("UPDATE tenant_connectors").WithArgs("acme", "github-fixloop", "Failed", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	resp, err := srv.ListDesiredConnectors(context.Background(), &daemonoperatorv1.ListDesiredConnectorsRequest{})
+	if err != nil {
+		t.Fatalf("ListDesiredConnectors: %v", err)
+	}
+	if len(resp.GetConnectors()) != 0 {
+		t.Fatalf("connectors = %v, want none", resp.GetConnectors())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+}
+
 func TestTenantConnectorRPCs_FailClosed(t *testing.T) {
 	srv := newPendingServer()
 	srv.platformDB = nil

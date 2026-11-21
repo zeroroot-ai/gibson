@@ -66,17 +66,36 @@ func TestDesiredConnector_HostedEgressFollowsTheVariable(t *testing.T) {
 	srv := newPendingServer()
 	entry := aapLikeEntry()
 
-	good := srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: "aap-like",
+	good, err := srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: "aap-like",
 		Config: tenantconnector.Config{Variables: map[string]string{"base_url": "https://aap.corp-example.com:8443/"}}}, entry)
+	require.NoError(t, err)
 	assert.Equal(t, "https://aap.corp-example.com:8443/", good.GetEnv()["BASE_URL"])
 	assert.Equal(t, "false", good.GetEnv()["ALLOW_WRITE_OPERATIONS"])
 	assert.True(t, slices.Contains(good.GetEgressAllow(), "aap.corp-example.com:8443"), "%v", good.GetEgressAllow())
 	assert.True(t, slices.Contains(good.GetEgressAllow(), "registry-static.example.com:443"), "%v", good.GetEgressAllow())
 	assert.Empty(t, entry.Env["BASE_URL"], "the catalog entry must not change")
 
-	bad := srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: "aap-like",
+	// A stored value that the rules refuse fails loudly: no desired connector
+	// (review M10).
+	bad, err := srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: "aap-like",
 		Config: tenantconnector.Config{Variables: map[string]string{"base_url": "https://10.0.0.5/"}}}, entry)
-	assert.Empty(t, bad.GetEnv()["BASE_URL"])
-	assert.Equal(t, []string{"registry-static.example.com:443"}, bad.GetEgressAllow(),
-		"a stored private address must add no egress host")
+	require.Error(t, err)
+	assert.Nil(t, bad)
+}
+
+// A variable with a default takes it when the tenant gives none, so the egress
+// list holds the host that the server calls by default (review M10).
+func TestDesiredConnector_AVariableWithADefault(t *testing.T) {
+	srv := newPendingServer()
+	for id, want := range map[string]string{
+		"github-fixloop":             "api.github.com:443",
+		"crowdstrike-response":       "api.crowdstrike.com:443",
+		"defender-endpoint-response": "api.security.microsoft.com:443",
+	} {
+		entry, err := componentcatalog.LookupConnector(id)
+		require.NoError(t, err)
+		d, err := srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: id}, entry)
+		require.NoError(t, err, id)
+		assert.True(t, slices.Contains(d.GetEgressAllow(), want), "%s egress = %v", id, d.GetEgressAllow())
+	}
 }
