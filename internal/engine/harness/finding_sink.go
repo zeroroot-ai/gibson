@@ -24,9 +24,11 @@ type FindingRaised struct {
 	MissionID    string
 	MissionRunID string
 	AgentName    string
-	// CheckRef is the mission that raised the finding. A rerun of that mission
-	// is the check that verifies the fix (ADR-0178). The daemon sets the kind.
-	CheckRef string
+	// CheckKind and CheckRef name the check that raised the finding
+	// (SubmittedFindingCheck, ADR-0178): the mission run, or the read of a
+	// connector tool.
+	CheckKind string
+	CheckRef  string
 	// At is the time of the read. The harness sets it.
 	At time.Time
 }

@@ -190,8 +190,9 @@ func ingestHarnessFinding(reg *brain.Registry) harness.FindingSink {
 			MissionID:    f.MissionID,
 			MissionRunID: f.MissionRunID,
 			AgentName:    f.AgentName,
-			// A rerun of the mission is the check that verifies the fix (ADR-0178).
-			CheckKind: string(finding.CheckScan),
+			// The check that raised it (ADR-0178): the mission run, or the
+			// read of a connector tool (harness.SubmittedFindingCheck).
+			CheckKind: f.CheckKind,
 			CheckRef:  f.CheckRef,
 			At:        f.At,
 		})

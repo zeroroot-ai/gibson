@@ -1722,6 +1722,7 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 	// keeps the node for relations. The reader gets the fields and the evidence
 	// from Postgres by this ID.
 	if h.findingSink != nil {
+		check := SubmittedFindingCheck(finding, h.missionCtx.ID)
 		h.findingSink(ctx, FindingRaised{
 			Tenant:       h.missionCtx.TenantID,
 			ID:           finding.ID.String(),
@@ -1732,7 +1733,8 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 			MissionID:    h.missionCtx.ID.String(),
 			MissionRunID: h.missionCtx.MissionRunID,
 			AgentName:    h.missionCtx.CurrentAgent,
-			CheckRef:     h.missionCtx.ID.String(),
+			CheckKind:    string(check.Kind),
+			CheckRef:     check.Ref,
 			At:           time.Now().UTC(),
 		})
 	}
