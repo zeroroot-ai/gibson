@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v2.1.0...gibson-bootstrap-v3.0.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* delete the plan tier fields ([#1572](https://github.com/zeroroot-ai/gibson/issues/1572))
+
+### Features
+
+* delete the plan tier fields ([#1572](https://github.com/zeroroot-ai/gibson/issues/1572)) ([0ae6c08](https://github.com/zeroroot-ai/gibson/commit/0ae6c0899c434711151f84399b644d1e35da0b15))
+
 ## [2.1.0](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v2.0.0...gibson-bootstrap-v2.1.0) (2026-11-20)
 
 
