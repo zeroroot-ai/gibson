@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -49,7 +50,10 @@ func incidentReportStatus(err error) error {
 	case errors.Is(err, incidentreport.ErrNoTenant):
 		return status_grpc.Error(codes.PermissionDenied, "GetIncidentReport: missing tenant in context")
 	default:
-		return status_grpc.Errorf(codes.Unavailable, "GetIncidentReport: %v", err)
+		// The cause stays in the daemon log. The caller gets a fixed text, so
+		// no internal detail leaves the daemon (review m20).
+		slog.Error("incident report read failed", "error", err)
+		return status_grpc.Error(codes.Unavailable, "GetIncidentReport: the report cannot be read now")
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -149,7 +150,7 @@ func Assemble(incident string, ix *Index, alertRows, reachedRows, causeRows, fix
 		if key == "" {
 			continue
 		}
-		label := str(row, "label")
+		label := reachedLabel(row)
 		rep.Reached = append(rep.Reached, ReachedLine{
 			Label: label, Key: key, AlertKey: str(row, "alert_key"), Frame: ix.entityFrame(label, key),
 		})
@@ -228,6 +229,36 @@ func (r *Report) ControlIDs() []string {
 func str(row map[string]any, key string) string {
 	if v, ok := row[key].(string); ok {
 		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+// reachedLabel picks one label of a reached node, the same one on each read:
+// the first label in sort order that the Taxonomy admits, else the first in
+// sort order. A row with a single "label" column keeps it.
+func reachedLabel(row map[string]any) string {
+	if l := str(row, "label"); l != "" {
+		return l
+	}
+	var labels []string
+	switch v := row["labels"].(type) {
+	case []string:
+		labels = append(labels, v...)
+	case []any:
+		for _, x := range v {
+			if s, ok := x.(string); ok {
+				labels = append(labels, s)
+			}
+		}
+	}
+	sort.Strings(labels)
+	for _, l := range labels {
+		if taxonomy.Global.ClassifyNode(l).InTaxonomy {
+			return l
+		}
+	}
+	if len(labels) > 0 {
+		return labels[0]
 	}
 	return ""
 }

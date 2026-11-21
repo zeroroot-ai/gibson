@@ -58,7 +58,9 @@ func BuildIndex(history []brain.Event) *Index {
 	}
 	for i, ev := range history {
 		seq := uint64(i)
-		switch e := ev.(type) {
+		// The codec decodes an event of the durable history as a pointer, and a
+		// live Submit carries a value. Both forms count (review m23).
+		switch e := derefEvent(ev).(type) {
 		case brain.EntityObserved:
 			k := entityKey(e.Label, e.Key)
 			if _, ok := ix.entity[k]; !ok {
@@ -170,4 +172,22 @@ func classify(errText, result string) Outcome {
 	default:
 		return OutcomeDone
 	}
+}
+
+// derefEvent turns a pointer event of the kinds that BuildIndex reads into its
+// value. Any other event passes through.
+func derefEvent(ev brain.Event) brain.Event {
+	switch e := ev.(type) {
+	case *brain.EntityObserved:
+		return *e
+	case *brain.FindingRaised:
+		return *e
+	case *brain.FindingStatusChanged:
+		return *e
+	case *brain.AgentRunObserved:
+		return *e
+	case *brain.AgentToolCallObserved:
+		return *e
+	}
+	return ev
 }

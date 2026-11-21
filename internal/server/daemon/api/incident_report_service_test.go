@@ -75,6 +75,10 @@ func TestIncidentReportStatus_MapsEachErrorToACode(t *testing.T) {
 		if got := status_grpc.Code(incidentReportStatus(tc.err)); got != tc.want {
 			t.Errorf("%v -> %v, want %v", tc.err, got, tc.want)
 		}
+		// No internal text reaches the caller (review m20).
+		if msg := status_grpc.Convert(incidentReportStatus(tc.err)).Message(); strings.Contains(msg, "graph down") {
+			t.Errorf("the message carries the internal error: %q", msg)
+		}
 	}
 }
 

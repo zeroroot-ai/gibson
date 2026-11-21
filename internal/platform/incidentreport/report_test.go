@@ -322,3 +322,32 @@ func TestNewReader_RequiresEachSource(t *testing.T) {
 		t.Error("a nil graph must be refused")
 	}
 }
+
+// The reach query returns all labels of a node, and the reader picks the same
+// one on each read: the first in sort order that the Taxonomy admits
+// (review m19).
+func TestReachedLabel_IsTheSameOnEachRead(t *testing.T) {
+	for _, labels := range [][]any{{"Host", "Asset"}, {"Asset", "Host"}} {
+		if got := reachedLabel(map[string]any{"labels": labels}); got != "Host" {
+			t.Fatalf("labels %v -> %q, want Host", labels, got)
+		}
+	}
+	if got := reachedLabel(map[string]any{"labels": []any{"Zeta", "Alpha"}}); got != "Alpha" {
+		t.Fatalf("no Taxonomy label -> %q, want the first in sort order", got)
+	}
+	for _, q := range []string{alertsCypher, reachedCypher, causesCypher, fixesCypher} {
+		if strings.Contains(q, "coalesce(i.key") || strings.Contains(q, "head(labels") {
+			t.Fatalf("a query keeps the form that no index serves: %s", q)
+		}
+	}
+}
+
+// BuildIndex reads the pointer form of an event, as the codec decodes the
+// durable history, the same as the value form (review m23).
+func TestBuildIndex_ReadsPointerEvents(t *testing.T) {
+	value := BuildIndex([]brain.Event{brain.FindingRaised{ID: "f-1"}, brain.FindingStatusChanged{ID: "f-1", Status: "fixing"}})
+	ptr := BuildIndex([]brain.Event{&brain.FindingRaised{ID: "f-1"}, &brain.FindingStatusChanged{ID: "f-1", Status: "fixing"}})
+	if value.findingFrame("f-1") != ptr.findingFrame("f-1") || len(ptr.statusHistory("f-1")) != 1 {
+		t.Fatalf("pointer events: frame %+v, history %+v", ptr.findingFrame("f-1"), ptr.statusHistory("f-1"))
+	}
+}

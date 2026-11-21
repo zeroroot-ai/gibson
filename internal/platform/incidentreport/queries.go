@@ -11,10 +11,15 @@ package incidentreport
 // AFFECTS (taxonomy version 6). The Incident node names its cause with
 // CAUSED_BY. A fix is a FIXED_BY edge from the finding to a MergeRequest, and
 // VERIFIED_BY joins a finding to the pipeline that verified it.
+//
+// The entity projector merges an Incident on its key (review m19), so each
+// query matches the key property, which the uniqueness constraint indexes. A
+// node can hold more than one label, and Neo4j gives them in no fixed order,
+// so the reach query returns all of them and the reader picks one
+// (reachedLabel).
 
 const alertsCypher = `
-MATCH (i:Incident)
-WHERE coalesce(i.key, i.brain_id) = $incident
+MATCH (i:Incident {key: $incident})
 OPTIONAL MATCH (a:Alert)-[:PART_OF]->(i)
 RETURN
   coalesce(a.key, a.brain_id, '') AS alert_key,
@@ -25,18 +30,16 @@ ORDER BY alert_key
 LIMIT $limit`
 
 const reachedCypher = `
-MATCH (i:Incident)<-[:PART_OF]-(a:Alert)-[:AFFECTS]->(p)
-WHERE coalesce(i.key, i.brain_id) = $incident
+MATCH (i:Incident {key: $incident})<-[:PART_OF]-(a:Alert)-[:AFFECTS]->(p)
 RETURN DISTINCT
   coalesce(a.key, a.brain_id, '')   AS alert_key,
-  head(labels(p))                    AS label,
+  labels(p)                          AS labels,
   coalesce(p.key, p.brain_id, '')   AS key
-ORDER BY alert_key, label, key
+ORDER BY alert_key, key
 LIMIT $limit`
 
 const causesCypher = `
-MATCH (i:Incident)-[:CAUSED_BY]->(f:Finding)
-WHERE coalesce(i.key, i.brain_id) = $incident
+MATCH (i:Incident {key: $incident})-[:CAUSED_BY]->(f:Finding)
 RETURN
   coalesce(f.brain_id, f.key, '') AS finding_key,
   coalesce(f.title, '')           AS title,
@@ -46,8 +49,7 @@ ORDER BY finding_key
 LIMIT $limit`
 
 const fixesCypher = `
-MATCH (i:Incident)-[:CAUSED_BY]->(f:Finding)
-WHERE coalesce(i.key, i.brain_id) = $incident
+MATCH (i:Incident {key: $incident})-[:CAUSED_BY]->(f:Finding)
 OPTIONAL MATCH (f)-[:FIXED_BY]->(mr:MergeRequest)
 OPTIONAL MATCH (f)-[:VERIFIED_BY]->(p:Pipeline)
 RETURN
