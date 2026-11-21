@@ -141,6 +141,14 @@ func (w *Watcher) stepFixing(ctx context.Context, tenant, mr string, fs []brain.
 	if hasSlot || !fact.PipelineGreen {
 		return nil, nil
 	}
+	mission := fixMission(fs)
+	if mission == "" {
+		// A slot binds a mission, and no call of an empty mission merges. A
+		// slot with none would only hold the Application.
+		w.logger.Warn("fix loop: the merge request names no fix mission, so it gets no merge slot",
+			"tenant", tenant, "merge_request", mr)
+		return nil, nil
+	}
 	app, err := w.placer.Application(ctx, tenant, fs[0].ID)
 	if err != nil {
 		return nil, fmt.Errorf("place finding: %w", err)
@@ -149,7 +157,7 @@ func (w *Watcher) stepFixing(ctx context.Context, tenant, mr string, fs []brain.
 		return nil, nil
 	}
 	return []brain.Event{brain.MergeRequestQueued{
-		MergeRequest: mr, Application: app, At: w.now(), MissionID: fixMission(fs),
+		MergeRequest: mr, Application: app, At: w.now(), MissionID: mission,
 	}}, nil
 }
 

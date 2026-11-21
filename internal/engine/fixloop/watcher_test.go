@@ -429,3 +429,21 @@ func TestNewWatcher_RefusesAMissingDependency(t *testing.T) {
 		t.Error("no placer: want an error")
 	}
 }
+
+// A merge request whose findings name no fix mission gets no merge slot: no
+// call could merge with it, and it would hold the Application (review, final).
+func TestStep_NoSlotForAMergeRequestWithNoMission(t *testing.T) {
+	w := brain.NewWorld("t1")
+	brain.Reduce(w, brain.FindingRaised{ID: "f1", At: at(0)})
+	brain.Reduce(w, brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", At: at(1)})
+	r := &fakeReader{mr: MergeFact{State: MROpen, PipelineGreen: true}}
+	wt, err := NewWatcher(r, &fakeReverter{}, fakePlacer{app: "app-1"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range wt.Step(context.Background(), "t1", w.FindingSnapshot(), w.MergeSlots()) {
+		if _, ok := ev.(brain.MergeRequestQueued); ok {
+			t.Fatalf("a merge request with no mission was queued: %+v", ev)
+		}
+	}
+}
