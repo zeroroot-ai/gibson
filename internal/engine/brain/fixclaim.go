@@ -53,7 +53,7 @@ func applyFixClaimed(w *World, e FixClaimed) {
 	}
 	forFinding(w, e.ID, func(f *Finding) {
 		if f.Status == FindingStatusOpen && f.FixClaim == "" {
-			f.FixClaim = e.Claim
+			f.FixClaim, f.FixClaimedAt = e.Claim, e.At
 		}
 	})
 }
@@ -62,10 +62,28 @@ func applyFixClaimed(w *World, e FixClaimed) {
 func applyFixClaimReleased(w *World, e FixClaimReleased) {
 	forFinding(w, e.ID, func(f *Finding) {
 		if f.FixClaim == e.Claim {
-			f.FixClaim = ""
+			f.FixClaim, f.FixClaimedAt = "", time.Time{}
 		}
 	})
 }
+
+// FixLinkRefused records that the daemon refused to link a merge request to a
+// Finding (review B1). The fix job named the merge request, and the daemon
+// read it on the Git host. The merge request was not open, was older than the
+// claim of the job, or came from a branch that is not the job branch. The
+// Finding keeps its status, and the claim of the job ends. The event changes
+// nothing else. It is the record of the refusal in the Timeline.
+type FixLinkRefused struct {
+	ID           string
+	MergeRequest string
+	JobID        string
+	Reason       string
+	MissionID    string
+	At           time.Time
+}
+
+// Kind identifies the finding.fix_link_refused brain event.
+func (FixLinkRefused) Kind() string { return "finding.fix_link_refused" }
 
 // FixClaimOf returns the claim that holds the Finding, or "".
 func (w *World) FixClaimOf(id string) string {

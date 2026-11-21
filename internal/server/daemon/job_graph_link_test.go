@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
+	"github.com/zeroroot-ai/gibson/internal/engine/fixloop"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 )
@@ -22,7 +23,42 @@ var testNow = time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 const testMRURL = "https://forge.example/g/r/-/merge_requests/7"
 
 func closedJob(inputs []string, ds ...job.Deliverable) jobnode.ClosedJob {
-	return jobnode.ClosedJob{TenantID: "acme", MissionRunID: "run-1", JobID: "job-1", Inputs: inputs, Deliverables: ds}
+	return jobnode.ClosedJob{
+		TenantID: "acme", MissionRunID: "run-1", NodeID: "fix", JobID: "job-1", Inputs: inputs, Deliverables: ds,
+	}
+}
+
+// testClaimedAt is the time of the claim of the test job.
+var testClaimedAt = testNow.Add(-time.Hour)
+
+// heldWorld builds a World view in which the job of closedJob holds every
+// finding, and each is open with the scope that the map gives.
+func heldWorld(findings map[string]string) func(string) map[string]findingRef {
+	refs := make(map[string]findingRef, len(findings))
+	for id, scope := range findings {
+		refs[id] = findingRef{scope: scope, status: brain.FindingStatusOpen, claim: "run-1/fix", claimedAt: testClaimedAt}
+	}
+	return func(string) map[string]findingRef { return refs }
+}
+
+// fakeMRReader is the Git host of the link tests.
+type fakeMRReader struct {
+	fact  fixloop.MergeFact
+	err   error
+	calls []string
+}
+
+func (f *fakeMRReader) MergeRequest(_ context.Context, tenant, missionID, key string) (fixloop.MergeFact, error) {
+	f.calls = append(f.calls, tenant+"/"+missionID+"/"+key)
+	return f.fact, f.err
+}
+
+// jobMR is the merge request that the test job opened: open, on the job
+// branch, after the claim.
+func jobMR() *fakeMRReader {
+	return &fakeMRReader{fact: fixloop.MergeFact{
+		State: fixloop.MROpen, SourceBranch: "job/job-1", CreatedAt: testClaimedAt.Add(10 * time.Minute),
+	}}
 }
 
 // worldWith builds a World view in which every finding is open and has the
@@ -132,8 +168,8 @@ func TestJobGraphLink_SubmitsToTheClosingTenant(t *testing.T) {
 	var n int
 	l := &jobGraphLink{
 		submit:   func(tenant string, _ brain.Event) { tenants = append(tenants, tenant); n++ },
-		findings: worldWith(map[string]string{"f-1": "s"}),
-		logger:   testObsLogger().Slog(),
+		findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: jobMR(), now: func() time.Time { return testNow },
+		logger: testObsLogger().Slog(),
 	}
 	l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
 	if n != 3 || tenants[0] != "acme" || tenants[2] != "acme" {
@@ -148,8 +184,8 @@ func TestJobGraphLink_LogsTheInputsItLeftOut(t *testing.T) {
 	var submitted int
 	l := &jobGraphLink{
 		submit:   func(string, brain.Event) { submitted++ },
-		findings: worldWith(map[string]string{"f-1": "s"}),
-		logger:   testObsLogger().Slog(),
+		findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: jobMR(), now: func() time.Time { return testNow },
+		logger: testObsLogger().Slog(),
 	}
 	// Two inputs, one finding and one plan.
 	l.JobClosed(context.Background(), closedJob([]string{"f-1", "plan-1"}, mrDeliverable))
@@ -165,8 +201,8 @@ func TestJobGraphLink_LogsTheInputsItLeftOut(t *testing.T) {
 // them: the submit path and the findings projection both stay unproven.
 func TestNewJobGraphLink_ReadsFindingsFromTheTenantWorld(t *testing.T) {
 	reg := brain.NewRegistry(context.Background(), braintest.StoreFactory())
-	l := newJobGraphLink(reg, testObsLogger().Slog())
-	if l.submit == nil || l.findings == nil {
+	l := newJobGraphLink(reg, jobMR(), testObsLogger().Slog())
+	if l.submit == nil || l.findings == nil || l.mergeRequests == nil || l.now == nil {
 		t.Fatal("newJobGraphLink left a seam nil")
 	}
 	// A tenant with no findings yields an empty, non-nil map, so a caller can
@@ -356,4 +392,71 @@ func testFixClaims(t *testing.T) fixClaims {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	return newFixClaims(brain.NewRegistry(ctx, braintest.StoreFactory()))
+}
+
+// The daemon links only a merge request that the job opened: open on the Git
+// host, from the job branch, and newer than the claim (review B1). Any other
+// merge request is refused, the refusal is recorded on each finding, the
+// claim ends, and no finding moves to fixing.
+func TestJobGraphLink_RefusesAMergeRequestThatIsNotTheWorkOfTheJob(t *testing.T) {
+	good := jobMR().fact
+	cases := map[string]*fakeMRReader{
+		"merged by a person": {fact: fixloop.MergeFact{
+			State: fixloop.MRMerged, SourceBranch: good.SourceBranch, CreatedAt: good.CreatedAt}},
+		"closed": {fact: fixloop.MergeFact{
+			State: fixloop.MRClosed, SourceBranch: good.SourceBranch, CreatedAt: good.CreatedAt}},
+		"another branch": {fact: fixloop.MergeFact{
+			State: fixloop.MROpen, SourceBranch: "release-hotfix", CreatedAt: good.CreatedAt}},
+		"older than the claim": {fact: fixloop.MergeFact{
+			State: fixloop.MROpen, SourceBranch: good.SourceBranch, CreatedAt: testClaimedAt.Add(-time.Minute)}},
+		"no time of creation": {fact: fixloop.MergeFact{State: fixloop.MROpen, SourceBranch: good.SourceBranch}},
+		"the host cannot be read": {err: errors.New("connector down")},
+	}
+	for name, mrs := range cases {
+		t.Run(name, func(t *testing.T) {
+			var evs []brain.Event
+			l := &jobGraphLink{
+				submit:        func(_ string, ev brain.Event) { evs = append(evs, ev) },
+				findings:      heldWorld(map[string]string{"f-1": "s"}),
+				mergeRequests: mrs, now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
+			}
+			l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
+			if len(mrs.calls) != 1 || mrs.calls[0] != "acme/run-1/"+testMRURL {
+				t.Fatalf("reads = %v", mrs.calls)
+			}
+			if len(evs) != 2 {
+				t.Fatalf("events = %+v, want the refusal and the release", evs)
+			}
+			ref, ok := evs[0].(brain.FixLinkRefused)
+			if !ok || ref.ID != "f-1" || ref.MergeRequest != testMRURL || ref.JobID != "job-1" || ref.Reason == "" {
+				t.Fatalf("refusal = %+v", evs[0])
+			}
+			rel, ok := evs[1].(brain.FixClaimReleased)
+			if !ok || rel.ID != "f-1" || rel.Claim != "run-1/fix" {
+				t.Fatalf("release = %+v", evs[1])
+			}
+		})
+	}
+}
+
+// A finding that the job does not hold takes no link, even when the merge
+// request is the work of the job.
+func TestJobGraphLink_LinksOnlyTheFindingsThatTheJobHolds(t *testing.T) {
+	var evs []brain.Event
+	known := heldWorld(map[string]string{"f-1": "s"})("")
+	known["f-other"] = findingRef{scope: "s", status: brain.FindingStatusOpen, claim: "run-2/fix", claimedAt: testClaimedAt}
+	l := &jobGraphLink{
+		submit:   func(_ string, ev brain.Event) { evs = append(evs, ev) },
+		findings: func(string) map[string]findingRef { return known }, mergeRequests: jobMR(),
+		now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
+	}
+	l.JobClosed(context.Background(), closedJob([]string{"f-1", "f-other"}, mrDeliverable))
+	for _, ev := range evs {
+		if c, ok := ev.(brain.FindingStatusChanged); ok && c.ID != "f-1" {
+			t.Fatalf("a finding that the job does not hold moved: %+v", c)
+		}
+		if e, ok := ev.(brain.EntityObserved); ok && e.Key == "f-other" {
+			t.Fatalf("a finding that the job does not hold took the link: %+v", e)
+		}
+	}
 }

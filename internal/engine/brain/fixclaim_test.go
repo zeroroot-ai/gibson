@@ -56,6 +56,7 @@ func TestFixLoopEvents_SurviveTheCodecAndTheMissionSlice(t *testing.T) {
 	for _, ev := range []Event{
 		FixClaimed{ID: "f1", Claim: "c", MissionID: "m1", At: at},
 		FixClaimReleased{ID: "f1", Claim: "c", MissionID: "m1", At: at},
+		FixLinkRefused{ID: "f1", MergeRequest: "mr-1", JobID: "j1", Reason: "r", MissionID: "m1", At: at},
 		RevertRequested{MergeRequest: "mr-1", RevertMergeRequest: "mr-2", MissionID: "m1", At: at},
 	} {
 		data, err := EncodeEvent(ev)
@@ -176,5 +177,21 @@ func TestMissionSlice_HoldsTheFixLoopOfTheMission(t *testing.T) {
 	got := MissionSlice(append(append([]Event(nil), mine...), others...), "fix-1")
 	if len(got) != len(mine) {
 		t.Fatalf("slice holds %d events, want %d: %+v", len(got), len(mine), got)
+	}
+}
+
+// The claim keeps its time, so the graph link can check that a merge request
+// is newer than the claim (review B1). A release forgets the time.
+func TestFixClaim_KeepsTheTimeOfTheClaim(t *testing.T) {
+	w := NewWorld("t1")
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	Reduce(w, FindingRaised{ID: "f1", At: at})
+	Reduce(w, FixClaimed{ID: "f1", Claim: "run-1/fix", At: at.Add(time.Minute)})
+	if got := w.FindingSnapshot()[0].FixClaimedAt; !got.Equal(at.Add(time.Minute)) {
+		t.Fatalf("claimed at = %v", got)
+	}
+	Reduce(w, FixClaimReleased{ID: "f1", Claim: "run-1/fix", At: at})
+	if got := w.FindingSnapshot()[0].FixClaimedAt; !got.IsZero() {
+		t.Fatalf("claimed at after the release = %v", got)
 	}
 }

@@ -27,6 +27,11 @@ type MergeFact struct {
 	Reason string
 	// At is the time of the fact on the host.
 	At time.Time
+	// CreatedAt is when the merge request was opened on the host. SourceBranch
+	// is the branch that it merges. The daemon reads both before it links the
+	// merge request of a fix job to a finding (review B1).
+	CreatedAt    time.Time
+	SourceBranch string
 }
 
 // RestartFact is what the deploy tool says about a restart that a deploy
@@ -62,11 +67,12 @@ type HealthFact struct {
 
 // Reader reads the facts from the tools of the tenant. The implementation
 // calls the Connector of the tenant with its own grant. The tenant comes from
-// the caller of the Watcher and never from a finding.
+// the caller of the Watcher and never from a finding. missionID is the mission
+// of the fix, for the audit record and the flight recorder.
 type Reader interface {
-	MergeRequest(ctx context.Context, tenant, key string) (MergeFact, error)
-	Deploy(ctx context.Context, tenant, mergeRequest string) (DeployFact, error)
-	Health(ctx context.Context, tenant, application string, since time.Time, hold time.Duration) (HealthFact, error)
+	MergeRequest(ctx context.Context, tenant, missionID, key string) (MergeFact, error)
+	Deploy(ctx context.Context, tenant, missionID, mergeRequest string) (DeployFact, error)
+	Health(ctx context.Context, tenant, missionID, application string, since time.Time, hold time.Duration) (HealthFact, error)
 }
 
 // RevertFact is what the Git host says after one call of the revert tool.

@@ -71,6 +71,10 @@ func findingSubject(ev Event) (id, mergeRequest string, ok bool) {
 		return e.ID, "", true
 	case *FixClaimReleased:
 		return e.ID, "", true
+	case FixLinkRefused:
+		return e.ID, "", true
+	case *FixLinkRefused:
+		return e.ID, "", true
 	}
 	return "", "", false
 }

@@ -23,13 +23,13 @@ type fakeReader struct {
 	err    error
 }
 
-func (f *fakeReader) MergeRequest(context.Context, string, string) (MergeFact, error) {
+func (f *fakeReader) MergeRequest(context.Context, string, string, string) (MergeFact, error) {
 	return f.mr, f.err
 }
-func (f *fakeReader) Deploy(context.Context, string, string) (DeployFact, error) {
+func (f *fakeReader) Deploy(context.Context, string, string, string) (DeployFact, error) {
 	return f.deploy, f.err
 }
-func (f *fakeReader) Health(context.Context, string, string, time.Time, time.Duration) (HealthFact, error) {
+func (f *fakeReader) Health(context.Context, string, string, string, time.Time, time.Duration) (HealthFact, error) {
 	return f.health, f.err
 }
 

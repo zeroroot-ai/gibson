@@ -120,7 +120,7 @@ func (w *Watcher) stampOr(t time.Time) time.Time {
 
 // stepFixing reads the merge request of a `fixing` finding.
 func (w *Watcher) stepFixing(ctx context.Context, tenant, mr string, fs []brain.FindingSnapshot, hasSlot bool) ([]brain.Event, error) {
-	fact, err := w.reader.MergeRequest(ctx, tenant, mr)
+	fact, err := w.reader.MergeRequest(ctx, tenant, fixMission(fs), mr)
 	if err != nil {
 		return nil, fmt.Errorf("read merge request: %w", err)
 	}
@@ -175,7 +175,7 @@ func (w *Watcher) stepFixed(ctx context.Context, tenant, mr string, fs []brain.F
 	f := firstWithStatus(fs, brain.FindingStatusFixed)
 	switch {
 	case f.DeployedAt.IsZero():
-		d, err := w.reader.Deploy(ctx, tenant, mr)
+		d, err := w.reader.Deploy(ctx, tenant, f.FixMissionID, mr)
 		if err != nil {
 			return nil, fmt.Errorf("read deploy: %w", err)
 		}
@@ -258,7 +258,7 @@ func firstWithStatus(fs []brain.FindingSnapshot, status string) brain.FindingSna
 // than the limit is a failure.
 func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.FindingSnapshot) ([]brain.Event, error) {
 	pol := w.policy(tenant)
-	d, err := w.reader.Deploy(ctx, tenant, mr)
+	d, err := w.reader.Deploy(ctx, tenant, f.FixMissionID, mr)
 	if err != nil {
 		return nil, fmt.Errorf("read deploy: %w", err)
 	}
@@ -287,7 +287,7 @@ func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.Fin
 	if app == "" {
 		return w.unavailable(mr, f), nil // no place, so no health signal to read
 	}
-	h, err := w.reader.Health(ctx, tenant, app, since, pol.HoldTime)
+	h, err := w.reader.Health(ctx, tenant, f.FixMissionID, app, since, pol.HoldTime)
 	if err != nil {
 		return nil, fmt.Errorf("read health: %w", err)
 	}

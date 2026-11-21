@@ -48,18 +48,19 @@ func (p applicationPlacer) Application(ctx context.Context, tenant, findingID st
 	return "", nil
 }
 
-// governedRevert is the fixloop.TenantCaller of the daemon. It resolves the
+// governedConnector is the fixloop.TenantCaller of the daemon. It resolves the
 // callback manager on each call, because the daemon builds it after the fix
-// loop. With no callback manager, the revert fails and the Watcher tries it
-// again on the next pass. The call never goes around the governed path.
-type governedRevert struct {
+// loop. With no callback manager, the call fails and the Watcher tries it
+// again on the next pass. No call of the fix loop goes around the governed
+// path (ADR-0065).
+type governedConnector struct {
 	callback func() *harness.CallbackManager
 }
 
-var _ fixloop.TenantCaller = governedRevert{}
+var _ fixloop.TenantCaller = governedConnector{}
 
 // CallConnectorForTenant implements fixloop.TenantCaller.
-func (g governedRevert) CallConnectorForTenant(
+func (g governedConnector) CallConnectorForTenant(
 	ctx context.Context, tenant, missionID, connector, tool string, args map[string]any,
 ) (any, error) {
 	cb := g.callback()

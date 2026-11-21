@@ -365,7 +365,16 @@ func abandon(ctx context.Context, in Input, jobID string, pass int32, report str
 }
 
 // claim names the fix job of this node run.
-func (in Input) claim() string { return in.MissionRunID + "/" + in.NodeID }
+func (in Input) claim() string { return ClaimName(in.MissionRunID, in.NodeID) }
+
+// ClaimName is the name of the fix claim of one node run: the mission run and
+// the node. The graph link reads it to find the claims of a closed job.
+func ClaimName(missionRunID, nodeID string) string { return missionRunID + "/" + nodeID }
+
+// JobBranch is the branch that the member driver commits the work of a job on
+// (zeroroot-ai/zerocool-plugins, claude-member workspace.ts jobBranch). A merge
+// request of the job comes from this branch and from no other.
+func JobBranch(jobID string) string { return "job/" + jobID }
 
 // release ends the claims of the job on a bound that drops the cancellation of
 // the caller, because the bound of the caller may be the thing that ended.

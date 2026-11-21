@@ -1106,11 +1106,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 	// The fix loop reads the merge, the deploy and the health signal from the
 	// tools of the tenant. The daemon reads them and no agent states them.
-	// The revert changes the code of the buyer, so it takes the governed path
-	// of every connector call: the grant, the audit records and the flight
-	// recorder (gibson#1465).
+	// Each read and the revert take the governed path of every connector
+	// call: the grant, the audit records and the flight recorder (gibson#1465,
+	// ADR-0065).
 	connectors := fixloop.NewConnectorReader(d.connectorMCPClient(),
-		governedRevert{callback: func() *harness.CallbackManager { return d.callback }})
+		governedConnector{callback: func() *harness.CallbackManager { return d.callback }})
 	fixWatcher, err := fixloop.NewWatcher(
 		connectors, connectors,
 		applicationPlacer{querier: func() any { return d.graphragQuerier }},
@@ -1187,7 +1187,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.brainExecutor.models = d.modelClient
 		// A job node's jobs live in the tenant's data plane, which is built
 		// later in Start, so the store is read per dispatch (gibson#1713).
-		d.brainExecutor.jobClosed = newJobGraphLink(d.brainRegistry, d.logger.WithComponent("job-graph-link").Slog())
+		d.brainExecutor.jobClosed = newJobGraphLink(d.brainRegistry, connectors, d.logger.WithComponent("job-graph-link").Slog())
 		d.brainExecutor.jobFindings = openFindingsResolver(d.brainRegistry)
 		d.brainExecutor.jobClaims = newFixClaims(d.brainRegistry)
 		d.brainExecutor.jobs = func() (job.Store, error) {

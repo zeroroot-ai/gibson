@@ -107,6 +107,7 @@ func init() {
 	registerEvent("fix.revert_requested", func() Event { return &RevertRequested{} })
 	registerEvent("finding.fix_claimed", func() Event { return &FixClaimed{} })
 	registerEvent("finding.fix_claim_released", func() Event { return &FixClaimReleased{} })
+	registerEvent("finding.fix_link_refused", func() Event { return &FixLinkRefused{} })
 	registerEvent("fix.reverted", func() Event { return &FixReverted{} })
 	registerEvent("check.rerun", func() Event { return &CheckRerun{} })
 	registerEvent("merge_request.queued", func() Event { return &MergeRequestQueued{} })

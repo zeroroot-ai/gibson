@@ -47,7 +47,7 @@ func TestApplicationPlacer(t *testing.T) {
 
 // With no callback manager, the revert fails and takes no other path.
 func TestGovernedRevert_NeedsTheCallbackManager(t *testing.T) {
-	g := governedRevert{callback: func() *harness.CallbackManager { return nil }}
+	g := governedConnector{callback: func() *harness.CallbackManager { return nil }}
 	if _, err := g.CallConnectorForTenant(context.Background(), "acme", "m1", "gitlab", "revert_merge_request", nil); err == nil {
 		t.Fatal("want an error with no callback manager")
 	}
@@ -78,15 +78,15 @@ func TestNewFixLoopRunner_Defaults(t *testing.T) {
 
 type stubFixReader struct{}
 
-func (*stubFixReader) MergeRequest(context.Context, string, string) (fixloop.MergeFact, error) {
+func (*stubFixReader) MergeRequest(context.Context, string, string, string) (fixloop.MergeFact, error) {
 	return fixloop.MergeFact{}, nil
 }
 
-func (*stubFixReader) Deploy(context.Context, string, string) (fixloop.DeployFact, error) {
+func (*stubFixReader) Deploy(context.Context, string, string, string) (fixloop.DeployFact, error) {
 	return fixloop.DeployFact{}, nil
 }
 
-func (*stubFixReader) Health(context.Context, string, string, time.Time, time.Duration) (fixloop.HealthFact, error) {
+func (*stubFixReader) Health(context.Context, string, string, string, time.Time, time.Duration) (fixloop.HealthFact, error) {
 	return fixloop.HealthFact{}, nil
 }
 

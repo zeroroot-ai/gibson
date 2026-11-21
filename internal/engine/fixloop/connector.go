@@ -18,7 +18,7 @@ import (
 // it serves. Each tool takes the arguments below and returns a JSON object.
 const (
 	// ToolMergeRequestState takes {merge_request} and returns {state,
-	// pipeline_green, reason, at}.
+	// pipeline_green, reason, at, created_at, source_branch}.
 	ToolMergeRequestState = "merge_request_state"
 	// ToolDeploymentState takes {merge_request} and returns {deployed,
 	// deployment, application, at, restart: {needed, started, ended}}.
@@ -34,11 +34,11 @@ const (
 // ErrNoConnector means that the tenant has no connector that serves the tool.
 var ErrNoConnector = errors.New("fixloop: the tenant has no connector that serves the tool")
 
-// ConnectorCaller is the one MCP client of the daemon. component.ConnectorMCP
-// satisfies it.
-type ConnectorCaller interface {
+// ToolLister lists the connector tools of a tenant. component.ConnectorMCP
+// satisfies it. The fix loop uses it only to find the connector that serves a
+// tool. It never calls a tool through it.
+type ToolLister interface {
 	ListConnectorTools(ctx context.Context, tenant string) ([]catalog.ToolEntry, error)
-	CallConnectorTool(ctx context.Context, tenant, connector, tool string, args map[string]any) (any, error)
 }
 
 // TenantCaller makes a connector call for a tenant on the one governed path of
@@ -50,11 +50,11 @@ type TenantCaller interface {
 }
 
 // ConnectorReader reads the facts of the fix loop through the connectors of
-// the tenant. It implements Reader and Reverter. A read goes through the MCP
-// client of the daemon. The revert changes the code of the buyer, so it goes
-// through the TenantCaller.
+// the tenant. It implements Reader and Reverter. Each call, a read or the
+// revert, goes through the TenantCaller: the can_execute check and the audit
+// record of ADR-0065 apply to every connector call of the daemon.
 type ConnectorReader struct {
-	c ConnectorCaller
+	c ToolLister
 	w TenantCaller
 }
 
@@ -63,9 +63,9 @@ var (
 	_ Reverter = (*ConnectorReader)(nil)
 )
 
-// NewConnectorReader builds the reader over the MCP client of the daemon and
-// the governed caller of the revert.
-func NewConnectorReader(c ConnectorCaller, w TenantCaller) *ConnectorReader {
+// NewConnectorReader builds the reader over the tool list of the daemon and
+// the governed caller of each connector call.
+func NewConnectorReader(c ToolLister, w TenantCaller) *ConnectorReader {
 	return &ConnectorReader{c: c, w: w}
 }
 
@@ -89,12 +89,17 @@ func (r *ConnectorReader) connectorFor(ctx context.Context, tenant, tool string)
 	return names[0], nil
 }
 
-func (r *ConnectorReader) call(ctx context.Context, tenant, tool string, args map[string]any) (map[string]any, error) {
+// call makes one governed connector call. missionID is the mission of the fix,
+// for the audit record and the flight recorder.
+func (r *ConnectorReader) call(ctx context.Context, tenant, missionID, tool string, args map[string]any) (map[string]any, error) {
+	if r.w == nil {
+		return nil, errors.New("fixloop: no governed caller is wired")
+	}
 	conn, err := r.connectorFor(ctx, tenant, tool)
 	if err != nil {
 		return nil, err
 	}
-	res, err := r.c.CallConnectorTool(ctx, tenant, conn, tool, args)
+	res, err := r.w.CallConnectorForTenant(ctx, tenant, missionID, conn, tool, args)
 	if err != nil {
 		return nil, fmt.Errorf("call %s: %w", tool, err)
 	}
@@ -110,12 +115,15 @@ func object(tool string, res any) (map[string]any, error) {
 }
 
 // MergeRequest implements Reader.
-func (r *ConnectorReader) MergeRequest(ctx context.Context, tenant, key string) (MergeFact, error) {
-	m, err := r.call(ctx, tenant, ToolMergeRequestState, map[string]any{"merge_request": key})
+func (r *ConnectorReader) MergeRequest(ctx context.Context, tenant, missionID, key string) (MergeFact, error) {
+	m, err := r.call(ctx, tenant, missionID, ToolMergeRequestState, map[string]any{"merge_request": key})
 	if err != nil {
 		return MergeFact{}, err
 	}
-	f := MergeFact{State: str(m, "state"), PipelineGreen: boolean(m, "pipeline_green"), Reason: str(m, "reason"), At: when(m, "at")}
+	f := MergeFact{
+		State: str(m, "state"), PipelineGreen: boolean(m, "pipeline_green"), Reason: str(m, "reason"), At: when(m, "at"),
+		CreatedAt: when(m, "created_at"), SourceBranch: str(m, "source_branch"),
+	}
 	switch f.State {
 	case MROpen, MRMerged, MRClosed, MRRefused:
 		return f, nil
@@ -124,8 +132,8 @@ func (r *ConnectorReader) MergeRequest(ctx context.Context, tenant, key string) 
 }
 
 // Deploy implements Reader.
-func (r *ConnectorReader) Deploy(ctx context.Context, tenant, mergeRequest string) (DeployFact, error) {
-	m, err := r.call(ctx, tenant, ToolDeploymentState, map[string]any{"merge_request": mergeRequest})
+func (r *ConnectorReader) Deploy(ctx context.Context, tenant, missionID, mergeRequest string) (DeployFact, error) {
+	m, err := r.call(ctx, tenant, missionID, ToolDeploymentState, map[string]any{"merge_request": mergeRequest})
 	if err != nil {
 		return DeployFact{}, err
 	}
@@ -140,8 +148,10 @@ func (r *ConnectorReader) Deploy(ctx context.Context, tenant, mergeRequest strin
 }
 
 // Health implements Reader.
-func (r *ConnectorReader) Health(ctx context.Context, tenant, application string, since time.Time, hold time.Duration) (HealthFact, error) {
-	m, err := r.call(ctx, tenant, ToolHealthSignal, map[string]any{
+func (r *ConnectorReader) Health(
+	ctx context.Context, tenant, missionID, application string, since time.Time, hold time.Duration,
+) (HealthFact, error) {
+	m, err := r.call(ctx, tenant, missionID, ToolHealthSignal, map[string]any{
 		"application": application, "since": since.UTC().Format(time.RFC3339), "hold_seconds": int64(hold / time.Second),
 	})
 	if err != nil {
@@ -153,19 +163,7 @@ func (r *ConnectorReader) Health(ctx context.Context, tenant, application string
 // Revert implements Reverter. The result of the tool holds merged and
 // revert_merge_request (zeroroot-ai/connectors, internal/fixloop RevertResult).
 func (r *ConnectorReader) Revert(ctx context.Context, tenant, mergeRequest, missionID string) (RevertFact, error) {
-	if r.w == nil {
-		return RevertFact{}, errors.New("fixloop: no governed caller is wired for the revert")
-	}
-	conn, err := r.connectorFor(ctx, tenant, ToolRevertMergeRequest)
-	if err != nil {
-		return RevertFact{}, err
-	}
-	res, err := r.w.CallConnectorForTenant(ctx, tenant, missionID, conn, ToolRevertMergeRequest,
-		map[string]any{"merge_request": mergeRequest})
-	if err != nil {
-		return RevertFact{}, fmt.Errorf("call %s: %w", ToolRevertMergeRequest, err)
-	}
-	m, err := object(ToolRevertMergeRequest, res)
+	m, err := r.call(ctx, tenant, missionID, ToolRevertMergeRequest, map[string]any{"merge_request": mergeRequest})
 	if err != nil {
 		return RevertFact{}, err
 	}
