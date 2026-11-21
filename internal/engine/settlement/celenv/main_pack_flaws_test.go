@@ -38,6 +38,17 @@ const (
 	forbiddenStatus  = `{"kind":"Status","status":"Failure","reason":"Forbidden","code":403}`
 )
 
+const adminBody = `{"admin":true,"users":["alice","bob"]}`
+
+// httpRequest is an HTTP request item to the URL, with the headers.
+func httpRequest(url string, headers map[string]string) *typespb.Evidence {
+	return findingtest.NewEvidence(sdkfinding.EvidenceHTTPRequest, "request",
+		map[string]any{"method": "GET", "url": url, "headers": headers})
+}
+
+// adminRequest is the request to the protected path with no credential.
+var adminRequest = httpRequest("http://catalog-api.refenv.svc.cluster.local:8080/admin/", nil)
+
 func logEvidence(text string) *typespb.Evidence {
 	return findingtest.NewEvidence(sdkfinding.EvidenceLog, "recorded tool call", text)
 }
@@ -60,11 +71,34 @@ func TestMainPackFlawPredicates(t *testing.T) {
 		evidence  []*typespb.Evidence
 		want      bool
 	}{
-		// unauthenticated-admin-endpoint
+		// unauthenticated-admin-endpoint. The proof needs the request to a
+		// protected path with no credential, and a 200 with a JSON body that is
+		// no login page, with no redirect (review B4).
 		{"unauthenticated_endpoint_exposed", "the admin path answers 200",
-			[]*typespb.Evidence{findingtest.NewHTTPResponseEvidence("GET /admin/", 200, nil, `{"admin":true}`, 0)}, true},
+			[]*typespb.Evidence{adminRequest, findingtest.NewHTTPResponseEvidence("GET /admin/", 200, nil, adminBody, 0)}, true},
 		{"unauthenticated_endpoint_exposed", "the admin path answers 401 after the fix",
-			[]*typespb.Evidence{findingtest.NewHTTPResponseEvidence("GET /admin/", 401, nil, "", 0)}, false},
+			[]*typespb.Evidence{adminRequest, findingtest.NewHTTPResponseEvidence("GET /admin/", 401, nil, "", 0)}, false},
+		{"unauthenticated_endpoint_exposed", "a public health path answers 200",
+			[]*typespb.Evidence{httpRequest("http://catalog-api:8080/healthz", nil),
+				findingtest.NewHTTPResponseEvidence("GET /healthz", 200, nil, `{"status":"ok"}`, 0)}, false},
+		{"unauthenticated_endpoint_exposed", "the public catalog answers 200",
+			[]*typespb.Evidence{httpRequest("http://catalog-api:8080/catalog", nil),
+				findingtest.NewHTTPResponseEvidence("GET /catalog", 200, nil, `{"items":["widget","gadget"]}`, 0)}, false},
+		{"unauthenticated_endpoint_exposed", "a 200 with no request names no path",
+			[]*typespb.Evidence{findingtest.NewHTTPResponseEvidence("GET /admin/", 200, nil, adminBody, 0)}, false},
+		{"unauthenticated_endpoint_exposed", "a login page answers 200 on the admin path",
+			[]*typespb.Evidence{adminRequest, findingtest.NewHTTPResponseEvidence("GET /admin/", 200, nil,
+				`<html><form action="/login"><input type="password" name="pw"></form></html>`, 0)}, false},
+		{"unauthenticated_endpoint_exposed", "a JSON login answer on the admin path",
+			[]*typespb.Evidence{adminRequest, findingtest.NewHTTPResponseEvidence("GET /admin/", 200, nil,
+				`{"login":"required","redirect":"/sso"}`, 0)}, false},
+		{"unauthenticated_endpoint_exposed", "a 200 after a redirect",
+			[]*typespb.Evidence{adminRequest,
+				findingtest.NewHTTPResponseEvidence("GET /admin/", 302, map[string]string{"Location": "/sso/start"}, "", 0),
+				findingtest.NewHTTPResponseEvidence("GET /sso/start", 200, nil, adminBody, 0)}, false},
+		{"unauthenticated_endpoint_exposed", "the request carried a credential",
+			[]*typespb.Evidence{httpRequest("http://catalog-api:8080/admin/", map[string]string{"Authorization": "Bearer x"}),
+				findingtest.NewHTTPResponseEvidence("GET /admin/", 200, nil, adminBody, 0)}, false},
 
 		// credential-in-environment
 		{"credential_disclosure_detected", "the environment of the pod holds a password",

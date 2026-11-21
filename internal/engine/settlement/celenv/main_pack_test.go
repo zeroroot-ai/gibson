@@ -50,13 +50,20 @@ func TestLoadDomainPack_MainCatalogPackEvaluates(t *testing.T) {
 		require.True(t, ok)
 
 		got, err := cp.Evaluate(ctx, []*typespb.Evidence{
-			findingtest.NewHTTPResponseEvidence("resp", 200, nil, "", 0),
+			adminRequest, findingtest.NewHTTPResponseEvidence("resp", 200, nil, adminBody, 0),
 		})
 		require.NoError(t, err)
 		assert.True(t, got)
 
+		// A bare 200 names no protected path (review B4).
 		got, err = cp.Evaluate(ctx, []*typespb.Evidence{
-			findingtest.NewHTTPResponseEvidence("resp", 404, nil, "", 0),
+			findingtest.NewHTTPResponseEvidence("resp", 200, nil, "", 0),
+		})
+		require.NoError(t, err)
+		assert.False(t, got)
+
+		got, err = cp.Evaluate(ctx, []*typespb.Evidence{
+			adminRequest, findingtest.NewHTTPResponseEvidence("resp", 404, nil, "", 0),
 		})
 		require.NoError(t, err)
 		assert.False(t, got)

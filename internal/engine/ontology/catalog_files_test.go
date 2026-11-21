@@ -128,11 +128,23 @@ func wantMainPack() DomainPack {
 		// technique names (ADR-0135); each references only the "evidence"
 		// variable and the curated helper catalog celenv.NewEnv declares.
 		Predicates: map[string]string{
-			"credential_disclosure_detected":   `evidence.exists(e, regexMatch(evidenceText(e), "(?i)(api[_-]?key|password|secret)\\s*[:=]\\s*\\S+"))`,
-			"node_token_readable":              `evidence.exists(e, regexMatch(evidenceText(e), r'/var/lib/kubelet/pods/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/volumes/kubernetes\.io~projected/') && regexMatch(evidenceText(e), r'eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'))`,
-			"privileged_container_detected":    `evidence.exists(e, regexMatch(evidenceText(e), r'(?m)^CapEff:\s*0*[0-9a-f]?f{9,}\s*$'))`,
-			"rbac_write_access_proven":         `evidence.exists(e, httpStatus(e) == 201 && regexMatch(evidenceText(e), r'\\?"kind\\?"\s*:\s*\\?"ConfigMap\\?"') && regexMatch(evidenceText(e), r'\\?"name\\?"\s*:\s*\\?"gibson-proof-[a-z0-9]+\\?"'))`,
-			"unauthenticated_endpoint_exposed": `evidence.exists(e, httpStatus(e) == 200)`,
+			"credential_disclosure_detected": `evidence.exists(e, regexMatch(evidenceText(e), "(?i)(api[_-]?key|password|secret)\\s*[:=]\\s*\\S+"))`,
+			"node_token_readable":            `evidence.exists(e, regexMatch(evidenceText(e), r'/var/lib/kubelet/pods/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/volumes/kubernetes\.io~projected/') && regexMatch(evidenceText(e), r'eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'))`,
+			"privileged_container_detected":  `evidence.exists(e, regexMatch(evidenceText(e), r'(?m)^CapEff:\s*0*[0-9a-f]?f{9,}\s*$'))`,
+			"rbac_write_access_proven":       `evidence.exists(e, httpStatus(e) == 201 && regexMatch(evidenceText(e), r'\\?"kind\\?"\s*:\s*\\?"ConfigMap\\?"') && regexMatch(evidenceText(e), r'\\?"name\\?"\s*:\s*\\?"gibson-proof-[a-z0-9]+\\?"'))`,
+			"unauthenticated_endpoint_exposed": `((evidence.exists(q, q.type == "http_request" && type(q.content) == map && "url" in q.content && typ` +
+				`e(q.content.url) == string && regexMatch(q.content.url, r'^https?://[^/]+/(admin|internal|management` +
+				`|manage|actuator|debug)(/|\?|$)') && !("headers" in q.content && type(q.content.headers) == map && (` +
+				`"authorization" in q.content.headers || "Authorization" in q.content.headers || "cookie" in q.conten` +
+				`t.headers || "Cookie" in q.content.headers))) && evidence.exists(r, r.type == "http_response" && htt` +
+				`pStatus(r) == 200 && regexMatch(evidenceText(r), r'^\s*[\{\[]\s*\"') && !regexMatch(evidenceText(r),` +
+				` r'(?i)(<form|<input|type\s*=\s*.?password|\"(login|signin|sign_in|redirect)\"\s*:)'))) || evidence.` +
+				`exists(e, e.type == "log" && httpStatus(e) == 200 && type(jsonPath(evidenceText(e), "url")) == strin` +
+				`g && regexMatch(jsonPath(evidenceText(e), "url"), r'^https?://[^/]+/(admin|internal|management|manag` +
+				`e|actuator|debug)(/|\?|$)') && type(jsonPath(evidenceText(e), "body")) == string && regexMatch(jsonP` +
+				`ath(evidenceText(e), "body"), r'^\s*[\{\[]\s*\"') && !regexMatch(jsonPath(evidenceText(e), "body"), ` +
+				`r'(?i)(<form|<input|type\s*=\s*.?password|\"(login|signin|sign_in|redirect)\"\s*:)'))) && !evidence.` +
+				`exists(x, httpStatus(x) >= 300 && httpStatus(x) < 400)`,
 		},
 
 		// The fine-grained techniques of this pack, each with the core
