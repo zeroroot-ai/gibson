@@ -798,10 +798,3 @@ func TestApplicationFindingsToProto_CarriesThePriorityTriple(t *testing.T) {
 			full.GetPriority(), full.GetPriorityRule(), full.GetPriorityReason())
 	}
 }
-
-// The pinned SDK still declares the reads of attack patterns and attack
-// chains (gibson#1521). The daemon serves neither, so the embedded
-// UnimplementedHarnessCallbackServiceServer answers them. The tests reach the
-// RPC by its name through the service descriptor, so they compile against the
-// pinned SDK and against the SDK of zeroroot-ai/sdk#359, which deletes both.
-// After the SDK bump the descriptor holds neither, and both tests go.
