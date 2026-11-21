@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	github.com/google/go-github/v90 v90.0.0
-	github.com/zeroroot-ai/sdk v0.212.0
+	github.com/zeroroot-ai/sdk v0.213.0
 )
 
 require (
