@@ -22,12 +22,10 @@
 #      See tests/fixtures/agentskills/README.md.
 #   3. TestAgentSkills runs in the cluster as a Job.
 #   4. The script of the probe Agent Skill names the pod of the daemon, which is a
-#      host outside the egress limit of a sandbox. The test runs that command with
-#      the nmap tool in a sandbox. A step then reads the Cilium drop records and
-#      fails when the network let a packet through.
-#
-# Point 5 of the epic is covered for what exists. The sandbox files of an Agent
-# Skill are not built (gibson#1373), so the agent reads the script as text.
+#      host outside the egress limit of a sandbox. The test runs that script with
+#      the skill-script tool: the daemon places the files of the Agent Skill in
+#      the sandbox of the call (gibson#1373). A step then reads the Cilium drop
+#      records and fails when the network let a packet through.
 #
 # ADR-0080: NEVER on pull_request and never on a schedule. It needs a live cluster.
 # It runs on main and on dispatch.
@@ -43,6 +41,8 @@ on:
       - 'internal/engine/metatool/**'
       - 'internal/engine/catalog/**'
       - 'internal/engine/harness/callback_agentskill*.go'
+      - 'internal/engine/harness/skill_script*.go'
+      - 'internal/engine/harness/sandboxed/**'
       - 'internal/engine/harness/callback_metatool.go'
       - 'internal/engine/harness/callback_searchtools.go'
       - 'internal/platform/component/service_metatool.go'

@@ -50,6 +50,12 @@ type ToolSpec struct {
 	// output_json; this name tells the executor to read it there (gibson#1140).
 	OutputProtoType string
 
+	// Files are placed in the machine, read-only, below /setec/files before the
+	// tool starts (setec files). The harness fills them for a tool that runs a
+	// file of an Agent Skill. They add no network path: the sandbox keeps the
+	// egress above.
+	Files []File
+
 	// MissionTenant is the tenant that owns the mission of the call. It scopes
 	// the discovery of the call when the context carries no tenant, as the
 	// brain execution context of a mission tool node does not (gibson#1145).

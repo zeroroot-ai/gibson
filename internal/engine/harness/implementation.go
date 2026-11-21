@@ -133,6 +133,12 @@ type DefaultAgentHarness struct {
 	// a silent dispatch without it.
 	missionSecrets CredentialStore
 
+	// skillStore reads the files of an Agent Skill for a skill-script call, and
+	// missionDenyList reads the deny list of the mission. Both are providers
+	// because the data plane starts after the harness factory.
+	skillStore      func() SkillFileStore
+	missionDenyList MissionDenyList
+
 	// graphrag serves the knowledge-graph reads. The SAME querier the daemon
 	// hands to ComponentService — one implementation reached two ways, which is
 	// what ADR-0161 promised and could not deliver until this field existed.
@@ -332,6 +338,9 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		spec.MissionTenant = h.missionCtx.TenantID
 		h.addTargetFacts(ctx, &spec)
 		if err := h.addDeclaredSecrets(ctx, name, &spec); err != nil {
+			return err
+		}
+		if err := h.addSkillFiles(ctx, name, request, &spec); err != nil {
 			return err
 		}
 		//nolint:wrapcheck // ExecuteWithSpec already returns a typed gibson error; re-wrapping would double-wrap it (same as the registry path below).

@@ -106,6 +106,16 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// secret.can_resolve stays plugin-only.
 		MissionSecrets:  d.missionSecretsStore,
 		RegistryAdapter: d.registryAdapter,
+
+		// The files of an Agent Skill that a skill-script call places in its
+		// sandbox, and the deny list of the mission that the call checks.
+		SkillFiles: func() harness.SkillFileStore {
+			if store := d.agentSkillStore(); store != nil {
+				return store
+			}
+			return nil
+		},
+		MissionDenyList: d.storedBlockedTools,
 		WorkQueue:       workQueue,
 
 		// Finding storage: the findings table of the database of the tenant.
