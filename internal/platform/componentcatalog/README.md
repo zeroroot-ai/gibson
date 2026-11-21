@@ -50,7 +50,11 @@ spec:
 2. A person decides in the approval queue (`DestructiveAuthorizationService`). A denial is final. The call then returns permission denied.
 3. The next identical call runs one time after an approval. The daemon records the use as the event `destructive_action.consumed`. A later identical call needs a new approval.
 
-An approval covers one call. The request key is a hash of the tenant, the mission, the connector, the tool and the canonical arguments. A call with another target, tool or mission needs its own approval. If the approval queue is not wired, a marked call is refused.
+An approval covers one call of one agent. The request key is a hash of the tenant, the mission, the identity of the agent, the connector, the tool and the canonical arguments. A call with another target, tool, mission or agent needs its own approval. If the approval queue is not wired, a marked call is refused.
+
+**The approval is spent before the dispatch (fail closed).** `AuthorizeToolCall` records the use of the approval, and only then does the handler call the connector. When the dispatch fails after that, for example because the connector is down, the approval is gone. The next identical call starts a new request, and a person decides again. The daemon never runs a marked call twice on one approval.
+
+**The merge slot belongs to the mission of the fix.** A merge tool runs only for a call of the mission that holds the merge slot, or of the mission that originated it (the fix agent originates the fix mission). A call with no mission, or of another mission, gets `merge not granted yet`.
 
 **The merge tool of a Git host (gibson#1458).** A Git host connector names the tool that merges a merge request with `role: merge`. Such an entry needs no `approval` on a connector without `responseActions`.
 

@@ -49,6 +49,7 @@ func (a *tenantRoutedToolApproval) Acquire(
 	}
 	state, id, err := eng.DestructiveAuthorizationQueue().AuthorizeToolCall(ctx, req.Tenant, brain.ToolCallRequest{
 		MissionID:     req.MissionID,
+		Agent:         req.Agent,
 		Connector:     req.Connector,
 		Tool:          req.Tool,
 		ArgsHash:      req.ArgsHash,
@@ -72,7 +73,7 @@ func (a *tenantRoutedToolApproval) Acquire(
 
 // MayMerge implements metatool.ApprovalGate. It reads the merge slot of the
 // merge request from the World of the tenant (gibson#1458, gibson#1466).
-func (a *tenantRoutedToolApproval) MayMerge(_ context.Context, tenant, mergeRequest string) (bool, error) {
+func (a *tenantRoutedToolApproval) MayMerge(_ context.Context, tenant, missionID, mergeRequest string) (bool, error) {
 	if tenant == "" {
 		return false, errors.New("merge gate: the call has no tenant")
 	}
@@ -81,6 +82,6 @@ func (a *tenantRoutedToolApproval) MayMerge(_ context.Context, tenant, mergeRequ
 		return false, api.ErrWorldUnavailable
 	}
 	var granted bool
-	eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge(mergeRequest) })
+	eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge(mergeRequest, missionID) })
 	return granted, nil
 }

@@ -160,7 +160,7 @@ func TestToolApproval_TheMergeGateReadsTheWorld(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		var granted bool
-		eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge("mr-7") })
+		eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge("mr-7", "m1") })
 		if granted {
 			break
 		}

@@ -609,9 +609,9 @@ const toolCallIDPrefix = "tool-call:"
 // approval of one call does not cover another target, another tool or another
 // mission. Each part has a length prefix, so two different calls cannot form the
 // same input.
-func ToolCallKey(tenant, missionID, connector, tool, argsHash string) string {
+func ToolCallKey(tenant, missionID, agent, connector, tool, argsHash string) string {
 	h := sha256.New()
-	for _, part := range []string{tenant, missionID, connector, tool, argsHash} {
+	for _, part := range []string{tenant, missionID, agent, connector, tool, argsHash} {
 		_, _ = fmt.Fprintf(h, "%d:%s|", len(part), part) // a hash never fails a write
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -621,6 +621,9 @@ func ToolCallKey(tenant, missionID, connector, tool, argsHash string) string {
 // person.
 type ToolCallRequest struct {
 	MissionID string
+	// Agent is the identity of the caller. An approval covers the call of one
+	// agent, so another agent of the mission cannot spend it (review m16).
+	Agent     string
 	Connector string
 	Tool      string
 	// ArgsHash is the hash of the canonical arguments of the call.
@@ -665,7 +668,7 @@ func (q *DestructiveAuthorizationQueue) AuthorizeToolCall(
 	if req.Connector == "" || req.Tool == "" || req.ArgsHash == "" {
 		return 0, "", errors.New("brain: a tool call request needs a connector, a tool and an argument hash")
 	}
-	key := ToolCallKey(tenant, req.MissionID, req.Connector, req.Tool, req.ArgsHash)
+	key := ToolCallKey(tenant, req.MissionID, req.Agent, req.Connector, req.Tool, req.ArgsHash)
 
 	q.toolMu.Lock()
 	defer q.toolMu.Unlock()

@@ -52,6 +52,9 @@ type MergeSlot struct {
 	Granted      bool
 	// GrantedAt is the time of the grant. It is zero until the grant.
 	GrantedAt time.Time
+	// MissionID is the mission of the fix that holds the slot. Only a call
+	// of that mission may merge with it (review m16).
+	MissionID string
 }
 
 // MergeSlotHold is how long a granted slot waits for the deploy of its merge
@@ -88,7 +91,7 @@ func applyMergeRequestQueued(w *World, e MergeRequestQueued) {
 		return
 	}
 	w.mergeSlots = append(w.mergeSlots, MergeSlot{
-		MergeRequest: e.MergeRequest, Application: e.Application, QueuedAt: e.At,
+		MergeRequest: e.MergeRequest, Application: e.Application, QueuedAt: e.At, MissionID: e.MissionID,
 	})
 }
 
@@ -112,10 +115,21 @@ func releaseMergeSlot(w *World, mr string) {
 // MergeSlots returns the queue in the order of the Timeline.
 func (w *World) MergeSlots() []MergeSlot { return append([]MergeSlot(nil), w.mergeSlots...) }
 
-// MayMerge reports whether the merge request holds a slot that is not free yet.
-func (w *World) MayMerge(mr string) bool {
+// MayMerge reports whether the merge request holds a granted slot for a call
+// of the mission. A call with no mission never merges. A slot that names its
+// mission lets only a call of that mission merge, or of the mission that
+// originated it: the fix agent originates the fix mission and merges from its
+// own mission (review m16).
+func (w *World) MayMerge(mr, missionID string) bool {
 	s := findMergeSlot(w, mr)
-	return s != nil && s.Granted
+	if s == nil || !s.Granted || missionID == "" {
+		return false
+	}
+	if s.MissionID == "" || s.MissionID == missionID {
+		return true
+	}
+	l, ok := w.MissionLineage(s.MissionID)
+	return ok && l.ParentMissionID == missionID
 }
 
 // MergeGateSystem grants the slot of an Application to its oldest queued merge

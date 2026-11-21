@@ -122,7 +122,7 @@ func TestStep_GreenPipelineQueuesTheMergeRequest(t *testing.T) {
 	g := newRig(t, "scan")
 	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
 	g.tick()
-	if !g.w.MayMerge("mr-1") {
+	if !g.w.MayMerge("mr-1", "fix-run-1") {
 		t.Fatalf("slots = %+v, want a granted slot for mr-1", g.w.MergeSlots())
 	}
 }
