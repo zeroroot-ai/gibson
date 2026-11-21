@@ -99,6 +99,14 @@ gibson.fx.v1.AckResponse.only_test | #502 | kept" "$GO_OK"
 check "a verdict without a reference is refused" 1 "names no issue or ADR" "gibson.fx.v1.AckResponse.a_side | because | kept" "$GO_OK"
 check "a verdict for a field that now has a consumer is stale" 1 "now has a consumer" "gibson.fx.v1.AckResponse.acked | #502 | kept" "$GO_OK"
 check "a verdict for a field that no longer exists is stale" 1 "is not a declared field" "gibson.fx.v1.AckResponse.gone | #502 | kept" "$GO_OK"
+export PROTO_FIELD_TODAY=2027-02-01
+check "a hold whose date passed fails the gate" 1 "ended on 2027-01-31" "gibson.fx.v1.AckResponse.a_side | #502 | hold until 2027-01-31: kept
+gibson.fx.v1.AckResponse.b_side | #502 | kept
+gibson.fx.v1.AckResponse.only_test | #502 | kept" "$GO_OK"
+check "a hold whose date has not passed keeps the gate green" 0 "0 without a consumer, 3 verdicts" "gibson.fx.v1.AckResponse.a_side | #502 | hold until 2027-02-01: kept
+gibson.fx.v1.AckResponse.b_side | #502 | kept
+gibson.fx.v1.AckResponse.only_test | #502 | kept" "$GO_OK"
+unset PROTO_FIELD_TODAY
 
 out="$(PROTO_DIR="$tmp/proto" EXEMPT_FILE=/dev/null MIN_FIELDS=500 GO_READS_FILE="$tmp/goreads" CONSUMER_ROOTS="$tmp/consumer" bash "$GATE" 2>&1)"; rc=$?
 if [ "$rc" -eq 1 ] && [[ "$out" == *"below the floor"* ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL: the floor fails a run that measured too little (rc=$rc)"; echo "$out" | sed 's/^/    /'; fi

@@ -246,6 +246,9 @@ for root in roots:
     scan(root)
 
 # --- 3. The verdicts. ---
+# PROTO_FIELD_TODAY replaces the date of today, for the fixture.
+import datetime
+today = os.environ.get("PROTO_FIELD_TODAY") or datetime.date.today().isoformat()
 exempt = {}
 if os.path.exists(exempt_file):
     with open(exempt_file, encoding="utf-8") as fh:
@@ -259,6 +262,13 @@ if os.path.exists(exempt_file):
                 sys.exit(1)
             if not re.search(r'#\d+|ADR-\d+', parts[1]):
                 print(f"check-proto-field-consumers: verdict for {parts[0]} names no issue or ADR", file=sys.stderr)
+                sys.exit(1)
+            # A verdict is a dated hold (ADR-0094 rule 5). A reason that starts
+            # with "hold until YYYY-MM-DD" ends on that date.
+            hold = re.match(r'hold until (\d{4}-\d{2}-\d{2})\b', parts[2])
+            if hold and hold.group(1) < today:
+                print(f"check-proto-field-consumers: the hold of {parts[0]} ended on {hold.group(1)}: "
+                      f"build the consumer or delete the field", file=sys.stderr)
                 sys.exit(1)
             exempt[parts[0]] = parts[1]
 
