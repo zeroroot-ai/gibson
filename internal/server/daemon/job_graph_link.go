@@ -40,8 +40,10 @@ type jobGraphLink struct {
 	findings func(tenant string) map[string]findingRef
 	// mergeRequests reads a merge request on the Git host of the tenant.
 	mergeRequests mergeRequestReader
-	now           func() time.Time
-	logger        *slog.Logger
+	// retryWaits replace mergeReadWaits. A test sets them.
+	retryWaits []time.Duration
+	now        func() time.Time
+	logger     *slog.Logger
 }
 
 // mergeRequestReader reads one merge request through the governed connector
@@ -89,6 +91,12 @@ func (l *jobGraphLink) JobClosed(ctx context.Context, c jobnode.ClosedJob) {
 	known := l.findings(c.TenantID)
 	claim := jobnode.ClaimName(c.MissionRunID, c.NodeID)
 	held := heldFindings(c, known, claim)
+	if len(held) == 0 {
+		// A job that delivered a merge request and holds no finding has lost
+		// its claims, or names no finding of the World (review r11).
+		l.logger.Warn("a fix job closed with a merge request and holds no finding",
+			"job_id", c.JobID, "merge_request", mrKey, "claim", claim)
+	}
 	if len(held) > 0 {
 		if reason := l.vet(ctx, c, mrKey, held, known); reason != "" {
 			l.refuse(c, mrKey, claim, held, reason, now)
@@ -149,7 +157,7 @@ func (l *jobGraphLink) vet(ctx context.Context, c jobnode.ClosedJob, mrKey strin
 	if l.mergeRequests == nil {
 		return "the daemon has no reader of the Git host, so it cannot check the merge request"
 	}
-	fact, err := l.mergeRequests.MergeRequest(ctx, c.TenantID, c.MissionRunID, mrKey)
+	fact, err := l.readMergeRequest(ctx, c, mrKey)
 	if err != nil {
 		return "the daemon could not read the merge request on the Git host: " + err.Error()
 	}
@@ -160,6 +168,35 @@ func (l *jobGraphLink) vet(ctx context.Context, c jobnode.ClosedJob, mrKey strin
 		}
 	}
 	return mergeRequestRefusal(fact, jobnode.JobBranch(c.JobID), claimedAt)
+}
+
+// mergeReadWaits are the waits between the reads of the merge request on the
+// Git host. One failed read does not refuse the link (review r10).
+var mergeReadWaits = []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second}
+
+// readMergeRequest reads the merge request, and reads it again after each wait
+// of retryWaits when a read fails. It stops early when ctx ends.
+func (l *jobGraphLink) readMergeRequest(ctx context.Context, c jobnode.ClosedJob, mrKey string) (fixloop.MergeFact, error) {
+	waits := l.retryWaits
+	if waits == nil {
+		waits = mergeReadWaits
+	}
+	for attempt := 0; ; attempt++ {
+		fact, err := l.mergeRequests.MergeRequest(ctx, c.TenantID, c.MissionRunID, mrKey)
+		if err == nil || attempt >= len(waits) {
+			if err != nil {
+				return fact, fmt.Errorf("after %d reads: %w", attempt+1, err)
+			}
+			return fact, nil
+		}
+		l.logger.Warn("the read of the merge request of a fix job failed, and the daemon reads it again",
+			"job_id", c.JobID, "merge_request", mrKey, "attempt", attempt+1, "error", err)
+		select {
+		case <-ctx.Done():
+			return fact, fmt.Errorf("the read of the merge request stopped: %w", ctx.Err())
+		case <-time.After(waits[attempt]):
+		}
+	}
 }
 
 // mergeRequestRefusal returns why a merge request is not the work of a fix job,

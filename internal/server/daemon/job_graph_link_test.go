@@ -41,15 +41,21 @@ func heldWorld(findings map[string]string) func(string) map[string]findingRef {
 	return func(string) map[string]findingRef { return refs }
 }
 
-// fakeMRReader is the Git host of the link tests.
+// fakeMRReader is the Git host of the link tests. failures is the number of
+// reads that fail before the reads succeed.
 type fakeMRReader struct {
-	fact  fixloop.MergeFact
-	err   error
-	calls []string
+	fact     fixloop.MergeFact
+	err      error
+	failures int
+	calls    []string
 }
 
 func (f *fakeMRReader) MergeRequest(_ context.Context, tenant, missionID, key string) (fixloop.MergeFact, error) {
 	f.calls = append(f.calls, tenant+"/"+missionID+"/"+key)
+	if f.failures > 0 {
+		f.failures--
+		return fixloop.MergeFact{}, errors.New("the connector is down for a moment")
+	}
 	return f.fact, f.err
 }
 
@@ -420,9 +426,10 @@ func TestJobGraphLink_RefusesAMergeRequestThatIsNotTheWorkOfTheJob(t *testing.T)
 				submit:        func(_ string, ev brain.Event) { evs = append(evs, ev) },
 				findings:      heldWorld(map[string]string{"f-1": "s"}),
 				mergeRequests: mrs, now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
+				retryWaits: []time.Duration{0, 0},
 			}
 			l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
-			if len(mrs.calls) != 1 || mrs.calls[0] != "acme/run-1/"+testMRURL {
+			if len(mrs.calls) == 0 || mrs.calls[0] != "acme/run-1/"+testMRURL {
 				t.Fatalf("reads = %v", mrs.calls)
 			}
 			if len(evs) != 2 {
@@ -473,5 +480,44 @@ func TestMergeRequestRefusal_NamesAnOldConnector(t *testing.T) {
 		if got := mergeRequestRefusal(fact, "job/job-1", testClaimedAt); got != errConnectorLacksMergeFields {
 			t.Errorf("fact %+v: refusal = %q", fact, got)
 		}
+	}
+}
+
+// One failed read of the Git host does not refuse the link. The daemon reads
+// the merge request again, and a later good read links the fix (review r10).
+// A read that keeps failing refuses the link after the last try.
+func TestJobGraphLink_ReadsTheGitHostAgainAfterAFailure(t *testing.T) {
+	var evs []brain.Event
+	mrs := jobMR()
+	mrs.failures = 2
+	l := &jobGraphLink{
+		submit:   func(_ string, ev brain.Event) { evs = append(evs, ev) },
+		findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: mrs,
+		now: func() time.Time { return testNow }, logger: testObsLogger().Slog(), retryWaits: []time.Duration{0, 0},
+	}
+	l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
+	if len(mrs.calls) != 3 {
+		t.Fatalf("reads = %d, want 3", len(mrs.calls))
+	}
+	var fixing bool
+	for _, ev := range evs {
+		if c, ok := ev.(brain.FindingStatusChanged); ok && c.Status == brain.FindingStatusFixing {
+			fixing = true
+		}
+	}
+	if !fixing {
+		t.Fatalf("events = %+v, want the finding moved to fixing", evs)
+	}
+
+	evs = nil
+	down := jobMR()
+	down.failures = 10
+	l.mergeRequests = down
+	l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
+	if len(down.calls) != 3 {
+		t.Fatalf("reads = %d, want 3 and then the refusal", len(down.calls))
+	}
+	if _, ok := evs[0].(brain.FixLinkRefused); !ok {
+		t.Fatalf("events = %+v, want the refusal", evs)
 	}
 }
