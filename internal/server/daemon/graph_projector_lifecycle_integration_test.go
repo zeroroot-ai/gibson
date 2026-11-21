@@ -259,6 +259,10 @@ func TestLifecycleLabelIsDataNotCypher(t *testing.T) {
 // onto a Finding created a SECOND :Finding beside the real one — and the
 // priority, the status and any TOUCHES edge landed on a node nothing else
 // references. A triage pass would then read its own writes back as missing.
+//
+// The daemon owns the priority, the status and the other fields that the
+// Finding projection writes (gibson#1556 review M5). An agent's write of one of
+// them is dropped. Its other properties and its edges land on the real node.
 func TestAnAgentEnrichesTheFindingItMeantRatherThanCreatingASecondOne(t *testing.T) {
 	ctx := context.Background()
 	drv := startProvisionedNeo4j(t, ctx)
@@ -273,7 +277,7 @@ func TestAnAgentEnrichesTheFindingItMeantRatherThanCreatingASecondOne(t *testing
 	// brain_id every read surface hands back.
 	projectEntity(t, ctx, drv, brain.EntitySnapshot{
 		Label: "Finding", Key: "f1", ScopeID: "s",
-		Props: map[string]string{"priority": "P1", "priority_rule": "R01"},
+		Props: map[string]string{"priority": "P1", "priority_rule": "R01", "triage_note": "reachable from the edge"},
 		Edges: []brain.EntityEdge{
 			{Type: "TOUCHES", TargetLabel: "Control", TargetKey: "PCI-DSS-6.3.3"},
 		},
@@ -287,12 +291,17 @@ func TestAnAgentEnrichesTheFindingItMeantRatherThanCreatingASecondOne(t *testing
 	recs = runWrite(t, ctx, drv, `
 MATCH (f:Finding {brain_id: 'f1'})
 OPTIONAL MATCH (f)-[:TOUCHES]->(c:Control)
-RETURN f.priority AS priority, f.title AS title, f.status AS status, c.key AS control`, nil)
+RETURN f.priority AS priority, f.triage_note AS note, f.title AS title, f.status AS status, c.key AS control`, nil)
 	if len(recs) != 1 {
 		t.Fatalf("want one row, got %d", len(recs))
 	}
-	if got, _ := recs[0].Get("priority"); got != "P1" {
-		t.Errorf("priority = %v, want P1 on the Finding the agent meant", got)
+	if got, _ := recs[0].Get("note"); got != "reachable from the edge" {
+		t.Errorf("triage_note = %v, want the note of the agent on the Finding the agent meant", got)
+	}
+	// The priority belongs to the daemon (FindingPrioritized). The agent's
+	// write of it is dropped (review M5).
+	if got, _ := recs[0].Get("priority"); got != nil && got != "" {
+		t.Errorf("priority = %v, want no priority from the agent", got)
 	}
 	// The enrichment must not erase what raised the Finding.
 	if got, _ := recs[0].Get("title"); got != "vulnerable lodash" {
