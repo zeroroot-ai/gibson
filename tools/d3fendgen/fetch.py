@@ -1,4 +1,4 @@
-#!/usr/bin/env python3 -I
+#!/usr/bin/env -S python3 -I
 """Fetch one D3FEND release and distill the facts that the pack needs.
 
 Usage: python3 -I fetch.py <empty-work-dir> <out-extract.json>
@@ -109,7 +109,11 @@ def main():
         for b in as_list(n.get("d3f:broader")):
             t = by.get(b["@id"])
             if t is not None and str(t.get("d3f:d3fend-id", "")).startswith("D3-"):
-                cm = countermeasures[t["d3f:d3fend-id"]]
+                # A NIST control can map to a D3 class with no tactic, which
+                # the pack does not keep (see above).
+                cm = countermeasures.get(t["d3f:d3fend-id"])
+                if cm is None:
+                    continue
                 if label not in cm["nist_controls"]:
                     cm["nist_controls"].append(label)
 

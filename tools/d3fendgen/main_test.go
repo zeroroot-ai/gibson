@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -182,5 +183,22 @@ func TestRun_ChecksWritesAndRefuses(t *testing.T) {
 	}
 	if code := run([]string{"-dir", tree, "-check"}, &stderr); code != 1 {
 		t.Errorf("a stale pack: code %d, want 1", code)
+	}
+}
+
+// fetch.py runs on Linux, where env takes one argument unless -S splits it,
+// and a NIST control that maps to a D3 class with no tactic is skipped, not a
+// KeyError (review m22).
+func TestFetchScript_RunsOnLinuxAndSkipsAClassWithNoTactic(t *testing.T) {
+	raw, err := os.ReadFile("fetch.py")
+	if err != nil {
+		t.Fatalf("read fetch.py: %v", err)
+	}
+	text := string(raw)
+	if first, _, _ := strings.Cut(text, "\n"); first != "#!/usr/bin/env -S python3 -I" {
+		t.Fatalf("shebang = %q", first)
+	}
+	if strings.Contains(text, `cm = countermeasures[t["d3f:d3fend-id"]]`) || !strings.Contains(text, "countermeasures.get(") {
+		t.Fatal("a NIST mapping to a class with no tactic must not index countermeasures directly")
 	}
 }
