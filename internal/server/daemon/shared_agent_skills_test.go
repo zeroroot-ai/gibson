@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,4 +78,83 @@ func TestSeedSharedAgentSkillGate_Converges(t *testing.T) {
 	assert.Equal(t, []authz.Tuple{
 		{User: "system_tenant:_system", Relation: "platform_enabled", Object: "agent_skill:_shared/retired"},
 	}, fga.deleted)
+}
+
+// storeGateFGA keeps tuples as a set. Its Check answers as the platform gate of
+// EnableSharedAgentSkill does, so a test can seed the gate and then ask the
+// question that the RPC asks.
+type storeGateFGA struct{ tuples map[authz.Tuple]bool }
+
+func newStoreGateFGA() *storeGateFGA { return &storeGateFGA{tuples: map[authz.Tuple]bool{}} }
+
+func (s *storeGateFGA) Check(_ context.Context, user, relation, object string) (bool, error) {
+	return s.tuples[authz.Tuple{User: user, Relation: relation, Object: object}], nil
+}
+
+func (s *storeGateFGA) Write(_ context.Context, t []authz.Tuple) error {
+	for _, tp := range t {
+		s.tuples[tp] = true
+	}
+	return nil
+}
+
+func (s *storeGateFGA) Delete(_ context.Context, t []authz.Tuple) error {
+	for _, tp := range t {
+		delete(s.tuples, tp)
+	}
+	return nil
+}
+
+func (s *storeGateFGA) ListObjects(_ context.Context, user, relation, objectType string) ([]string, error) {
+	var out []string
+	for tp := range s.tuples {
+		if tp.User == user && tp.Relation == relation && strings.HasPrefix(tp.Object, objectType+":") {
+			out = append(out, tp.Object)
+		}
+	}
+	return out, nil
+}
+
+func offered(t *testing.T, fga *storeGateFGA, name string) bool {
+	t.Helper()
+	obj, err := authz.SharedAgentSkillObject(name)
+	require.NoError(t, err)
+	ok, err := fga.Check(context.Background(), "system_tenant:_system", "platform_enabled", obj)
+	require.NoError(t, err)
+	return ok
+}
+
+// After the seed, the platform gate that EnableSharedAgentSkill checks is open
+// for each configured name and for no other. A second seed changes nothing. A
+// name that leaves the config closes the gate at the next seed.
+func TestSeedSharedAgentSkillGate_OpensTheGateThatEnableChecks(t *testing.T) {
+	ctx := context.Background()
+	fga := newStoreGateFGA()
+	load := func(names ...string) *SharedAgentSkills {
+		var refs []config.SharedAgentSkillConfig
+		for _, n := range names {
+			refs = append(refs, config.SharedAgentSkillConfig{Name: n, Reference: "r@sha256:" + n})
+		}
+		s, err := loadSharedAgentSkills(ctx, refs, okPuller, discardLog())
+		require.NoError(t, err)
+		return s
+	}
+
+	require.NoError(t, seedSharedAgentSkillGate(ctx, fga, load("web-recon", "dns"), discardLog()))
+	assert.True(t, offered(t, fga, "web-recon"))
+	assert.True(t, offered(t, fga, "dns"))
+	assert.False(t, offered(t, fga, "not-configured"))
+
+	// A second seed with the same config is a no-op, and a new name joins the
+	// ones that exist already.
+	require.NoError(t, seedSharedAgentSkillGate(ctx, fga, load("web-recon", "dns"), discardLog()))
+	require.NoError(t, seedSharedAgentSkillGate(ctx, fga, load("web-recon", "dns", "extra"), discardLog()))
+	assert.Len(t, fga.tuples, 3)
+	assert.True(t, offered(t, fga, "extra"))
+
+	// A name that left the config loses its tuple. The others keep theirs.
+	require.NoError(t, seedSharedAgentSkillGate(ctx, fga, load("web-recon"), discardLog()))
+	assert.True(t, offered(t, fga, "web-recon"))
+	assert.False(t, offered(t, fga, "dns"))
+	assert.False(t, offered(t, fga, "extra"))
 }
