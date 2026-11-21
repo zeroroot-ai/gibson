@@ -25,6 +25,12 @@ rules:
   - create
   - patch
 - apiGroups:
+  - apps
+  resources:
+  - daemonsets
+  verbs:
+  - get
+- apiGroups:
   - gibson.zeroroot.ai
   resources:
   - agentenrollments
