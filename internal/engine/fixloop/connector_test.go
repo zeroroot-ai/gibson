@@ -30,7 +30,7 @@ func TestConnectorReader_MergeRequest(t *testing.T) {
 	f := &fakeMCP{tools: []catalog.ToolEntry{{Connector: "gitlab", Tool: ToolMergeRequestState}}}
 	w := &fakeTenantCaller{result: map[string]any{
 		"state": "open", "pipeline_green": true, "at": "2026-11-20T08:00:00Z",
-		"created_at": "2026-11-20T07:00:00Z", "source_branch": "job/j-1",
+		"created_at": "2026-11-20T07:00:00Z", "source_branch": "job/j-1", "source_branch_reason": "",
 	}}
 	got, err := NewConnectorReader(f, w).MergeRequest(context.Background(), "t1", "run-9", "mr-1")
 	if err != nil {
@@ -131,5 +131,15 @@ func TestConnectorReader_RevertTakesTheGovernedPath(t *testing.T) {
 	}
 	if _, err := NewConnectorReader(mcp, nil).Revert(context.Background(), "t1", "g/p!12", ""); err == nil {
 		t.Fatal("want an error with no governed caller")
+	}
+}
+
+// The reader keeps the reason that the host gives for no source branch.
+func TestConnectorReader_MergeRequestKeepsTheBranchReason(t *testing.T) {
+	f := &fakeMCP{tools: []catalog.ToolEntry{{Connector: "github", Tool: ToolMergeRequestState}}}
+	w := &fakeTenantCaller{result: map[string]any{"state": "open", "source_branch_reason": "fork"}}
+	got, err := NewConnectorReader(f, w).MergeRequest(context.Background(), "t1", "", "o/r#1")
+	if err != nil || got.SourceBranch != "" || got.SourceBranchReason != "fork" {
+		t.Fatalf("fact = %+v, %v", got, err)
 	}
 }

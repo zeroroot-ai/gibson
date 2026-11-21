@@ -32,6 +32,9 @@ type MergeFact struct {
 	// merge request of a fix job to a finding (review B1).
 	CreatedAt    time.Time
 	SourceBranch string
+	// SourceBranchReason is why the host gave no source branch, for example
+	// a branch in a fork. It is empty when the host gave the branch.
+	SourceBranchReason string
 }
 
 // RestartFact is what the deploy tool says about a restart that a deploy

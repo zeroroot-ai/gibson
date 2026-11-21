@@ -18,7 +18,9 @@ import (
 // it serves. Each tool takes the arguments below and returns a JSON object.
 const (
 	// ToolMergeRequestState takes {merge_request} and returns {state,
-	// pipeline_green, reason, at, created_at, source_branch}.
+	// pipeline_green, reason, at, created_at, source_branch,
+	// source_branch_reason}. source_branch_reason says why the host gave no
+	// source branch, for example a fork.
 	ToolMergeRequestState = "merge_request_state"
 	// ToolDeploymentState takes {merge_request} and returns {deployed,
 	// deployment, application, at, restart: {needed, started, ended}}.
@@ -123,6 +125,7 @@ func (r *ConnectorReader) MergeRequest(ctx context.Context, tenant, missionID, k
 	f := MergeFact{
 		State: str(m, "state"), PipelineGreen: boolean(m, "pipeline_green"), Reason: str(m, "reason"), At: when(m, "at"),
 		CreatedAt: when(m, "created_at"), SourceBranch: str(m, "source_branch"),
+		SourceBranchReason: str(m, "source_branch_reason"),
 	}
 	switch f.State {
 	case MROpen, MRMerged, MRClosed, MRRefused:

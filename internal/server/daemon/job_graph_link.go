@@ -206,6 +206,10 @@ func mergeRequestRefusal(fact fixloop.MergeFact, branch string, claimedAt time.T
 	switch {
 	case fact.State != fixloop.MROpen:
 		return fmt.Sprintf("the merge request is %q on the Git host, not open", fact.State)
+	case fact.SourceBranch == "" && fact.SourceBranchReason != "":
+		// The host knows the merge request and says why it gives no branch,
+		// for example a branch in a fork. That is no work of the job.
+		return "the Git host gave no source branch for the merge request: " + fact.SourceBranchReason
 	case fact.SourceBranch == "" || fact.CreatedAt.IsZero():
 		// The check needs both fields, and an old connector server does not
 		// send them (review R2). The daemon keeps the check and names the

@@ -521,3 +521,14 @@ func TestJobGraphLink_ReadsTheGitHostAgainAfterAFailure(t *testing.T) {
 		t.Fatalf("events = %+v, want the refusal", evs)
 	}
 }
+
+// A host that gives no source branch and says why, for example a fork, gets
+// that reason in the refusal (connectors v0.2.0).
+func TestMergeRequestRefusal_NamesTheReasonOfTheHost(t *testing.T) {
+	got := mergeRequestRefusal(fixloop.MergeFact{
+		State: fixloop.MROpen, CreatedAt: testNow, SourceBranchReason: "the source branch is in a fork",
+	}, "job/job-1", testClaimedAt)
+	if !strings.Contains(got, "the source branch is in a fork") {
+		t.Fatalf("refusal = %q, want the reason of the host", got)
+	}
+}
