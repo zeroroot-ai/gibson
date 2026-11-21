@@ -57,9 +57,10 @@ import (
 // it must not (ADR-0178). Its check is an attack predicate, the strongest
 // check. An agent that ends a run without a proof did not show that the flaw
 // is gone: it can stop early, choose another technique, or lose its budget. So
-// its silence is never a CheckRerun. The producer of that CheckRerun is the
-// evaluation of the predicate by the daemon on its own record of the tool
-// calls (predicate_rerun.go, review M11).
+// its silence is never a CheckRerun. No producer of a predicate CheckRerun
+// exists yet. It needs a proof of absence that the daemon selects itself: the
+// same probe of the same target after the deploy, never evidence that an agent
+// names (gibson#1491, review R3).
 
 // ScanMissionName is the name of the Scan mission definition
 // (internal/platform/missioncatalog/missions/scan.cue). A mission is a scan —
