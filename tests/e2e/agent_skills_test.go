@@ -41,7 +41,8 @@
 // the probe Agent Skill to the mission while the agent node is open, then
 // releases the node. The daemon reads the pinned version of the Agent Skill,
 // places its files in the sandbox of the call through the files field of the
-// sandbox launch, and the tool runs scripts/probe.sh there. The script scans a
+// sandbox launch, and the tool runs the probe script there (the file probe.sh in the scripts folder
+// of tests/fixtures/agentskills/probe/e2e-probe). The script scans a
 // host outside the egress limit of a sandbox. The workflow then reads the
 // Cilium drop records and fails when the network let a packet reach the host.
 // The text of the script is never served: invoke_tool refuses it.
@@ -538,7 +539,7 @@ func TestAgentSkills(t *testing.T) {
 	})
 
 	t.Run("a script of an Agent Skill runs in the sandbox and cannot reach a host outside the egress limit", func(t *testing.T) {
-		// The probe Agent Skill holds scripts/probe.sh. The script scans a host
+		// The probe Agent Skill holds a script (tests/fixtures/agentskills/probe/e2e-probe/scripts/probe.sh). The script scans a host
 		// that is outside the egress limit of a sandbox. The skill-script tool
 		// runs it: the daemon places the files of the pinned Agent Skill in the
 		// sandbox of the call, and the tool runs the script there, as any tool.
