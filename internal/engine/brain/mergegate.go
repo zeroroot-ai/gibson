@@ -57,9 +57,11 @@ type MergeSlot struct {
 	MissionID string
 }
 
-// MergeSlotHold is how long a granted slot waits for the deploy of its merge
-// request. A merge request that is not merged, or a merge that is never
-// deployed, then frees the slot.
+// MergeSlotHold is how long a granted slot waits for its merge request to
+// merge. A merge request that is not merged by then frees the slot. A merged
+// merge request keeps the slot until its health signal answers, its revert
+// merges, or its service shows no health signal (review R4): the fix is out,
+// and the next fix of the Application must wait for its verdict.
 const MergeSlotHold = 24 * time.Hour
 
 // MergeSlotExpired records that the daemon freed a slot that nothing else
@@ -156,8 +158,8 @@ func MergeGateSystem(w *World) []Event {
 //
 //	no Finding carries the merge request          → free (a rerun opened the
 //	                                                 Finding again, or it moved on)
-//	granted, no deploy after MergeSlotHold         → free (not merged, or a merge
-//	                                                 that is never deployed)
+//	granted, not merged after MergeSlotHold        → free (the merge request did
+//	                                                 not merge)
 //
 // The System is quiescent: a freed slot leaves the queue.
 func MergeSlotExpirySystem(w *World) []Event {
@@ -166,15 +168,15 @@ func MergeSlotExpirySystem(w *World) []Event {
 	}
 	now := w.Now()
 	carried := map[string]bool{}
-	deployed := map[string]bool{}
+	merged := map[string]bool{}
 	mission := map[string]string{}
 	for _, f := range w.FindingSnapshot() {
 		if f.MergeRequest == "" {
 			continue
 		}
 		carried[f.MergeRequest] = true
-		if !f.DeployedAt.IsZero() {
-			deployed[f.MergeRequest] = true
+		if f.MergeRequestState == MergeRequestMerged || !f.DeployedAt.IsZero() {
+			merged[f.MergeRequest] = true
 		}
 		if f.FixMissionID != "" {
 			mission[f.MergeRequest] = f.FixMissionID
@@ -186,8 +188,8 @@ func MergeSlotExpirySystem(w *World) []Event {
 		switch {
 		case !carried[s.MergeRequest]:
 			reason = "no finding carries the merge request"
-		case s.Granted && !deployed[s.MergeRequest] && !s.GrantedAt.IsZero() && now.Sub(s.GrantedAt) > MergeSlotHold:
-			reason = "the merge request has no deploy " + MergeSlotHold.String() + " after the grant"
+		case s.Granted && !merged[s.MergeRequest] && !s.GrantedAt.IsZero() && now.Sub(s.GrantedAt) > MergeSlotHold:
+			reason = "the merge request did not merge " + MergeSlotHold.String() + " after the grant"
 		default:
 			continue
 		}

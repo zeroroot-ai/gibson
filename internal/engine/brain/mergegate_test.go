@@ -181,3 +181,19 @@ func TestMergeGate_TheSlotIsBoundToItsMission(t *testing.T) {
 		t.Fatal("the originating mission must merge")
 	}
 }
+
+// A merged merge request keeps its slot, whatever the time since the grant,
+// until its health signal answers (review R4). Only a merge request that did
+// not merge loses the slot after MergeSlotHold.
+func TestMergeSlotExpirySystem_KeepsTheSlotOfAMergedFix(t *testing.T) {
+	w := NewWorld("t1")
+	w.clock = func() time.Time { return at(0).Add(10 * MergeSlotHold) }
+	Reduce(w, FindingRaised{ID: "f1", At: at(0)})
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixing, MergeRequest: "mr-1", At: at(0)})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "a", At: at(0)})
+	Reduce(w, MergeGranted{MergeRequest: "mr-1", Application: "a", At: at(0)})
+	Reduce(w, MergeRequestObserved{Key: "mr-1", State: MergeRequestMerged, At: at(30)})
+	if evs := MergeSlotExpirySystem(w); len(evs) != 0 {
+		t.Fatalf("a merged fix with no health result lost its slot: %+v", evs)
+	}
+}
