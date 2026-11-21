@@ -27,10 +27,15 @@ spec:
   # The tenant gives the address of its GitLab, for example
   # https://gitlab.com. The deploy environment is production.
   # The egress allow-list of the pod holds the host of the value.
+  # A GitLab that the customer hosts has no vendor domain, so the platform
+  # owner of the install states its pattern in the chart (installPatterns).
   variables:
     - name: base_url
       env: GITLAB_BASE_URL
       kind: endpoint
+      patterns:
+        - https://gitlab.com
+      installPatterns: true
   # The merge tool runs only when the merge request holds its merge slot
   # (gibson#1458). The other tools need only the grant.
   tools:

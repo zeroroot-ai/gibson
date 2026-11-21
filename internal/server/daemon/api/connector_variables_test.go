@@ -27,7 +27,9 @@ func aapLikeEntry() componentcatalog.ConnectorEntry {
 		EgressAllow: []string{"registry-static.example.com:443"},
 		Env:         map[string]string{"ALLOW_WRITE_OPERATIONS": "false"},
 		Variables: []componentcatalog.TenantVariable{
-			{Name: "base_url", Env: "BASE_URL", Kind: componentcatalog.VariableKindEndpoint},
+			{Name: "base_url", Env: "BASE_URL", Kind: componentcatalog.VariableKindEndpoint, Patterns: []string{
+				"https://aap.corp-example.com", "https://aap.corp-example.com:8443",
+			}},
 		},
 	}
 }

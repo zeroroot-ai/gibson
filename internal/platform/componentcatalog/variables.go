@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/net/publicsuffix"
 
@@ -42,15 +43,21 @@ import (
 //     .lan, .corp, .home.arpa).
 //   - The port is 443 or a number from 1024 to 65535. A system port such as
 //     22 or 25 is refused.
-//   - The manifest can state patterns, with the grammar of endpointPatterns.
-//     The value must then match one of them. With no pattern, any public DNS
-//     name is allowed, because the host belongs to the customer.
+//   - The value must match a host pattern, with the grammar of
+//     endpointPatterns. A variable with no pattern is refused (review B3).
+//     The manifest states the patterns of the vendor. A server that the
+//     customer hosts (a GitHub Enterprise Server, a GitLab, a Prometheus, a
+//     Puppet Enterprise) has no vendor domain. Its manifest sets
+//     installPatterns, and the platform owner of the install states the
+//     patterns in the chart (SetInstallPatterns). The tenant never states a
+//     pattern, because the tenant is the party that the rule limits.
 //   - The egress entry is the exact host:port of the value. It is never a
 //     wildcard.
 //
 // A name that is public can still resolve to a private address. The
-// CiliumNetworkPolicy of the connector refuses private addresses (ADR-0114),
-// and that check is the second layer. The daemon does not resolve the name.
+// CiliumNetworkPolicy of the connector denies the private, link-local,
+// loopback and CGNAT ranges and the cluster ranges (ciliumegress.DenyRules),
+// and that deny is the second layer. The daemon does not resolve the name.
 
 // Values of TenantVariable.Kind.
 const (
@@ -70,9 +77,72 @@ type TenantVariable struct {
 	Env string `yaml:"env"`
 	// Kind is "endpoint".
 	Kind string `yaml:"kind"`
-	// Patterns limit the value. See endpointPatterns for the grammar. Empty
-	// means any public DNS name.
+	// Patterns limit the value. See endpointPatterns for the grammar.
 	Patterns []string `yaml:"patterns"`
+	// InstallPatterns is true when the platform owner of the install adds
+	// the patterns (SetInstallPatterns). A variable needs Patterns,
+	// InstallPatterns or both.
+	InstallPatterns bool `yaml:"installPatterns"`
+}
+
+// installPatterns are the patterns that the platform owner set for this
+// install, keyed by "<connector id>/<variable name>".
+var installPatterns = struct {
+	sync.RWMutex
+	m map[string][]string
+}{m: map[string][]string{}}
+
+// InstallPatternsKey is the key of the install patterns of one variable.
+func InstallPatternsKey(connectorID, variable string) string { return connectorID + "/" + variable }
+
+// SetInstallPatterns sets the patterns that the platform owner states for
+// this install. Each key names a connector of the catalog and a variable of
+// it that sets installPatterns. Each pattern has the grammar of
+// endpointPatterns. A bad entry refuses the whole set, so a typo fails the
+// start of the daemon and never widens a rule.
+func SetInstallPatterns(m map[string][]string) error {
+	clean := make(map[string][]string, len(m))
+	for key, pats := range m {
+		id, name, ok := strings.Cut(key, "/")
+		if !ok {
+			return fmt.Errorf("install patterns: key %q is not <connector>/<variable>", key)
+		}
+		e, err := LookupConnector(id)
+		if err != nil {
+			return fmt.Errorf("install patterns: %w", err)
+		}
+		var v *TenantVariable
+		for i := range e.Variables {
+			if e.Variables[i].Name == name {
+				v = &e.Variables[i]
+			}
+		}
+		if v == nil || !v.InstallPatterns {
+			return fmt.Errorf("install patterns: connector %q has no variable %q that takes install patterns", id, name)
+		}
+		for _, p := range pats {
+			if err := validateEndpointPattern(p); err != nil {
+				return fmt.Errorf("install patterns: %s pattern %q: %w", key, p, err)
+			}
+		}
+		clean[key] = append([]string(nil), pats...)
+	}
+	installPatterns.Lock()
+	defer installPatterns.Unlock()
+	installPatterns.m = clean
+	return nil
+}
+
+// patternsOf returns the patterns of the manifest and of the install for one
+// variable.
+func patternsOf(connectorID string, v TenantVariable) []string {
+	out := append([]string(nil), v.Patterns...)
+	if v.InstallPatterns {
+		installPatterns.RLock()
+		out = append(out, installPatterns.m[InstallPatternsKey(connectorID, v.Name)]...)
+		installPatterns.RUnlock()
+	}
+	return out
 }
 
 // ResolvedVariables is what the tenant values give to one Hosted connector.
@@ -121,6 +191,10 @@ func validateTenantVariables(id string, s ConnectorSpec) error {
 		envs[v.Env] = true
 		if v.Kind != VariableKindEndpoint {
 			return fmt.Errorf("%s: variable %q has kind %q, which must be %q", id, v.Name, v.Kind, VariableKindEndpoint)
+		}
+		if len(v.Patterns) == 0 && !v.InstallPatterns {
+			return fmt.Errorf("%s: variable %q has no host pattern: state patterns, or installPatterns for a "+
+				"server that the customer hosts", id, v.Name)
 		}
 		for _, p := range v.Patterns {
 			if err := validateEndpointPattern(p); err != nil {
@@ -186,8 +260,13 @@ func (e ConnectorEntry) ResolveVariables(values map[string]string) (ResolvedVari
 		if err == nil {
 			err = checkVariablePort(ep.port)
 		}
-		if err == nil && len(v.Patterns) > 0 && !matchesAnyPattern(v.Patterns, ep) {
-			err = errors.New("the value is outside the patterns " + strings.Join(v.Patterns, ", "))
+		pats := patternsOf(e.ID, v)
+		switch {
+		case err != nil:
+		case len(pats) == 0:
+			err = errors.New("no host pattern allows a value: the platform owner of this install states the patterns")
+		case !matchesAnyPattern(pats, ep):
+			err = errors.New("the value is outside the patterns " + strings.Join(pats, ", "))
 		}
 		if err != nil {
 			return ResolvedVariables{}, fmt.Errorf("variable %q of connector %q: %w", v.Name, e.ID, err)

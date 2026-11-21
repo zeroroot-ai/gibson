@@ -39,9 +39,15 @@ func ciliumEgressPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {
 }
 
 // desiredCiliumEgressPolicy is the egress policy of a connector with a
-// non-empty host list.
-func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance) (*unstructured.Unstructured, error) {
+// non-empty host list. The allow rules name each host. The deny rule refuses
+// the private, link-local, loopback and CGNAT ranges and the cluster ranges,
+// so a host name that resolves to one of them is refused (review B3).
+func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance, clusterCIDRs []string) (*unstructured.Unstructured, error) {
 	egress, err := ciliumegress.Rules(ci.Spec.EgressAllow)
+	if err != nil {
+		return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
+	}
+	deny, err := ciliumegress.DenyRules(clusterCIDRs)
 	if err != nil {
 		return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
 	}
@@ -56,7 +62,8 @@ func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance) (*unstru
 		"endpointSelector": map[string]interface{}{
 			"matchLabels": map[string]interface{}{"toolhive-name": ci.Name},
 		},
-		"egress": egress,
+		"egress":     egress,
+		"egressDeny": deny,
 	}
 	return u, nil
 }
@@ -80,7 +87,7 @@ func (r *ConnectorInstanceReconciler) reconcileCiliumEgressPolicy(
 		}
 		return nil
 	}
-	desired, err := desiredCiliumEgressPolicy(ci)
+	desired, err := desiredCiliumEgressPolicy(ci, r.ClusterCIDRs)
 	if err != nil {
 		return err
 	}

@@ -128,6 +128,10 @@ type ConnectorInstanceReconciler struct {
 	// Audit writes the record of each runtime, network or grant change
 	// before the change (gibson#583). Required.
 	Audit *audit.SagaEmitter
+	// ClusterCIDRs are the pod and the service ranges of the cluster. The
+	// egress policy of each connector denies them with the private ranges
+	// (review B3).
+	ClusterCIDRs []string
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=connectorinstances,verbs=get;list;watch;create;update;patch;delete

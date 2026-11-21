@@ -30,10 +30,13 @@ spec:
   # https://pe.example.com:8143. The secrets name the patch task and the
   # rollback task. A private CA of Puppet is not supported yet.
   # The egress allow-list of the pod holds the host of the value.
+  # Puppet Enterprise has no vendor domain, so the platform owner of the
+  # install states the pattern in the chart (installPatterns).
   variables:
     - name: orchestrator_url
       env: PUPPET_ORCHESTRATOR_URL
       kind: endpoint
+      installPatterns: true
   # Each tool is a response action. Revoke a session, disable an account and
   # isolate a host need no person (ADR-0180): only a tool that destroys data
   # waits for one. A new tool of the server waits until this list names it.

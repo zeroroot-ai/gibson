@@ -5,6 +5,7 @@ package ciliumegress
 
 import (
 	"errors"
+	"net"
 	"testing"
 )
 
@@ -78,5 +79,59 @@ func TestNewPolicy(t *testing.T) {
 	u := NewPolicy()
 	if u.GetAPIVersion() != APIVersion || u.GetKind() != Kind {
 		t.Fatalf("NewPolicy = %s/%s", u.GetAPIVersion(), u.GetKind())
+	}
+}
+
+// The deny rule holds each private, link-local, loopback, CGNAT and unique
+// local range, and the cluster ranges. A bad cluster range refuses the rule.
+// The metadata address and a rebinding answer in 10/8 fall in the denied set.
+func TestDenyRules(t *testing.T) {
+	rules, err := DenyRules([]string{"10.244.0.0/16", "fd00:10:96::/112"})
+	if err != nil {
+		t.Fatalf("DenyRules: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("rules = %v, want one deny rule", rules)
+	}
+	set := rules[0].(map[string]interface{})["toCIDRSet"].([]interface{})
+	var nets []*net.IPNet
+	got := map[string]bool{}
+	for _, e := range set {
+		c := e.(map[string]interface{})["cidr"].(string)
+		got[c] = true
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nets = append(nets, n)
+	}
+	for _, want := range []string{
+		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8",
+		"100.64.0.0/10", "fc00::/7", "fe80::/10", "::1/128", "10.244.0.0/16", "fd00:10:96::/112",
+	} {
+		if !got[want] {
+			t.Errorf("the deny rule has no %s: %v", want, set)
+		}
+	}
+	for _, ip := range []string{"169.254.169.254", "10.1.2.3", "172.20.0.1", "192.168.1.1", "100.100.0.1", "127.0.0.1", "::1", "fe80::1", "fd12::1"} {
+		denied := false
+		for _, n := range nets {
+			if n.Contains(net.ParseIP(ip)) {
+				denied = true
+			}
+		}
+		if !denied {
+			t.Errorf("%s is not denied", ip)
+		}
+	}
+	for _, ip := range []string{"140.82.112.6", "2606:50c0:8000::153"} {
+		for _, n := range nets {
+			if n.Contains(net.ParseIP(ip)) {
+				t.Errorf("the public address %s is denied by %s", ip, n)
+			}
+		}
+	}
+	if _, err := DenyRules([]string{"10.244.0.0"}); !errors.Is(err, ErrBadCIDR) {
+		t.Errorf("a bad cluster range: err = %v, want ErrBadCIDR", err)
 	}
 }

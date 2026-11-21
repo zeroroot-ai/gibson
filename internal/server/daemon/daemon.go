@@ -991,6 +991,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Record start time
 	d.startTime = time.Now()
 
+	// The platform owner states the host patterns of the connectors of a
+	// server that the customer hosts (review B3). A bad set fails the start.
+	if err := loadConnectorInstallPatterns(os.Getenv); err != nil {
+		return err
+	}
+
 	// Per unified-identity-and-authorization Requirement 8.4 the
 	// daemon no longer talks to ext-authz directly: ext-authz lives
 	// upstream of the daemon and consults the SDK-rendered registry +

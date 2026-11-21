@@ -142,10 +142,12 @@ Some Hosted servers must reach a host that only the customer knows. The Ansible 
 ```yaml
 shape: Hosted
 variables:
-  - name: base_url   # the key in the enable request
-    env: BASE_URL    # the variable of the pod
-    kind: endpoint   # the only kind: an https URL
-    patterns: []     # optional: limit the host, same grammar as endpointPatterns
+  - name: base_url        # the key in the enable request
+    env: BASE_URL         # the variable of the pod
+    kind: endpoint        # the only kind: an https URL
+    patterns:             # the hosts of the vendor, same grammar as endpointPatterns
+      - https://*.vendor.example
+    installPatterns: true # the platform owner of the install adds patterns
 ```
 
 The tenant gives a value for each variable in `EnableConnector` (`variables`). The pod gets the canonical value as the variable `env`. The egress allow-list of the pod holds the exact `host:port` of the value, in addition to the `egressAllow` of the manifest.
@@ -155,8 +157,23 @@ The daemon applies these rules at enable time and again each time it hands the c
 - The value is an https URL. It has no user info, no query, no fragment, no escape and no IP address.
 - The host is a public DNS name. Its last label must be a public suffix of the ICANN list. This refuses `localhost`, `.svc`, `.cluster.local`, `.local`, `.internal`, `.lan` and `.corp`.
 - The port is 443 or a number from 1024 to 65535.
-- With `patterns`, the value must match one of them. With no pattern, any public name is allowed, because the host belongs to the customer. The egress entry is never a wildcard.
+- The value must match a host pattern. The loader refuses a variable with no `patterns` and no `installPatterns`. The egress entry is never a wildcard.
 - The daemon refuses a missing value and a value that the manifest does not declare.
 - A stored value that a later manifest or rule refuses gives the pod no value and no egress host.
 
-A public name can resolve to a private address. The daemon does not resolve names. The `CiliumNetworkPolicy` of the connector refuses private addresses (ADR-0114), and this is the second layer.
+### A server that the customer hosts
+
+A GitHub Enterprise Server, a GitLab of the customer, a Prometheus and a Puppet Enterprise have no vendor domain. A pattern in the manifest cannot name them. A rule of "any public name" lets a tenant name `169.254.169.254.nip.io`, a public name that resolves to the cloud metadata address. So the rule is this:
+
+- The manifest sets `installPatterns: true`.
+- The platform owner of the install states the patterns in the chart, in `GIBSON_CONNECTOR_INSTALL_PATTERNS`, as JSON: `{"gitlab-fixloop/base_url": ["https://gitlab.customer.example"]}`.
+- The daemon reads them at start. A value that does not parse, an unknown connector, a variable without `installPatterns` and a bad pattern fail the start.
+- With no pattern from the manifest or the install, the variable takes no value.
+
+The tenant never states a pattern, because the tenant is the party that the rule limits. The platform owner of a single-customer install knows the hosts of that customer. The SaaS states only the vendor patterns.
+
+### The network layer
+
+A public name can resolve to a private address. The daemon does not resolve names. The `CiliumNetworkPolicy` of each connector has an `egressDeny` rule (`operators/internal/ciliumegress.DenyRules`). It denies 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 127.0.0.0/8, 100.64.0.0/10, 0.0.0.0/8, fc00::/7, fe80::/10, ::1 and ::, and the pod and the service ranges in `CONNECTOR_CLUSTER_CIDRS` of the connector operator. A Cilium deny rule wins over each allow rule, a `toFQDNs` allow too ([Deny Policies](https://docs.cilium.io/en/stable/security/policy/deny/)). A deny rule cannot name a host, but the address that a `toFQDNs` name resolves to is denied when it is in a denied range. So a server of the customer on a private address cannot be a connector. It needs a public address.
+
+A CIDR rule of Cilium does not select a pod or a node that Cilium manages, so the deny does not block kube-dns or the `kube-apiserver` entity. Cilium before 1.14.16, 1.15.10 and 1.16.3 can drop a CIDR deny when a narrower CIDR allow exists (CVE-2024-47825). The install must run a fixed version.

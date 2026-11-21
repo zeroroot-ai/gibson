@@ -74,12 +74,16 @@ func TestDesiredCiliumEgressPolicy(t *testing.T) {
 		},
 	} {
 		ci.Spec.EgressAllow = c.allow
-		u, err := desiredCiliumEgressPolicy(ci)
+		u, err := desiredCiliumEgressPolicy(ci, []string{"10.244.0.0/16"})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		if got := fqdnRules(t, u); !equalStrings(got, c.want) {
 			t.Errorf("%s: rules = %v, want %v", name, got, c.want)
+		}
+		deny, _, _ := unstructured.NestedSlice(u.Object, "spec", "egressDeny")
+		if len(deny) != 1 {
+			t.Errorf("%s: egressDeny = %v, want the deny rule of the private and cluster ranges", name, deny)
 		}
 		sel, _, _ := unstructured.NestedStringMap(u.Object, "spec", "endpointSelector", "matchLabels")
 		if sel["toolhive-name"] != "gh" || u.GetName() != "connector-gh-egress" {
@@ -88,7 +92,7 @@ func TestDesiredCiliumEgressPolicy(t *testing.T) {
 	}
 	for _, bad := range []string{"", "api.github.com:http", "api.github.com:0", "https://api.github.com", ":443"} {
 		ci.Spec.EgressAllow = []string{bad}
-		if _, err := desiredCiliumEgressPolicy(ci); !errors.Is(err, ciliumegress.ErrBadEntry) {
+		if _, err := desiredCiliumEgressPolicy(ci, nil); !errors.Is(err, ciliumegress.ErrBadEntry) {
 			t.Errorf("entry %q: err = %v, want ciliumegress.ErrBadEntry", bad, err)
 		}
 	}
@@ -349,5 +353,15 @@ func TestReconcileProxyAPIServerPolicy_Errors(t *testing.T) {
 	if err := r.reconcileProxyAPIServerPolicy(ctx, ci); err == nil ||
 		!strings.Contains(err.Error(), "update proxy api server policy") {
 		t.Errorf("update: err = %v", err)
+	}
+}
+
+// A bad cluster range refuses the policy, so a typo in the install never
+// drops the deny rule (review B3).
+func TestDesiredCiliumEgressPolicy_ABadClusterRangeIsRefused(t *testing.T) {
+	ci := hostedInstance("gh", "tenant-acme")
+	ci.Spec.EgressAllow = []string{"api.github.com:443"}
+	if _, err := desiredCiliumEgressPolicy(ci, []string{"not-a-cidr"}); !errors.Is(err, ciliumegress.ErrBadCIDR) {
+		t.Fatalf("err = %v, want ciliumegress.ErrBadCIDR", err)
 	}
 }

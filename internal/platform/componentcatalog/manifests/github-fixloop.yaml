@@ -28,10 +28,15 @@ spec:
   # https://<host>/api/v3 for GitHub Enterprise Server. The deploy
   # environment is production.
   # The egress allow-list of the pod holds the host of the value.
+  # A GitHub Enterprise Server has no vendor domain, so the platform owner
+  # of the install states its pattern in the chart (installPatterns).
   variables:
     - name: api_url
       env: GITHUB_API_URL
       kind: endpoint
+      patterns:
+        - https://api.github.com
+      installPatterns: true
   # The merge tool runs only when the merge request holds its merge slot
   # (gibson#1458). The other tools need only the grant.
   tools:

@@ -28,7 +28,10 @@ spec:
   # prometheus-health-queries holds the JSON map from an application key to
   # its health query.
   # The egress allow-list of the pod holds the host of the value.
+  # Prometheus has no vendor domain, so the platform owner of the install
+  # states the pattern in the chart (installPatterns).
   variables:
     - name: base_url
       env: PROMETHEUS_BASE_URL
       kind: endpoint
+      installPatterns: true
