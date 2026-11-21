@@ -126,12 +126,12 @@ func TestWorkAgent_BoundByEnqueueForAgentWorkOnly(t *testing.T) {
 	toolItem := WorkItem{WorkID: "w-tool"}
 	require.NoError(t, bindWorkAgent(ctx, client, "tool", "nmap", toolItem))
 	_, _, err = env.reg.WorkAgent(ctx, "w-tool")
-	assert.ErrorIs(t, err, ErrWorkAgentUnknown, "tool work binds no agent")
+	require.ErrorIs(t, err, ErrWorkAgentUnknown, "tool work binds no agent")
 	_, _, err = env.reg.WorkAgent(ctx, "")
-	assert.ErrorIs(t, err, ErrWorkAgentUnknown)
+	require.ErrorIs(t, err, ErrWorkAgentUnknown)
 	require.NoError(t, client.Set(ctx, workAgentKey("w-bad"), "not json", workOwnerTTL).Err())
 	_, _, err = env.reg.WorkAgent(ctx, "w-bad")
-	assert.ErrorIs(t, err, ErrWorkAgentUnknown)
+	require.ErrorIs(t, err, ErrWorkAgentUnknown)
 }
 
 // Enqueue itself binds the agent of agent work to the work id.

@@ -880,7 +880,7 @@ type toolMessages func(ctx context.Context, harness AgentHarness, req *harnesspb
 // input type that the agent names.
 func (s *HarnessCallbackService) resolveToolMessages(
 	ctx context.Context, harness AgentHarness, req *harnesspb.CallToolProtoRequest,
-) (proto.Message, proto.Message, *harnesspb.CallToolProtoResponse) {
+) (request, response proto.Message, refused *harnesspb.CallToolProtoResponse) {
 	// Get tool descriptor to validate it exists and extract metadata
 	toolDesc, err := harness.GetToolDescriptor(ctx, req.Name)
 	if err != nil {
@@ -889,7 +889,7 @@ func (s *HarnessCallbackService) resolveToolMessages(
 		return nil, nil, &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
-				Message: fmt.Sprintf("tool not found: %s", req.Name),
+				Message: "tool not found: " + req.Name,
 			},
 		}
 	}
