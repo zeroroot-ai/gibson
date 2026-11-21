@@ -288,6 +288,13 @@ func applicationFindingsToProto(raw []byte) ([]*harnesspb.ApplicationFinding, er
 			Priority:        f.Priority,
 			PriorityRule:    f.PriorityRule,
 			PriorityReason:  f.PriorityReason,
+
+			// The fix agent reads these. A block reason stops a second try of
+			// the same fix, and the merge request links to the current fix
+			// (gibson#1579).
+			FixBlockedReason: f.FixBlockedReason,
+			MergeRequest:     f.MergeRequest,
+			MergeRequestUrl:  f.MergeRequestURL,
 		})
 	}
 	return out, nil
