@@ -234,3 +234,25 @@ func TestCallPullTool_EmitsTheEventsAndRecordsTheAgent(t *testing.T) {
 	assert.Equal(t, rec.ToolCallID, reply.id, "the reply must carry the id of the record")
 	assert.NotEmpty(t, env.loads.got, "the script is a load of the Agent Skill")
 }
+
+type errAuthzStore struct{}
+
+func (errAuthzStore) Get(context.Context, string) (*RunAuthzState, error) {
+	return nil, assert.AnError
+}
+
+// A store that is not wired, and a store that fails, refuse the call before the
+// launch.
+func TestCallPullTool_RefusesWithoutAReadableRunState(t *testing.T) {
+	env := newPullEnv(t, pullOpts{network: &agent.NodeNetwork{}})
+	env.svc.authzStore = nil
+	reply, err := env.call(t)
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, reply.code)
+
+	env.svc.authzStore = errAuthzStore{}
+	reply, err = env.call(t)
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, reply.code)
+	assert.Empty(t, env.launch.got.Image)
+}
