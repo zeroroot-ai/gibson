@@ -38,6 +38,8 @@ func TestCheckVersion(t *testing.T) {
 		{"v0.9.0", false},
 		{"latest", false},
 		{"v1.15", false},
+		{"v1.x.3", false},
+		{"v1.-2.3", false},
 		{"", false},
 	}
 	for _, c := range cases {

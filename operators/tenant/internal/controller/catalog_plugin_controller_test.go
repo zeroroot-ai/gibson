@@ -353,6 +353,18 @@ func TestCatalogPlugins_ABadHostIsRefused(t *testing.T) {
 	}
 }
 
+// A bad cluster range refuses the plugin policy, so no plugin runs with a
+// deny rule that lacks the cluster ranges (gibson#1582).
+func TestCatalogPlugins_ABadClusterRangeRefusesThePlugin(t *testing.T) {
+	d := &fakeCatalogPluginDaemon{desired: []provision.DesiredCatalogPlugin{cpWish(cpTenant, cpPlugin)}}
+	r, c := newCatalogPluginLoop(t, d, cpTenantObject(cpTenant))
+	r.Config.ClusterCIDRs = "10.244.0.0/16,nope"
+	_ = r.converge(context.Background())
+	if cpExists(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-github"}, &appsv1.Deployment{}) {
+		t.Error("a plugin with a bad cluster range got a Deployment")
+	}
+}
+
 func TestCatalogPlugins_ReportsThePhase(t *testing.T) {
 	r, c, d := convergedInstance(t)
 	if got := d.lastReport(t); got != (cpReport{cpTenant, cpPlugin, "Provisioning", ""}) {
