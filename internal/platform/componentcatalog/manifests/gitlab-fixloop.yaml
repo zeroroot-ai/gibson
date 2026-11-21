@@ -13,7 +13,7 @@ spec:
   vendor: gitlab
   class: git-host
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-gitlab-fixloop@sha256:cfbbcbbe12e3137fa8775425acf15f6a5efc6c0cd35a119feb127937f4469962
+  image: ghcr.io/zeroroot-ai/connectors-gitlab-fixloop@sha256:75b6ba566e4314dcb0329af2bb83033ce3be9c65bbb40d9c6ab27f3c9572092d
   transport: streamable-http
   port: 8080
   auth: none
