@@ -2290,6 +2290,9 @@ func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 		Severity:    protoSeverityToAgentSeverity(pf.Severity),
 		Confidence:  pf.Confidence,
 		Category:    pf.Category,
+		// The remediation text is part of the finding that the agent authors.
+		// The fix loop and the dashboard read it (gibson#1574).
+		Remediation: pf.Remediation,
 	}
 
 	// Identity is assigned by the daemon and never read from the payload
