@@ -43,7 +43,6 @@ Do not edit the tables by hand.
 | ADR-0033 | The saga runner calls each step, and each step is safe to run again |
 | ADR-0034 | The daemon owns LLM provider records and credentials |
 | ADR-0035 | CUE is the only mission authoring format |
-| ADR-0038 | Eino is the one LLM framework in gibson |
 | ADR-0041 | One grant model: FGA tuples, one read RPC, writes through the daemon |
 | ADR-0045 | One runtime identity for every component: the Capability Grant JWT |
 | ADR-0046 | The FGA model treats agent, tool and plugin principals the same |
@@ -170,6 +169,7 @@ Do not edit the tables by hand.
 | ADR-0030 | A package stays in the SDK when customer code needs it | ADR-0058 |
 | ADR-0036 | A Capability Grant is always required | ADR-0045 |
 | ADR-0037 | Customer RPCs on two SDK services, operator RPCs on one | ADR-0058 |
+| ADR-0038 | Eino is the one LLM framework in gibson | ADR-0172, ADR-0173 |
 | ADR-0039 | Tenant admin services live in the OSS SDK | ADR-0058 |
 | ADR-0040 | Tenant administration is split into focused services | ADR-0058 |
 | ADR-0042 | Connect by cluster name, claim the public origin | ADR-0092 |
