@@ -114,10 +114,61 @@ func TestMigration024_MapsTheOldStatuses(t *testing.T) {
 	for old, id := range ids {
 		assert.Equal(t, want[old], status(id), "up: %s", old)
 	}
+	// The daemon moves one mapped row. The down step keeps that move
+	// (review r12).
+	_, err := pool.Exec(ctx, `UPDATE findings SET document = jsonb_set(document, '{status}', '"verified"') WHERE id = $1`,
+		ids["resolved"])
+	require.NoError(t, err)
 	require.NoError(t, m.Migrate(23))
 	for old, id := range ids {
+		if old == "resolved" {
+			assert.Equal(t, "verified", status(id), "down keeps a row that the daemon moved")
+			continue
+		}
 		assert.Equal(t, old, status(id), "down: %s", old)
 	}
+}
+
+// The store round-trips a finding: Get, List, ListBySeverity, a finding with
+// no mission, and ErrNotFound for an unknown id.
+func TestStore_Integration_RoundTrip(t *testing.T) {
+	s, pool := newStore(t)
+	ctx := context.Background()
+	mission := types.NewID()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	mk := func(m types.ID, title string, sev agent.FindingSeverity, at time.Time) finding.EnhancedFinding {
+		f := finding.NewEnhancedFinding(agent.NewFinding(title, "d", sev), m, "recon")
+		f.Check = finding.Check{Kind: finding.CheckScan}
+		f.CreatedAt = at
+		return f
+	}
+	a := mk(mission, "a", agent.SeverityHigh, now)
+	b := mk(mission, "b", agent.SeverityLow, now.Add(time.Second))
+	orphan := mk("", "orphan", agent.SeverityHigh, now.Add(2*time.Second))
+	for _, f := range []finding.EnhancedFinding{a, b, orphan} {
+		require.NoError(t, s.Store(ctx, "acme", f))
+	}
+
+	var rows int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings`).Scan(&rows))
+	assert.Equal(t, 3, rows, "one row for each finding")
+
+	got, err := s.Get(ctx, "acme", a.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "a", got.Title)
+
+	list, err := s.List(ctx, "acme", mission, nil)
+	require.NoError(t, err)
+	require.Len(t, list, 2)
+	assert.Equal(t, "a", list[0].Title)
+
+	high, err := s.ListBySeverity(ctx, "acme", agent.SeverityHigh)
+	require.NoError(t, err)
+	assert.Len(t, high, 2)
+
+	_, err = s.Get(ctx, "acme", types.NewID())
+	require.ErrorIs(t, err, finding.ErrNotFound)
 }
 
 // Confidences reads the confidence of each finding of a list in one read. A
