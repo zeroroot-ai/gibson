@@ -156,7 +156,7 @@ func TestToolApproval_TheMergeGateReadsTheWorld(t *testing.T) {
 	if err := merge("acme"); !errors.Is(err, metatool.ErrMergeNotGranted) {
 		t.Fatalf("want merge not granted, got %v", err)
 	}
-	eng.Submit(brain.MergeRequestQueued{MergeRequest: "mr-7", Application: "app-1", At: time.Now().UTC()})
+	eng.Submit(brain.MergeRequestQueued{MergeRequest: "mr-7", Application: "app-1", At: time.Now().UTC(), MissionID: "m1"})
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		var granted bool

@@ -21,8 +21,8 @@ func grants(w *World) []MergeGranted {
 // health result of the one before.
 func TestMergeGate_OneFixAtATimeForOneApplication(t *testing.T) {
 	w := NewWorld("t1")
-	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(0)})
-	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "shop", At: at(1)})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(0), MissionID: "m1"})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "shop", At: at(1), MissionID: "m1"})
 
 	first := grants(w)
 	if len(first) != 1 || first[0].MergeRequest != "mr-1" {
@@ -134,7 +134,7 @@ func TestMergeSlotExpirySystem(t *testing.T) {
 	}
 	for i, app := range []string{"a1", "a2", "a3"} {
 		mr := "mr-f-" + string(rune('1'+i))
-		Reduce(w, MergeRequestQueued{MergeRequest: mr, Application: app, At: at(0)})
+		Reduce(w, MergeRequestQueued{MergeRequest: mr, Application: app, At: at(0), MissionID: "m1"})
 		Reduce(w, MergeGranted{MergeRequest: mr, Application: app, At: at(0)})
 	}
 	Reduce(w, FindingStatusChanged{ID: "f-1", Status: FindingStatusOpen, At: at(1)}) // a rerun found it again
@@ -174,6 +174,12 @@ func TestMergeGate_TheSlotIsBoundToItsMission(t *testing.T) {
 	}
 	if w.MayMerge("mr-1", "other-mission") || w.MayMerge("mr-1", "") {
 		t.Fatal("another mission or no mission merged with the slot")
+	}
+	// A slot that names no mission lets no call merge (review r2).
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "bank", At: at(0)})
+	Reduce(w, MergeGranted{MergeRequest: "mr-2", Application: "bank", At: at(0)})
+	if w.MayMerge("mr-2", "fix-1") {
+		t.Fatal("a slot with no mission let a call merge")
 	}
 	// The mission that originated the fix mission merges too.
 	Reduce(w, MissionOriginated{MissionID: "fix-1", ParentMissionID: "fix-agent-run"})

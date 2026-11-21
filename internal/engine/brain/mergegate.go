@@ -127,7 +127,10 @@ func (w *World) MayMerge(mr, missionID string) bool {
 	if s == nil || !s.Granted || missionID == "" {
 		return false
 	}
-	if s.MissionID == "" || s.MissionID == missionID {
+	if s.MissionID == "" {
+		return false // a slot that names no mission lets no call merge (review r2)
+	}
+	if s.MissionID == missionID {
 		return true
 	}
 	l, ok := w.MissionLineage(s.MissionID)
