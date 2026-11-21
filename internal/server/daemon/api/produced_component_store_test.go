@@ -113,3 +113,15 @@ func TestSQLProducedComponentStore_StatementErrors(t *testing.T) {
 		t.Fatalf("a result with no row count: %v", err)
 	}
 }
+
+// Each kind maps to its role and FGA type.
+func TestProducedKind(t *testing.T) {
+	for kind, want := range map[string]string{"agent": "agent_principal", "tool": "tool_principal", "plugin": "plugin_principal"} {
+		if _, fgaType, err := producedKind(kind); err != nil || fgaType != want {
+			t.Errorf("producedKind(%q) = %q, %v; want %q", kind, fgaType, err, want)
+		}
+	}
+	if _, _, err := producedKind("connector"); err == nil {
+		t.Error("an unknown kind must be refused")
+	}
+}
