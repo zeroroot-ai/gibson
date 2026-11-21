@@ -16,6 +16,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
+	findingpkg "github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -1475,7 +1476,11 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 	// (gibson#1448). The daemon still authors the name: it is a hash, and the
 	// agent cannot pick the id of a finding of another agent.
 	if key := req.GetIdempotencyKey(); key != "" {
-		finding.ID = resultFindingID(auth.TenantStringFromContext(ctx), req.GetContext().GetAgentName(), key)
+		id, err := auth.IdentityFromContext(ctx)
+		if err != nil || id.Subject == "" {
+			return nil, status.Error(codes.Unauthenticated, "SubmitFinding: an idempotency key needs an authenticated caller")
+		}
+		finding.ID = findingpkg.ResultID(auth.TenantStringFromContext(ctx), id.Subject, key)
 	}
 
 	// Tier 1 evidence comes from the record of each tool call that the agent
@@ -3023,14 +3028,4 @@ func callToolDiscoveryScope(ctx context.Context, info *harnesspb.ContextInfo) in
 		ec.TenantID = tenant
 	}
 	return ec
-}
-
-// resultFindingNamespace is the UUID namespace of a finding id that comes from
-// an idempotency key.
-var resultFindingNamespace = uuid.MustParse("6f1d3c2a-5b7e-4f10-9a8c-2d4e6b8f0a13")
-
-// resultFindingID derives the id of a finding from the tenant, the agent and
-// the idempotency key of the submit.
-func resultFindingID(tenant, agentName, key string) types.ID {
-	return types.ID(uuid.NewSHA1(resultFindingNamespace, []byte(tenant+"\x00"+agentName+"\x00"+key)).String())
 }

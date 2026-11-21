@@ -59,7 +59,7 @@ func TestFindingSubmitter_NoDataPoolRefusesTheSubmit(t *testing.T) {
 	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), poolStore(nil), nil, testLogger())
 
 	id, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"),
-		victimTenant, "", `{"title":"exposed admin panel"}`, "", "")
+		victimTenant, "", `{"title":"exposed admin panel"}`, "", "", "")
 
 	require.ErrorIs(t, err, ErrFindingNotStored)
 	assert.Empty(t, id)
@@ -73,12 +73,31 @@ func TestFindingSubmitter_TheWorldGetsTheStoredRecord(t *testing.T) {
 	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), store, nil, testLogger())
 
 	id, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"),
-		victimTenant, "", `{"title":"exposed admin panel"}`, "", "")
+		victimTenant, "", `{"title":"exposed admin panel"}`, "", "", "")
 
 	require.NoError(t, err)
 	require.Len(t, store.records, 1)
 	assert.Equal(t, id, store.records[0].ID.String())
 	assert.Equal(t, id, seen.ID.String())
+}
+
+// A submit with an idempotency key gets the id of the verified submitter and
+// the key, so a second read of one result names the same finding. Another
+// submitter with the same key gets another id (review R6).
+func TestFindingSubmitter_AnIdempotencyKeyNamesTheFinding(t *testing.T) {
+	var seen finding.EnhancedFinding
+	store := &memFindingStore{}
+	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), store, nil, testLogger())
+	submit := func(principal string) string {
+		id, err := submitter.Submit(submitterCtx(victimTenant, principal),
+			victimTenant, "", `{"title":"exposed admin panel"}`, "", "", "qualys:host-9:qid-1")
+		require.NoError(t, err)
+		return id
+	}
+	first, second := submit("agent_principal:sa-1"), submit("agent_principal:sa-1")
+	assert.Equal(t, first, second)
+	assert.Equal(t, finding.ResultID(victimTenant, "agent_principal:sa-1", "qualys:host-9:qid-1").String(), first)
+	assert.NotEqual(t, first, submit("agent_principal:sa-2"))
 }
 
 func TestNewGraphRAGFindingSubmitter_RequiresAStore(t *testing.T) {
@@ -97,7 +116,7 @@ func TestFindingSubmitter_AStoreFailureFailsTheSubmitBeforeTheWorld(t *testing.T
 			submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), poolStore(failingPool{err: cause}), nil, testLogger())
 
 			id, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"),
-				victimTenant, "", `{"title":"exposed admin panel","severity":"info"}`, "", "")
+				victimTenant, "", `{"title":"exposed admin panel","severity":"info"}`, "", "", "")
 
 			require.Error(t, err)
 			require.ErrorIs(t, err, cause)

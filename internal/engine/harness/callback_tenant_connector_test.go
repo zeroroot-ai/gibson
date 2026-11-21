@@ -83,21 +83,3 @@ func TestConnectorToolClass_ComesFromTheCatalog(t *testing.T) {
 		t.Errorf("no connector = %q, want empty", got)
 	}
 }
-
-// One result of a tool of the buyer names one finding: the same tenant, agent
-// and key give the same id, and any other value gives another (gibson#1448).
-func TestResultFindingID_IsStableAndScoped(t *testing.T) {
-	a := resultFindingID("acme", "intake-agent", "intake:abc")
-	if a != resultFindingID("acme", "intake-agent", "intake:abc") {
-		t.Fatal("the same result gave two ids")
-	}
-	for _, other := range []string{
-		string(resultFindingID("other", "intake-agent", "intake:abc")),
-		string(resultFindingID("acme", "red-agent", "intake:abc")),
-		string(resultFindingID("acme", "intake-agent", "intake:abd")),
-	} {
-		if other == string(a) {
-			t.Fatalf("another tenant, agent or key gave the same id %s", a)
-		}
-	}
-}

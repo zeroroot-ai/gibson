@@ -69,7 +69,7 @@ func TestFindingSubmitter_StampsTheVerifiedSubmitter(t *testing.T) {
 	payload := `{"title":"exposed admin panel","severity":"info",` +
 		`"agent_name":"forged-agent","submitted_by":"agent_principal:forged","enrolled_by":"user-forged"}`
 
-	id, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"), victimTenant, "", payload, "", "")
+	id, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"), victimTenant, "", payload, "", "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, id)
 
@@ -86,7 +86,7 @@ func TestFindingSubmitter_RefusesACallerWithoutIdentity(t *testing.T) {
 	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), &memFindingStore{}, nil, testLogger())
 
 	_, err := submitter.Submit(auth.ContextWithTenantString(context.Background(), victimTenant),
-		victimTenant, "", `{"title":"orphan"}`, "", "")
+		victimTenant, "", `{"title":"orphan"}`, "", "", "")
 
 	require.ErrorIs(t, err, ErrNoSubmitterIdentity)
 	assert.Empty(t, seen.ID, "a finding with no submitter is not recorded")
@@ -98,7 +98,7 @@ func TestFindingSubmitter_UnenrolledPrincipalCarriesThePrincipalOnly(t *testing.
 	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), &memFindingStore{}, nil, testLogger()).
 		WithEnrolledAgentLookup(registry)
 
-	_, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-2"), victimTenant, "", `{"title":"x"}`, "", "")
+	_, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-2"), victimTenant, "", `{"title":"x"}`, "", "", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "agent_principal:sa-2", seen.SubmittedBy)
@@ -115,7 +115,7 @@ func TestFindingSubmitter_HumanSubjectIsStampedAsAUser(t *testing.T) {
 		auth.WithIdentity(context.Background(),
 			auth.Identity{Subject: "12345", Issuer: auth.IssuerOIDC, CredentialType: auth.CredentialOIDCUser}),
 		victimTenant)
-	_, err := submitter.Submit(ctx, victimTenant, "", `{"title":"x"}`, "", "")
+	_, err := submitter.Submit(ctx, victimTenant, "", `{"title":"x"}`, "", "", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "user:12345", seen.SubmittedBy)
@@ -126,7 +126,7 @@ func TestFindingSubmitter_RegistryFailureIsAnError(t *testing.T) {
 	submitter := NewGraphRAGFindingSubmitter(recordingSink(&seen), &memFindingStore{}, nil, testLogger()).
 		WithEnrolledAgentLookup(&stubEnrolledAgents{err: errors.New("db down")})
 
-	_, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"), victimTenant, "", `{"title":"x"}`, "", "")
+	_, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"), victimTenant, "", `{"title":"x"}`, "", "", "")
 	require.ErrorContains(t, err, "db down")
 	assert.Empty(t, seen.ID)
 }

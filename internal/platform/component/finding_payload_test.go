@@ -128,7 +128,7 @@ func TestFindingSubmitter_NamedToolCallWithNoRecordFailsTheSubmit(t *testing.T) 
 		WithToolCallRecord(&stubToolCallRecord{})
 
 	_, err := s.Submit(submitterCtx(victimTenant, "agent_principal:sa-1"), victimTenant, "",
-		`{"title":"x","tool_call_ids":["call-1"]}`, "", "")
+		`{"title":"x","tool_call_ids":["call-1"]}`, "", "", "")
 
 	require.ErrorIs(t, err, ErrToolCallNotRecorded)
 	assert.Empty(t, seen.ID)

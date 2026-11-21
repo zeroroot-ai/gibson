@@ -221,7 +221,7 @@ func (s *GraphRAGFindingSubmitter) recordedEvidence(
 // store failure each return an error.
 func (s *GraphRAGFindingSubmitter) Submit(
 	ctx context.Context,
-	tenant, workID, findingJSON, severity, title string,
+	tenant, workID, findingJSON, severity, title, idempotencyKey string,
 ) (string, error) {
 	// Step 1: the verified caller. ext-authz asserted it and the SDK
 	// interceptor put it on the context; the client payload has no say.
@@ -250,6 +250,10 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	// Step 3: Assign a canonical finding ID and stamp the verified submitter.
 	// Both overwrite the client payload.
 	findingID := types.NewID()
+	if idempotencyKey != "" {
+		// One result of a tool names one finding of this submitter (review R6).
+		findingID = finding.ResultID(tenant, submitter.principal, idempotencyKey)
+	}
 	baseFinding.ID = findingID
 	baseFinding.TenantID = tenant
 	baseFinding.SubmittedBy = submitter.principal

@@ -23,7 +23,7 @@ type countingFindingSubmitter struct {
 	submitted []string
 }
 
-func (s *countingFindingSubmitter) Submit(_ context.Context, _, _, findingJSON, _, _ string) (string, error) {
+func (s *countingFindingSubmitter) Submit(_ context.Context, _, _, findingJSON, _, _, _ string) (string, error) {
 	s.submitted = append(s.submitted, findingJSON)
 	return "finding-1", nil
 }

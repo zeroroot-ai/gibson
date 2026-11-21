@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/idempotency"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc"
 	grpccodes "google.golang.org/grpc/codes"
@@ -26,6 +27,14 @@ import (
 // protoreflect to discover the field on each request — no SDK pin
 // and no method-name allowlist required.
 const idempotencyFieldName = "idempotency_key"
+
+// identityKeyMethods are the methods whose idempotency_key names the record
+// that the call writes, not one call to repeat. The handler upserts the record
+// by that key, so a second call with the same key must reach the handler and
+// update it. A cached answer would drop the update (review R6).
+var identityKeyMethods = map[string]bool{
+	componentpb.ComponentService_SubmitFinding_FullMethodName: true,
+}
 
 // idempotencyUnaryInterceptor returns a UnaryServerInterceptor that
 // deduplicates mutating RPCs by inspecting the request for a non-empty
@@ -69,7 +78,7 @@ func idempotencyUnaryInterceptor(store idempotency.Store, defaultTTL time.Durati
 	}
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		key := extractIdempotencyKey(req)
-		if key == "" {
+		if key == "" || identityKeyMethods[info.FullMethod] {
 			// No field on this message or caller opted out — pass through.
 			return handler(ctx, req)
 		}
