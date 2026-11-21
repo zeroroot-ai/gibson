@@ -157,9 +157,7 @@ func TestChildOrchestration_CreationOrder(t *testing.T) {
 }
 
 // TestChildOrchestration_ReadinessGate verifies the Tenant only flips to Ready
-// once ALL four owned sub-CRDs report Status.Ready. The Tenant has no
-// spec.tier, so this test also pins that a Tenant with no plan reaches Ready
-// (gibson#1531).
+// once ALL four owned sub-CRDs report Status.Ready.
 func TestChildOrchestration_ReadinessGate(t *testing.T) {
 	r, c := newChildOrchestrationReconciler(t, childOrchestrationTenant())
 

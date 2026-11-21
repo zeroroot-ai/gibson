@@ -132,7 +132,7 @@ func (f *operatorFixture) EnqueueTenantProvisioning(
 	_ context.Context, req *operatorv1.EnqueueTenantProvisioningRequest,
 ) (*operatorv1.EnqueueTenantProvisioningResponse, error) {
 	if req.GetTenantId() != "acme" || req.GetDisplayName() != "Acme" ||
-		req.GetOwnerEmail() != "a@x" || req.GetTier() != "pro" {
+		req.GetOwnerEmail() != "a@x" {
 		return nil, status.Error(codes.InvalidArgument, "unexpected request")
 	}
 	return &operatorv1.EnqueueTenantProvisioningResponse{AlreadyExisted: true}, f.err
@@ -201,7 +201,7 @@ func TestDaemonClient_ReturnsWhatTheDaemonSends(t *testing.T) {
 		t.Errorf("WriteAccessTuples: %v", err)
 	}
 	existed, err := c.EnqueueTenantProvisioning(ctx, PendingTenant{
-		TenantID: "acme", WorkspaceName: "Acme", OwnerEmail: "a@x", Tier: "pro",
+		TenantID: "acme", WorkspaceName: "Acme", OwnerEmail: "a@x",
 	})
 	if err != nil || !existed {
 		t.Errorf("EnqueueTenantProvisioning = %v, %v", existed, err)

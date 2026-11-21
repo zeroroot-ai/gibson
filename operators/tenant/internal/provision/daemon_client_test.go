@@ -223,7 +223,6 @@ func TestEnqueueTenantProvisioning_SendsFirstTenant(t *testing.T) {
 		TenantID:      "default",
 		WorkspaceName: "Default Workspace",
 		OwnerEmail:    "admin@localhost.zeroroot.ai",
-		Tier:          "enterprise",
 	})
 	if err != nil {
 		t.Fatalf("EnqueueTenantProvisioning: %v", err)
@@ -242,9 +241,6 @@ func TestEnqueueTenantProvisioning_SendsFirstTenant(t *testing.T) {
 	}
 	if got, want := srv.got.GetOwnerEmail(), "admin@localhost.zeroroot.ai"; got != want {
 		t.Errorf("owner_email: got %q, want %q", got, want)
-	}
-	if got, want := srv.got.GetTier(), "enterprise"; got != want {
-		t.Errorf("tier: got %q, want %q", got, want)
 	}
 }
 

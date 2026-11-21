@@ -81,7 +81,6 @@ func TestSeedFirstAdmin_ParsesConfig(t *testing.T) {
 	t.Setenv("BOOTSTRAP_ADMIN_EMAIL", "root@acme.example")
 	t.Setenv("BOOTSTRAP_TENANT_ID", "acme")
 	t.Setenv("BOOTSTRAP_TENANT_DISPLAY_NAME", "Acme Corp")
-	t.Setenv("BOOTSTRAP_ADMIN_TIER", "")       // empty → no plan
 	t.Setenv("GIBSON_BOOTSTRAP_MTLS_CERT", "") // empty → insecure transport
 	t.Setenv("GIBSON_BOOTSTRAP_MTLS_KEY", "")
 	t.Setenv("GIBSON_BOOTSTRAP_MTLS_CA", "")
@@ -103,32 +102,10 @@ func TestSeedFirstAdmin_ParsesConfig(t *testing.T) {
 	if cfg.TenantDisplayName != "Acme Corp" {
 		t.Errorf("TenantDisplayName = %q, want Acme Corp", cfg.TenantDisplayName)
 	}
-	// An empty BOOTSTRAP_ADMIN_TIER means no plan (gibson#1531).
-	if cfg.Tier != "" {
-		t.Errorf("Tier = %q, want empty", cfg.Tier)
-	}
 	// mTLS fields absent.
 	if cfg.TLSCertFile != "" || cfg.TLSKeyFile != "" || cfg.TLSCAFile != "" {
 		t.Errorf("expected empty mTLS fields, got cert=%q key=%q ca=%q",
 			cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSCAFile)
-	}
-}
-
-// TestSeedFirstAdmin_ExplicitTier verifies that an explicit BOOTSTRAP_ADMIN_TIER
-// value is passed through.
-func TestSeedFirstAdmin_ExplicitTier(t *testing.T) {
-	t.Setenv("GIBSON_DAEMON_ADDR", "daemon:50051")
-	t.Setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
-	t.Setenv("BOOTSTRAP_TENANT_ID", "default")
-	t.Setenv("BOOTSTRAP_TENANT_DISPLAY_NAME", "Default Org")
-	t.Setenv("BOOTSTRAP_ADMIN_TIER", "enterprise")
-
-	cfg, err := loadSeedFirstAdminConfig()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.Tier != "enterprise" {
-		t.Errorf("Tier = %q, want enterprise", cfg.Tier)
 	}
 }
 

@@ -25,10 +25,6 @@ package main
 //	BOOTSTRAP_TENANT_ID     — tenant slug (e.g. "default" or "acme")
 //	BOOTSTRAP_TENANT_DISPLAY_NAME — human-readable workspace name
 //
-// # Optional env vars
-//
-//	BOOTSTRAP_ADMIN_TIER    — optional plan id; empty means no plan
-//
 // # Output
 //
 //	{"tenant_id":"...","op_id":"...","already_existed":true|false}
@@ -63,9 +59,6 @@ type seedFirstAdminConfig struct {
 
 	// TenantDisplayName is the human-readable workspace name.
 	TenantDisplayName string
-
-	// Tier is the plan tier. Defaults to "team" when empty.
-	Tier string
 
 	// TLSCertFile / TLSKeyFile / TLSCAFile are optional mTLS credentials.
 	// When all three are empty, the command uses insecure transport (suitable
@@ -105,15 +98,11 @@ func loadSeedFirstAdminConfig() (seedFirstAdminConfig, error) {
 		return seedFirstAdminConfig{}, errors.New("BOOTSTRAP_TENANT_DISPLAY_NAME env must be set")
 	}
 
-	// The plan id is optional (gibson#1531). Empty means no plan.
-	tier := os.Getenv("BOOTSTRAP_ADMIN_TIER")
-
 	return seedFirstAdminConfig{
 		DaemonAddr:        daemonAddr,
 		AdminEmail:        adminEmail,
 		TenantID:          tenantID,
 		TenantDisplayName: displayName,
-		Tier:              tier,
 		TLSCertFile:       os.Getenv("GIBSON_BOOTSTRAP_MTLS_CERT"),
 		TLSKeyFile:        os.Getenv("GIBSON_BOOTSTRAP_MTLS_KEY"),
 		TLSCAFile:         os.Getenv("GIBSON_BOOTSTRAP_MTLS_CA"),
@@ -153,7 +142,6 @@ func cmdSeedFirstAdmin(ctx context.Context, args []string) error {
 		TenantId:    cfg.TenantID,
 		DisplayName: cfg.TenantDisplayName,
 		OwnerEmail:  cfg.AdminEmail,
-		Tier:        cfg.Tier,
 	})
 	if err != nil {
 		return fmt.Errorf("AdminProvisionTenant: %w", err)

@@ -59,10 +59,10 @@ func TestRedeemToken_IsACompareAndSet(t *testing.T) {
 	mock.ExpectQuery(`UPDATE signup_verification`).
 		WithArgs(platformtoken.Hash(raw), sqlmock.AnyArg(), sqlmock.AnyArg(), now).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "attempt_id", "email", "workspace_name", "tier",
+			"id", "attempt_id", "email", "workspace_name",
 			"owner_first_name", "owner_last_name", "expires_at",
 			"completion_attempts",
-		}).AddRow("row-1", "attempt-1", "owner@example.com", "Acme", "team",
+		}).AddRow("row-1", "attempt-1", "owner@example.com", "Acme",
 			"Ada", "Lovelace", now.Add(time.Hour), 0))
 
 	row, session, err := s.RedeemToken(context.Background(), raw)
@@ -169,7 +169,7 @@ func TestIssuePersistsOnlyTheHash(t *testing.T) {
 			sqlmock.AnyArg(), // id
 			"11111111-2222-4333-8444-555555555555",
 			"owner@example.com",
-			"Acme", "team", "Ada", "Lovelace",
+			"Acme", "Ada", "Lovelace",
 			argCapture{&persisted}, // token_hash
 			now.Add(SignupVerificationTTL),
 			"iphash",
@@ -179,7 +179,7 @@ func TestIssuePersistsOnlyTheHash(t *testing.T) {
 
 	_, raw, err := s.Issue(context.Background(), IssueParams{
 		AttemptID: "11111111-2222-4333-8444-555555555555", Email: "owner@example.com",
-		WorkspaceName: "Acme", Tier: "team",
+		WorkspaceName:  "Acme",
 		OwnerFirstName: "Ada", OwnerLastName: "Lovelace", ClientIPHash: "iphash",
 	})
 	if err != nil {
@@ -346,10 +346,10 @@ func TestGetByVerifiedSession(t *testing.T) {
 		mock.ExpectQuery(`SELECT id, attempt_id, email`).
 			WithArgs(platformtoken.Hash("sess-raw"), now).
 			WillReturnRows(sqlmock.NewRows([]string{
-				"id", "attempt_id", "email", "workspace_name", "tier",
+				"id", "attempt_id", "email", "workspace_name",
 				"owner_first_name", "owner_last_name", "expires_at",
 				"completion_attempts",
-			}).AddRow("row-1", "attempt-1", "owner@example.com", "Acme", "team",
+			}).AddRow("row-1", "attempt-1", "owner@example.com", "Acme",
 				"Ada", "Lovelace", now.Add(time.Hour), 1))
 
 		row, err := s.GetByVerifiedSession(context.Background(), "sess-raw")
@@ -409,10 +409,10 @@ func TestClaimCompletion(t *testing.T) {
 		mock.ExpectQuery(`UPDATE signup_verification`).
 			WithArgs(platformtoken.Hash("sess-raw"), now, SignupMaxCompletionAttempts).
 			WillReturnRows(sqlmock.NewRows([]string{
-				"id", "attempt_id", "email", "workspace_name", "tier",
+				"id", "attempt_id", "email", "workspace_name",
 				"owner_first_name", "owner_last_name", "expires_at",
 				"completion_attempts",
-			}).AddRow("row-1", "attempt-1", "owner@example.com", "Acme", "team",
+			}).AddRow("row-1", "attempt-1", "owner@example.com", "Acme",
 				"Ada", "Lovelace", now.Add(time.Hour), 1))
 
 		row, err := s.ClaimCompletion(context.Background(), "sess-raw")
@@ -679,14 +679,13 @@ func TestIssuePendingApproval_WritesThePendingRow(t *testing.T) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS signup_verification").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(`INSERT INTO signup_verification`).
-		WithArgs(sqlmock.AnyArg(), "attempt-1", "owner@example.com", "Acme", "team",
+		WithArgs(sqlmock.AnyArg(), "attempt-1", "owner@example.com", "Acme",
 			"Ada", "Lovelace", sqlmock.AnyArg(), now.Add(SignupRegistrationTTL),
 			"ip-hash", "user-1", now).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	row, err := s.IssuePendingApproval(context.Background(), IssueParams{
-		AttemptID: "attempt-1", Email: "owner@example.com", WorkspaceName: "Acme",
-		Tier: "team", OwnerFirstName: "Ada", OwnerLastName: "Lovelace",
+		AttemptID: "attempt-1", Email: "owner@example.com", WorkspaceName: "Acme", OwnerFirstName: "Ada", OwnerLastName: "Lovelace",
 		ClientIPHash: "ip-hash",
 	}, "user-1")
 	if err != nil {
@@ -723,11 +722,11 @@ func TestListPendingApprovals_ReadsTheQueueOldestFirst(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
 		WithArgs(SignupApprovalPageSize, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "attempt_id", "email", "workspace_name", "tier",
+			"id", "attempt_id", "email", "workspace_name",
 			"owner_first_name", "owner_last_name", "owner_user_id", "created_at",
 		}).
-			AddRow("reg-1", "attempt-1", "a@example.com", "Acme", "team", "Ada", "L", "user-1", now).
-			AddRow("reg-2", "attempt-2", "b@example.com", "Beta", "team", "Bob", "M", "user-2", now))
+			AddRow("reg-1", "attempt-1", "a@example.com", "Acme", "Ada", "L", "user-1", now).
+			AddRow("reg-2", "attempt-2", "b@example.com", "Beta", "Bob", "M", "user-2", now))
 
 	rows, err := s.ListPendingApprovals(context.Background(), 0, 0)
 	if err != nil {
@@ -750,7 +749,7 @@ func TestListPendingApprovals_CapsTheLimit(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
 		WithArgs(SignupApprovalPageSize, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "attempt_id", "email", "workspace_name", "tier",
+			"id", "attempt_id", "email", "workspace_name",
 			"owner_first_name", "owner_last_name", "owner_user_id", "created_at",
 		}))
 
@@ -790,10 +789,10 @@ func TestClaimApproval_ReturnsTheDecidedRegistration(t *testing.T) {
 	mock.ExpectQuery(`UPDATE signup_verification`).
 		WithArgs(id, "admin-1", now).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "attempt_id", "email", "workspace_name", "tier",
+			"id", "attempt_id", "email", "workspace_name",
 			"owner_first_name", "owner_last_name", "expires_at",
 			"completion_attempts", "owner_user_id",
-		}).AddRow(id, "attempt-1", "owner@example.com", "Acme", "team",
+		}).AddRow(id, "attempt-1", "owner@example.com", "Acme",
 			"Ada", "Lovelace", now.Add(time.Hour), 0, "user-1"))
 
 	row, err := s.ClaimApproval(context.Background(), id, "admin-1")
@@ -841,10 +840,10 @@ func TestRejectRegistration_ReturnsTheRefusedRegistration(t *testing.T) {
 	mock.ExpectQuery(`UPDATE signup_verification`).
 		WithArgs(id, "admin-1", now).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "attempt_id", "email", "workspace_name", "tier",
+			"id", "attempt_id", "email", "workspace_name",
 			"owner_first_name", "owner_last_name", "expires_at",
 			"completion_attempts", "owner_user_id",
-		}).AddRow(id, "attempt-1", "owner@example.com", "Acme", "team",
+		}).AddRow(id, "attempt-1", "owner@example.com", "Acme",
 			"Ada", "Lovelace", now.Add(time.Hour), 0, "user-1"))
 
 	row, err := s.RejectRegistration(context.Background(), id, "admin-1")
@@ -916,9 +915,9 @@ func TestListExpiringRegistrations_ReadsDueAndClaimedRows(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM signup_verification\s+WHERE \(status = 'pending_approval' AND expires_at <= \$1\) OR status = 'expiring'`).
 		WithArgs(now, SignupApprovalPageSize).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "attempt_id", "email", "workspace_name", "tier",
+			"id", "attempt_id", "email", "workspace_name",
 			"owner_first_name", "owner_last_name", "owner_user_id", "created_at", "expires_at", "status",
-		}).AddRow("reg-1", "attempt-1", "a@example.com", "Acme", "team", "Ada", "L", "user-1", now, now, "expiring"))
+		}).AddRow("reg-1", "attempt-1", "a@example.com", "Acme", "Ada", "L", "user-1", now, now, "expiring"))
 
 	rows, err := s.ListExpiringRegistrations(context.Background(), 10_000)
 	if err != nil {
@@ -952,10 +951,10 @@ func TestBeginAndCompleteExpiry(t *testing.T) {
 	mock.ExpectQuery(`UPDATE signup_verification\s+SET status = 'expiring'`).
 		WithArgs(id, "system:signup-janitor", now).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "attempt_id", "email", "workspace_name", "tier",
+			"id", "attempt_id", "email", "workspace_name",
 			"owner_first_name", "owner_last_name", "expires_at",
 			"completion_attempts", "owner_user_id",
-		}).AddRow(id, "attempt-1", "owner@example.com", "Acme", "team",
+		}).AddRow(id, "attempt-1", "owner@example.com", "Acme",
 			"Ada", "Lovelace", now, 0, "user-1"))
 	row, err := s.BeginExpiry(context.Background(), id, "system:signup-janitor")
 	if err != nil || row.Status != signupStatusExpiring || row.OwnerUserID != "user-1" {
@@ -982,9 +981,9 @@ func TestListExpiringRegistrations_RowErrorIsReported(t *testing.T) {
 	s, mock, now := newMockStore(t)
 	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "attempt_id", "email", "workspace_name", "tier",
+			"id", "attempt_id", "email", "workspace_name",
 			"owner_first_name", "owner_last_name", "owner_user_id", "created_at", "expires_at", "status",
-		}).AddRow("reg-1", "a", "a@example.com", "Acme", "team", "A", "L", "u", now, now, "expiring").
+		}).AddRow("reg-1", "a", "a@example.com", "Acme", "A", "L", "u", now, now, "expiring").
 			RowError(0, errors.New("broken row")))
 	if _, err := s.ListExpiringRegistrations(context.Background(), 0); err == nil {
 		t.Fatal("a row error must be reported")

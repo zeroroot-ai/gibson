@@ -27,17 +27,17 @@ func TestDescribeSignupStep_KnownToken(t *testing.T) {
 	srv.platformDB = db
 
 	expectEnsureTable(mock)
-	mock.ExpectQuery("SELECT tenant_id, tier, owner_email FROM pending_tenant_provisioning").
+	mock.ExpectQuery("SELECT tenant_id, owner_email FROM pending_tenant_provisioning").
 		WithArgs(hashSignupStepToken("tok"), sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "tier", "owner_email"}).
-			AddRow("acme", "team", "owner@acme.example"))
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "owner_email"}).
+			AddRow("acme", "owner@acme.example"))
 
 	got, err := srv.DescribeSignupStep(peerCtx(t, testCompleterSVID), &connectionv1.DescribeSignupStepRequest{StepToken: "tok"})
 	if err != nil {
 		t.Fatalf("DescribeSignupStep: %v", err)
 	}
-	if got.GetTenantId() != "acme" || got.GetPlanId() != "team" || got.GetOwnerEmail() != "owner@acme.example" {
-		t.Fatalf("DescribeSignupStep = %+v, want acme, team, owner@acme.example", got)
+	if got.GetTenantId() != "acme" || got.GetPlanId() != "" || got.GetOwnerEmail() != "owner@acme.example" {
+		t.Fatalf("DescribeSignupStep = %+v, want acme, no plan id, owner@acme.example", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -56,14 +56,14 @@ func TestDescribeSignupStep_UnknownTokenAndReadError(t *testing.T) {
 	ctx := peerCtx(t, testCompleterSVID)
 
 	expectEnsureTable(mock)
-	mock.ExpectQuery("SELECT tenant_id, tier, owner_email").
-		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "tier", "owner_email"}))
+	mock.ExpectQuery("SELECT tenant_id, owner_email").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "owner_email"}))
 	if _, err := srv.DescribeSignupStep(ctx, &connectionv1.DescribeSignupStepRequest{StepToken: "nope"}); status.Code(err) != codes.NotFound {
 		t.Fatalf("unknown token: code = %v, want NotFound", status.Code(err))
 	}
 
 	expectEnsureTable(mock)
-	mock.ExpectQuery("SELECT tenant_id, tier, owner_email").WillReturnError(errors.New("down"))
+	mock.ExpectQuery("SELECT tenant_id, owner_email").WillReturnError(errors.New("down"))
 	if _, err := srv.DescribeSignupStep(ctx, &connectionv1.DescribeSignupStepRequest{StepToken: "tok"}); status.Code(err) != codes.Unavailable {
 		t.Fatalf("read error: code = %v, want Unavailable", status.Code(err))
 	}

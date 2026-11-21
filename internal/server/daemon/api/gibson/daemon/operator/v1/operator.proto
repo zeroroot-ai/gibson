@@ -531,7 +531,7 @@ message SetTenantZitadelOrgResponse {}
 // provisioned, awaiting Tenant-CR creation by the operator. It carries exactly
 // what the operator needs to build the Tenant CR spec (the same shape the
 // dashboard used to write directly): tenant_id (CR name), workspace_name
-// (displayName), owner_email (spec.owner) and tier (spec.tier).
+// (displayName) and owner_email (spec.owner).
 message PendingTenant {
   // tenant_id is the deterministic tenant slug (SignupResponse.tenant_id) —
   // becomes the Tenant CR's metadata.name.
@@ -543,8 +543,9 @@ message PendingTenant {
   string owner_email = 3;
   // workspace_name becomes Tenant.spec.displayName.
   string workspace_name = 4;
-  // tier becomes Tenant.spec.tier ("team"/"org"/"enterprise").
-  string tier = 5;
+  // Field 5 (tier) was removed. The product has no plan (gibson#1531).
+  reserved 5;
+  reserved "tier";
   // Field 6 (stripe_customer_id) was removed (ADR-0060, D54).
   reserved 6;
   reserved "stripe_customer_id";
@@ -597,8 +598,9 @@ message EnqueueTenantProvisioningRequest {
   string display_name = 2 [(buf.validate.field).string = { max_len: 1024 }];
   // owner_email becomes Tenant.spec.owner. Required.
   string owner_email = 3 [(buf.validate.field).string = { min_len: 1, max_len: 4096 }];
-  // tier becomes Tenant.spec.tier.
-  string tier = 4 [(buf.validate.field).string = { max_len: 4096 }];
+  // Field 4 (tier) was removed. The product has no plan (gibson#1531).
+  reserved 4;
+  reserved "tier";
 }
 
 // EnqueueTenantProvisioningResponse reports the enqueue outcome.
@@ -676,12 +678,10 @@ message TenantOp {
   bool display_name_set = 5;
   // owner_email is Tenant.spec.owner. Set on provision; unused for update/delete.
   string owner_email = 6;
-  // tier is Tenant.spec.tier. Set on provision; on update applied only when
-  // tier_set is true. Ignored for delete.
-  string tier = 7;
-  // tier_set marks tier for application on an update op (always true for
-  // provision).
-  bool tier_set = 8;
+  // Fields 7 (tier) and 8 (tier_set) were removed. The product has no plan
+  // (gibson#1531).
+  reserved 7, 8;
+  reserved "tier", "tier_set";
   // audit_record_id is the id of the daemon audit record of the admin request
   // behind this op. The operator stamps it on the Tenant as the
   // gibson.zeroroot.ai/correlation-id annotation (gibson#583).

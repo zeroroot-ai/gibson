@@ -35,7 +35,7 @@ func TestEnqueueTenantProvisioning_EmptyOwnerEmail_InvalidArgument(t *testing.T)
 	}
 }
 
-func TestEnqueueTenantProvisioning_FreshInsert_DefaultsTier(t *testing.T) {
+func TestEnqueueTenantProvisioning_FreshInsert(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -46,10 +46,9 @@ func TestEnqueueTenantProvisioning_FreshInsert_DefaultsTier(t *testing.T) {
 	srv.platformDB = db
 
 	expectEnsureTable(mock)
-	// owner_user_id is empty (no Zitadel user yet). An empty tier stays empty
-	// (gibson#1531).
+	// owner_user_id is empty (no Zitadel user yet).
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
-		WithArgs("acme", "", "owner@acme.test", "Acme Inc", "", "pending", "", "", sql.NullTime{}, false, "").
+		WithArgs("acme", "", "owner@acme.test", "Acme Inc", "pending", "", "", sql.NullTime{}, false, "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	resp, err := srv.EnqueueTenantProvisioning(context.Background(),
@@ -81,18 +80,17 @@ func TestEnqueueTenantProvisioning_Conflict_AlreadyExisted(t *testing.T) {
 
 	expectEnsureTable(mock)
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
-		WithArgs("acme", "", "owner@acme.test", "", "enterprise", "pending", "", "", sql.NullTime{}, false, "").
+		WithArgs("acme", "", "owner@acme.test", "", "pending", "", "", sql.NullTime{}, false, "").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	// The queued row already matches: the rewrite changes nothing.
 	mock.ExpectQuery("UPDATE pending_tenant_provisioning p").
-		WithArgs("acme", "owner@acme.test", "", "enterprise").
-		WillReturnRows(sqlmock.NewRows([]string{"tier", "owner_email", "workspace_name"}))
+		WithArgs("acme", "owner@acme.test", "").
+		WillReturnRows(sqlmock.NewRows([]string{"owner_email", "workspace_name"}))
 
 	resp, err := srv.EnqueueTenantProvisioning(context.Background(),
 		&daemonoperatorv1.EnqueueTenantProvisioningRequest{
 			TenantId:   "acme",
 			OwnerEmail: "owner@acme.test",
-			Tier:       "enterprise",
 		})
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
@@ -129,11 +127,11 @@ func TestEnqueueTenantProvisioning_DBError_Internal(t *testing.T) {
 	}
 }
 
-// TestEnqueueTenantProvisioning_PendingRowTakesTheNewTier is gibson#219: a
-// row queued with a tier that cannot provision sat in the queue for ever, and
-// a chart fix that changed FIRST_TENANT_TIER never reached it. The seed now
-// rewrites a pending row to its current intent.
-func TestEnqueueTenantProvisioning_PendingRowTakesTheNewTier(t *testing.T) {
+// TestEnqueueTenantProvisioning_PendingRowTakesTheNewIntent is gibson#219: a
+// row queued with values that cannot provision sat in the queue for ever, and
+// a chart fix never reached it. The seed now rewrites a pending row to its
+// current intent.
+func TestEnqueueTenantProvisioning_PendingRowTakesTheNewIntent(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -145,19 +143,18 @@ func TestEnqueueTenantProvisioning_PendingRowTakesTheNewTier(t *testing.T) {
 
 	expectEnsureTable(mock)
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
-		WithArgs("acme", "", "owner@acme.test", "Acme", "enterprise-deploy", "pending", "", "", sql.NullTime{}, false, "").
+		WithArgs("acme", "", "owner@acme.test", "Acme", "pending", "", "", sql.NullTime{}, false, "").
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery(`UPDATE pending_tenant_provisioning p\s+SET owner_email = \$2, workspace_name = \$3, tier = \$4`).
-		WithArgs("acme", "owner@acme.test", "Acme", "enterprise-deploy").
-		WillReturnRows(sqlmock.NewRows([]string{"tier", "owner_email", "workspace_name"}).
-			AddRow("team", "owner@acme.test", "Acme"))
+	mock.ExpectQuery(`UPDATE pending_tenant_provisioning p\s+SET owner_email = \$2, workspace_name = \$3, updated_at`).
+		WithArgs("acme", "owner@acme.test", "Acme").
+		WillReturnRows(sqlmock.NewRows([]string{"owner_email", "workspace_name"}).
+			AddRow("old@acme.test", "Acme"))
 
 	resp, err := srv.EnqueueTenantProvisioning(context.Background(),
 		&daemonoperatorv1.EnqueueTenantProvisioningRequest{
 			TenantId:    "acme",
 			DisplayName: "Acme",
 			OwnerEmail:  "owner@acme.test",
-			Tier:        "enterprise-deploy",
 		})
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)

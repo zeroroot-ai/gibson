@@ -134,16 +134,17 @@ func completeSignupStep(ctx context.Context, db *sql.DB, token string, done bool
 	return nil
 }
 
-// describeSignupStep reads the tenant, the plan and the owner address of the
-// signup that the token names. An unknown or expired token is
-// errSignupStepNotFound.
+// describeSignupStep reads the tenant and the owner address of the signup
+// that the token names. An unknown or expired token is
+// errSignupStepNotFound. The product has no plan, so plan_id stays empty
+// (gibson#1531).
 func describeSignupStep(ctx context.Context, db *sql.DB, token string, now time.Time) (*connectionv1.DescribeSignupStepResponse, error) {
 	var d connectionv1.DescribeSignupStepResponse
 	err := db.QueryRowContext(ctx, `
-		SELECT tenant_id, tier, owner_email FROM pending_tenant_provisioning
+		SELECT tenant_id, owner_email FROM pending_tenant_provisioning
 		WHERE step_token_hash = $1 AND step_expires_at > $2`,
 		hashSignupStepToken(token), now,
-	).Scan(&d.TenantId, &d.PlanId, &d.OwnerEmail)
+	).Scan(&d.TenantId, &d.OwnerEmail)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errSignupStepNotFound
 	}

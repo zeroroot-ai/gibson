@@ -32,7 +32,6 @@ var _ = ginkgo.Describe("belief trainer provisioning", func() {
 			Spec: gibsonv1alpha1.TenantSpec{
 				DisplayName: "Trainer envtest",
 				Owner:       "owner@example.org",
-				Tier:        "team",
 			},
 		}
 		gomega.Expect(k8sClient.Create(ctx, tenant)).To(gomega.Succeed())
