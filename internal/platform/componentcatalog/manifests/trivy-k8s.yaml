@@ -18,7 +18,7 @@ description: >-
 spec:
   contentTrust: untrusted
   dispatchMode: sandboxed
-  image: ghcr.io/zeroroot-ai/gibson-executor@sha256:12826078d28168d9c83a9f6b728bb9c63a1b07d84f61bd5f7e1f09754f8e0c05
+  image: ghcr.io/zeroroot-ai/gibson-executor@sha256:14d500c02066672253f2a6c6e1b5c9f4e3aaa6a8b2568468e85404cbcd54b7de
   command: gibson-runner
   outputProtoType: gibson.graphrag.v1.DiscoveryResult
   resources:
