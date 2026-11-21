@@ -164,6 +164,9 @@ type ComponentServiceServer struct {
 	// metaTools serves search_tools and invoke_tool for an agent in pull mode.
 	metaTools MetaToolCaller
 
+	// sandboxTools runs a sandboxed catalog tool for an agent in pull mode.
+	sandboxTools SandboxToolCaller
+
 	// slotModels resolves a slot to a model for ResolveModel. modelGateway and
 	// agentGateway are the public gateways that the Resolve RPCs return.
 	slotModels   SlotModelResolver
@@ -1382,6 +1385,11 @@ func (s *ComponentServiceServer) CallTool(
 			slog.String("error", err.Error()),
 		)
 		return nil, status.Errorf(codes.Internal, "tool discovery failed: %v", err)
+	}
+	// A sandboxed catalog tool that no outside component serves is launched by
+	// the daemon. The agent calls it by its own name, as it calls any native tool.
+	if len(instances) == 0 && isSandboxedCatalogTool(req.ToolName) {
+		return s.callSandboxedTool(ctx, tenant, req)
 	}
 	if len(instances) == 0 {
 		s.logger.WarnContext(ctx, "call tool: tool not found",

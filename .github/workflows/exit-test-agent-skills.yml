@@ -42,6 +42,8 @@ on:
       - 'internal/engine/catalog/**'
       - 'internal/engine/harness/callback_agentskill*.go'
       - 'internal/engine/harness/skill_script*.go'
+      - 'internal/platform/component/service_sandboxtool*.go'
+      - 'internal/server/daemon/sandbox_tool_adapter*.go'
       - 'internal/engine/harness/sandboxed/**'
       - 'internal/engine/harness/callback_metatool.go'
       - 'internal/engine/harness/callback_searchtools.go'

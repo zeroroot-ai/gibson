@@ -80,6 +80,16 @@ func (d *daemonImpl) skillFileStore() harness.SkillFileStore {
 	return nil
 }
 
+// skillLoadSink returns the sink that records the loads of Agent Skills on the
+// Timeline, or nil while the brain registry is not built. A skill-script call
+// uses it, so its load has the same record as a load by invoke_tool.
+func (d *daemonImpl) skillLoadSink() harness.SkillLoadSink {
+	if d.brainRegistry == nil {
+		return nil
+	}
+	return ingestSkillLoad(d.brainRegistry)
+}
+
 // daemonSecretReader reads a tenant secret through the secrets broker. The
 // broker is built after the options of the services are assembled, so it is read
 // for each call.
