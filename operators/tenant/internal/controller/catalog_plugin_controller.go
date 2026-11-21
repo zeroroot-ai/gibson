@@ -128,7 +128,14 @@ type CatalogPluginConfig struct {
 	// rules to it. Required.
 	OperatorServiceAccount string
 	OperatorNamespace      string
+	// ClusterCIDRs is the comma list of the pod and the service ranges of the
+	// cluster (PLUGIN_CLUSTER_CIDRS). The egress policy of each plugin denies
+	// them, as the policy of a connector does (gibson#1582). Required.
+	ClusterCIDRs string
 }
+
+// envClusterCIDRs names the variable that holds Config.ClusterCIDRs.
+const envClusterCIDRs = "PLUGIN_CLUSTER_CIDRS"
 
 // CatalogPluginConfigFromEnv reads the config from the environment of the
 // operator.
@@ -141,6 +148,7 @@ func CatalogPluginConfigFromEnv(getenv func(string) string) CatalogPluginConfig 
 		WaitForSpireImage:      getenv("PLUGIN_WAIT_FOR_SPIRE_IMAGE"),
 		OperatorServiceAccount: getenv(envOperatorSAName),
 		OperatorNamespace:      getenv(envOperatorSANamespace),
+		ClusterCIDRs:           getenv(envClusterCIDRs),
 	}
 }
 
@@ -158,6 +166,9 @@ func (c CatalogPluginConfig) Validate() error {
 			return fmt.Errorf("catalog plugins: %s is required", name)
 		}
 	}
+	if _, err := ciliumegress.ParseClusterCIDRs(envClusterCIDRs, c.ClusterCIDRs); err != nil {
+		return fmt.Errorf("catalog plugins: %w", err)
+	}
 	return nil
 }
 
@@ -168,6 +179,7 @@ func (c CatalogPluginConfig) Validate() error {
 // ClusterRole gibson-tenant-operator-plugin-namespace, and ensureNamespaceRBAC
 // binds it into each plugin namespace.
 // +kubebuilder:rbac:groups=spire.spiffe.io,resources=clusterspiffeids,verbs=get;list;create;update;delete
+// +kubebuilder:rbac:groups=apps,resources=daemonsets,resourceNames=cilium,verbs=get
 
 // CatalogPluginRunnable converges the cluster to the catalog plugins the
 // tenants enabled.
@@ -711,7 +723,11 @@ func (r *CatalogPluginRunnable) ensurePluginEgressPolicy(ctx context.Context, p 
 	// a connector, so a host name of the list that resolves to one of them is
 	// refused (review r3). The edge rule selects pods, and a CIDR deny does
 	// not select a pod, so the edge stays reachable.
-	deny, err := ciliumegress.DenyRules(nil)
+	clusterCIDRs, err := ciliumegress.ParseClusterCIDRs(envClusterCIDRs, r.Config.ClusterCIDRs)
+	if err != nil {
+		return fmt.Errorf("plugin %s: %w", p.PluginID, err)
+	}
+	deny, err := ciliumegress.DenyRules(clusterCIDRs)
 	if err != nil {
 		return fmt.Errorf("plugin %s: %w", p.PluginID, err)
 	}

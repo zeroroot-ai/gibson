@@ -71,6 +71,7 @@ func cpConfig() CatalogPluginConfig {
 		WaitForSpireImage:      "registry.example/busybox@sha256:1",
 		OperatorServiceAccount: "gibson-tenant-operator",
 		OperatorNamespace:      "gibson",
+		ClusterCIDRs:           "10.244.0.0/16,10.96.0.0/12",
 	}
 }
 
@@ -323,9 +324,10 @@ func TestCatalogPlugins_EgressIsTheHostList(t *testing.T) {
 	if !reflect.DeepEqual(egress, want) {
 		t.Errorf("egress = %v, want %v", egress, want)
 	}
-	// The private ranges are denied, as for a connector (review r3).
+	// The private ranges and the cluster ranges are denied, as for a
+	// connector (review r3, gibson#1582).
 	deny, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egressDeny")
-	wantDeny, err := ciliumegress.DenyRules(nil)
+	wantDeny, err := ciliumegress.DenyRules([]string{"10.244.0.0/16", "10.96.0.0/12"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,6 +667,8 @@ func TestCatalogPluginConfig_Validate(t *testing.T) {
 		func(c *CatalogPluginConfig) { c.WaitForSpireImage = "" },
 		func(c *CatalogPluginConfig) { c.OperatorServiceAccount = "" },
 		func(c *CatalogPluginConfig) { c.OperatorNamespace = "" },
+		func(c *CatalogPluginConfig) { c.ClusterCIDRs = "" },
+		func(c *CatalogPluginConfig) { c.ClusterCIDRs = "10.244.0.0/16,nope" },
 	} {
 		cfg := cpConfig()
 		clear(&cfg)

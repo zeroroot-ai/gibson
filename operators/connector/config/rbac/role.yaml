@@ -17,6 +17,14 @@ rules:
   - update
   - watch
 - apiGroups:
+  - apps
+  resourceNames:
+  - cilium
+  resources:
+  - daemonsets
+  verbs:
+  - get
+- apiGroups:
   - cilium.io
   resources:
   - ciliumnetworkpolicies
