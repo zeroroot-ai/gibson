@@ -292,14 +292,18 @@ func (p *DomainPack) validateCountermeasureParents() error {
 	return nil
 }
 
-// validateNoPredicates refuses a predicate in the D3FEND pack. It keys on the
-// name of the pack.
+// validateNoPredicates refuses a predicate and a mapping rule in a pack of
+// countermeasures. It keys on the content of the pack, not on its name, so a
+// pack of countermeasures with another name follows the same rule (review
+// m21). A pack of countermeasures holds taxonomy and ontology only: no attack
+// predicate and no CEL of a mapping rule.
 func (p *DomainPack) validateNoPredicates() error {
-	if p.Name != D3FENDPackName {
+	if len(p.Countermeasures) == 0 && len(p.CountermeasureTactics) == 0 {
 		return nil
 	}
-	if len(p.Predicates) > 0 || len(p.NonDestructivePredicates) > 0 {
-		return fmt.Errorf("domain pack %q: the pack holds taxonomy and ontology only, and no predicate", p.Name)
+	if len(p.Predicates) > 0 || len(p.NonDestructivePredicates) > 0 || len(p.MappingRules) > 0 {
+		return fmt.Errorf("domain pack %q: a pack of countermeasures holds taxonomy and ontology only, "+
+			"and no predicate and no mapping rule", p.Name)
 	}
 	return nil
 }

@@ -90,9 +90,18 @@ func TestD3FENDPack_RefusesAPredicate(t *testing.T) {
 	assert.Contains(t, err.Error(), "no predicate")
 	assert.Panics(t, func() { NewDomainPackCatalog(fixture) })
 
+	// The guard keys on the content: a pack of countermeasures with another
+	// name is refused too, and so is a mapping rule in it (review m21).
 	other := fixture
 	other.Name = "other-pack"
-	require.NoError(t, other.Validate(), "the guard keys on the pack name")
+	require.Error(t, other.Validate(), "the guard keys on the content, not on the name")
+	rules := d3fendPack(t)
+	rules.MappingRules = []MappingRule{{ControlID: "ac-2", Expression: "true"}}
+	require.Error(t, rules.Validate(), "a mapping rule in a pack of countermeasures")
+	plain := fixture
+	plain.Countermeasures, plain.CountermeasureTactics = nil, nil
+	plain.Name = "other-pack"
+	require.NoError(t, plain.Validate(), "a pack with no countermeasure keeps its predicates")
 
 	listed := d3fendPack(t)
 	listed.NonDestructivePredicates = []string{"x"}
