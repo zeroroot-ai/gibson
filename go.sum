@@ -655,8 +655,8 @@ github.com/zeroroot-ai/adk/gibson v0.115.0 h1:mUatW2Ni9crMFAF/iG+kQUuBD1DSd5nQka
 github.com/zeroroot-ai/adk/gibson v0.115.0/go.mod h1:ZKL54rIuHE7p/YBEJJ/yHDNhHzyP08Da6Buta88/+p0=
 github.com/zeroroot-ai/ast-checks v0.10.0 h1:HnMvc+w34FUvB8tOCms3NHQfdbLBTPh43qMQYDR16o8=
 github.com/zeroroot-ai/ast-checks v0.10.0/go.mod h1:bD+97M/UC5BCXBjKXpzP4zCX1VVz1u9g7Ddr2XQ48dI=
-github.com/zeroroot-ai/sdk v0.212.0 h1:W9jLtDsnYcR+RsIBFTMFPwyTg7zM8JBIfghGdWvv/PQ=
-github.com/zeroroot-ai/sdk v0.212.0/go.mod h1:wMTSLYNPhNze04aEU5sycHRPIFVdWuZbEZDaTkVszfc=
+github.com/zeroroot-ai/sdk v0.213.0 h1:Lbq6qEXafs2fCs1iSOxIjLEw5pCn3AN1BFrslBrhfVQ=
+github.com/zeroroot-ai/sdk v0.213.0/go.mod h1:wMTSLYNPhNze04aEU5sycHRPIFVdWuZbEZDaTkVszfc=
 github.com/zeroroot-ai/setec v0.127.9 h1:LTUACno8BKJBToaNudp41UMIU391gmgEJ9YVce6kA0Y=
 github.com/zeroroot-ai/setec v0.127.9/go.mod h1:RWvTTt8LOpKMFBf02AsSQWteVDiRaM/Z9cJFF1laUJA=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
