@@ -109,24 +109,3 @@ type WorldSnapshot struct {
 	// SnapshotWorld writes.
 	Data []byte
 }
-
-// FilterHistory keeps the events of the kinds named whose own time is from or
-// later, in order. An event with no time is kept, because nothing shows that
-// it is older. A store with no append time uses it for LoadHistoryRange.
-func FilterHistory(events []Event, from time.Time, kinds []string) []Event {
-	want := make(map[string]bool, len(kinds))
-	for _, k := range kinds {
-		want[k] = true
-	}
-	var out []Event
-	for _, ev := range events {
-		if !want[ev.Kind()] {
-			continue
-		}
-		if t := EventTime(ev); !t.IsZero() && t.Before(from) {
-			continue
-		}
-		out = append(out, ev)
-	}
-	return out
-}

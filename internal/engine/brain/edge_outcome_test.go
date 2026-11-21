@@ -187,7 +187,17 @@ func (s *memTimelineStore) LoadHistoryRange(ctx context.Context, tenant string, 
 	if err != nil {
 		return nil, err
 	}
-	return FilterHistory(all, from, kinds), nil
+	want := map[string]bool{}
+	for _, k := range kinds {
+		want[k] = true
+	}
+	var out []Event
+	for _, ev := range all {
+		if t := EventTime(ev); want[ev.Kind()] && (t.IsZero() || !t.Before(from)) {
+			out = append(out, ev)
+		}
+	}
+	return out, nil
 }
 
 type memEvent struct {
