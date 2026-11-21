@@ -79,6 +79,8 @@ func TestE2EPeerPolicy_CoversTheAAIFExitTests(t *testing.T) {
 		"/gibson.tenant.v1.AgentSkillService/GetAgentSkill",
 		"/gibson.tenant.v1.AgentSkillService/GrantAgentSkill",
 		"/gibson.tenant.v1.AgentSkillService/DeleteAgentSkill",
+		"/gibson.tenant.v1.AgentSkillService/ListSharedAgentSkills",
+		"/gibson.tenant.v1.AgentSkillService/EnableSharedAgentSkill",
 		"/gibson.component.v1.ComponentService/CallTool",
 		"/gibson.component.v1.ComponentService/SubmitFinding",
 		"/gibson.component.v1.ComponentService/ResolveModel",
