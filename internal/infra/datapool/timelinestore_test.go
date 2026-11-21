@@ -1000,6 +1000,18 @@ func TestTimelineStore_LoadHistoryRange(t *testing.T) {
 	n, err = store.CountHistoryBefore(ctx, tenant, before.Add(-time.Minute))
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
+	n, err = store.CountHistoryBefore(ctx, tenant, time.Time{})
+	require.NoError(t, err)
+	require.Equal(t, 0, n, "nothing is before the zero time")
+
+	// With no Postgres handle the count fails, as each history read does.
+	noSQL := NewTimelineStore(func(context.Context) (TimelineConn, func(), error) {
+		return TimelineConn{Redis: rdb}, func() {}, nil
+	})
+	_, err = noSQL.CountHistoryBefore(ctx, tenant, time.Now())
+	require.Error(t, err)
+	_, err = noSQL.LoadHistoryRange(ctx, tenant, time.Now(), nil)
+	require.Error(t, err)
 }
 
 // archiveErrorCount reads gibson_timeline_archive_errors_total for one tenant

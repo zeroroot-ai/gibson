@@ -40,7 +40,7 @@ func history() []brain.Event {
 func rows(kv ...map[string]any) []map[string]any { return kv }
 
 func sampleReport() *Report {
-	return Assemble("inc-1", BuildIndex(history()),
+	return Assemble("inc-1", BuildIndexFrom(history(), 0),
 		rows(map[string]any{"alert_key": "alert-1", "title": "Beacon", "source": "crowdstrike", "severity": "high"}),
 		rows(map[string]any{"alert_key": "alert-1", "label": "Host", "key": "host-9"}),
 		rows(map[string]any{"finding_key": "f-1", "title": "Exposed token", "severity": "high", "status": "verified"}),
@@ -108,7 +108,7 @@ func TestAssemble_ListsOnlyTheResponseActionsOfTheIncident(t *testing.T) {
 
 // A line that the Timeline does not hold stays in the report with Known false.
 func TestAssemble_ALineWithNoEventHasNoFrame(t *testing.T) {
-	rep := Assemble("inc-1", BuildIndex(nil),
+	rep := Assemble("inc-1", BuildIndexFrom(nil, 0),
 		rows(map[string]any{"alert_key": "a-x"}), nil, nil, nil)
 	if len(rep.Alerts) != 1 || rep.Alerts[0].Frame.Known {
 		t.Errorf("alerts = %+v", rep.Alerts)
@@ -118,7 +118,7 @@ func TestAssemble_ALineWithNoEventHasNoFrame(t *testing.T) {
 // An incident with no alert returns one row with an empty alert key, because
 // the alert match is optional. It gives no alert line.
 func TestAssemble_DropsRowsWithNoKey(t *testing.T) {
-	rep := Assemble("inc-1", BuildIndex(nil),
+	rep := Assemble("inc-1", BuildIndexFrom(nil, 0),
 		rows(map[string]any{"alert_key": ""}),
 		rows(map[string]any{"label": "Host"}),
 		rows(map[string]any{"title": "no id"}),
@@ -131,10 +131,10 @@ func TestAssemble_DropsRowsWithNoKey(t *testing.T) {
 // A check that finds the flaw again sets the finding to open, so the proof is
 // not the old `verified` event.
 func TestIndex_AReopenedFindingIsNotVerified(t *testing.T) {
-	ix := BuildIndex([]brain.Event{
+	ix := BuildIndexFrom([]brain.Event{
 		brain.FindingStatusChanged{ID: "f", Status: "verified"},
 		brain.FindingStatusChanged{ID: "f", Status: "open"},
-	})
+	}, 0)
 	if ix.verifiedFrame("f").Known {
 		t.Error("a finding that was reopened is not verified")
 	}
@@ -348,8 +348,8 @@ func TestReachedLabel_IsTheSameOnEachRead(t *testing.T) {
 // BuildIndex reads the pointer form of an event, as the codec decodes the
 // durable history, the same as the value form (review m23).
 func TestBuildIndex_ReadsPointerEvents(t *testing.T) {
-	value := BuildIndex([]brain.Event{brain.FindingRaised{ID: "f-1"}, brain.FindingStatusChanged{ID: "f-1", Status: "fixing"}})
-	ptr := BuildIndex([]brain.Event{&brain.FindingRaised{ID: "f-1"}, &brain.FindingStatusChanged{ID: "f-1", Status: "fixing"}})
+	value := BuildIndexFrom([]brain.Event{brain.FindingRaised{ID: "f-1"}, brain.FindingStatusChanged{ID: "f-1", Status: "fixing"}}, 0)
+	ptr := BuildIndexFrom([]brain.Event{&brain.FindingRaised{ID: "f-1"}, &brain.FindingStatusChanged{ID: "f-1", Status: "fixing"}}, 0)
 	if value.findingFrame("f-1") != ptr.findingFrame("f-1") || len(ptr.statusHistory("f-1")) != 1 {
 		t.Fatalf("pointer events: frame %+v, history %+v", ptr.findingFrame("f-1"), ptr.statusHistory("f-1"))
 	}

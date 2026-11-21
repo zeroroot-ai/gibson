@@ -61,3 +61,24 @@ func TestBrainHistory_ReadsTheTimelineOfTheTenantOfTheContext(t *testing.T) {
 		t.Errorf("no tenant: err = %v", err)
 	}
 }
+
+// The bounded read of the history gives the events from the time on and the
+// position of the first one (review R5).
+func TestBrainHistory_HistoryFromGivesTheOffset(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	t0 := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+	for _, ev := range []brain.Event{
+		brain.FixReverted{MergeRequest: "old", At: t0},
+		brain.FixReverted{MergeRequest: "new", At: t0.Add(2 * time.Hour)},
+	} {
+		if err := reg.For("acme").SubmitAndWait(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evs, offset, err := BrainHistory{Registry: reg}.HistoryFrom(tenantCtx(t), t0.Add(time.Hour))
+	if err != nil || offset != 1 || len(evs) != 1 {
+		t.Fatalf("history = %v, offset = %d, %v", evs, offset, err)
+	}
+}

@@ -35,3 +35,24 @@ func TestMemTimelineStore_LoadHistoryRange(t *testing.T) {
 		t.Fatalf("range = %+v", got)
 	}
 }
+
+// The count before a time leaves out an event with no time, as the range
+// keeps it (review R5).
+func TestMemTimelineStore_CountHistoryBefore(t *testing.T) {
+	s := NewMemTimelineStore()
+	ctx := context.Background()
+	t0 := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+	for i, ev := range []brain.Event{
+		brain.FixReverted{MergeRequest: "old", At: t0},
+		brain.ScanReconciled{MissionID: "no-time"},
+		brain.FixReverted{MergeRequest: "new", At: t0.Add(2 * time.Hour)},
+	} {
+		if _, err := s.Append(ctx, "t", string(rune('a'+i)), ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := s.CountHistoryBefore(ctx, "t", t0.Add(time.Hour))
+	if err != nil || n != 1 {
+		t.Fatalf("count = %d, %v, want 1", n, err)
+	}
+}

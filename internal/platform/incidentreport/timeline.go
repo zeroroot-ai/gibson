@@ -44,13 +44,13 @@ type statusEvent struct {
 
 func entityKey(label, key string) string { return label + "\x00" + key }
 
-// BuildIndex walks the history of the tenant once. The position of an event is
+// BuildIndexFrom walks the history of the tenant once. The position of an event is
 // its index in the history, which is the number that GetTimeline gives when the
 // request names no mission.
-func BuildIndex(history []brain.Event) *Index { return BuildIndexFrom(history, 0) }
-
-// BuildIndexFrom is BuildIndex for a part of the history that starts at the
-// position offset of the whole history (review R5).
+//
+// BuildIndexFrom takes a part of the history that starts at the position
+// offset of the whole history, and the index keeps the positions of the whole
+// history (review R5).
 func BuildIndexFrom(history []brain.Event, offset uint64) *Index {
 	ix := &Index{
 		total:    offset + uint64(len(history)),
