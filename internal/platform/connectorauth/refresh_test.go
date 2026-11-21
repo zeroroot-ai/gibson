@@ -475,7 +475,7 @@ func TestRefresh_ReadsTheNamedClientSecretEachTime(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "at", "expires_in": 3600, "refresh_token": "rt-2"})
 	}))
 	defer srv.Close()
-	blob, err := MarshalGrant(&Grant{
+	blob, err := MarshalGrant(&Grant{ //nolint:gosec // G101: test values and the name of a secret, not a credential
 		RefreshToken: "rt-1", TokenEndpoint: srv.URL, ClientID: "cid", ClientSecretName: "entra-oauth-secret",
 		AuthorizedBy: "alice@example.com", AuthorizedAt: time.Unix(1_700_000_000, 0).UTC(),
 	})

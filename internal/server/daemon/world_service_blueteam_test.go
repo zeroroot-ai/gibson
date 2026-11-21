@@ -57,7 +57,7 @@ func TestListOpenFindings_RanksAndLeavesOutVerified(t *testing.T) {
 		}
 		return out, nil
 	}
-	srv.blue.confidence = func(_ context.Context, _ string, ids []string) (map[string]float64, error) {
+	srv.blue.confidence = func(_ context.Context, _ string, _ []string) (map[string]float64, error) {
 		confidenceReads++
 		return map[string]float64{"p1": 0.9}, nil
 	}
