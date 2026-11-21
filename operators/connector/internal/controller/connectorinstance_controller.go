@@ -530,10 +530,7 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 		// breaks the run-config validation. Add a ToolHive host list as a
 		// second layer when a ToolHive version resolves a per-MCPServer profile.
 		permProfile := map[string]interface{}{"type": "builtin", "name": "network"}
-		mcpPort := int64(proxyPort)
-		if ci.Spec.Port != 0 {
-			mcpPort = int64(ci.Spec.Port)
-		}
+		mcpPort := int64(serverPort(ci))
 		spec := map[string]interface{}{
 			"image":             ci.Spec.Image,
 			"transport":         transport,

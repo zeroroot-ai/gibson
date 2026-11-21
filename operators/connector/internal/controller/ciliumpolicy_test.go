@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -363,5 +364,31 @@ func TestDesiredCiliumEgressPolicy_ABadClusterRangeIsRefused(t *testing.T) {
 	ci.Spec.EgressAllow = []string{"api.github.com:443"}
 	if _, err := desiredCiliumEgressPolicy(ci, []string{"not-a-cidr"}); !errors.Is(err, ciliumegress.ErrBadCIDR) {
 		t.Fatalf("err = %v, want ciliumegress.ErrBadCIDR", err)
+	}
+}
+
+// The NetworkPolicy opens the port of the server that spec.port names, next
+// to the proxy port, so a server on another port is reachable (review m12).
+func TestNetworkPolicy_OpensThePortOfTheServer(t *testing.T) {
+	ci := hostedInstance("gh", "tenant-acme")
+	ci.Spec.Port = 3000
+	np := desiredNetworkPolicy(ci)
+	has := func(ports []networkingv1.NetworkPolicyPort, want int) bool {
+		for _, p := range ports {
+			if p.Port != nil && p.Port.IntValue() == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(np.Spec.Ingress[0].Ports, 3000) || !has(np.Spec.Ingress[0].Ports, proxyPort) {
+		t.Fatalf("ingress ports = %v", np.Spec.Ingress[0].Ports)
+	}
+	if !has(np.Spec.Egress[0].Ports, 3000) {
+		t.Fatalf("egress ports = %v", np.Spec.Egress[0].Ports)
+	}
+	ci.Spec.Port = 0
+	if got := desiredNetworkPolicy(ci).Spec.Ingress[0].Ports; len(got) != 1 || !has(got, proxyPort) {
+		t.Fatalf("no spec.port: ingress ports = %v", got)
 	}
 }
