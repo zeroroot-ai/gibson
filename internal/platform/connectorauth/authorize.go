@@ -104,17 +104,17 @@ func randomURLToken(n int) (string, error) {
 // by State, and is never persisted: a lost pending record just means the
 // operator starts again.
 type PendingAuthorization struct {
-	State              string
-	Verifier           string // PKCE code_verifier
-	Connector          string
-	TokenEndpoint      string
-	ClientID           string
-	ClientSecret       string // empty for a public PKCE client
+	State         string
+	Verifier      string // PKCE code_verifier
+	Connector     string
+	TokenEndpoint string
+	ClientID      string
+	ClientSecret  string // empty for a public PKCE client
 	// ClientSecretName names the secret of the tenant that holds the client
 	// secret of a tenant OAuth client. The grant keeps the name, and each
 	// refresh reads the secret again, so a rotation reaches it (review m13).
-	ClientSecretName string
-	RedirectURI      string
+	ClientSecretName   string
+	RedirectURI        string
 	Scope              string
 	RevocationEndpoint string
 	// AuthorizedBy is the FGA user reference of the human who started the flow,
