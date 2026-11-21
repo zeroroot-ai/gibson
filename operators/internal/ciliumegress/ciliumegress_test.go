@@ -94,7 +94,7 @@ func TestDenyRules(t *testing.T) {
 		t.Fatalf("rules = %v, want one deny rule", rules)
 	}
 	set := rules[0].(map[string]interface{})["toCIDRSet"].([]interface{})
-	var nets []*net.IPNet
+	nets := make([]*net.IPNet, 0, len(set))
 	got := map[string]bool{}
 	for _, e := range set {
 		c := e.(map[string]interface{})["cidr"].(string)
