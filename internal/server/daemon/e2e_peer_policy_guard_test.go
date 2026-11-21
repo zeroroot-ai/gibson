@@ -61,38 +61,86 @@ type e2eJob struct {
 var (
 	runJobRe  = regexp.MustCompile(`run-e2e-job\.sh\s+\S+\s+'?(Test[^'\s]*)'?`)
 	stepNameR = regexp.MustCompile(`^\s*- (name|uses):`)
+	// A Job manifest that a workflow applies itself passes the test pattern as
+	// args: ["-test.run", "TestX", ...].
+	manifestRunRe = regexp.MustCompile(`"-test\.run",\s*"(Test[^"]*)"`)
+	// A workflow that compiles the suite builds a test binary of tests/e2e.
+	buildsSuiteRe = regexp.MustCompile(`go test\b[^\n]*\s-c\b|-o\s+\S*e2e\.test`)
 )
 
-// e2eJobsOf reads the jobs of one workflow text.
+// testNamesOf splits a -test.run pattern into the names of its tests.
+func testNamesOf(pattern string) []string {
+	var tests []string
+	for _, alt := range strings.Split(pattern, "|") {
+		alt = strings.Trim(alt, "^$()")
+		if alt != "" {
+			tests = append(tests, alt)
+		}
+	}
+	return tests
+}
+
+// e2eJobsOf reads the jobs of one workflow text. A job is one call of
+// run-e2e-job.sh, or one Job manifest with a -test.run argument.
 func e2eJobsOf(workflow, text string) []e2eJob {
 	lines := strings.Split(text, "\n")
 	var jobs []e2eJob
 	for i, line := range lines {
-		m := runJobRe.FindStringSubmatch(line)
-		if m == nil {
+		if m := runJobRe.FindStringSubmatch(line); m != nil {
+			// The command may continue over lines with a backslash, so the
+			// identity variable can sit on an earlier line of the same step.
+			identity := e2eAsRunner
+			for j := i; j >= 0; j-- {
+				if strings.Contains(lines[j], "E2E_RUNNER_COMPONENT=e2e-member") {
+					identity = e2eAsMember
+				}
+				if stepNameR.MatchString(lines[j]) {
+					break
+				}
+			}
+			jobs = append(jobs, e2eJob{workflow: workflow, tests: testNamesOf(m[1]), identity: identity})
 			continue
 		}
-		// The command may continue over lines with a backslash, so the
-		// identity variable can sit on an earlier line of the same step.
-		identity := e2eAsRunner
-		for j := i; j >= 0; j-- {
-			if strings.Contains(lines[j], "E2E_RUNNER_COMPONENT=e2e-member") {
-				identity = e2eAsMember
+		if m := manifestRunRe.FindStringSubmatch(line); m != nil {
+			// The identity is the service account of the pod of the same
+			// manifest. It sits above the args, in the same pod spec.
+			identity := e2eAsRunner
+			for j := i; j >= 0; j-- {
+				line := strings.TrimSpace(lines[j])
+				if strings.HasPrefix(line, "serviceAccountName:") {
+					if strings.Contains(line, "e2e-member") {
+						identity = e2eAsMember
+					}
+					break
+				}
+				// The start of the manifest: the pod spec is below it.
+				if strings.HasPrefix(line, "kind:") || line == "---" {
+					break
+				}
 			}
-			if stepNameR.MatchString(lines[j]) {
-				break
-			}
+			jobs = append(jobs, e2eJob{workflow: workflow, tests: testNamesOf(m[1]), identity: identity})
 		}
-		var tests []string
-		for _, alt := range strings.Split(m[1], "|") {
-			alt = strings.Trim(alt, "^$()")
-			if alt != "" {
-				tests = append(tests, alt)
-			}
-		}
-		jobs = append(jobs, e2eJob{workflow: workflow, tests: tests, identity: identity})
 	}
 	return jobs
+}
+
+// hasSecretsBinary reports whether a workflow runs another test binary through
+// run-e2e-job.sh (E2E_RUNNER_BINARY). The cluster workflow does so for the
+// secrets suite, which this guard does not read.
+func hasSecretsBinary(text string) bool {
+	return strings.Contains(text, "E2E_RUNNER_BINARY")
+}
+
+// buildsSuite reports whether a workflow builds the e2e test binary. A comment
+// does not count.
+func buildsSuite(text string) bool {
+	var code []string
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "#") {
+			code = append(code, line)
+		}
+	}
+	return buildsSuiteRe.MatchString(strings.Join(code, "\n"))
 }
 
 // generatedMethods maps the import path of a generated package to its methods:
@@ -191,11 +239,39 @@ var newClientRe = regexp.MustCompile(`^New(\w+)Client$`)
 // called from.
 func collectClientCalls(files map[string]*ast.File, gen generatedMethods) map[string][]string {
 	calls := map[string][]string{}
+	// The fields of a struct that hold a client, from every file: a test calls
+	// clients.Daemon.X, and the struct is in a helper file.
+	type client struct{ pkg, service string }
+	fieldVars := map[string][]client{}
+	for _, f := range files {
+		aliases := importAliases(f)
+		ast.Inspect(f, func(n ast.Node) bool {
+			st, ok := n.(*ast.StructType)
+			if !ok {
+				return true
+			}
+			for _, fld := range st.Fields.List {
+				ts, ok := fld.Type.(*ast.SelectorExpr)
+				if !ok || !strings.HasSuffix(ts.Sel.Name, "Client") {
+					continue
+				}
+				if pkgID, ok := ts.X.(*ast.Ident); ok {
+					for _, nm := range fld.Names {
+						fieldVars[nm.Name] = append(fieldVars[nm.Name],
+							client{pkg: aliases[pkgID.Name], service: strings.TrimSuffix(ts.Sel.Name, "Client")})
+					}
+				}
+			}
+			return true
+		})
+	}
 	for name, f := range files {
 		aliases := importAliases(f)
 		// The variables that hold a client, with their service and package.
-		type client struct{ pkg, service string }
-		vars := map[string]client{}
+		vars := map[string][]client{}
+		for k, v := range fieldVars {
+			vars[k] = append(vars[k], v...)
+		}
 		noteClient := func(lhs []ast.Expr, rhs []ast.Expr) {
 			for i, l := range lhs {
 				id, ok := l.(*ast.Ident)
@@ -215,7 +291,7 @@ func collectClientCalls(files map[string]*ast.File, gen generatedMethods) map[st
 					continue
 				}
 				if m := newClientRe.FindStringSubmatch(sel.Sel.Name); m != nil {
-					vars[id.Name] = client{pkg: aliases[pkgID.Name], service: m[1]}
+					vars[id.Name] = append(vars[id.Name], client{pkg: aliases[pkgID.Name], service: m[1]})
 				}
 			}
 		}
@@ -226,7 +302,7 @@ func collectClientCalls(files map[string]*ast.File, gen generatedMethods) map[st
 				if ts, ok := s.Type.(*ast.SelectorExpr); ok && strings.HasSuffix(ts.Sel.Name, "Client") {
 					if pkgID, ok := ts.X.(*ast.Ident); ok {
 						for _, nm := range s.Names {
-							vars[nm.Name] = client{pkg: aliases[pkgID.Name], service: strings.TrimSuffix(ts.Sel.Name, "Client")}
+							vars[nm.Name] = append(vars[nm.Name], client{pkg: aliases[pkgID.Name], service: strings.TrimSuffix(ts.Sel.Name, "Client")})
 						}
 					}
 				}
@@ -251,14 +327,26 @@ func collectClientCalls(files map[string]*ast.File, gen generatedMethods) map[st
 				return true
 			}
 			method := sel.Sel.Name
-			// A receiver that is a variable of a client.
-			if id, ok := sel.X.(*ast.Ident); ok {
-				if c, ok := vars[id.Name]; ok {
-					if full, ok := gen[c.pkg][c.service][method]; ok {
-						calls[full] = append(calls[full], name)
-					}
-					return true
+			// A receiver that is a variable or a field of a client. The last name
+			// of the receiver counts: c.X, p.comp.X and clients.Daemon.X. A name
+			// can hold two clients in one file, so each one is tried. A miss falls
+			// through to the check of the request literal.
+			recv := ""
+			switch r := sel.X.(type) {
+			case *ast.Ident:
+				recv = r.Name
+			case *ast.SelectorExpr:
+				recv = r.Sel.Name
+			}
+			found := false
+			for _, c := range vars[recv] {
+				if full, ok := gen[c.pkg][c.service][method]; ok {
+					calls[full] = append(calls[full], name)
+					found = true
 				}
+			}
+			if found {
+				return true
 			}
 			// A literal of the request type of the method, as an argument.
 			for _, arg := range call.Args {
@@ -348,7 +436,13 @@ func TestE2EPeerPolicy_AllowsEachCallOfTheExitTests(t *testing.T) {
 	for _, w := range workflows {
 		raw, err := os.ReadFile(w)
 		require.NoError(t, err)
-		jobs = append(jobs, e2eJobsOf(filepath.Base(w), string(raw))...)
+		found := e2eJobsOf(filepath.Base(w), string(raw))
+		// A workflow that builds the suite and starts no job that the guard
+		// reads has changed how it starts its tests. It must not drop out.
+		if buildsSuite(string(raw)) && !hasSecretsBinary(string(raw)) {
+			require.NotEmpty(t, found, "%s builds the e2e test binary and the guard finds no job in it", filepath.Base(w))
+		}
+		jobs = append(jobs, found...)
 	}
 	require.NotEmpty(t, jobs, "no exit workflow calls run-e2e-job.sh, so the guard would check nothing")
 
@@ -477,4 +571,85 @@ func TestE2EJobsOf_ReadsTheIdentityOfTheStep(t *testing.T) {
 	assert.Equal(t, e2eAsRunner, jobs[0].identity)
 	assert.Equal(t, []string{"TestC"}, jobs[1].tests)
 	assert.Equal(t, e2eAsMember, jobs[1].identity)
+}
+
+// A workflow can apply its own Job manifest. The tests are in the -test.run
+// argument, and the identity is the service account of the pod.
+func TestE2EJobsOf_ReadsAJobManifest(t *testing.T) {
+	text := `      - name: run
+        run: |
+          kubectl apply -f - <<EOF
+          kind: Job
+          spec:
+            template:
+              spec:
+                serviceAccountName: ${RELEASE}-e2e-runner
+                containers:
+                  - name: e2e
+                    args: ["-test.run", "TestBank", "-test.v", "-test.timeout", "40m"]
+          ---
+          kind: Job
+          spec:
+            template:
+              spec:
+                serviceAccountName: ${RELEASE}-e2e-member
+                containers:
+                  - name: e2e
+                    args: ["-test.run", "TestMember$|TestOther", "-test.v"]
+          EOF
+`
+	jobs := e2eJobsOf("w.yml", text)
+	require.Len(t, jobs, 2)
+	assert.Equal(t, []string{"TestBank"}, jobs[0].tests)
+	assert.Equal(t, e2eAsRunner, jobs[0].identity)
+	assert.Equal(t, []string{"TestMember", "TestOther"}, jobs[1].tests)
+	assert.Equal(t, e2eAsMember, jobs[1].identity)
+}
+
+// A workflow that builds the suite is told apart from one that only names the
+// binary in a comment.
+func TestBuildsSuite(t *testing.T) {
+	assert.True(t, buildsSuite("run: CGO_ENABLED=0 go test -tags=e2e -c \\\n  -o /tmp/ectx/e2e.test ./tests/e2e/\n"))
+	assert.False(t, buildsSuite("      # the image holds e2e.test and runs it as a Job\n"))
+}
+
+// A receiver that is a field (p.comp), a name that two clients share, and a
+// request literal all resolve to a method.
+func TestCollectClientCalls_ResolvesFieldsAndCollisions(t *testing.T) {
+	src := `package e2e
+
+import (
+	"context"
+
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+)
+
+type probe struct{ comp componentpb.ComponentServiceClient }
+
+func (p *probe) submit(ctx context.Context, req *componentpb.SubmitResultRequest) {
+	_, _ = p.comp.SubmitResult(ctx, req)
+}
+
+func twice(ctx context.Context) {
+	c := tenantv1.NewMembershipServiceClient(nil)
+	_, _ = c.ListMembers(ctx, nil)
+}
+
+func twiceMore(ctx context.Context) {
+	c := componentpb.NewComponentServiceClient(nil)
+	_, _ = c.Heartbeat(ctx, nil)
+}
+`
+	f, err := parser.ParseFile(token.NewFileSet(), "x.go", src, 0)
+	require.NoError(t, err)
+	parsed := map[string]*ast.File{"x.go": f}
+	gen := loadGeneratedMethods(t, gibsonRoot(t), e2eImports(parsed))
+
+	calls := collectClientCalls(parsed, gen)
+
+	assert.Contains(t, calls, "/gibson.component.v1.ComponentService/SubmitResult")
+	assert.Contains(t, calls, "/gibson.tenant.v1.MembershipService/ListMembers")
+	assert.Contains(t, calls, "/gibson.component.v1.ComponentService/Heartbeat",
+		"the second client with the name c is not lost")
 }
