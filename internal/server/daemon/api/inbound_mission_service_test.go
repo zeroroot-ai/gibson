@@ -91,15 +91,10 @@ func (m *memInboundStore) Get(_ context.Context, _, agent string) (*inboundmissi
 }
 
 // The service uses none of the task methods.
-func (m *memInboundStore) Reserve(
-	context.Context, string, string, string, string, func(string) (bool, bool), time.Duration,
-) (string, error) {
+func (m *memInboundStore) Reserve(context.Context, string, string, string, string) (string, error) {
 	return "", errors.New("not used")
 }
 func (m *memInboundStore) Release(context.Context, string, string) error {
-	return errors.New("not used")
-}
-func (m *memInboundStore) Finish(context.Context, string, string) error {
 	return errors.New("not used")
 }
 func (m *memInboundStore) Owner(context.Context, string, string) (owner, agent string, err error) {
@@ -316,7 +311,7 @@ func newInboundFixture(t *testing.T) *inboundFixture {
 
 func pub(agent, def string, targets ...string) *tenantv1.PublishInboundMissionRequest {
 	return &tenantv1.PublishInboundMissionRequest{
-		Agent: agent, MissionDefinitionId: def, TargetIds: targets, MaxActiveMissions: 3,
+		Agent: agent, MissionDefinitionId: def, TargetIds: targets,
 	}
 }
 
@@ -377,10 +372,6 @@ func TestPublishInboundMission_Refusals(t *testing.T) {
 			pub("recon", "def-1", goodTarget), codes.PermissionDenied},
 		{"the agent is not a DNS label", nil, nil, pub("Recon!", "def-1", goodTarget), codes.InvalidArgument},
 		{"no target", nil, nil, pub("recon", "def-1"), codes.InvalidArgument},
-		{"no limit", nil, nil, &tenantv1.PublishInboundMissionRequest{
-			Agent: "recon", MissionDefinitionId: "def-1", TargetIds: []string{goodTarget}}, codes.InvalidArgument},
-		{"a limit of zero", nil, nil, &tenantv1.PublishInboundMissionRequest{
-			Agent: "recon", MissionDefinitionId: "def-1", TargetIds: []string{goodTarget}, MaxActiveMissions: 0}, codes.InvalidArgument},
 		{"too many targets", nil, nil, func() *tenantv1.PublishInboundMissionRequest {
 			ids := make([]string, maxInboundTargets+1)
 			for i := range ids {
@@ -721,7 +712,6 @@ func TestPublishInboundMission_PinsTheDefinitionAndEachTarget(t *testing.T) {
 	require.NoError(t, err)
 	e := f.store.entries["recon"]
 	assert.Equal(t, "hash-1", e.DefinitionHash)
-	assert.Equal(t, int32(3), e.MaxActive, "the admin sets the limit")
 	assert.Equal(t, map[string]string{goodTarget: "h-" + goodTarget}, e.TargetHashes)
 }
 

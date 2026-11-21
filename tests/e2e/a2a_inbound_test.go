@@ -450,7 +450,7 @@ func TestA2AInbound(t *testing.T) {
 	f.defID = helpers.CreateAgentMission(ctx, t, clients.Daemon, "a2a-inbound-exit", inboundAgent, nil)
 
 	_, err = f.inbound.PublishInboundMission(ctx, &tenantv1.PublishInboundMissionRequest{
-		Agent: inboundAgent, MissionDefinitionId: f.defID, TargetIds: f.targets[:], MaxActiveMissions: 3,
+		Agent: inboundAgent, MissionDefinitionId: f.defID, TargetIds: f.targets[:],
 	})
 	require.NoError(t, err, "PublishInboundMission")
 	t.Cleanup(func() {
@@ -609,7 +609,7 @@ func TestA2AInbound(t *testing.T) {
 		require.NoError(t, cerr, "CreateMissionDefinition")
 		_, perr := f.inbound.PublishInboundMission(ctx, &tenantv1.PublishInboundMissionRequest{
 			Agent: inboundFanAgent, MissionDefinitionId: created.GetMissionDefinitionId(),
-			TargetIds: f.targets[:2], MaxActiveMissions: 2,
+			TargetIds: f.targets[:2],
 		})
 		require.NoError(t, perr, "a definition with its agent in a for_each template can be published")
 		t.Cleanup(func() {

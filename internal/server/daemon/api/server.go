@@ -212,11 +212,9 @@ type DaemonServer struct {
 	// May be nil; when nil, SaveMissionDraft/ListMissionDrafts return codes.Unavailable.
 	missionDraftStore missionDraftStoreIface
 
-	// producedComponents records each component that an agent enrolled, and
-	// producedComponentLimit is the quota for each tenant (gibson#33). With
-	// no store, EnrollComponent is Unavailable.
-	producedComponents     producedComponentStore
-	producedComponentLimit int
+	// producedComponents records each component that an agent enrolled
+	// (gibson#33). With no store, EnrollComponent is Unavailable.
+	producedComponents producedComponentStore
 
 	// poolGetter returns the live per-tenant data-plane pool.
 	// Used by ExportFindings (Neo4j Cypher path).

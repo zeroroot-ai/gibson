@@ -349,9 +349,7 @@ func (c *HarnessConfig) ApplyDefaults() {
 	// SpawnLimits are only defaulted when MissionClient is present
 	if c.MissionClient != nil {
 		// Check if spawn limits are at zero values (not configured)
-		if c.SpawnLimits.MaxChildMissions == 0 &&
-			c.SpawnLimits.MaxConcurrentMissions == 0 &&
-			c.SpawnLimits.MaxMissionDepth == 0 {
+		if c.SpawnLimits.MaxMissionDepth == 0 {
 			c.SpawnLimits = DefaultSpawnLimits()
 		}
 	}

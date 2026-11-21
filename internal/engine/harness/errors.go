@@ -36,12 +36,6 @@ const (
 	// ErrHarnessInvalidConfig indicates the harness configuration is invalid or incomplete
 	ErrHarnessInvalidConfig types.ErrorCode = "HARNESS_INVALID_CONFIG"
 
-	// ErrChildMissionLimitExceeded indicates the parent mission has reached its maximum child count
-	ErrChildMissionLimitExceeded types.ErrorCode = "HARNESS_CHILD_MISSION_LIMIT_EXCEEDED"
-
 	// ErrMissionDepthLimitExceeded indicates the mission depth limit has been reached
 	ErrMissionDepthLimitExceeded types.ErrorCode = "HARNESS_MISSION_DEPTH_LIMIT_EXCEEDED"
-
-	// ErrConcurrentMissionLimitExceeded indicates the system-wide concurrent mission limit has been reached
-	ErrConcurrentMissionLimitExceeded types.ErrorCode = "HARNESS_CONCURRENT_MISSION_LIMIT_EXCEEDED"
 )
