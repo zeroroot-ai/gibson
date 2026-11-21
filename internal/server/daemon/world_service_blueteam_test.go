@@ -302,3 +302,27 @@ func TestBlueTeamWorldServer_TheStoresResolveOnTheCall(t *testing.T) {
 		t.Fatal("actions with no platform database: want an error")
 	}
 }
+
+// One old open finding, or one finding with no time, does not make a view over
+// many findings read the whole history (review r13).
+func TestBlueTeamViews_TheReadIsBoundedWhateverTheOldestFinding(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var ranges []string
+	store := rangeOnlyStore{MemTimelineStore: braintest.NewMemTimelineStore(), ranges: &ranges}
+	reg := brain.NewRegistry(ctx, func(context.Context, string) (brain.TimelineStore, error) { return store, nil })
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
+	now := blueAt(10)
+	srv.blue.now = func() time.Time { return now }
+	submit(t, reg, "acme",
+		brain.FindingRaised{ID: "no-time", Title: "t", ScopeID: "s", Severity: "high"},
+		brain.FindingStatusChanged{ID: "no-time", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", At: blueAt(3)},
+	)
+	wctx := worldTenantCtx("acme")
+	_, err := srv.GetExposureTrend(wctx, &worldpb.GetExposureTrendRequest{PeriodSeconds: 3600})
+	require.NoError(t, err)
+	_, err = srv.ListWaitingOnPerson(wctx, &worldpb.ListWaitingOnPersonRequest{})
+	require.NoError(t, err)
+	floor := now.Add(-maxViewLookback).UTC().Format(time.RFC3339)
+	require.Equal(t, []string{floor, floor}, ranges)
+}
