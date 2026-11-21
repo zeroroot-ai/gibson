@@ -217,13 +217,6 @@ func encodeApplicationFindings(rows []map[string]any) ([]byte, error) {
 	return encoded, nil
 }
 
-// readGraph runs a read-only Cypher query on the tenant's graph.
-//
-// It deliberately does NOT go through withStore. That path also requires a
-// vector collection and a resolved embedding provider, which a pure traversal
-// has no use for — routing this read through it would make reachability
-// unreadable on any tenant that has not configured an embedder, which is
-// exactly the silent-unknown this read exists to remove.
 // ReadGraph runs a read-only Cypher query on the graph of the tenant. It is
 // the one read of a raw query, for a reader outside this package such as the
 // incident report (gibson#1478).
@@ -233,6 +226,13 @@ func (q *PoolGraphRAGQuerier) ReadGraph(
 	return q.readGraph(ctx, tenant, cypher, params)
 }
 
+// readGraph runs a read-only Cypher query on the tenant's graph.
+//
+// It deliberately does NOT go through withStore. That path also requires a
+// vector collection and a resolved embedding provider, which a pure traversal
+// has no use for — routing this read through it would make reachability
+// unreadable on any tenant that has not configured an embedder, which is
+// exactly the silent-unknown this read exists to remove.
 func (q *PoolGraphRAGQuerier) readGraph(
 	ctx context.Context, tenant, cypher string, params map[string]any,
 ) ([]map[string]any, error) {
