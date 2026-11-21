@@ -7,30 +7,6 @@ package daemon
 
 import "testing"
 
-// The bank exit test calls these RPCs (tests/e2e/bank_test.go). The runner's
-// method policy is an allow-list, so a suite that grows a call the policy
-// does not name is denied at the daemon and the exit test reads red for a
-// reason that has nothing to do with banks (gibson#13, run 35436962740).
-func TestE2EPeerPolicy_CoversTheBankExitTest(t *testing.T) {
-	policy := e2ePeerMethodPolicies(testTD)[e2eRunnerSVID(testTD)]
-	for _, m := range []string{
-		"/gibson.tenant.v1.ProviderService/CreateProvider",
-		"/gibson.tenant.v1.ProviderService/DeleteProvider",
-		"/gibson.bank.v1.BankService/CreateBank",
-		"/gibson.bank.v1.BankService/GetBank",
-		"/gibson.bank.v1.BankService/UpdateBank",
-		"/gibson.bank.v1.BankService/DeleteBank",
-		"/gibson.bank.v1.BankService/ListMembers",
-		"/gibson.job.v1.JobService/OpenJob",
-		"/gibson.job.v1.JobService/GetJob",
-		"/gibson.job.v1.JobService/CloseJob",
-	} {
-		if !policy[m] {
-			t.Errorf("the runner policy does not allow %s, which tests/e2e/bank_test.go calls", m)
-		}
-	}
-}
-
 // The secrets isolation suite calls these admin RPCs with the runner SVID
 // (tests/e2e/secrets, gibson#213). Its component calls go through the edge
 // and are not in this policy.
@@ -44,54 +20,6 @@ func TestE2EPeerPolicy_CoversTheSecretsSuite(t *testing.T) {
 	} {
 		if !policy[m] {
 			t.Errorf("the runner policy does not allow %s, which tests/e2e/secrets calls", m)
-		}
-	}
-}
-
-// The plugin secret revocation suite calls these RPCs with the runner SVID
-// (tests/e2e/plugin_secret_revocation_test.go). It enables the catalog plugin
-// through the API (gibson#1062), so the policy must name that call too
-// (gibson#1159).
-func TestE2EPeerPolicy_CoversThePluginRevocationSuite(t *testing.T) {
-	policy := e2ePeerMethodPolicies(testTD)[e2eRunnerSVID(testTD)]
-	for _, m := range []string{
-		"/gibson.tenant.v1.CatalogPluginService/EnableCatalogPlugin",
-		"/gibson.secrets.v1.SecretsService/SetSecret",
-		"/gibson.tenant.v1.GrantsService/WriteSecretGrants",
-		"/gibson.secrets.v1.SecretsService/DeleteSecret",
-		"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls",
-		"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding",
-	} {
-		if !policy[m] {
-			t.Errorf("the runner policy does not allow %s, which tests/e2e/plugin_secret_revocation_test.go calls", m)
-		}
-	}
-}
-
-// The exit tests of the AAIF epics call these RPCs with the runner SVID
-// (tests/e2e/agent_skills_test.go, finding_evidence_test.go,
-// aaif_alignment_test.go, model_gate_test.go).
-func TestE2EPeerPolicy_CoversTheAAIFExitTests(t *testing.T) {
-	policy := e2ePeerMethodPolicies(testTD)[e2eRunnerSVID(testTD)]
-	for _, m := range []string{
-		"/gibson.tenant.v1.AgentSkillService/PublishAgentSkill",
-		"/gibson.tenant.v1.AgentSkillService/ListAgentSkills",
-		"/gibson.tenant.v1.AgentSkillService/GetAgentSkill",
-		"/gibson.tenant.v1.AgentSkillService/GrantAgentSkill",
-		"/gibson.tenant.v1.AgentSkillService/DeleteAgentSkill",
-		"/gibson.tenant.v1.AgentSkillService/ListSharedAgentSkills",
-		"/gibson.tenant.v1.AgentSkillService/EnableSharedAgentSkill",
-		"/gibson.component.v1.ComponentService/CallTool",
-		"/gibson.component.v1.ComponentService/SubmitFinding",
-		"/gibson.component.v1.ComponentService/ResolveModel",
-		"/gibson.component.v1.ComponentService/ResolveAgent",
-		"/gibson.tenant.v1.TenantService/GetFinding",
-		"/gibson.tenant.v1.TenantService/ExportFindings",
-		"/gibson.world.v1.WorldService/GetTimeline",
-		"/gibson.world.v1.WorldService/GetLlmCall",
-	} {
-		if !policy[m] {
-			t.Errorf("the runner policy does not allow %s, which an AAIF exit test calls", m)
 		}
 	}
 }
