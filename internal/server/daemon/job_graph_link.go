@@ -78,10 +78,13 @@ func newJobGraphLink(reg *brain.Registry, mrs mergeRequestReader, logger *slog.L
 
 // JobClosed submits the events for one accomplished close.
 func (l *jobGraphLink) JobClosed(ctx context.Context, c jobnode.ClosedJob) {
-	now := l.now()
 	mrKey, _, _ := deliveredMergeRequest(c)
 	if mrKey == "" {
 		return
+	}
+	now := time.Now().UTC()
+	if l.now != nil {
+		now = l.now()
 	}
 	known := l.findings(c.TenantID)
 	claim := jobnode.ClaimName(c.MissionRunID, c.NodeID)
