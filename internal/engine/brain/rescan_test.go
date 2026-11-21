@@ -42,12 +42,27 @@ func settleRescan(w *World) {
 func raiseInto(w *World, id, missionID, status string) {
 	Reduce(w, FindingRaised{ID: id, MissionID: missionID})
 	if status != "" && status != FindingStatusOpen {
-		Reduce(w, FindingStatusChanged{ID: id, Status: status, MergeRequest: "mr-" + id})
+		walk(w, id, status, "mr-"+id)
 	}
 	if status == FindingStatusFixed {
 		// A fixed Finding has a deploy and a health signal that held.
 		Reduce(w, DeployObserved{MergeRequest: "mr-" + id, At: testDeployTime})
 		Reduce(w, HealthObserved{MergeRequest: "mr-" + id, Held: true, At: testDeployTime})
+	}
+}
+
+// walk moves a Finding along its lifecycle to the status: open, fixing,
+// fixed, verified. The fixing step records the merge request (review M4).
+func walk(w *World, id, status, mr string) {
+	for _, s := range []string{FindingStatusFixing, FindingStatusFixed, FindingStatusVerified} {
+		ev := FindingStatusChanged{ID: id, Status: s}
+		if s == FindingStatusFixing {
+			ev.MergeRequest = mr
+		}
+		Reduce(w, ev)
+		if s == status {
+			return
+		}
 	}
 }
 
@@ -200,7 +215,7 @@ func TestRescan_RunsOncePerScan(t *testing.T) {
 	settleRescan(w)
 
 	// The agent fixes it AFTER the scan completed.
-	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
+	walk(w, "f1", FindingStatusFixed, "")
 
 	if evs := RescanReconciliationSystem(w); len(evs) != 0 {
 		t.Fatalf("a reconciled scan judged a fix it never saw: %#v", evs)
@@ -256,7 +271,7 @@ func TestRescan_BranchCompletionCannotVerify(t *testing.T) {
 func TestRescan_ReRaiseKeepsStatusAndMovesLastScan(t *testing.T) {
 	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-1", Title: "original", Severity: "high"})
-	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
+	walk(w, "f1", FindingStatusFixed, "")
 
 	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-2", Title: "ignored", Severity: "low"})
@@ -379,6 +394,7 @@ func TestRescan_ReplayAfterRestart_DoesNotReReconcile(t *testing.T) {
 	timeline := []Event{
 		MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"},
 		FindingRaised{ID: "f1", MissionID: "scan-1"},
+		FindingStatusChanged{ID: "f1", Status: FindingStatusFixing},
 		FindingStatusChanged{ID: "f1", Status: FindingStatusFixed},
 		MissionDone{ID: "scan-1", Outcome: MissionCompleted},
 		ScanReconciled{MissionID: "scan-1"},
@@ -410,7 +426,7 @@ func TestRescan_ReplayAfterRestart_DoesNotReReconcile(t *testing.T) {
 
 // fix moves a Finding to fixed with a deploy and a health signal that held.
 func fix(w *World, id string) {
-	Reduce(w, FindingStatusChanged{ID: id, Status: FindingStatusFixed, MergeRequest: "mr-" + id})
+	walk(w, id, FindingStatusFixed, "mr-"+id)
 	Reduce(w, DeployObserved{MergeRequest: "mr-" + id, At: testDeployTime})
 	Reduce(w, HealthObserved{MergeRequest: "mr-" + id, Held: true, At: testDeployTime})
 }

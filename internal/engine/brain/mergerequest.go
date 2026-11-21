@@ -75,6 +75,7 @@ func applyMergeRequestObserved(w *World, e MergeRequestObserved) {
 // A Finding in any other status does not move. The System is quiescent: after
 // the status change the Finding is no longer `fixing`.
 func MergeRequestReconciliationSystem(w *World) []Event {
+	now := w.Now()
 	var out []Event
 	for _, f := range w.FindingSnapshot() {
 		if f.Status != FindingStatusFixing {
@@ -82,9 +83,9 @@ func MergeRequestReconciliationSystem(w *World) []Event {
 		}
 		switch f.MergeRequestState {
 		case MergeRequestMerged:
-			out = append(out, FindingStatusChanged{ID: f.ID, Status: FindingStatusFixed})
+			out = append(out, FindingStatusChanged{ID: f.ID, Status: FindingStatusFixed, MissionID: f.FixMissionID, At: now})
 		case MergeRequestClosed:
-			out = append(out, FindingStatusChanged{ID: f.ID, Status: FindingStatusOpen})
+			out = append(out, FindingStatusChanged{ID: f.ID, Status: FindingStatusOpen, MissionID: f.FixMissionID, At: now})
 		}
 	}
 	return out

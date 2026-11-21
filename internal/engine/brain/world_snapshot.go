@@ -654,6 +654,7 @@ func restoreFindingFields(w *World, s FindingSnapshot) {
 		f.MergeRequest, f.MergeRequestState = s.MergeRequest, s.MergeRequestState
 		f.Priority, f.PriorityRule, f.PriorityReason = s.Priority, s.PriorityRule, s.PriorityReason
 		f.FixFacts = s.FixFacts
+		f.RefusedMoves, f.LastRefusedMove = s.RefusedMoves, s.LastRefusedMove
 		f.SubmittedBy, f.AgentName, f.EnrolledBy = s.SubmittedBy, s.AgentName, s.EnrolledBy
 		q.Close()
 		return

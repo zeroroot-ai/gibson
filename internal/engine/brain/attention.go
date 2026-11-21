@@ -92,6 +92,11 @@ type Finding struct {
 	// FixFacts are the facts of the fix loop (gibson#1457, #1460, #1464).
 	FixFacts
 
+	// RefusedMoves counts the status changes that the lifecycle refused, and
+	// LastRefusedMove names the last one, as "from -> to" (review M4).
+	RefusedMoves    int
+	LastRefusedMove string
+
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208). See FindingRaised.
 	SubmittedBy string
@@ -302,9 +307,26 @@ type FindingStatusChanged struct {
 // Kind identifies the finding.status_changed brain event.
 func (FindingStatusChanged) Kind() string { return "finding.status_changed" }
 
+// allowedStatusMoves are the moves of the lifecycle of a Finding (ADR-0178,
+// review M4). FixReverted is the one other event that sets a status: it
+// opens a Finding again because the revert undoes the fix.
+var allowedStatusMoves = map[[2]string]bool{
+	{FindingStatusOpen, FindingStatusFixing}:    true, // a fix job opened a merge request
+	{FindingStatusFixing, FindingStatusFixed}:   true, // the merge request merged
+	{FindingStatusFixing, FindingStatusOpen}:    true, // the merge request closed
+	{FindingStatusFixed, FindingStatusVerified}: true, // the check and the health signal proved the fix
+	{FindingStatusFixed, FindingStatusOpen}:     true, // the check found the flaw again
+}
+
+// AllowedStatusMove reports whether a Finding may move from one status to the
+// other with a FindingStatusChanged event.
+func AllowedStatusMove(from, to string) bool { return allowedStatusMoves[[2]string{from, to}] }
+
 // applyFindingStatusChanged updates the Finding in place. An unknown Finding
 // or an invalid status changes nothing: the event is recorded in the Timeline
-// either way, but the World never holds a status outside the four.
+// either way, but the World never holds a status outside the four. A move
+// that the lifecycle does not allow changes nothing, and the Finding records
+// the refusal (review M4).
 func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 	if !ValidFindingStatus(e.Status) {
 		return
@@ -313,6 +335,12 @@ func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 	for q.Next() {
 		f := q.Get()
 		if f.ID == e.ID {
+			if !AllowedStatusMove(f.Status, e.Status) {
+				f.RefusedMoves++
+				f.LastRefusedMove = f.Status + " -> " + e.Status
+				q.Close()
+				return
+			}
 			f.Status = e.Status
 			if e.MergeRequest != "" {
 				f.MergeRequest = e.MergeRequest
@@ -351,6 +379,9 @@ type FindingSnapshot struct {
 	PriorityReason string
 	// FixFacts: see Finding.
 	FixFacts
+	// RefusedMoves and LastRefusedMove: see Finding.
+	RefusedMoves    int
+	LastRefusedMove string
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208). See FindingRaised.
 	SubmittedBy string
@@ -412,7 +443,8 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 			ScanScope: f.ScanScope, LastScan: f.LastScan,
 			MergeRequest: f.MergeRequest, MergeRequestState: f.MergeRequestState,
 			Priority: f.Priority, PriorityRule: f.PriorityRule, PriorityReason: f.PriorityReason,
-			FixFacts:    f.FixFacts,
+			FixFacts:     f.FixFacts,
+			RefusedMoves: f.RefusedMoves, LastRefusedMove: f.LastRefusedMove,
 			SubmittedBy: f.SubmittedBy, AgentName: f.AgentName, EnrolledBy: f.EnrolledBy,
 		})
 	}

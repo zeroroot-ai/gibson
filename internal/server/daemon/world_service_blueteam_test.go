@@ -53,7 +53,7 @@ func TestListOpenFindings_RanksAndLeavesOutVerified(t *testing.T) {
 	submit(t, reg, "acme",
 		brain.FindingRaised{ID: "p2", Title: "b", ScopeID: "s", Severity: "critical", Address: "h"},
 		brain.FindingRaised{ID: "p1", Title: "a", ScopeID: "s", Severity: "low", Address: "h"},
-		brain.FindingRaised{ID: "done", Title: "c", ScopeID: "s", Severity: "high", Address: "h"},
+		brain.FindingRaised{ID: "done", Title: "c", ScopeID: "s", Severity: "high", Address: "h", Status: brain.FindingStatusFixed},
 		brain.FindingPrioritized{ID: "p2", Priority: "P2", Rule: "r2"},
 		brain.FindingPrioritized{ID: "p1", Priority: "P1", Rule: "r1"},
 		brain.FindingStatusChanged{ID: "p1", Status: brain.FindingStatusFixing, MergeRequest: "https://git.example/mr/1", At: blueAt(1)},
