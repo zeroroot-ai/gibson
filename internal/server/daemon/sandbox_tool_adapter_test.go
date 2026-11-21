@@ -95,11 +95,11 @@ func TestSandboxToolAdapter_AFailureOfTheCallIsAReplyWithAnError(t *testing.T) {
 func TestSandboxToolAdapter_ErrorsOfTheCallItself(t *testing.T) {
 	ctx := context.Background()
 	_, err := sandboxToolAdapter{d: &daemonImpl{}}.CallSandboxedTool(ctx, "acme", types.NewID().String(), "r", "skill-script", nil)
-	assert.Error(t, err, "a daemon with no factory")
+	require.Error(t, err, "a daemon with no factory")
 	_, err = adapterWith(&stubFactory{}).CallSandboxedTool(ctx, "acme", "not-an-id", "r", "skill-script", nil)
-	assert.Error(t, err, "a mission id that is not an id")
+	require.Error(t, err, "a mission id that is not an id")
 	_, err = adapterWith(&stubFactory{err: errors.New("no config")}).CallSandboxedTool(ctx, "acme", types.NewID().String(), "r", "skill-script", nil)
-	assert.Error(t, err, "a factory that fails")
+	require.Error(t, err, "a factory that fails")
 }
 
 func TestCallerAgentName(t *testing.T) {
@@ -112,7 +112,10 @@ func TestCallerAgentName(t *testing.T) {
 	assert.Equal(t, "agent", callerAgentName(context.Background()))
 }
 
-// The sink of the loads is nil until the brain registry is built.
-func TestSkillLoadSink_IsNilUntilTheBrainIsBuilt(t *testing.T) {
-	assert.Nil(t, (&daemonImpl{}).skillLoadSink())
+// While the brain registry is not built, the sink refuses each load, so a
+// skill-script call is refused and no load goes without its record.
+func TestSkillLoadSink_RefusesUntilTheBrainIsBuilt(t *testing.T) {
+	sink := (&daemonImpl{}).skillLoadSink()
+	require.NotNil(t, sink)
+	require.Error(t, sink(context.Background(), "acme", harness.SkillLoadRecord{Name: "s", Digest: "sha256:aa"}))
 }

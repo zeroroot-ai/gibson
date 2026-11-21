@@ -81,12 +81,10 @@ func (d *daemonImpl) skillFileStore() harness.SkillFileStore {
 }
 
 // skillLoadSink returns the sink that records the loads of Agent Skills on the
-// Timeline, or nil while the brain registry is not built. A skill-script call
-// uses it, so its load has the same record as a load by invoke_tool.
+// Timeline. A skill-script call uses it, so its load has the same record as a
+// load by invoke_tool. While the brain registry is not built, the sink answers
+// each load with an error, and the call is refused.
 func (d *daemonImpl) skillLoadSink() harness.SkillLoadSink {
-	if d.brainRegistry == nil {
-		return nil
-	}
 	return ingestSkillLoad(d.brainRegistry)
 }
 
