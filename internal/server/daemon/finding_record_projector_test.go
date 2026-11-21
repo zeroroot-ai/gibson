@@ -18,6 +18,9 @@ import (
 type fakeRecordSetter struct {
 	calls []string
 	err   error
+	// unchanged makes SetStatus change no row, as for a row that the table
+	// does not hold yet.
+	unchanged bool
 }
 
 func (f *fakeRecordSetter) SetPriority(
@@ -31,7 +34,34 @@ func (f *fakeRecordSetter) SetStatus(
 	_ context.Context, tenant string, id types.ID, status finding.FindingStatus,
 ) (bool, error) {
 	f.calls = append(f.calls, tenant+"/"+id.String()+"="+string(status))
-	return true, f.err
+	return !f.unchanged, f.err
+}
+
+// A write that changes no row is tried again on the next passes, so a row that
+// the table did not hold yet gets the status. After maxRecordMisses passes the
+// projector takes the row as equal and stops (review m4).
+func TestFindingRecordProjector_RetriesAWriteThatChangedNoRow(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	id := types.NewID().String()
+	seedFindingsWorld(t, reg.For("acme"), 1,
+		brain.MissionCreated{ID: "run-1", TenantID: "acme", TargetID: "t"},
+		brain.FindingRaised{ID: id, ScopeID: "t", Title: "x"},
+	)
+	set := &fakeRecordSetter{unchanged: true}
+	p := NewFindingRecordProjector(reg, set, 0, nil)
+	p.project(ctx)
+	p.project(ctx)
+	if len(set.calls) != 2 {
+		t.Fatalf("writes = %v, want the write tried again", set.calls)
+	}
+	for range maxRecordMisses + 2 {
+		p.project(ctx)
+	}
+	if len(set.calls) != maxRecordMisses {
+		t.Fatalf("writes = %d, want %d and then no more", len(set.calls), maxRecordMisses)
+	}
 }
 
 func TestFindingRecordProjector_WritesAChangeOnce(t *testing.T) {

@@ -31,7 +31,17 @@ type findingRecord struct {
 	status   string
 	priority string
 	rule     string
+	// misses counts the writes of the status that changed no row. See
+	// maxRecordMisses.
+	misses int
 }
+
+// maxRecordMisses is how many passes a write that changes no row is tried
+// again before the projector takes the row as equal (review m4). A write
+// changes no row when the row holds the value already, or when the row is not
+// in the table yet. The second case is a race with the insert of the finding,
+// so a few passes end it, and the first case stops after them.
+const maxRecordMisses = 3
 
 // FindingRecordProjector copies the status and the priority of each finding in
 // the tenant World to the findings table (gibson#1518, gibson#1522). The World
@@ -87,11 +97,15 @@ func (p *FindingRecordProjector) projectOne(ctx context.Context, tenant string, 
 	p.mu.Unlock()
 
 	if rec.status != f.Status {
-		if _, err := p.setter.SetStatus(ctx, tenant, id, finding.FindingStatus(f.Status)); err != nil {
+		changed, err := p.setter.SetStatus(ctx, tenant, id, finding.FindingStatus(f.Status))
+		switch {
+		case err != nil:
 			p.logger.Warn("finding projection: status write failed",
 				"tenant", tenant, "finding_id", f.ID, "error", err)
-		} else {
-			rec.status = f.Status
+		case changed || rec.misses+1 >= maxRecordMisses:
+			rec.status, rec.misses = f.Status, 0
+		default:
+			rec.misses++ // no row changed: try again on the next pass
 		}
 	}
 	// No priority yet means nothing to write. An empty priority is not a value.
