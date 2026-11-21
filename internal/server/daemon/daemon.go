@@ -1193,7 +1193,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.brainExecutor.models = d.modelClient
 		// A job node's jobs live in the tenant's data plane, which is built
 		// later in Start, so the store is read per dispatch (gibson#1713).
-		d.brainExecutor.jobClosed = newJobGraphLink(d.brainRegistry, connectors, d.logger.WithComponent("job-graph-link").Slog())
+		fixLink := newJobGraphLink(d.brainRegistry, connectors, d.logger.WithComponent("job-graph-link").Slog())
+		d.brainExecutor.jobClosed = fixLink
+		// A close whose merge request could not be read stays pending. This loop
+		// reads it again (gibson#1581).
+		go fixLink.Run(ctx)
 		d.brainExecutor.jobFindings = openFindingsResolver(d.brainRegistry)
 		d.brainExecutor.jobClaims = newFixClaims(d.brainRegistry)
 		d.brainExecutor.jobs = func() (job.Store, error) {

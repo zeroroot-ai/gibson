@@ -85,6 +85,23 @@ type FixLinkRefused struct {
 // Kind identifies the finding.fix_link_refused brain event.
 func (FixLinkRefused) Kind() string { return "finding.fix_link_refused" }
 
+// FixLinkPending records that the daemon could not read the merge request of a
+// closed fix job on the Git host, so it could not check the merge request yet
+// (gibson#1581). The Finding keeps its claim, and the daemon reads the merge
+// request again. A later read ends in a link or in a FixLinkRefused. The event
+// changes nothing else. It is the record of the wait in the Timeline.
+type FixLinkPending struct {
+	ID           string
+	MergeRequest string
+	JobID        string
+	Reason       string
+	MissionID    string
+	At           time.Time
+}
+
+// Kind identifies the finding.fix_link_pending brain event.
+func (FixLinkPending) Kind() string { return "finding.fix_link_pending" }
+
 // FixClaimOf returns the claim that holds the Finding, or "".
 func (w *World) FixClaimOf(id string) string {
 	var out string

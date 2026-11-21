@@ -57,6 +57,7 @@ func TestFixLoopEvents_SurviveTheCodecAndTheMissionSlice(t *testing.T) {
 		FixClaimed{ID: "f1", Claim: "c", MissionID: "m1", At: at},
 		FixClaimReleased{ID: "f1", Claim: "c", MissionID: "m1", At: at},
 		FixLinkRefused{ID: "f1", MergeRequest: "mr-1", JobID: "j1", Reason: "r", MissionID: "m1", At: at},
+		FixLinkPending{ID: "f1", MergeRequest: "mr-1", JobID: "j1", Reason: "r", MissionID: "m1", At: at},
 		RevertRequested{MergeRequest: "mr-1", RevertMergeRequest: "mr-2", MissionID: "m1", At: at},
 	} {
 		data, err := EncodeEvent(ev)

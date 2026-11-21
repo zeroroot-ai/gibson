@@ -415,9 +415,8 @@ func TestJobGraphLink_RefusesAMergeRequestThatIsNotTheWorkOfTheJob(t *testing.T)
 			State: fixloop.MROpen, SourceBranch: "release-hotfix", CreatedAt: good.CreatedAt}},
 		"older than the claim": {fact: fixloop.MergeFact{
 			State: fixloop.MROpen, SourceBranch: good.SourceBranch, CreatedAt: testClaimedAt.Add(-time.Minute)}},
-		"no time of creation":     {fact: fixloop.MergeFact{State: fixloop.MROpen, SourceBranch: good.SourceBranch}},
-		"an old connector":        {fact: fixloop.MergeFact{State: fixloop.MROpen}},
-		"the host cannot be read": {err: errors.New("connector down")},
+		"no time of creation": {fact: fixloop.MergeFact{State: fixloop.MROpen, SourceBranch: good.SourceBranch}},
+		"an old connector":    {fact: fixloop.MergeFact{State: fixloop.MROpen}},
 	}
 	for name, mrs := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -426,7 +425,6 @@ func TestJobGraphLink_RefusesAMergeRequestThatIsNotTheWorkOfTheJob(t *testing.T)
 				submit:        func(_ string, ev brain.Event) { evs = append(evs, ev) },
 				findings:      heldWorld(map[string]string{"f-1": "s"}),
 				mergeRequests: mrs, now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
-				retryWaits: []time.Duration{0, 0},
 			}
 			l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
 			if len(mrs.calls) == 0 || mrs.calls[0] != "acme/run-1/"+testMRURL {
@@ -483,42 +481,88 @@ func TestMergeRequestRefusal_NamesAnOldConnector(t *testing.T) {
 	}
 }
 
-// One failed read of the Git host does not refuse the link. The daemon reads
-// the merge request again, and a later good read links the fix (review r10).
-// A read that keeps failing refuses the link after the last try.
-func TestJobGraphLink_ReadsTheGitHostAgainAfterAFailure(t *testing.T) {
+// A Git host read that fails during the close leaves the link pending, not
+// refused, and the close does not wait or read again (gibson#1581). The claim
+// stays. A later read links the fix.
+func TestJobGraphLink_AFailedReadLeavesTheLinkPendingAndALaterReadLinksIt(t *testing.T) {
 	var evs []brain.Event
 	mrs := jobMR()
-	mrs.failures = 2
+	mrs.failures = 1
 	l := &jobGraphLink{
 		submit:   func(_ string, ev brain.Event) { evs = append(evs, ev) },
 		findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: mrs,
-		now: func() time.Time { return testNow }, logger: testObsLogger().Slog(), retryWaits: []time.Duration{0, 0},
+		now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
 	}
 	l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
-	if len(mrs.calls) != 3 {
-		t.Fatalf("reads = %d, want 3", len(mrs.calls))
+	if len(mrs.calls) != 1 {
+		t.Fatalf("reads in the close = %d, want 1 (no retry in the close path)", len(mrs.calls))
+	}
+	if len(evs) != 1 {
+		t.Fatalf("events = %+v, want the pending record only", evs)
+	}
+	pending, ok := evs[0].(brain.FixLinkPending)
+	if !ok || pending.ID != "f-1" || pending.MergeRequest != testMRURL || pending.JobID != "job-1" || pending.Reason == "" {
+		t.Fatalf("event = %+v, want a FixLinkPending", evs[0])
+	}
+
+	// The reconciliation reads again. The Git host is up now, so the fix is linked.
+	evs = nil
+	l.RetryPending(context.Background())
+	if len(mrs.calls) != 2 {
+		t.Fatalf("reads after the retry = %d, want 2", len(mrs.calls))
 	}
 	var fixing bool
 	for _, ev := range evs {
 		if c, ok := ev.(brain.FindingStatusChanged); ok && c.Status == brain.FindingStatusFixing {
 			fixing = true
 		}
+		if _, ok := ev.(brain.FixLinkRefused); ok {
+			t.Fatalf("a good read refused the link: %+v", ev)
+		}
 	}
 	if !fixing {
 		t.Fatalf("events = %+v, want the finding moved to fixing", evs)
 	}
 
+	// The link is not pending any more.
 	evs = nil
+	l.RetryPending(context.Background())
+	if len(evs) != 0 || len(mrs.calls) != 2 {
+		t.Fatalf("a settled link was read again: events = %+v, reads = %d", evs, len(mrs.calls))
+	}
+}
+
+// A read that keeps failing keeps the link pending until the limit, and then
+// refuses it and releases the claim.
+func TestJobGraphLink_APendingLinkIsRefusedAfterTheLimit(t *testing.T) {
+	var evs []brain.Event
 	down := jobMR()
-	down.failures = 10
-	l.mergeRequests = down
+	down.failures = 100
+	clock := testNow
+	l := &jobGraphLink{
+		submit:   func(_ string, ev brain.Event) { evs = append(evs, ev) },
+		findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: down,
+		now: func() time.Time { return clock }, logger: testObsLogger().Slog(),
+	}
 	l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
-	if len(down.calls) != 3 {
-		t.Fatalf("reads = %d, want 3 and then the refusal", len(down.calls))
+	evs = nil
+
+	clock = testNow.Add(pendingLinkLimit - time.Minute)
+	l.RetryPending(context.Background())
+	if len(evs) != 0 {
+		t.Fatalf("a link inside the limit was refused: %+v", evs)
+	}
+
+	clock = testNow.Add(pendingLinkLimit)
+	l.RetryPending(context.Background())
+	if len(evs) != 2 {
+		t.Fatalf("events = %+v, want the refusal and the release", evs)
 	}
 	if _, ok := evs[0].(brain.FixLinkRefused); !ok {
-		t.Fatalf("events = %+v, want the refusal", evs)
+		t.Fatalf("event 0 = %+v, want the refusal", evs[0])
+	}
+	if _, ok := evs[1].(brain.FixClaimReleased); !ok {
+		t.Fatalf("event 1 = %+v, want the release", evs[1])
 	}
 }
 
