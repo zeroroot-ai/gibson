@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.168.0](https://github.com/zeroroot-ai/gibson/compare/v0.167.0...v0.168.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* PublishInboundMissionRequest and InboundMissionEntry have no max_active_missions field.
+
+### Features
+
+* remove the count limits on missions, child missions, produced components and a2a publications ([#1568](https://github.com/zeroroot-ai/gibson/issues/1568)) ([8b2ae73](https://github.com/zeroroot-ai/gibson/commit/8b2ae730324a62bf313e15595aa24415f7cef48d))
+
 ## [0.167.0](https://github.com/zeroroot-ai/gibson/compare/v0.166.0...v0.167.0) (2026-11-20)
 
 
