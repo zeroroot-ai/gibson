@@ -109,12 +109,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 
 		// The files of an Agent Skill that a skill-script call places in its
 		// sandbox, and the deny list of the mission that the call checks.
-		SkillFiles: func() harness.SkillFileStore {
-			if store := d.agentSkillStore(); store != nil {
-				return store
-			}
-			return nil
-		},
+		SkillFiles:      d.skillFileStore,
 		MissionDenyList: d.storedBlockedTools,
 		WorkQueue:       workQueue,
 
