@@ -514,6 +514,31 @@ var entityReservedProps = map[string]struct{}{
 	"brain_id": {}, "event_id": {}, "brain_host_id": {},
 }
 
+// findingReservedProps are the properties of a Finding node that the Finding
+// projection writes from the World (upsertFindingCypher). The daemon owns them:
+// the status, the merge request, the priority, the submitter and the times. An
+// agent that reports a Finding through the entity path must not set one of
+// them, or it could mark its own finding verified (review M5).
+var findingReservedProps = map[string]struct{}{
+	"title": {}, "description": {}, "severity": {}, "address": {}, "status": {},
+	"vulnerability_id": {}, "priority": {}, "priority_rule": {}, "priority_reason": {},
+	"merge_request": {}, "submitted_by": {}, "agent_name": {}, "enrolled_by": {},
+	"created_at": {}, "verified_at": {}, "verified_status": {}, "id": {},
+}
+
+// reservedProp reports whether the entity path must drop the property of a
+// node of the label.
+func reservedProp(label, prop string) bool {
+	if _, ok := entityReservedProps[prop]; ok {
+		return true
+	}
+	if label == labelFinding {
+		_, ok := findingReservedProps[prop]
+		return ok
+	}
+	return false
+}
+
 // entityUpsertParams builds the parameter set for upsertEntityCypher. Split
 // out so the labels-and-types-are-parameters property, the reserved-property
 // filter and the Taxonomy re-check on every label and edge type are testable
@@ -532,7 +557,7 @@ func entityUpsertParams(e brain.EntitySnapshot) (map[string]any, error) {
 	}
 	props := make(map[string]any, len(e.Props))
 	for k, v := range e.Props {
-		if _, reserved := entityReservedProps[k]; reserved {
+		if reservedProp(e.Label, k) {
 			continue
 		}
 		if !safeTaxonomyLabel.MatchString(k) {
