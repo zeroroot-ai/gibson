@@ -1,0 +1,37 @@
+# Prometheus health signal connector. Zero Root builds the MCP server in zeroroot-ai/connectors
+# (prometheus/, release v0.1.0), because the vendor publishes no server with these tools.
+# The image is public, signed and scanned, and the catalog pins it by digest.
+# Source of the environment: prometheus/README.md of zeroroot-ai/connectors at v0.1.0.
+# The server speaks streamable HTTP on :8080 at /mcp.
+id: prometheus-health
+kind: connector
+displayName: Prometheus health signal
+description: >-
+  Reads the Prometheus HTTP API, and answers the health signal of a service
+  after the deploy of a fix. It only reads.
+spec:
+  vendor: prometheus
+  class: observability
+  shape: Hosted
+  image: ghcr.io/zeroroot-ai/connectors-prometheus@sha256:2c446640cf65884b509319f0cc9166abc1f7fe9f5c286c7b3517605b9b319bff
+  transport: streamable-http
+  port: 8080
+  auth: none
+  # Each credential is the name of a secret in the secret store of the
+  # tenant. The operator puts the value in the pod. No value is in this file.
+  credentials:
+    - secret: prometheus-health-bearer-token
+      env: PROMETHEUS_BEARER_TOKEN
+    - secret: prometheus-health-queries
+      env: PROMETHEUS_HEALTH_QUERIES
+  # The tenant gives the base URL of its Prometheus. The secret
+  # prometheus-health-queries holds the JSON map from an application key to
+  # its health query.
+  # The egress allow-list of the pod holds the host of the value.
+  # Prometheus has no vendor domain, so the platform owner of the install
+  # states the pattern in the chart (installPatterns).
+  variables:
+    - name: base_url
+      env: PROMETHEUS_BASE_URL
+      kind: endpoint
+      installPatterns: true

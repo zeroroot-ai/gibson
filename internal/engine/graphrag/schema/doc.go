@@ -9,15 +9,9 @@
 //
 // # Mission Node
 //
-// The Mission node represents the top-level execution unit. It tracks:
-//   - Mission metadata (name, description, objective, target)
-//   - Execution status (pending, running, completed, failed)
-//   - Temporal lifecycle (created_at, started_at, completed_at)
-//   - Original YAML source for reconstruction
-//
-// A :Mission node is NOT written through this package. The graph projector
-// (internal/server/daemon, GraphWriter.UpsertMission) is its sole writer
-// (ADR-0112, gibson#551); schema.Mission is the shape a read decodes into.
+// A :Mission node is NOT written or modeled through this package. The graph
+// projector (internal/server/daemon, GraphWriter.UpsertMission) is its sole
+// writer (ADR-0112, gibson#551).
 //
 // # MissionNode Node
 //
@@ -61,7 +55,6 @@
 //
 // The package provides strongly-typed status enums with validation:
 //
-//   - MissionStatus: pending, running, completed, failed
 //   - MissionNodeStatus: pending, ready, running, completed, failed, skipped
 //   - MissionNodeType: agent, tool
 //

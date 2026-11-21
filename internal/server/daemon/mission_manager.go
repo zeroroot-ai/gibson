@@ -1419,6 +1419,8 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// The run ID is what tells this run from the run before it, because the
 	// mission ID is the same for both (gibson#1217).
 	proj.RunID = runID
+	// The start of the run is the time of the evidence of a scan (review B2).
+	proj.StartedAt = time.Now().UTC()
 
 	// A child run reserves its budget against the parent again. Origination
 	// reserved once for the record, and the end of a run releases it, so a

@@ -366,3 +366,62 @@ func TestConnectorCredentialReader_DefaultClock(t *testing.T) {
 		t.Fatalf("clock = %v, want a time after %v", got, before)
 	}
 }
+
+func staticGrant(t *testing.T) []byte {
+	t.Helper()
+	blob, err := connectorauth.MarshalGrant(&connectorauth.Grant{
+		Static: true, AuthorizedBy: "user:admin", AuthorizedAt: credNow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return blob
+}
+
+// A static credential has no access metadata. It reaches the Secret in the
+// header of its catalog entry, in the format of that entry (gibson#1535).
+func TestGetConnectorCredential_StaticSecretInANamedHeader(t *testing.T) {
+	store := &fakeCredStore{data: map[string][]byte{
+		connectorauth.GrantSecretName("tenable"):  staticGrant(t),
+		connectorauth.AccessSecretName("tenable"): []byte(`{"accessKey":"AK1","secretKey":"SK2"}`),
+	}}
+	resp, err := credServer(store).GetConnectorCredential(peerCtx(t, testConnectorOperatorSVID),
+		&daemonoperatorv1.GetConnectorCredentialRequest{TenantId: "acme", ConnectorId: "tenable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(resp.GetData()[connectorCredSecretKey]); got != "accessKey=AK1;secretKey=SK2" {
+		t.Errorf("header value = %q", got)
+	}
+}
+
+// A secret that lacks a property of the format is an error that holds no
+// value of the secret.
+func TestGetConnectorCredential_HeaderFormatErrorHoldsNoSecret(t *testing.T) {
+	store := &fakeCredStore{data: map[string][]byte{
+		connectorauth.GrantSecretName("tenable"):  staticGrant(t),
+		connectorauth.AccessSecretName("tenable"): []byte(`{"accessKey":"AK-VALUE-1"}`),
+	}}
+	_, err := credServer(store).GetConnectorCredential(peerCtx(t, testConnectorOperatorSVID),
+		&daemonoperatorv1.GetConnectorCredentialRequest{TenantId: "acme", ConnectorId: "tenable"})
+	if err == nil {
+		t.Fatal("a secret with a missing property was accepted")
+	}
+	if strings.Contains(err.Error(), "AK-VALUE-1") {
+		t.Errorf("the error holds the secret: %v", err)
+	}
+}
+
+// With no grant and no metadata, nothing is published.
+func TestGetConnectorCredential_NoGrantNoHeader(t *testing.T) {
+	store := &fakeCredStore{data: map[string][]byte{
+		connectorauth.AccessSecretName("tenable"): []byte(`{"accessKey":"a","secretKey":"b"}`),
+	}}
+	resp, err := credServer(store).GetConnectorCredential(peerCtx(t, testConnectorOperatorSVID),
+		&daemonoperatorv1.GetConnectorCredentialRequest{TenantId: "acme", ConnectorId: "tenable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.GetData()) != 0 {
+		t.Errorf("data = %v, want none", resp.GetData())
+	}
+}

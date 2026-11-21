@@ -83,6 +83,12 @@ spec:
               the egress allow-list and the auth kind come from the entry. The inline
               fields are also the escape hatch for a custom connector authored by hand.
             properties:
+              args:
+                description: Args are the arguments of the server process of a Hosted
+                  connector.
+                items:
+                  type: string
+                type: array
               auth:
                 default: none
                 description: Auth is how the connector authenticates to the vendor.
@@ -97,14 +103,22 @@ spec:
                   (mcp:<connector>:<tool>) and the OAuth grant key. For example
                   "connector-gitlab".
                 type: string
+              credentialHeader:
+                description: |-
+                  CredentialHeader is the name of the header that carries the credential
+                  of a Remote connector. Empty means Authorization (gibson#1535). The
+                  daemon builds the value in the format of the catalog entry.
+                pattern: ^[A-Za-z][A-Za-z0-9-]{0,63}$
+                type: string
               credentials:
                 description: |-
                   Credentials are additional vendor credentials to inject into a Hosted
                   connector as environment variables, each resolved from the tenant's
                   secret store. The bearer credential a connector presents (Auth "secret"
                   or "oauth") is NOT listed here: the daemon stores it under the
-                  connector's own name and writes the credential Secret (ADR-0061).
-                  Environment injection from this list is not wired yet.
+                  connector's own name and writes the credential Secret (ADR-0061). The
+                  catalog entry states the list, and the operator copies it from the
+                  daemon (gibson#1536).
                 items:
                   description: |-
                     CredentialRef points at ONE entry in the tenant's secret store. The store
@@ -145,11 +159,34 @@ spec:
                   Endpoint is the vendor MCP URL for a Remote connector (for example
                   https://gitlab.com/api/v4/mcp).
                 type: string
+              env:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Env holds plain environment variables of a Hosted connector. A
+                  credential is never here: the catalog loader refuses a name that looks
+                  like one, and Credentials names the secret instead (gibson#1536).
+                type: object
               image:
                 description: |-
                   Image is the container image URL for a Hosted connector. A private
                   registry needs RegistryCredential.
                 type: string
+              imagePullSecret:
+                description: |-
+                  ImagePullSecret is the name of the secret in the secret store of the
+                  tenant that holds the Docker config JSON for the registry of Image. The
+                  daemon reads it and the operator writes a pull Secret from it, so the
+                  manifest holds no registry credential (gibson#1536).
+                type: string
+              port:
+                description: |-
+                  Port is the port that the server of a Hosted connector listens on. Zero
+                  means the default of the operator.
+                format: int32
+                maximum: 65535
+                minimum: 1024
+                type: integer
               runtime:
                 default: pod
                 description: Runtime is where a Hosted connector runs. The only value

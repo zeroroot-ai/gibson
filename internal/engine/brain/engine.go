@@ -514,6 +514,11 @@ func (e *Engine) Hydrate(ctx context.Context) error {
 		// events enter the next tick's drain without blocking.
 		e.intake <- failEv
 	}
+	// A claim of a fix job lives only as long as its job node, which ran in the
+	// daemon that stopped (review M3).
+	for _, ev := range ResumeReleaseFixClaims(e.World) {
+		e.intake <- ev
+	}
 
 	slog.Info("brain/engine: hydrated World from persisted store",
 		"tenant", e.World.Tenant,
@@ -711,6 +716,31 @@ func (e *Engine) History(ctx context.Context) ([]Event, error) {
 		return nil, fmt.Errorf("brain/engine: history of tenant %q: %w", e.World.Tenant, err)
 	}
 	return evs, nil
+}
+
+// HistoryRange returns the events of the kinds that the store appended at from
+// or later (review M6). See TimelineStore.LoadHistoryRange.
+func (e *Engine) HistoryRange(ctx context.Context, from time.Time, kinds []string) ([]Event, error) {
+	evs, err := e.store.LoadHistoryRange(ctx, e.World.Tenant, from, kinds)
+	if err != nil {
+		return nil, fmt.Errorf("brain/engine: history range of tenant %q: %w", e.World.Tenant, err)
+	}
+	return evs, nil
+}
+
+// HistoryFrom returns the events that the store appended at from or later, of
+// each kind, and the position of the first of them in the whole history
+// (review R5).
+func (e *Engine) HistoryFrom(ctx context.Context, from time.Time) (evs []Event, offset int, err error) {
+	offset, err = e.store.CountHistoryBefore(ctx, e.World.Tenant, from)
+	if err != nil {
+		return nil, 0, fmt.Errorf("brain/engine: count the history of tenant %q: %w", e.World.Tenant, err)
+	}
+	evs, err = e.HistoryRange(ctx, from, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	return evs, offset, nil
 }
 
 // MissionHistory returns the mission's slice of the full history

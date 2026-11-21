@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -97,6 +98,14 @@ func (*historyFailStore) LoadHistory(context.Context, string) ([]Event, error) {
 	return nil, errHistoryDown
 }
 
+func (*historyFailStore) LoadHistoryRange(context.Context, string, time.Time, []string) ([]Event, error) {
+	return nil, errHistoryDown
+}
+
+func (*historyFailStore) CountHistoryBefore(context.Context, string, time.Time) (int, error) {
+	return 0, errHistoryDown
+}
+
 // A history read that fails is an error for the reader, never a short history.
 func TestEngine_HistoryReturnsTheStoreError(t *testing.T) {
 	e := NewEngine("t", &historyFailStore{})
@@ -107,5 +116,26 @@ func TestEngine_HistoryReturnsTheStoreError(t *testing.T) {
 	_, err = e.MissionHistory(ctx, "A")
 	require.ErrorIs(t, err, errHistoryDown)
 	_, _, _, err = e.HistoryFrameAt(ctx, "", 1)
+	require.ErrorIs(t, err, errHistoryDown)
+}
+
+// HistoryFrom returns the events of each kind from the time on and the count
+// of the events before it, so an index plus the count is a position in the
+// whole history. A failed count is an error (review R5).
+func TestEngine_HistoryFromKeepsThePositions(t *testing.T) {
+	t0 := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+	store := &memTimelineStore{history: []Event{
+		FixReverted{MergeRequest: "a", At: t0},
+		FixReverted{MergeRequest: "b", At: t0.Add(2 * time.Hour)},
+		ScanReconciled{MissionID: "no-time"},
+	}}
+	e := NewEngine("t", store)
+	evs, offset, err := e.HistoryFrom(context.Background(), t0.Add(time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, 1, offset)
+	require.Len(t, evs, 2)
+	assert.Equal(t, "b", evs[0].(FixReverted).MergeRequest)
+
+	_, _, err = NewEngine("t", &historyFailStore{}).HistoryFrom(context.Background(), t0)
 	require.ErrorIs(t, err, errHistoryDown)
 }

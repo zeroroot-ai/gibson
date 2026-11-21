@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -35,6 +36,14 @@ func (failingTimelineStore) WriteSnapshot(context.Context, string, brain.WorldSn
 
 func (failingTimelineStore) LoadHistory(context.Context, string) ([]brain.Event, error) {
 	return nil, errStoreDown
+}
+
+func (failingTimelineStore) LoadHistoryRange(context.Context, string, time.Time, []string) ([]brain.Event, error) {
+	return nil, errStoreDown
+}
+
+func (failingTimelineStore) CountHistoryBefore(context.Context, string, time.Time) (int, error) {
+	return 0, errStoreDown
 }
 
 func (failingTimelineStore) LoadSnapshot(context.Context, string) (*brain.WorldSnapshot, error) {

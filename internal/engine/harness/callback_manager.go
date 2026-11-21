@@ -540,6 +540,16 @@ func (m *CallbackManager) SetConnectorAudit(l *audit.AuditLogger) {
 	}
 }
 
+// SetConnectorGrants sets the read of the capability grant behind a connector
+// call. Call after NewCallbackManager, before Start(). Thread-safe.
+func (m *CallbackManager) SetConnectorGrants(g metatool.GrantLookup) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithConnectorGrants(g)(m.server.service)
+	}
+}
+
 // SetBeliefSubstrate sets the belief substrate on the callback service,
 // wiring PlaceBet to persist staked bets (ADR-0122, ADR-0129,
 // gibson#273/#278). Call after NewCallbackManager, before Start().
@@ -581,6 +591,16 @@ func (m *CallbackManager) SetProofSettlement(engine brain.ProofSettlementEngine)
 		defer m.server.service.mu.Unlock()
 		WithProofSettlement(engine)(m.server.service)
 		m.logger.Debug("set proof settlement engine on callback service")
+	}
+}
+
+// SetToolApproval wires the approval queue of invoke_tool (gibson#1474).
+// Call after NewCallbackManager, before Start(). Thread-safe.
+func (m *CallbackManager) SetToolApproval(g metatool.ApprovalGate) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithToolApproval(g)(m.server.service)
 	}
 }
 
@@ -689,6 +709,14 @@ func (m *CallbackManager) MissionPolicyForRun(ctx context.Context, tenant, runID
 // harness callback context.
 func (m *CallbackManager) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
 	return m.server.Service().RecordToolCall(ctx, rec, resultJSON, errText)
+}
+
+// CallConnectorForTenant runs one connector call that the daemon makes for a
+// tenant, on the one governed path of a connector call (gibson#1465).
+func (m *CallbackManager) CallConnectorForTenant(
+	ctx context.Context, tenant, missionID, connector, tool string, args map[string]any,
+) (any, error) {
+	return m.server.Service().CallConnectorForTenant(ctx, tenant, missionID, connector, tool, args)
 }
 
 // CallMetaTool serves search_tools and invoke_tool for an agent in pull mode.

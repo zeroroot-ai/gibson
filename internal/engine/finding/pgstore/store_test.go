@@ -6,6 +6,7 @@ package pgstore
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -93,6 +94,40 @@ func (d *fakeDB) Exec(_ context.Context, sql string, args ...any) (int64, error)
 	case contains(sql, "DELETE FROM finding_evidence"):
 		delete(d.evidence, args[0].(string))
 		return 1, nil
+	case contains(sql, "UPDATE findings") && contains(sql, "'{priority}'"):
+		id := args[0].(string)
+		row, ok := d.rows[id]
+		if !ok {
+			return 0, nil
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(row.document, &doc); err != nil {
+			return 0, fmt.Errorf("decode the document: %w", err)
+		}
+		if doc["priority"] == args[1].(string) && doc["priority_rule"] == args[2].(string) {
+			return 0, nil
+		}
+		doc["priority"], doc["priority_rule"] = args[1].(string), args[2].(string)
+		row.document, _ = json.Marshal(doc)
+		d.rows[id] = row
+		return 1, nil
+	case contains(sql, "UPDATE findings"):
+		id := args[0].(string)
+		row, ok := d.rows[id]
+		if !ok {
+			return 0, nil
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(row.document, &doc); err != nil {
+			return 0, fmt.Errorf("decode the document: %w", err)
+		}
+		if doc["status"] == args[1].(string) {
+			return 0, nil
+		}
+		doc["status"] = args[1].(string)
+		row.document, _ = json.Marshal(doc)
+		d.rows[id] = row
+		return 1, nil
 	case contains(sql, "INSERT INTO finding_evidence"):
 		id := args[0].(string)
 		if _, ok := d.rows[id]; !ok {
@@ -111,14 +146,40 @@ func (d *fakeDB) Exec(_ context.Context, sql string, args ...any) (int64, error)
 		return 1, nil
 	}
 	id := args[0].(string)
+	doc := args[4].([]byte)
+	if old, ok := d.rows[id]; ok {
+		doc = keepDaemonKeys(sql, old.document, doc)
+	}
 	d.rows[id] = fakeRow{
 		missionID: args[1].(*string),
 		severity:  args[2].(string),
 		title:     args[3].(string),
-		document:  args[4].([]byte),
+		document:  doc,
 		createdAt: args[5].(time.Time),
 	}
 	return 1, nil
+}
+
+// keepDaemonKeys does what the conflict clause of the upsert does, for each
+// key that the statement names: the stored value wins.
+func keepDaemonKeys(sql string, stored, submitted []byte) []byte {
+	var oldDoc, newDoc map[string]any
+	if json.Unmarshal(stored, &oldDoc) != nil || json.Unmarshal(submitted, &newDoc) != nil {
+		return submitted
+	}
+	for _, k := range daemonOwnedKeys {
+		if !contains(sql, "findings.document->'"+k+"'") {
+			continue
+		}
+		if v, ok := oldDoc[k]; ok && v != nil {
+			newDoc[k] = v
+		}
+	}
+	out, err := json.Marshal(newDoc)
+	if err != nil {
+		return submitted
+	}
+	return out
 }
 
 type fakeScanRow struct {
@@ -217,6 +278,7 @@ func newTestStore(db *fakeDB) *Store { return &Store{conns: db} }
 
 func newFinding(missionID types.ID, title string, sev agent.FindingSeverity, created time.Time) finding.EnhancedFinding {
 	f := finding.NewEnhancedFinding(agent.NewFinding(title, "description of "+title, sev), missionID, "recon")
+	f.Check = finding.Check{Kind: finding.CheckScan}
 	f.CreatedAt = created
 	return f
 }
@@ -538,4 +600,118 @@ func TestStore_GetWithEvidenceOfAFindingWithNoEvidence(t *testing.T) {
 func TestStore_GetWithEvidenceNotFound(t *testing.T) {
 	_, err := newTestStore(newFakeDB()).GetWithEvidence(context.Background(), "acme", types.NewID())
 	require.ErrorIs(t, err, finding.ErrNotFound)
+}
+
+func TestSetStatus_UpdatesTheDocument(t *testing.T) {
+	db := newFakeDB()
+	s := &Store{conns: db}
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	require.NoError(t, s.Store(ctx, "acme", f))
+
+	changed, err := s.SetStatus(ctx, "acme", f.ID, finding.StatusFixed)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	got, err := s.Get(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	assert.Equal(t, finding.StatusFixed, got.Status)
+
+	changed, err = s.SetStatus(ctx, "acme", f.ID, finding.StatusFixed)
+	require.NoError(t, err)
+	assert.False(t, changed, "the same status is not a change")
+}
+
+func TestSetStatus_RefusesAStatusOutsideTheFour(t *testing.T) {
+	s := &Store{conns: newFakeDB()}
+	_, err := s.SetStatus(context.Background(), "acme", types.NewID(), finding.FindingStatus("resolved"))
+	require.Error(t, err)
+}
+
+// A finding with no check fails the write and leaves no row (gibson#1457).
+func TestStore_RefusesAFindingWithNoCheck(t *testing.T) {
+	db := newFakeDB()
+	s := &Store{conns: db}
+	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	f.Check = finding.Check{}
+
+	err := s.Store(context.Background(), "acme", f)
+	require.ErrorIs(t, err, finding.ErrNoCheck)
+	assert.Empty(t, db.rows)
+
+	f.Check = finding.Check{Kind: finding.CheckPredicate} // a predicate needs its type
+	require.ErrorIs(t, s.Store(context.Background(), "acme", f), finding.ErrNoCheck)
+}
+
+// A priority outside P1 to P4 fails the write (gibson#1522).
+func TestStore_RefusesAPriorityOutsideP1ToP4(t *testing.T) {
+	db := newFakeDB()
+	s := &Store{conns: db}
+	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	f.Priority = finding.Priority("P9")
+
+	require.ErrorIs(t, s.Store(context.Background(), "acme", f), finding.ErrInvalidPriority)
+	assert.Empty(t, db.rows)
+
+	f.Priority = finding.PriorityP2
+	require.NoError(t, s.Store(context.Background(), "acme", f))
+}
+
+func TestSetPriority_WritesPriorityAndRule(t *testing.T) {
+	db := newFakeDB()
+	s := &Store{conns: db}
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", agent.SeverityHigh), types.NewID(), "a")
+	f.Check = finding.Check{Kind: finding.CheckScan}
+	require.NoError(t, s.Store(ctx, "acme", f))
+
+	changed, err := s.SetPriority(ctx, "acme", f.ID, finding.PriorityP1, "kev-exposed")
+	require.NoError(t, err)
+	assert.True(t, changed)
+	got, err := s.Get(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	assert.Equal(t, finding.PriorityP1, got.Priority)
+	assert.Equal(t, "kev-exposed", got.PriorityRule)
+
+	changed, err = s.SetPriority(ctx, "acme", f.ID, finding.PriorityP1, "kev-exposed")
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	_, err = s.SetPriority(ctx, "acme", f.ID, finding.Priority("P5"), "x")
+	require.ErrorIs(t, err, finding.ErrInvalidPriority)
+}
+
+// A second submit of one finding updates the fields of the submitter and
+// keeps the status, the check and the priority that the daemon set
+// (gibson#1448, ADR-0178). A second read of one result of a tool must not move
+// a finding in `fixing` back to `open`.
+func TestStore_ASecondSubmitKeepsTheFieldsOfTheDaemon(t *testing.T) {
+	db := newFakeDB()
+	s := newTestStore(db)
+	ctx := context.Background()
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+	f.Check = finding.Check{Kind: finding.CheckTool, Ref: "wiz/r-1"}
+	require.NoError(t, s.Store(ctx, "acme", f))
+	_, err := s.SetStatus(ctx, "acme", f.ID, finding.StatusFixing)
+	require.NoError(t, err)
+	_, err = s.SetPriority(ctx, "acme", f.ID, finding.PriorityP1, "kev")
+	require.NoError(t, err)
+
+	again := f
+	again.Title = "open port 22"
+	again.Status = finding.StatusOpen
+	again.Check = finding.Check{Kind: finding.CheckScan}
+	again.Priority, again.PriorityRule = "", ""
+	require.NoError(t, s.Store(ctx, "acme", again))
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(db.rows[f.ID.String()].document, &doc))
+	assert.Equal(t, "open port 22", db.rows[f.ID.String()].title, "the field of the submitter is updated")
+	assert.Equal(t, string(finding.StatusFixing), doc["status"])
+	assert.Equal(t, string(finding.PriorityP1), doc["priority"])
+	assert.Equal(t, "kev", doc["priority_rule"])
+	check, _ := doc["check"].(map[string]any)
+	assert.Equal(t, string(finding.CheckTool), check["kind"])
 }

@@ -23,20 +23,10 @@ type GraphRAGStore interface {
 	// This is the primary query method for semantic + structural retrieval.
 	Query(ctx context.Context, query GraphRAGQuery) ([]GraphRAGResult, error)
 
-	// FindSimilarAttacks finds attack patterns similar to the given content.
-	// Uses vector search filtered to AttackPattern node type.
-	// Returns top-K most similar attack patterns ranked by similarity.
-	FindSimilarAttacks(ctx context.Context, content string, topK int) ([]AttackPattern, error)
-
 	// FindSimilarFindings finds findings similar to the given finding.
 	// Uses vector search filtered to Finding node type.
 	// Returns top-K most similar findings ranked by similarity.
 	FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]FindingNode, error)
-
-	// GetAttackChains discovers attack chains (technique sequences) from a starting technique.
-	// Traverses USES_TECHNIQUE relationships to find multi-step attack patterns.
-	// Returns all discovered chains up to maxDepth steps.
-	GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]AttackChain, error)
 
 	// GetRelatedFindings retrieves findings related to the given finding.
 	// Traverses SIMILAR_TO and other relationship types to find connected findings.

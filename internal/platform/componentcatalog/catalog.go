@@ -89,6 +89,40 @@ type ConnectorSpec struct {
 	Auth               connectorv1alpha1.ConnectorAuthKind  `yaml:"auth"`
 	OAuthScope         string                               `yaml:"oauthScope"`
 	DefaultInstanceURL string                               `yaml:"defaultInstanceUrl"`
+	// Class is the tool class of the connector (ADR-0177). It states what kind
+	// of tool of the buyer the connector reads or drives. See ConnectorClasses.
+	Class string `yaml:"class"`
+	// EndpointPatterns state which endpoints a tenant may give for a Remote
+	// connector (gibson#1534). See endpoint.go for the rules.
+	EndpointPatterns []string `yaml:"endpointPatterns"`
+	// CredentialHeader names the header that carries the credential of a
+	// Remote connector with auth secret, and its value format (gibson#1535).
+	CredentialHeader CredentialHeader `yaml:"credentialHeader"`
+	// OAuthClient is "dynamic" (the default) or "tenant" (gibson#1538).
+	OAuthClient string `yaml:"oauthClient"`
+	// The fields below configure a Hosted connector (gibson#1536). See
+	// hosted.go.
+	Credentials     []ConnectorCredential `yaml:"credentials"`
+	Env             map[string]string     `yaml:"env"`
+	Args            []string              `yaml:"args"`
+	Port            int                   `yaml:"port"`
+	ImagePullSecret string                `yaml:"imagePullSecret"`
+	// ResponseActions states that the connector has tools that change the
+	// tool of the buyer. A tool that the manifest does not name then needs
+	// approval. See approval.go (gibson#1474).
+	ResponseActions bool `yaml:"responseActions"`
+	// Tools marks tools by name. See approval.go.
+	Tools map[string]ConnectorTool `yaml:"tools"`
+	// Variables declare the values that a tenant gives for a Hosted
+	// connector (gibson#1508). See variables.go.
+	Variables []TenantVariable `yaml:"variables"`
+}
+
+// ConnectorClasses is the closed list of tool classes of a connector
+// (ADR-0177). The loader refuses a connector with a class outside the list.
+var ConnectorClasses = []string{
+	"siem", "edr", "scanner", "identity", "cloud",
+	"observability", "git-host", "ticket", "paging", "patch",
 }
 
 // WorkloadSpec is the shared hosting shape for an external gRPC component
@@ -255,7 +289,7 @@ func (m *Manifest) validate() error {
 		if err := m.Spec.Decode(&s); err != nil {
 			return fmt.Errorf("%s: decode connector spec: %w", m.ID, err)
 		}
-		if err := validateConnector(m.ID, s); err != nil {
+		if err := validateConnector(m.ID, s, m.EgressAllow); err != nil {
 			return err
 		}
 		m.connector = &s
@@ -509,11 +543,14 @@ func validateCredentialRequirements(id string, reqs []CredentialRequirement) err
 	return nil
 }
 
-func validateConnector(id string, s ConnectorSpec) error {
+func validateConnector(id string, s ConnectorSpec, egress []string) error {
 	switch s.Shape {
 	case connectorv1alpha1.ConnectorShapeRemote:
-		if s.Endpoint == "" {
-			return fmt.Errorf("%s: a Remote connector needs an endpoint", id)
+		if s.Endpoint == "" && len(s.EndpointPatterns) == 0 {
+			return fmt.Errorf("%s: a Remote connector needs an endpoint or endpointPatterns", id)
+		}
+		if err := validateEndpointPatterns(id, s, egress); err != nil {
+			return err
 		}
 		if s.Image != "" {
 			return fmt.Errorf("%s: a Remote connector must not set image", id)
@@ -522,8 +559,8 @@ func validateConnector(id string, s ConnectorSpec) error {
 		if s.Image == "" {
 			return fmt.Errorf("%s: a Hosted connector needs an image", id)
 		}
-		if s.Endpoint != "" {
-			return fmt.Errorf("%s: a Hosted connector must not set endpoint", id)
+		if s.Endpoint != "" || len(s.EndpointPatterns) > 0 {
+			return fmt.Errorf("%s: a Hosted connector must not set endpoint or endpointPatterns", id)
 		}
 		// A Hosted connector image runs inside the tenant data plane and sees
 		// the tenant's tool calls, so a third-party image is pinned the same
@@ -540,7 +577,19 @@ func validateConnector(id string, s ConnectorSpec) error {
 	default:
 		return fmt.Errorf("%s: auth %q must be none, secret, or oauth", id, s.Auth)
 	}
-	return nil
+	if !slices.Contains(ConnectorClasses, s.Class) {
+		return fmt.Errorf("%s: class %q must be one of %s", id, s.Class, strings.Join(ConnectorClasses, ", "))
+	}
+	if err := validateAuthFields(id, s); err != nil {
+		return err
+	}
+	if err := validateTools(id, s); err != nil {
+		return err
+	}
+	if err := validateTenantVariables(id, s); err != nil {
+		return err
+	}
+	return validateHostedConfig(id, s)
 }
 
 // catalog is the parsed, validated set. Built once at package init; a parse or
@@ -664,6 +713,28 @@ type ConnectorEntry struct {
 	Transport          connectorv1alpha1.ConnectorTransport
 	Auth               connectorv1alpha1.ConnectorAuthKind
 	DefaultInstanceURL string
+	// Class is the tool class of the connector (ADR-0177).
+	Class string
+	// EndpointPatterns are the endpoints that a tenant may give.
+	EndpointPatterns []string
+	// OAuthScope is the scope that the authorization asks for.
+	OAuthScope string
+	// CredentialHeader is the header of the credential of a Remote connector.
+	// It is never nil: the default is Authorization with "Bearer {secret}".
+	CredentialHeader CredentialHeader
+	// OAuthClient is "dynamic" or "tenant". It is empty without OAuth.
+	OAuthClient string
+	// The Hosted configuration.
+	Credentials     []ConnectorCredential
+	Env             map[string]string
+	Args            []string
+	Port            int
+	ImagePullSecret string
+	// ResponseActions and Tools carry the approval marks. See ApprovalFor.
+	ResponseActions bool
+	Tools           map[string]ConnectorTool
+	// Variables are the values that a tenant gives. See ResolveVariables.
+	Variables []TenantVariable
 }
 
 func (m Manifest) toConnectorEntry() ConnectorEntry {
@@ -680,6 +751,19 @@ func (m Manifest) toConnectorEntry() ConnectorEntry {
 		Transport:          s.Transport,
 		Auth:               s.Auth,
 		DefaultInstanceURL: s.DefaultInstanceURL,
+		Class:              s.Class,
+		EndpointPatterns:   s.EndpointPatterns,
+		OAuthScope:         s.OAuthScope,
+		CredentialHeader:   s.credentialHeader(),
+		OAuthClient:        s.oauthClient(),
+		Credentials:        s.Credentials,
+		Env:                s.Env,
+		Args:               s.Args,
+		Port:               s.Port,
+		ImagePullSecret:    s.ImagePullSecret,
+		ResponseActions:    s.ResponseActions,
+		Tools:              s.Tools,
+		Variables:          s.Variables,
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -179,6 +180,38 @@ func (s *memTimelineStore) LoadHistory(_ context.Context, _ string) ([]Event, er
 		out = append(out, me.ev)
 	}
 	return out, nil
+}
+
+func (s *memTimelineStore) LoadHistoryRange(ctx context.Context, tenant string, from time.Time, kinds []string) ([]Event, error) {
+	all, err := s.LoadHistory(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	want := map[string]bool{}
+	for _, k := range kinds {
+		want[k] = true
+	}
+	var out []Event
+	for _, ev := range all {
+		if t := EventTime(ev); (len(kinds) == 0 || want[ev.Kind()]) && (t.IsZero() || !t.Before(from)) {
+			out = append(out, ev)
+		}
+	}
+	return out, nil
+}
+
+func (s *memTimelineStore) CountHistoryBefore(ctx context.Context, tenant string, before time.Time) (int, error) {
+	all, err := s.LoadHistory(ctx, tenant)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, ev := range all {
+		if t := EventTime(ev); !t.IsZero() && t.Before(before) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 type memEvent struct {

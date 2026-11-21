@@ -32,48 +32,6 @@ func NewMockQueryProcessor(results []GraphRAGResult, err error) *MockQueryProces
 	}
 }
 
-func TestDefaultGraphRAGStore_FindSimilarAttacks(t *testing.T) {
-	ctx := context.Background()
-	mockProvider := NewMockGraphRAGProvider()
-	mockEmbedder := NewMockEmbedder()
-	mockProcessor := NewMockQueryProcessor(nil, nil)
-
-	store := &DefaultGraphRAGStore{
-		provider:  mockProvider,
-		processor: mockProcessor,
-		embedder:  mockEmbedder,
-	}
-
-	content := "phishing attack"
-	topK := 5
-	embedding := []float64{0.1, 0.2, 0.3}
-
-	// Create test attack pattern node
-	patternID := types.NewID()
-	patternNode := NewGraphNode(patternID, NodeType("attack_pattern")).
-		WithProperty("technique_id", "T1566").
-		WithProperty("name", "Phishing").
-		WithProperty("description", "Phishing attack").
-		WithProperty("tactics", []string{"Initial Access"}).
-		WithProperty("platforms", []string{"Windows", "Linux"})
-
-	// Setup mock responses
-	mockEmbedder.SetEmbedding(content, embedding)
-	mockProvider.vectorResults = []VectorResult{
-		{NodeID: patternID, Similarity: 0.9},
-	}
-	mockProvider.queriedNodes = []GraphNode{*patternNode}
-
-	// Execute
-	patterns, err := store.FindSimilarAttacks(ctx, content, topK)
-
-	// Verify
-	assert.NoError(t, err)
-	assert.Len(t, patterns, 1)
-	assert.Equal(t, "T1566", patterns[0].TechniqueID)
-	assert.Equal(t, "Phishing", patterns[0].Name)
-}
-
 func TestDefaultGraphRAGStore_FindSimilarFindings(t *testing.T) {
 	ctx := context.Background()
 	mockProvider := NewMockGraphRAGProvider()
@@ -120,46 +78,6 @@ func TestDefaultGraphRAGStore_FindSimilarFindings(t *testing.T) {
 	// Verify
 	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, len(findings), 0) // May be 0 or 1 depending on mock state
-}
-
-func TestDefaultGraphRAGStore_GetAttackChains(t *testing.T) {
-	ctx := context.Background()
-	mockProvider := NewMockGraphRAGProvider()
-	mockEmbedder := NewMockEmbedder()
-	mockProcessor := NewMockQueryProcessor(nil, nil)
-
-	store := &DefaultGraphRAGStore{
-		provider:  mockProvider,
-		processor: mockProcessor,
-		embedder:  mockEmbedder,
-	}
-
-	techniqueID := "T1566"
-	maxDepth := 3
-
-	// Create starting technique node
-	startNode := NewGraphNode(types.NewID(), NodeType("technique")).
-		WithProperty("technique_id", techniqueID).
-		WithProperty("name", "Phishing").
-		WithProperty("description", "Phishing technique")
-
-	// Create subsequent technique nodes
-	node2 := NewGraphNode(types.NewID(), NodeType("technique")).
-		WithProperty("technique_id", "T1204").
-		WithProperty("name", "User Execution").
-		WithProperty("description", "User execution technique")
-
-	// Setup mock responses
-	mockProvider.queriedNodes = []GraphNode{*startNode}
-	mockProvider.graphNodes = []GraphNode{*node2}
-
-	// Execute
-	chains, err := store.GetAttackChains(ctx, techniqueID, maxDepth)
-
-	// Verify
-	assert.NoError(t, err)
-	assert.NotEmpty(t, chains)
-	assert.GreaterOrEqual(t, len(chains[0].Steps), 1)
 }
 
 func TestDefaultGraphRAGStore_Health(t *testing.T) {
@@ -252,28 +170,6 @@ func TestDefaultGraphRAGStore_Close(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestGraphNodeToAttackPattern(t *testing.T) {
-	// Create a GraphNode with attack pattern properties
-	node := NewGraphNode(types.NewID(), NodeType("attack_pattern")).
-		WithProperty("technique_id", "T1566").
-		WithProperty("name", "Phishing").
-		WithProperty("description", "Phishing attack").
-		WithProperty("tactics", []string{"Initial Access", "Execution"}).
-		WithProperty("platforms", []string{"Windows", "Linux"}).
-		WithEmbedding([]float64{0.1, 0.2, 0.3})
-
-	// Convert to AttackPattern
-	pattern := graphNodeToAttackPattern(*node)
-
-	// Verify
-	assert.Equal(t, "T1566", pattern.TechniqueID)
-	assert.Equal(t, "Phishing", pattern.Name)
-	assert.Equal(t, "Phishing attack", pattern.Description)
-	assert.Equal(t, []string{"Initial Access", "Execution"}, pattern.Tactics)
-	assert.Equal(t, []string{"Windows", "Linux"}, pattern.Platforms)
-	assert.Equal(t, []float64{0.1, 0.2, 0.3}, pattern.Embedding)
-}
-
 func TestGraphNodeToFindingNode(t *testing.T) {
 	// Create a GraphNode with finding properties
 	missionID := types.NewID()
@@ -301,30 +197,4 @@ func TestGraphNodeToFindingNode(t *testing.T) {
 	assert.NotNil(t, finding.TargetID)
 	assert.Equal(t, targetID, *finding.TargetID)
 	assert.Equal(t, []float64{0.1, 0.2, 0.3}, finding.Embedding)
-}
-
-func TestBuildAttackChainsFromNodes(t *testing.T) {
-	// Create starting technique node
-	startNode := NewGraphNode(types.NewID(), NodeType("technique")).
-		WithProperty("technique_id", "T1566").
-		WithProperty("description", "Phishing")
-
-	// Create subsequent technique nodes
-	node2 := NewGraphNode(types.NewID(), NodeType("technique")).
-		WithProperty("technique_id", "T1204").
-		WithProperty("description", "User Execution")
-
-	node3 := NewGraphNode(types.NewID(), NodeType("technique")).
-		WithProperty("technique_id", "T1059").
-		WithProperty("description", "Command Execution")
-
-	traversedNodes := []GraphNode{*node2, *node3}
-
-	// Build chains
-	chains := buildAttackChainsFromNodes(*startNode, traversedNodes, 3)
-
-	// Verify
-	assert.NotEmpty(t, chains)
-	assert.GreaterOrEqual(t, len(chains[0].Steps), 2) // At least start node + one traversed node
-	assert.Equal(t, "T1566", chains[0].Steps[0].TechniqueID)
 }

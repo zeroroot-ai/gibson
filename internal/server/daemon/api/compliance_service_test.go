@@ -121,3 +121,24 @@ func TestListComplianceEvidence_AuthzEntry(t *testing.T) {
 	assert.Equal(t, "tenant_from_identity", e.ObjectDeriver)
 	assert.False(t, e.Unauthenticated)
 }
+
+// TestComplianceResponse_CarriesTheCountermeasures: the response names each
+// countermeasure next to its control.
+func TestComplianceResponse_CarriesTheCountermeasures(t *testing.T) {
+	resp := complianceResponse(&compliance.Report{
+		Pack: "nist-800-53-r5",
+		Controls: []compliance.ControlEvidence{{
+			ID: "si-3",
+			Countermeasures: []compliance.CountermeasureRef{
+				{ID: "D3-FA", Name: "File Analysis", Tactic: "Detect", MappedControls: []string{"si-3"}},
+			},
+		}},
+	})
+	require.Len(t, resp.GetControls(), 1)
+	require.Len(t, resp.GetControls()[0].GetCountermeasures(), 1)
+	cm := resp.GetControls()[0].GetCountermeasures()[0]
+	assert.Equal(t, "D3-FA", cm.GetId())
+	assert.Equal(t, "File Analysis", cm.GetName())
+	assert.Equal(t, "Detect", cm.GetTactic())
+	assert.Equal(t, []string{"si-3"}, cm.GetMappedControlIds())
+}

@@ -1,0 +1,22 @@
+# Wiz connector. Wiz runs the MCP server (ADR-0114, ADR-0177).
+# Source of the endpoint, the auth and the scopes:
+#   https://mcp.app.wiz.io/.well-known/oauth-protected-resource
+#   https://mcp.app.wiz.io/.well-known/oauth-authorization-server
+# The public docs of Wiz do not list the tools. The Wiz docs need a login.
+id: wiz
+kind: connector
+displayName: Wiz
+description: >-
+  The MCP server of Wiz. It reads the cloud security data of the Wiz tenant
+  of the customer.
+egressAllow:
+  - mcp.app.wiz.io:443
+spec:
+  vendor: wiz
+  class: scanner
+  shape: Remote
+  endpoint: https://mcp.app.wiz.io/
+  transport: streamable-http
+  auth: oauth
+  oauthScope: read:all offline_access
+  defaultInstanceUrl: https://mcp.app.wiz.io/

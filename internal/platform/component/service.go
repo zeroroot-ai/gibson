@@ -60,8 +60,10 @@ import (
 // folds the finding into the tenant's World, which is what makes the graph
 // projector materialize a :Finding node — there is no second write path.
 type FindingSubmitter interface {
-	// Submit stores the finding and returns a generated finding_id.
-	Submit(ctx context.Context, tenant, workID, findingJSON, severity, title string) (findingID string, err error)
+	// Submit stores the finding and returns its finding_id. A non-empty
+	// idempotency key gives the id finding.ResultID of the verified submitter,
+	// so a second read of one result updates the finding (review R6).
+	Submit(ctx context.Context, tenant, workID, findingJSON, severity, title, idempotencyKey string) (findingID string, err error)
 }
 
 // ResultDiscoveryProcessor processes a DiscoveryResult (proto field 100) extracted
@@ -145,6 +147,11 @@ type ComponentServiceServer struct {
 	// connectorCaller calls a connector tool for CallTool. Nil refuses a
 	// connector tool call.
 	connectorCaller metatool.ConnectorCaller
+	// toolApproval is the approval queue for a tool that the manifest of its
+	// connector marks (gibson#1474). Nil refuses a call of a marked tool.
+	toolApproval metatool.ApprovalGate
+	// connectorGrants names the grant of a connector call in its record.
+	connectorGrants metatool.GrantLookup
 
 	// missionPolicy returns the mission policy of a run for a connector call
 	// that names a work item. Nil refuses such a call.
@@ -1658,6 +1665,7 @@ func (s *ComponentServiceServer) SubmitFinding(
 			findingJSON,
 			"", // severity no longer in proto
 			"", // title no longer in proto
+			req.GetIdempotencyKey(),
 		)
 		if err != nil {
 			// A finding that names a tool call with no record is refused whole.

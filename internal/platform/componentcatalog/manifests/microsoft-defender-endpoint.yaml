@@ -1,0 +1,27 @@
+# Microsoft Defender for Endpoint connector. Microsoft runs the MCP server
+# (ADR-0114, ADR-0177). The triage collection of the Microsoft Sentinel MCP
+# server holds the Defender for Endpoint tools.
+# Source of the endpoint and the tools: https://learn.microsoft.com/en-us/azure/sentinel/datalake/sentinel-mcp-triage-tool
+# Source of the auth and the scope:
+#   https://sentinel.microsoft.com/.well-known/oauth-protected-resource/mcp/triage
+# The authorization server is Microsoft Entra ID. Entra ID has no dynamic client
+# registration (RFC 7591), so the tenant needs an app registration.
+# Each tool reads. No tool isolates a device.
+id: microsoft-defender-endpoint
+kind: connector
+displayName: Microsoft Defender for Endpoint
+description: >-
+  The triage tools of the Microsoft Sentinel MCP server. They read incidents,
+  alerts, devices and device vulnerabilities, and run hunting queries.
+egressAllow:
+  - sentinel.microsoft.com:443
+spec:
+  vendor: microsoft
+  class: edr
+  shape: Remote
+  endpoint: https://sentinel.microsoft.com/mcp/triage
+  transport: streamable-http
+  auth: oauth
+  oauthClient: tenant
+  oauthScope: 4500ebfb-89b6-4b14-a480-7f749797bfcd/.default offline_access
+  defaultInstanceUrl: https://sentinel.microsoft.com/mcp/triage

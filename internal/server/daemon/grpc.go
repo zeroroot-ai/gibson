@@ -740,6 +740,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// same logger as the rest of the daemon.
 	if d.callback != nil {
 		d.callback.SetConnectorAudit(auditLogger)
+		// The record of each allowed connector call names the grant that
+		// allowed it, so the incident report reads it from the event
+		// (gibson#1474, gibson#1478).
+		d.callback.SetConnectorGrants(capabilitygrant.NewCapabilityGrantStore(d.platformDB).ConnectorGrantID)
 	}
 	// The record of the components that agents enroll (gibson#33).
 	daemonSvc.WithProducedComponents(d.platformDB)
@@ -1681,7 +1685,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), brain.BeliefSystem)
 		wireBrainRegistry(ctx, d.brainRegistry, d.tenantBeliefs, beliefSchemaRegistry)
 	}
-	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog(), pageKeys))
+	worldpb.RegisterWorldServiceServer(srv, d.blueTeamWorldServer(
+		NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog(), pageKeys)))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
 
 	// Register gibson.tenant.v1.DomainPackService — the per-tenant Domain
@@ -1689,6 +1694,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// d.brainRegistry (just constructed above) so an enabled pack folds into
 	// the SAME per-tenant World WorldService reads.
 	if err := d.registerDomainPack(ctx, srv); err != nil {
+		return nil, err
+	}
+	if err := d.registerIncidentReport(ctx, srv); err != nil {
 		return nil, err
 	}
 	d.registerCatalogPlugin(ctx, srv)
@@ -1943,7 +1951,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// An agent enrolls a component that it produced through the
 			// identity provisioning of the tenant-admin surface (gibson#33).
 			compSvc.WithProducedComponentEnroller(producedEnroller{srv: daemonSvc})
-			compSvc.WithConnectorTools(d.connectorMCPClient()).WithConnectorCaller(d.connectorMCPClient())
+			compSvc.WithConnectorTools(d.connectorMCPClient()).WithConnectorCaller(d.connectorMCPClient()).
+				WithConnectorGrants(capabilitygrant.NewCapabilityGrantStore(d.platformDB).ConnectorGrantID)
+			if d.brainRegistry != nil {
+				compSvc.WithToolApproval(newTenantRoutedToolApproval(d.brainRegistry))
+			}
 			if d.callback != nil {
 				// A connector call that names a work item takes the mission
 				// policy of its run, the same policy as invoke_tool.

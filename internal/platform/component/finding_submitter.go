@@ -221,7 +221,7 @@ func (s *GraphRAGFindingSubmitter) recordedEvidence(
 // store failure each return an error.
 func (s *GraphRAGFindingSubmitter) Submit(
 	ctx context.Context,
-	tenant, workID, findingJSON, severity, title string,
+	tenant, workID, findingJSON, severity, title, idempotencyKey string,
 ) (string, error) {
 	// Step 1: the verified caller. ext-authz asserted it and the SDK
 	// interceptor put it on the context; the client payload has no say.
@@ -250,6 +250,10 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	// Step 3: Assign a canonical finding ID and stamp the verified submitter.
 	// Both overwrite the client payload.
 	findingID := types.NewID()
+	if idempotencyKey != "" {
+		// One result of a tool names one finding of this submitter (review R6).
+		findingID = finding.ResultID(tenant, submitter.subject, idempotencyKey)
+	}
 	baseFinding.ID = findingID
 	baseFinding.TenantID = tenant
 	baseFinding.SubmittedBy = submitter.principal
@@ -273,6 +277,10 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	// Step 5: the one record. The store keeps it and the World folds it, so
 	// the two never disagree about who submitted what under which mission.
 	enhanced := finding.NewEnhancedFinding(baseFinding, missionID, submitter.agentName)
+	// An agent that submits a finding raised it in a mission run, and a rerun of
+	// that mission is the check that verifies the fix (ADR-0178). The daemon has
+	// no attack proof for this path, so it never records a predicate here.
+	enhanced.Check = finding.ScanCheck(missionID)
 
 	// Step 6: Acquire a per-tenant Conn and persist the finding. Postgres is the
 	// one home of the fields and the evidence of the finding. A failed write
@@ -311,6 +319,10 @@ func (s *GraphRAGFindingSubmitter) Submit(
 
 // findingSubmitter is the verified identity a finding is stamped with.
 type findingSubmitter struct {
+	// subject is the authenticated subject of the caller, as the identity
+	// holds it. finding.ResultID takes it in this form on both submit paths,
+	// so one key of one caller gives one id (review R6).
+	subject    string
 	principal  string // the FGA user ref ext-authz asserted, e.g. "agent_principal:<id>"
 	agentName  string // the name the agent registered under, from the capability-grant registry
 	enrolledBy string // the subject of the person who enrolled the agent
@@ -327,7 +339,7 @@ func (s *GraphRAGFindingSubmitter) resolveSubmitter(ctx context.Context, tenant 
 	if err != nil || id.Subject == "" {
 		return findingSubmitter{}, ErrNoSubmitterIdentity
 	}
-	sub := findingSubmitter{principal: componentFGAUser(id.Subject)}
+	sub := findingSubmitter{principal: componentFGAUser(id.Subject), subject: id.Subject}
 	if s.enrolledAgents == nil {
 		return sub, nil
 	}

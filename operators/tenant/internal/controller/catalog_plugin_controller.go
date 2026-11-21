@@ -707,6 +707,14 @@ func (r *CatalogPluginRunnable) ensurePluginEgressPolicy(ctx context.Context, p 
 		return fmt.Errorf("plugin %s: %w", p.PluginID, err)
 	}
 	rules = append(rules, edgeEndpointRule(r.Config.OperatorNamespace))
+	// The private, link-local, loopback and CGNAT ranges are denied, as for
+	// a connector, so a host name of the list that resolves to one of them is
+	// refused (review r3). The edge rule selects pods, and a CIDR deny does
+	// not select a pod, so the edge stays reachable.
+	deny, err := ciliumegress.DenyRules(nil)
+	if err != nil {
+		return fmt.Errorf("plugin %s: %w", p.PluginID, err)
+	}
 	cnp := ciliumegress.NewPolicy()
 	cnp.SetName(egressPolicyName(pluginObjectName(p.PluginID)))
 	cnp.SetNamespace(pluginNamespace(p.TenantID))
@@ -718,7 +726,8 @@ func (r *CatalogPluginRunnable) ensurePluginEgressPolicy(ctx context.Context, p 
 					labelAppName: pluginObjectName(p.PluginID), labelAppComponent: pluginComponent,
 				},
 			},
-			"egress": rules,
+			"egress":     rules,
+			"egressDeny": deny,
 		}
 		return nil
 	})

@@ -1,0 +1,26 @@
+# Tenable connector. Tenable runs the Hexa AI MCP server (ADR-0114, ADR-0177).
+# Source of the endpoint and the header:
+#   https://docs.tenable.com/vulnerability-management/Content/getting-started/hexa-AI-MCP.htm
+# The server reads the header "X-ApiKeys: accessKey=<key>;secretKey=<key>".
+# The tenant stores one secret with the two keys as a JSON object:
+#   {"accessKey": "...", "secretKey": "..."}
+# The server needs a Tenable One license. It is not in FedRAMP. Tenable
+# Security Center (on premises) has no vendor server.
+id: tenable
+kind: connector
+displayName: Tenable
+description: >-
+  The Hexa AI MCP server of Tenable. It reads vulnerabilities and assets of
+  the Tenable Vulnerability Management account of the customer.
+egressAllow:
+  - cloud.tenable.com:443
+spec:
+  vendor: tenable
+  class: scanner
+  shape: Remote
+  endpoint: https://cloud.tenable.com/mcp
+  transport: streamable-http
+  auth: secret
+  credentialHeader:
+    name: X-ApiKeys
+    format: "accessKey={accessKey};secretKey={secretKey}"

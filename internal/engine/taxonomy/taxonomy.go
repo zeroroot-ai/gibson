@@ -52,7 +52,7 @@ import (
 // Version is the Taxonomy's platform-wide version. Bump it in the same change
 // that promotes a shape, so a projected graph can be attributed to the schema
 // that produced it.
-const Version = 5
+const Version = 6
 
 // ObservationLabel is the label every out-of-taxonomy shape lands on. It is a
 // compile-time constant and a plain identifier, so it is never caller-influenced.
@@ -118,6 +118,18 @@ var coreNodeLabels = []string{
 	// agent. The World folds it, and the projector writes one node for each
 	// hypothesis, keyed by the id that the World assigned.
 	"Hypothesis",
+
+	// Incident response (v6, ADR-0177, ADR-0180, gibson#1473). An Alert is an
+	// event that a tool of the buyer reported: a detection of a SIEM or an
+	// EDR, or a log event of an identity tool. It has no fix, so it is never a
+	// Finding. An Incident links its alerts and its findings.
+	"Alert",
+	"Incident",
+
+	// Defensive countermeasures (v6, ADR-0178, gibson#1487). A Countermeasure
+	// is one MITRE D3FEND technique. The D3FEND pack supplies the vocabulary,
+	// and a fix names the countermeasure that it applies.
+	"Countermeasure",
 }
 
 // coreRelationshipTypes is the promoted edge vocabulary, likewise tracking the
@@ -155,6 +167,18 @@ var coreRelationshipTypes = []string{
 	// Target (v4, gibson#550).
 	"FOUND_ON", // Finding    -> Target
 	"TARGETS",  // Mission    -> Target, MissionNode -> Target
+
+	// Incident response (v6, gibson#1473). An Alert joins its Incident with
+	// PART_OF, and it names what it is about with AFFECTS.
+	"CAUSED_BY", // Incident -> Finding
+
+	// Defensive countermeasures (v6, gibson#1487).
+	"APPLIES_COUNTERMEASURE", // MergeRequest -> Countermeasure
+	"COUNTERS",               // Countermeasure -> Technique
+
+	// Fix loop (v6, gibson#1460). The daemon reads the deploy of a merged fix
+	// from the tool of the buyer and links the merge request to it.
+	"DEPLOYED_IN", // MergeRequest -> Deployment
 }
 
 // Registry is a Taxonomy: a version plus the labels and relationship types it

@@ -3,7 +3,11 @@
 
 package brain
 
-import "github.com/mlange-42/ark/ecs"
+import (
+	"github.com/mlange-42/ark/ecs"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+)
 
 // rescan.go reconciles what a scan did NOT see (gibson#1686).
 //
@@ -49,6 +53,15 @@ import "github.com/mlange-42/ark/ecs"
 // MissionCompleted reconciles; MissionFailed is marked reconciled so the System
 // stays quiescent, and emits no status change at all.
 
+// Only a scan reconciles. A mission that runs an attack predicate does not, and
+// it must not (ADR-0178). Its check is an attack predicate, the strongest
+// check. An agent that ends a run without a proof did not show that the flaw
+// is gone: it can stop early, choose another technique, or lose its budget. So
+// its silence is never a CheckRerun. No producer of a predicate CheckRerun
+// exists yet. It needs a proof of absence that the daemon selects itself: the
+// same probe of the same target after the deploy, never evidence that an agent
+// names (gibson#1491, review R3).
+
 // ScanMissionName is the name of the Scan mission definition
 // (internal/platform/missioncatalog/missions/scan.cue). A mission is a scan —
 // and so reconciles — when its Name matches.
@@ -86,11 +99,14 @@ func applyScanReconciled(w *World, e ScanReconciled) {
 // RescanReconciliationSystem moves the Findings a completed scan did not see.
 //
 // For each terminal, not-yet-reconciled scan mission it emits ScanReconciled,
-// and — only when the scan actually completed — one FindingStatusChanged per
-// Finding in its scope whose status is `fixed`:
+// and — only when the scan actually completed — one CheckRerun per Finding in
+// its scope whose status is `fixed`:
 //
-//	seen again by this scan  → open      (the fix did not hold)
-//	not seen by this scan    → verified  (the fix held)
+//	seen again by this scan  → a rerun that found the flaw
+//	not seen by this scan    → a rerun that found nothing
+//
+// The rerun alone sets no status. VerificationSystem turns it into `open` or
+// `verified`, and only for evidence that is newer than the deploy of the fix.
 //
 // Nothing else moves. An `open` Finding the scan did not see stays `open`: a
 // scan not seeing something it never fixed is not evidence, and silently
@@ -126,19 +142,26 @@ func RescanReconciliationSystem(w *World) []Event {
 			// An unfinished look is not evidence of absence.
 			continue
 		}
+		if m.StartedAt.IsZero() {
+			// The time of the evidence is not known. The run time of this
+			// System is not that time: a scan that started before the deploy
+			// would then verify a fix that it never saw (review B2).
+			continue
+		}
 		for _, f := range findings {
 			if f.ScanScope == "" || f.ScanScope != m.TargetID {
 				continue // not this recurring scan's responsibility
 			}
-			if f.Status != FindingStatusFixed {
+			if f.Status != FindingStatusFixed && f.Status != FindingStatusVerified {
 				continue // only a fix is waiting on a rescan's verdict
 			}
-			status := FindingStatusVerified
-			if f.LastScan == m.RunID {
-				status = FindingStatusOpen // the scan saw it again
-			}
-			out = append(out, FindingStatusChanged{
-				ID: f.ID, Status: status, MissionID: m.ID,
+			// The scan is a rerun of the check. It does not set a status. The
+			// VerificationSystem does, once the deploy and the health signal
+			// are known (gibson#1464). The evidence of the scan is no older
+			// than the start of its run, so that is the time of the evidence.
+			out = append(out, CheckRerun{
+				ID: f.ID, CheckKind: string(finding.CheckScan), Found: f.LastScan == m.RunID,
+				EvidenceAt: m.StartedAt, MissionID: m.ID,
 			})
 		}
 	}

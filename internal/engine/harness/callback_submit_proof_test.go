@@ -620,12 +620,20 @@ func TestRecordedToolCall_SettlesTheMainPackHTTPPredicate(t *testing.T) {
 	}
 
 	got, err := predicate.Evaluate(context.Background(),
-		brain.RecordedEvidence(record(`{"status_code":200,"body":"admin panel"}`)))
+		brain.RecordedEvidence(record(`{"status_code":200,"url":"https://target.test/admin/",`+
+			`"body":"{\"admin\":true,\"users\":[\"alice\"]}"}`)))
 	require.NoError(t, err)
-	assert.True(t, got, "a recorded 200 must settle the predicate")
+	assert.True(t, got, "a recorded 200 of the protected path must settle the predicate")
 
-	got, err = predicate.Evaluate(context.Background(),
-		brain.RecordedEvidence(record(`{"status_code":403,"body":"forbidden"}`)))
-	require.NoError(t, err)
-	assert.False(t, got, "a recorded 403 must not settle the predicate")
+	for name, result := range map[string]string{
+		"a recorded 403":          `{"status_code":403,"url":"https://target.test/admin/","body":"forbidden"}`,
+		"a public path":           `{"status_code":200,"url":"https://target.test/healthz","body":"{\"status\":\"ok\"}"}`,
+		"no url in the record":    `{"status_code":200,"body":"{\"admin\":true}"}`,
+		"a login page":            `{"status_code":200,"url":"https://target.test/admin/","body":"<form><input type=password></form>"}`,
+		"a body that is not JSON": `{"status_code":200,"url":"https://target.test/admin/","body":"admin panel"}`,
+	} {
+		got, err = predicate.Evaluate(context.Background(), brain.RecordedEvidence(record(result)))
+		require.NoError(t, err, name)
+		assert.False(t, got, "%s must not settle the predicate (review B4)", name)
+	}
 }

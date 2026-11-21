@@ -1,0 +1,23 @@
+# PagerDuty connector. PagerDuty runs the MCP server (ADR-0114, ADR-0177).
+# Source of the endpoint: https://docs.pagerduty.com/developer/mcp-tooling-remote-server
+# Source of the auth: https://mcp.pagerduty.com/.well-known/oauth-protected-resource/mcp
+# The endpoint is the US server. An EU account picks https://mcp.eu.pagerduty.com/mcp.
+id: pagerduty
+kind: connector
+displayName: PagerDuty
+description: >-
+  The MCP server of PagerDuty. It reads incidents, services and on-call
+  schedules of the PagerDuty account of the customer.
+egressAllow:
+  - mcp.pagerduty.com:443
+spec:
+  vendor: pagerduty
+  class: paging
+  shape: Remote
+  endpoint: https://mcp.pagerduty.com/mcp
+  transport: streamable-http
+  auth: oauth
+  endpointPatterns:
+    - https://mcp.pagerduty.com/mcp
+    - https://mcp.eu.pagerduty.com/mcp
+  defaultInstanceUrl: https://mcp.pagerduty.com/mcp

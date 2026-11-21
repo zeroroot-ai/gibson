@@ -98,7 +98,7 @@ func TestMutatesExistingGraphStateFires(t *testing.T) {
 		// Reads.
 		"QueryNodes", "GetFindings", "FindSimilarFindings", "GetRelatedFindings",
 		"ValidateGraphNode", "ValidateRelationship", "GenerateNodeID",
-		"GetTaxonomySchema", "GetAttackChains", "ListAgents",
+		"GetTaxonomySchema", "ListAgents",
 		// Mutations of state that is not the graph. ADR-0112 governs graph
 		// ingress; plugin configuration, workspace files and mission lifecycle
 		// are different surfaces with their own authorisation.

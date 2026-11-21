@@ -42,7 +42,7 @@ const TechniqueLabel = "Technique"
 const RollsUpToRelationshipType = "ROLLS_UP_TO"
 
 // CategoryID identifies a coarse technique category, such as
-// "prompt_injection". Core category ids are seeded from types.TechniqueType.
+// "initial_access". Core category ids are seeded from types.TechniqueType.
 type CategoryID string
 
 // TechniqueID identifies a fine-grained, pack-defined technique. Unlike

@@ -317,11 +317,11 @@ func TestPlanVoI_HypothesisCandidateResolvesCoveringCapabilities(t *testing.T) {
 	substrate := newFakeBeliefSubstrate()
 	hierarchy := dispatchTestHierarchy(t)
 	generalist := Capability{Kind: "agent", Name: "injection-hunter",
-		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"initial_access"}, nil)}
 	unrelated := Capability{Kind: "tool", Name: "port-scanner", Coverage: taxonomy.EmptyCoverage()}
 
 	in := VoIPlanInput{
-		Hypotheses:   []HypothesisSnapshot{{ID: 7, Claim: "the prompt filter is bypassable", Technique: "indirect_prompt_injection"}},
+		Hypotheses:   []HypothesisSnapshot{{ID: 7, Claim: "the debug endpoint is exposed", Technique: "exposed_debug_endpoint"}},
 		Tenant:       "acme",
 		Capabilities: []Capability{generalist, unrelated},
 		Hierarchy:    hierarchy,
@@ -335,8 +335,8 @@ func TestPlanVoI_HypothesisCandidateResolvesCoveringCapabilities(t *testing.T) {
 		t.Fatalf("got %d candidates, want 1", len(got))
 	}
 	c := got[0]
-	if c.Technique != "indirect_prompt_injection" {
-		t.Fatalf("Technique = %q, want %q", c.Technique, "indirect_prompt_injection")
+	if c.Technique != "exposed_debug_endpoint" {
+		t.Fatalf("Technique = %q, want %q", c.Technique, "exposed_debug_endpoint")
 	}
 	if len(c.CoveringCapabilities) != 1 || c.CoveringCapabilities[0].Name != "injection-hunter" {
 		t.Fatalf("CoveringCapabilities = %+v, want only %q (via the category rollup)", c.CoveringCapabilities, "injection-hunter")
@@ -352,7 +352,7 @@ func TestPlanVoI_HypothesisWithNoTechniqueResolvesNoCoveringCapabilities(t *test
 	substrate := newFakeBeliefSubstrate()
 	hierarchy := dispatchTestHierarchy(t)
 	generalist := Capability{Kind: "agent", Name: "injection-hunter",
-		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"initial_access"}, nil)}
 
 	in := VoIPlanInput{
 		Hypotheses:   []HypothesisSnapshot{{ID: 7, Claim: "no technique named"}},
@@ -379,7 +379,7 @@ func TestPlanVoI_EvidenceCandidateNeverResolvesCoveringCapabilities(t *testing.T
 	substrate := newFakeBeliefSubstrate()
 	hierarchy := dispatchTestHierarchy(t)
 	generalist := Capability{Kind: "agent", Name: "injection-hunter",
-		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"initial_access"}, nil)}
 
 	in := VoIPlanInput{
 		Hosts:        []HostSnapshot{{ID: 1, Belief: Belief{Juicy: 0.5}}},
@@ -404,7 +404,7 @@ func TestPlanVoI_EvidenceCandidateNeverResolvesCoveringCapabilities(t *testing.T
 func TestPlanVoI_NoHierarchySuppliedNeverPanics(t *testing.T) {
 	substrate := newFakeBeliefSubstrate()
 	in := VoIPlanInput{
-		Hypotheses: []HypothesisSnapshot{{ID: 7, Claim: "c", Technique: "indirect_prompt_injection"}},
+		Hypotheses: []HypothesisSnapshot{{ID: 7, Claim: "c", Technique: "exposed_debug_endpoint"}},
 		Tenant:     "acme",
 	}
 

@@ -316,7 +316,7 @@ func TestFindingSubmitter_IgnoresWorkContextOfAnotherTenant(t *testing.T) {
 	writeWorkContext(t, env.mr, "work-mission-1", "mission-of-victim", victimTenant)
 
 	_, err := submitter.Submit(submitterCtx(attackerTenant, "agent_principal:attacker"), attackerTenant, "work-mission-1",
-		`{"title":"planted"}`, "high", "planted")
+		`{"title":"planted"}`, "high", "planted", "")
 
 	require.NoError(t, err, "the finding is still recorded under the submitter's own tenant")
 	assert.Empty(t, *seenMission,
@@ -332,7 +332,7 @@ func TestFindingSubmitter_ResolvesMissionForOwningTenant(t *testing.T) {
 	writeWorkContext(t, env.mr, "work-mission-2", "mission-of-victim", victimTenant)
 
 	_, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:victim"), victimTenant, "work-mission-2",
-		`{"title":"genuine"}`, "high", "genuine")
+		`{"title":"genuine"}`, "high", "genuine", "")
 
 	require.NoError(t, err)
 	assert.Equal(t, "mission-of-victim", *seenMission,
@@ -355,13 +355,13 @@ func TestFindingSubmitter_CarriesTheMissionRunOfTheWorkItem(t *testing.T) {
 	require.NoError(t, env.mr.Set(workRunKey("work-run-2"), "run-8"))
 
 	_, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:victim"), victimTenant, "work-run-1",
-		`{"title":"genuine"}`, "high", "genuine")
+		`{"title":"genuine"}`, "high", "genuine", "")
 	require.NoError(t, err)
 	assert.Equal(t, "run-7", seenRun)
 
 	seenRun = "unset"
 	_, err = submitter.Submit(submitterCtx(victimTenant, "agent_principal:victim"), victimTenant, "work-run-2",
-		`{"title":"no mission"}`, "high", "no mission")
+		`{"title":"no mission"}`, "high", "no mission", "")
 	require.NoError(t, err)
 	assert.Empty(t, seenRun, "a finding with no mission has no run")
 }

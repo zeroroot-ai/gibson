@@ -128,28 +128,35 @@ func wantMainPack() DomainPack {
 		// technique names (ADR-0135); each references only the "evidence"
 		// variable and the curated helper catalog celenv.NewEnv declares.
 		Predicates: map[string]string{
-			// reconnaissance: proof that some recorded HTTP exchange reached
-			// a live, responding endpoint.
-			"unauthenticated_endpoint_exposed": `evidence.exists(e, httpStatus(e) == 200)`,
-
-			// extraction: proof that recorded evidence text contains what
-			// reads like a disclosed credential (an API key, password, or
-			// secret assigned to a value).
 			"credential_disclosure_detected": `evidence.exists(e, regexMatch(evidenceText(e), "(?i)(api[_-]?key|password|secret)\\s*[:=]\\s*\\S+"))`,
-
-			// prompt_injection: proof that the agent's own marker-of-control
-			// (planted before the run, per markerPresent's "proof of
-			// control, not damage" contract) turned up in what came back.
-			"prompt_injection_marker_present": `markerPresent(evidence, "SYSTEM_PROMPT_LEAKED")`,
+			"node_token_readable":            `evidence.exists(e, regexMatch(evidenceText(e), r'/var/lib/kubelet/pods/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/volumes/kubernetes\.io~projected/') && regexMatch(evidenceText(e), r'eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'))`,
+			"privileged_container_detected":  `evidence.exists(e, regexMatch(evidenceText(e), r'(?m)^CapEff:\s*0*[0-9a-f]?f{9,}\s*$'))`,
+			"rbac_write_access_proven":       `evidence.exists(e, httpStatus(e) == 201 && regexMatch(evidenceText(e), r'\\?"kind\\?"\s*:\s*\\?"ConfigMap\\?"') && regexMatch(evidenceText(e), r'\\?"name\\?"\s*:\s*\\?"gibson-proof-[a-z0-9]+\\?"'))`,
+			"unauthenticated_endpoint_exposed": `((evidence.filter(p, p.type == "http_request").size() == 1 && evidence.filter(p, p.type == "http_res` +
+				`ponse").size() == 1 && evidence.exists(q, q.type == "http_request" && type(q.content) == map && "url` +
+				`" in q.content && type(q.content.url) == string && regexMatch(q.content.url, r'^https?://[^/]+/(admi` +
+				`n|internal|management|manage|actuator|debug)(/|\?|$)') && !("headers" in q.content && type(q.content` +
+				`.headers) == map && ("authorization" in q.content.headers || "Authorization" in q.content.headers ||` +
+				` "cookie" in q.content.headers || "Cookie" in q.content.headers))) && evidence.exists(r, r.type == "` +
+				`http_response" && httpStatus(r) == 200 && regexMatch(evidenceText(r), r'^\s*[\{\[]\s*\"') && !regexM` +
+				`atch(evidenceText(r), r'(?i)(<form|<input|type\s*=\s*.?password|\"(login|signin|sign_in|redirect)\"\` +
+				`s*:)'))) || evidence.exists(e, e.type == "log" && httpStatus(e) == 200 && type(jsonPath(evidenceText` +
+				`(e), "url")) == string && regexMatch(jsonPath(evidenceText(e), "url"), r'^https?://[^/]+/(admin|inte` +
+				`rnal|management|manage|actuator|debug)(/|\?|$)') && type(jsonPath(evidenceText(e), "body")) == strin` +
+				`g && regexMatch(jsonPath(evidenceText(e), "body"), r'^\s*[\{\[]\s*\"') && !regexMatch(jsonPath(evide` +
+				`nceText(e), "body"), r'(?i)(<form|<input|type\s*=\s*.?password|\"(login|signin|sign_in|redirect)\"\s` +
+				`*:)'))) && !evidence.exists(x, httpStatus(x) >= 300 && httpStatus(x) < 400)`,
 		},
 
 		// The fine-grained techniques of this pack, each with the core
 		// category that it rolls up to (ADR-0135). Each predicate above is
 		// bound to one of them.
 		Techniques: map[string]string{
-			"unauthenticated_endpoint_exposed": "reconnaissance",
-			"credential_disclosure_detected":   "extraction",
-			"prompt_injection_marker_present":  "prompt_injection",
+			"credential_disclosure_detected":   "credential_access",
+			"node_token_readable":              "credential_access",
+			"privileged_container_detected":    "privilege_escalation",
+			"rbac_write_access_proven":         "privilege_escalation",
+			"unauthenticated_endpoint_exposed": "initial_access",
 		},
 
 		// The pack makes a web endpoint bear belief (ADR-0129): an endpoint
@@ -169,12 +176,13 @@ func wantMainPack() DomainPack {
 			},
 		},
 
-		// Each predicate above reads evidence of a request the target already
-		// answers. None of them needs a change on the target, so the pack
-		// states all three as non-destructive (ADR-0132).
+		// The predicates below read evidence and change nothing on the target.
+		// The predicate rbac_write_access_proven is not in this list: its proof
+		// writes one object to the target, so it is destructive (ADR-0132).
 		NonDestructivePredicates: []string{
 			"credential_disclosure_detected",
-			"prompt_injection_marker_present",
+			"node_token_readable",
+			"privileged_container_detected",
 			"unauthenticated_endpoint_exposed",
 		},
 	}

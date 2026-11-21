@@ -90,6 +90,22 @@ message ControlEvidence {
   int64 event_count = 6;
   // last_event_time is unset when event_count is 0.
   google.protobuf.Timestamp last_event_time = 7;
+  // countermeasures are the countermeasures that the D3FEND pack maps to this
+  // control. They are set only when the tenant enabled the pack mitre-d3fend.
+  // A countermeasure is context for the control. It is not evidence.
+  repeated ControlCountermeasure countermeasures = 8;
+}
+
+// ControlCountermeasure names one D3FEND countermeasure next to a control.
+message ControlCountermeasure {
+  // id is the D3FEND id of the countermeasure, for example "D3-FA".
+  string id = 1;
+  string name = 2;
+  // tactic is the D3FEND tactic, for example "Detect".
+  string tactic = 3;
+  // mapped_control_ids are the controls that D3FEND maps to the
+  // countermeasure, when they are this control or one of its enhancements.
+  repeated string mapped_control_ids = 4;
 }
 
 // EvidenceEvent is one audit record that is evidence for one control or

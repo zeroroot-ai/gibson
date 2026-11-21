@@ -124,14 +124,59 @@ func (f *fakeHistorySQL) Exec(_ context.Context, sql string, args ...any) (int64
 	return inserted, nil
 }
 
-func (f *fakeHistorySQL) QueryRow(context.Context, string, ...any) Row {
-	panic("fakeHistorySQL: the Timeline store reads no single row")
+func (f *fakeHistorySQL) QueryRow(_ context.Context, sql string, args ...any) Row {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch sql {
+	case countHistoryBeforeSQL:
+		before, _ := args[0].(int64)
+		var n int64
+		for _, r := range f.rows {
+			if r.ms < before {
+				n++
+			}
+		}
+		return fakeRow{vals: []int64{n}}
+	case lastHistoryIDSQL:
+		if len(f.rows) == 0 {
+			return fakeRow{vals: []int64{-1, -1}}
+		}
+		last := f.rows[len(f.rows)-1]
+		return fakeRow{vals: []int64{last.ms, last.seq}}
+	}
+	panic("fakeHistorySQL: unexpected single-row query " + sql)
+}
+
+// fakeRow scans int64 values.
+type fakeRow struct{ vals []int64 }
+
+func (r fakeRow) Scan(dest ...any) error {
+	if len(dest) != len(r.vals) {
+		return errors.New("fakeRow: wrong number of columns")
+	}
+	for i, d := range dest {
+		p, ok := d.(*int64)
+		if !ok {
+			return errors.New("fakeRow: Scan wants *int64")
+		}
+		*p = r.vals[i]
+	}
+	return nil
 }
 
 func (f *fakeHistorySQL) Query(_ context.Context, sql string, args ...any) (Rows, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if sql != selectHistorySQL || len(args) != 3 {
+	var kinds map[string]bool
+	switch {
+	case sql == selectHistorySQL && len(args) == 3:
+	case sql == selectHistoryRangeSQL && len(args) == 4:
+		ks, _ := args[3].([]string)
+		kinds = map[string]bool{}
+		for _, k := range ks {
+			kinds[k] = true
+		}
+	default:
 		return nil, fmt.Errorf("fakeHistorySQL: unexpected query %q with %d args", sql, len(args))
 	}
 	afterMs, _ := args[0].(int64)
@@ -139,6 +184,9 @@ func (f *fakeHistorySQL) Query(_ context.Context, sql string, args ...any) (Rows
 	limit, _ := args[2].(int)
 	var page []fakeHistoryRow
 	for _, r := range f.rows {
+		if kinds != nil && !kinds[r.kind] {
+			continue
+		}
 		if r.ms > afterMs || (r.ms == afterMs && r.seq > afterSeq) {
 			page = append(page, r)
 			if len(page) == limit {
@@ -902,6 +950,68 @@ func TestTimelineStore_TrimKeepsTheFullHistoryInPostgres(t *testing.T) {
 		want = append(want, fmt.Sprintf("10.0.%d.%d", i/250, i%250))
 	}
 	require.Equal(t, want, hostAddresses(t, history), "the history is each event, one time, in order")
+}
+
+// A bounded read returns only the events of the kinds named that the store
+// appended at the start time or later, from Postgres and from the stream tail,
+// one time each and in order (review M6).
+func TestTimelineStore_LoadHistoryRange(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	db := &fakeHistorySQL{}
+	store := NewTimelineStore(staticAcquireWith(rdb, db))
+	ctx := context.Background()
+	const tenant = "tenant-range"
+
+	before := time.Now()
+	seqs := appendHosts(t, store, tenant, 0, 30)
+	for i := range 5 {
+		_, err := store.Append(ctx, tenant, uuid.NewString(), brain.ScanReconciled{MissionID: fmt.Sprintf("scan-%d", i)})
+		require.NoError(t, err)
+	}
+	require.NoError(t, store.TrimTo(ctx, tenant, seqs[19]), "20 hosts move to Postgres")
+	appendHosts(t, store, tenant, 30, 5)
+
+	hosts, err := store.LoadHistoryRange(ctx, tenant, before.Add(-time.Minute), []string{"host.observed"})
+	require.NoError(t, err)
+	want := make([]string, 0, 35)
+	for i := range 35 {
+		want = append(want, fmt.Sprintf("10.0.0.%d", i))
+	}
+	require.Equal(t, want, hostAddresses(t, hosts), "each host, one time, in order")
+
+	scans, err := store.LoadHistoryRange(ctx, tenant, before.Add(-time.Minute), []string{"scan.reconciled"})
+	require.NoError(t, err)
+	require.Len(t, scans, 5)
+
+	later, err := store.LoadHistoryRange(ctx, tenant, time.Now().Add(time.Hour), []string{"host.observed"})
+	require.NoError(t, err)
+	require.Empty(t, later, "nothing was appended after the start time")
+
+	all, err := store.LoadHistoryRange(ctx, tenant, time.Time{}, nil)
+	require.NoError(t, err)
+	require.Len(t, all, 40, "no kind means each kind")
+
+	// The count before a time plus the range from it is the whole history, so
+	// an index of the range plus the count is a position in the history
+	// (review R5).
+	n, err := store.CountHistoryBefore(ctx, tenant, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 40, n)
+	n, err = store.CountHistoryBefore(ctx, tenant, before.Add(-time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, 0, n)
+	n, err = store.CountHistoryBefore(ctx, tenant, time.Time{})
+	require.NoError(t, err)
+	require.Equal(t, 0, n, "nothing is before the zero time")
+
+	// With no Postgres handle the count fails, as each history read does.
+	noSQL := NewTimelineStore(func(context.Context) (TimelineConn, func(), error) {
+		return TimelineConn{Redis: rdb}, func() {}, nil
+	})
+	_, err = noSQL.CountHistoryBefore(ctx, tenant, time.Now())
+	require.Error(t, err)
+	_, err = noSQL.LoadHistoryRange(ctx, tenant, time.Now(), nil)
+	require.Error(t, err)
 }
 
 // archiveErrorCount reads gibson_timeline_archive_errors_total for one tenant

@@ -205,12 +205,12 @@ func TestListDesiredCatalogPlugins_KeysetPagesAcrossAFilteredRow(t *testing.T) {
 func TestListDesiredConnectors_KeysetPages(t *testing.T) {
 	srv, mock := connectorServer(t)
 	ctx := context.Background()
-	cols := []string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error"}
+	cols := []string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error", "endpoint", "oauth_client_id", "oauth_client_secret_name", "variables"}
 
 	mock.ExpectQuery(`ORDER BY tenant_id, connector_id LIMIT \$1`).WithArgs(2).
 		WillReturnRows(sqlmock.NewRows(cols).
-			AddRow("acme", "gitlab", "Ready", 0, "").
-			AddRow("globex", "gitlab", "Ready", 0, ""))
+			AddRow("acme", "gitlab", "Ready", 0, "", "", "", "", "{}").
+			AddRow("globex", "gitlab", "Ready", 0, "", "", "", "", "{}"))
 	p1, err := srv.ListDesiredConnectors(ctx, &daemonoperatorv1.ListDesiredConnectorsRequest{PageSize: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestListDesiredConnectors_KeysetPages(t *testing.T) {
 	}
 
 	mock.ExpectQuery(`WHERE \(tenant_id, connector_id\) > \(\$2, \$3\)`).WithArgs(2, "acme", "gitlab").
-		WillReturnRows(sqlmock.NewRows(cols).AddRow("globex", "gitlab", "Ready", 0, ""))
+		WillReturnRows(sqlmock.NewRows(cols).AddRow("globex", "gitlab", "Ready", 0, "", "", "", "", "{}"))
 	p2, err := srv.ListDesiredConnectors(ctx, &daemonoperatorv1.ListDesiredConnectorsRequest{PageSize: 1, PageToken: p1.GetNextPageToken()})
 	if err != nil {
 		t.Fatal(err)

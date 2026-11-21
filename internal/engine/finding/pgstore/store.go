@@ -126,6 +126,12 @@ func newFindingRow(f finding.EnhancedFinding) (findingRow, error) {
 	}, nil
 }
 
+// upsertFindingSQL writes a finding. A second submit of one finding, such as a
+// second read of one result of a tool of the buyer (gibson#1448), updates the
+// fields of the submitter. The daemon alone owns the status, the check and
+// the priority (ADR-0178), so the update keeps the stored values of these
+// keys. jsonb_strip_nulls drops a key that the stored document lacks, so the
+// value of the submit stays then.
 const upsertFindingSQL = `
 INSERT INTO findings (id, mission_id, severity, title, document, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -133,8 +139,15 @@ ON CONFLICT (id) DO UPDATE SET
 	mission_id = EXCLUDED.mission_id,
 	severity   = EXCLUDED.severity,
 	title      = EXCLUDED.title,
-	document   = EXCLUDED.document,
+	document   = EXCLUDED.document || jsonb_strip_nulls(jsonb_build_object(
+		'status',        findings.document->'status',
+		'check',         findings.document->'check',
+		'priority',      findings.document->'priority',
+		'priority_rule', findings.document->'priority_rule')),
 	updated_at = EXCLUDED.updated_at`
+
+// daemonOwnedKeys are the keys of the document that a second submit keeps.
+var daemonOwnedKeys = []string{"status", "check", "priority", "priority_rule"}
 
 const deleteEvidenceSQL = `DELETE FROM finding_evidence WHERE finding_id = $1`
 
@@ -215,6 +228,12 @@ func newEvidenceRows(items []*typespb.Evidence) ([]evidenceRow, error) {
 // The document of the finding does not hold the evidence. The evidence is in
 // the finding_evidence table only.
 func (s *Store) Store(ctx context.Context, tenantID string, f finding.EnhancedFinding) error {
+	if err := f.Check.Validate(); err != nil {
+		return fmt.Errorf("finding store: finding %s: %w", f.ID, err)
+	}
+	if err := f.Priority.Validate(); err != nil {
+		return fmt.Errorf("finding store: finding %s: %w", f.ID, err)
+	}
 	evidence, err := newEvidenceRows(f.Evidence)
 	if err != nil {
 		return err
@@ -251,6 +270,73 @@ func (s *Store) Store(ctx context.Context, tenantID string, f finding.EnhancedFi
 	return nil
 }
 
+// setStatusSQL writes the status into the document of the finding. The
+// WHERE clause skips a row that already holds the status, so a repeated write
+// changes nothing.
+const setStatusSQL = `
+UPDATE findings
+SET document = jsonb_set(document, '{status}', to_jsonb($2::text)), updated_at = now()
+WHERE id = $1 AND document->>'status' IS DISTINCT FROM $2::text`
+
+// SetStatus writes one of the four statuses into the document of the finding.
+// It reports whether the row changed. A finding that the table does not hold,
+// or that already holds the status, is not an error and gives false. A status
+// outside the four fails before any write.
+func (s *Store) SetStatus(
+	ctx context.Context, tenantID string, id types.ID, status finding.FindingStatus,
+) (bool, error) {
+	if err := id.Validate(); err != nil {
+		return false, fmt.Errorf("finding store: finding ID: %w", err)
+	}
+	if !status.IsValid() {
+		return false, fmt.Errorf("finding store: %q is not a finding status", status)
+	}
+	c, err := s.conns.For(ctx, tenantID)
+	if err != nil {
+		return false, fmt.Errorf("finding store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	n, err := c.SQL().Exec(ctx, setStatusSQL, id.String(), string(status))
+	if err != nil {
+		return false, fmt.Errorf("finding store: set status of finding %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
+// setPrioritySQL writes the priority and its rule into the document of the
+// finding. A row that already holds both is left alone.
+const setPrioritySQL = `
+UPDATE findings
+SET document = jsonb_set(jsonb_set(document, '{priority}', to_jsonb($2::text)),
+	'{priority_rule}', to_jsonb($3::text)),
+	updated_at = now()
+WHERE id = $1 AND (document->>'priority' IS DISTINCT FROM $2::text
+	OR coalesce(document->>'priority_rule', '') IS DISTINCT FROM $3::text)`
+
+// SetPriority writes the priority and the rule that gave it into the document
+// of the finding. It reports whether the row changed. A priority outside P1 to
+// P4, and the empty priority, fail before any write.
+func (s *Store) SetPriority(
+	ctx context.Context, tenantID string, id types.ID, priority finding.Priority, rule string,
+) (bool, error) {
+	if err := id.Validate(); err != nil {
+		return false, fmt.Errorf("finding store: finding ID: %w", err)
+	}
+	if !priority.IsValid() {
+		return false, fmt.Errorf("finding store: %w: %q", finding.ErrInvalidPriority, string(priority))
+	}
+	c, err := s.conns.For(ctx, tenantID)
+	if err != nil {
+		return false, fmt.Errorf("finding store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	n, err := c.SQL().Exec(ctx, setPrioritySQL, id.String(), string(priority), rule)
+	if err != nil {
+		return false, fmt.Errorf("finding store: set priority of finding %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
 // Get returns the finding with the ID, or finding.ErrNotFound. The result has
 // no evidence, because the store does not read the finding_evidence table for
 // it.
@@ -271,6 +357,47 @@ func (s *Store) Get(ctx context.Context, tenantID string, id types.ID) (*finding
 		return nil, fmt.Errorf("finding store: read finding %s: %w", id, err)
 	}
 	return decodeFinding(doc)
+}
+
+// Confidences returns the confidence of each finding of the list that the
+// table holds, in one read (review m9). A finding with no row has no key in
+// the map. An ID that is not a UUID is left out.
+func (s *Store) Confidences(ctx context.Context, tenantID string, ids []types.ID) (map[types.ID]float64, error) {
+	out := map[types.ID]float64{}
+	keys := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id.Validate() == nil {
+			keys = append(keys, id.String())
+		}
+	}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	c, err := s.conns.For(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("finding store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	rows, err := c.SQL().Query(ctx, `SELECT document FROM findings WHERE id = ANY($1)`, keys)
+	if err != nil {
+		return nil, fmt.Errorf("finding store: read the confidences: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var doc []byte
+		if err := rows.Scan(&doc); err != nil {
+			return nil, fmt.Errorf("finding store: scan a finding: %w", err)
+		}
+		f, err := decodeFinding(doc)
+		if err != nil {
+			return nil, err
+		}
+		out[f.ID] = f.Confidence
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("finding store: read the confidences: %w", err)
+	}
+	return out, nil
 }
 
 // GetWithEvidence returns the finding with the ID and all of its evidence, as

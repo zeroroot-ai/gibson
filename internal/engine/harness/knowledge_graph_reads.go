@@ -55,36 +55,6 @@ func (h *DefaultAgentHarness) QueryNodes(ctx context.Context, query *graphragpb.
 	return results, nil
 }
 
-// FindSimilarAttacks returns attack patterns semantically close to content.
-func (h *DefaultAgentHarness) FindSimilarAttacks(ctx context.Context, content string, topK int) ([]*graphragpb.AttackPattern, error) {
-	tenant, err := h.tenantForRead(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ctx, span := h.tracer.Start(ctx, "AgentHarness.FindSimilarAttacks")
-	defer span.End()
-	raw, err := h.graphrag.FindSimilarAttacks(ctx, tenant, content, topK)
-	if err != nil {
-		return nil, fmt.Errorf("find similar attacks: %w", err)
-	}
-	return decodeGraphResults[graphragpb.AttackPattern](raw, "attack patterns")
-}
-
-// GetAttackChains returns multi-hop technique paths from a starting technique.
-func (h *DefaultAgentHarness) GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]*graphragpb.AttackChain, error) {
-	tenant, err := h.tenantForRead(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ctx, span := h.tracer.Start(ctx, "AgentHarness.GetAttackChains")
-	defer span.End()
-	raw, err := h.graphrag.GetAttackChains(ctx, tenant, techniqueID, maxDepth)
-	if err != nil {
-		return nil, fmt.Errorf("get attack chains: %w", err)
-	}
-	return decodeGraphResults[graphragpb.AttackChain](raw, "attack chains")
-}
-
 // FindSimilarFindings returns findings semantically close to the given one.
 func (h *DefaultAgentHarness) FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]*graphragpb.FindingNode, error) {
 	tenant, err := h.tenantForRead(ctx)

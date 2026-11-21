@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 
@@ -375,6 +376,123 @@ func (s *TimelineStore) LoadHistory(ctx context.Context, tenant string) ([]brain
 	return append(out, tail...), nil
 }
 
+// selectHistoryRangeSQL is selectHistorySQL for the rows of the kinds named.
+// The cursor starts at the first stream id of the start time, so the primary
+// key bounds the scan.
+const selectHistoryRangeSQL = `
+SELECT stream_ms, stream_seq, event::text
+FROM timeline_events
+WHERE (stream_ms, stream_seq) > ($1, $2) AND kind = ANY($4)
+ORDER BY stream_ms, stream_seq
+LIMIT $3`
+
+// LoadHistoryRange returns the events of the kinds named that the store
+// appended at from or later, in order (review M6). The Postgres history and the
+// stream tail both carry the append time in the stream id, so the read starts
+// at the stream id of from and never reads the older history.
+func (s *TimelineStore) LoadHistoryRange(ctx context.Context, tenant string, from time.Time, kinds []string) ([]brain.Event, error) {
+	conn, release, err := s.acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("datapool/redis-timeline: acquire conn for the history of tenant %q: %w", tenant, err)
+	}
+	defer release()
+	if conn.SQL == nil {
+		return nil, fmt.Errorf("datapool/redis-timeline: tenant %q has no Postgres handle for the Timeline history", tenant)
+	}
+	fromMs := max(from.UnixMilli(), 0)
+	var out []brain.Event
+	lastMs, lastSeq := fromMs, int64(-1)
+	for {
+		var rows Rows
+		if len(kinds) == 0 {
+			rows, err = conn.SQL.Query(ctx, selectHistorySQL, lastMs, lastSeq, replayBatchSize)
+		} else {
+			rows, err = conn.SQL.Query(ctx, selectHistoryRangeSQL, lastMs, lastSeq, replayBatchSize, kinds)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("datapool/redis-timeline: select the history range of tenant %q: %w", tenant, err)
+		}
+		page, err := scanHistoryRows(rows)
+		if err != nil {
+			return nil, fmt.Errorf("datapool/redis-timeline: read the history range of tenant %q: %w", tenant, err)
+		}
+		for _, row := range page {
+			out = append(out, row.event)
+			lastMs, lastSeq = row.ms, row.seq
+		}
+		if len(page) < replayBatchSize {
+			break
+		}
+	}
+	start := strconv.FormatInt(fromMs, 10) + "-0"
+	if lastSeq >= 0 {
+		start = "(" + strconv.FormatInt(lastMs, 10) + "-" + strconv.FormatInt(lastSeq, 10)
+	}
+	tail, err := streamEvents(ctx, conn.Redis, s.streamKey(tenant), start)
+	if err != nil {
+		return nil, fmt.Errorf("datapool/redis-timeline: read the stream tail of tenant %q: %w", tenant, err)
+	}
+	want := make(map[string]bool, len(kinds))
+	for _, k := range kinds {
+		want[k] = true
+	}
+	for _, ev := range tail {
+		if len(kinds) == 0 || want[ev.Kind()] {
+			out = append(out, ev)
+		}
+	}
+	return out, nil
+}
+
+// countHistoryBeforeSQL counts the rows of the history that the stream
+// appended before a time. The primary key serves the range.
+const countHistoryBeforeSQL = `SELECT count(*) FROM timeline_events WHERE stream_ms < $1`
+
+// lastHistoryIDSQL returns the stream id of the last row of the history.
+const lastHistoryIDSQL = `
+SELECT coalesce(max(stream_ms), -1), coalesce((SELECT max(stream_seq) FROM timeline_events
+  WHERE stream_ms = (SELECT max(stream_ms) FROM timeline_events)), -1)
+FROM timeline_events`
+
+// CountHistoryBefore returns how many events of LoadHistory the stream
+// appended before the time: the rows of the history before it, and the
+// stream entries before it that follow the last row of the history (review R5).
+func (s *TimelineStore) CountHistoryBefore(ctx context.Context, tenant string, before time.Time) (int, error) {
+	conn, release, err := s.acquire(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("datapool/redis-timeline: acquire conn for the history of tenant %q: %w", tenant, err)
+	}
+	defer release()
+	if conn.SQL == nil {
+		return 0, fmt.Errorf("datapool/redis-timeline: tenant %q has no Postgres handle for the Timeline history", tenant)
+	}
+	beforeMs := max(before.UnixMilli(), 0)
+	var n int64
+	if err := conn.SQL.QueryRow(ctx, countHistoryBeforeSQL, beforeMs).Scan(&n); err != nil {
+		return 0, fmt.Errorf("datapool/redis-timeline: count the history of tenant %q: %w", tenant, err)
+	}
+	var lastMs, lastSeq int64
+	if err := conn.SQL.QueryRow(ctx, lastHistoryIDSQL).Scan(&lastMs, &lastSeq); err != nil {
+		return 0, fmt.Errorf("datapool/redis-timeline: read the end of the history of tenant %q: %w", tenant, err)
+	}
+	start := "-"
+	if lastMs >= 0 {
+		start = "(" + strconv.FormatInt(lastMs, 10) + "-" + strconv.FormatInt(lastSeq, 10)
+	}
+	if beforeMs == 0 {
+		return int(n), nil
+	}
+	end := "(" + strconv.FormatInt(beforeMs, 10) + "-0"
+	if start != "-" && lastMs >= beforeMs {
+		return int(n), nil // the stream tail starts after the time
+	}
+	msgs, err := conn.Redis.XRange(ctx, s.streamKey(tenant), start, end).Result()
+	if err != nil {
+		return 0, fmt.Errorf("datapool/redis-timeline: count the stream tail of tenant %q: %w", tenant, err)
+	}
+	return int(n) + len(msgs), nil
+}
+
 // historyRow is one decoded row of timeline_events.
 type historyRow struct {
 	ms, seq int64
@@ -388,6 +506,11 @@ func historyPage(ctx context.Context, db SQL, afterMs, afterSeq int64) ([]histor
 	if err != nil {
 		return nil, fmt.Errorf("select from timeline_events: %w", err)
 	}
+	return scanHistoryRows(rows)
+}
+
+// scanHistoryRows decodes one page of timeline_events rows and closes them.
+func scanHistoryRows(rows Rows) ([]historyRow, error) {
 	defer rows.Close()
 
 	var page []historyRow

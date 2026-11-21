@@ -25,9 +25,11 @@ func TestMainDomainPack_TechniquesRollUpToTheirCategories(t *testing.T) {
 	require.NoError(t, err)
 
 	want := map[taxonomy.TechniqueID]taxonomy.CategoryID{
-		"unauthenticated_endpoint_exposed": "reconnaissance",
-		"credential_disclosure_detected":   "extraction",
-		"prompt_injection_marker_present":  "prompt_injection",
+		"unauthenticated_endpoint_exposed": "initial_access",
+		"credential_disclosure_detected":   "credential_access",
+		"privileged_container_detected":    "privilege_escalation",
+		"node_token_readable":              "credential_access",
+		"rbac_write_access_proven":         "privilege_escalation",
 	}
 	assert.Len(t, extended.Techniques(), len(want))
 	for technique, category := range want {
@@ -63,11 +65,11 @@ func TestDomainPack_ExtendTechniques(t *testing.T) {
 		require.ErrorContains(t, pack.Validate(), "not admitted")
 	})
 	t.Run("a technique id that is not a plain identifier is refused", func(t *testing.T) {
-		pack := DomainPack{Name: "bad", Techniques: map[string]string{"bad id`": "extraction"}}
+		pack := DomainPack{Name: "bad", Techniques: map[string]string{"bad id`": "credential_access"}}
 		require.Error(t, pack.Validate())
 	})
 	t.Run("a technique that the hierarchy already holds is refused", func(t *testing.T) {
-		pack := DomainPack{Name: "p", Techniques: map[string]string{"t1": "extraction"}}
+		pack := DomainPack{Name: "p", Techniques: map[string]string{"t1": "credential_access"}}
 		once, err := pack.ExtendTechniques(taxonomy.GlobalTechniques)
 		require.NoError(t, err)
 		_, err = pack.ExtendTechniques(once)

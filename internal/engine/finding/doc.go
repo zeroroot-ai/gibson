@@ -11,7 +11,7 @@
 // MITRE mappings (types.go). The evidence of a finding is types.v1.Evidence,
 // the one evidence shape. EvidenceTypeName and EvidenceTypeFromName map its
 // type enum to the names that the SDK and the predicates of a Domain Pack use
-// (evidence.go). MitreMapping and MitreTechnique carry an ATT&CK or ATLAS
+// (evidence.go). MitreMapping and MitreTechnique carry an ATT&CK
 // technique (mitre.go).
 //
 // # Store

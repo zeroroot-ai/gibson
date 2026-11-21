@@ -122,14 +122,6 @@ func TestQuerier_EveryReadRPCGoesThroughTheTenantPool(t *testing.T) {
 			_, err := q.QueryNodes(context.Background(), "acme", &graphragpb.GraphQuery{Text: "x"})
 			return err
 		},
-		"FindSimilarAttacks": func(q *PoolGraphRAGQuerier) error {
-			_, err := q.FindSimilarAttacks(context.Background(), "acme", "content", 5)
-			return err
-		},
-		"GetAttackChains": func(q *PoolGraphRAGQuerier) error {
-			_, err := q.GetAttackChains(context.Background(), "acme", "T1059", 3)
-			return err
-		},
 		"FindSimilarFindings": func(q *PoolGraphRAGQuerier) error {
 			_, err := q.FindSimilarFindings(context.Background(), "acme", "f1", 5)
 			return err

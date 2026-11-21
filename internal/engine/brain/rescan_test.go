@@ -3,7 +3,10 @@
 
 package brain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // scanWorld builds a World holding one scan mission against target and one
 // unrelated non-scan mission, so every test starts from a shape where scoping
@@ -11,20 +14,55 @@ import "testing"
 func scanWorld(t *testing.T, missionID, target string, status MissionStatus) *World {
 	t.Helper()
 	w := NewWorld("t1")
-	Reduce(w, MissionStarted{ID: missionID, RunID: "run-" + missionID, Name: ScanMissionName, TargetID: target})
+	w.clock = func() time.Time { return testScanTime }
+	Reduce(w, MissionStarted{ID: missionID, RunID: "run-" + missionID, Name: ScanMissionName, StartedAt: testScanTime, TargetID: target})
 	if status != MissionWorking {
 		Reduce(w, MissionDone{ID: missionID, Outcome: status})
 	}
 	return w
 }
 
+// testDeployTime is when the fixes of these tests are deployed. testScanTime is
+// when the rescan reads its evidence. The scan is newer than the deploy.
+var (
+	testDeployTime = time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	testScanTime   = time.Date(2026, 11, 20, 11, 0, 0, 0, time.UTC)
+)
+
+// settleRescan runs the rescan System and then the VerificationSystem, and applies
+// what each of them emits, which is what two ticks do.
+func settleRescan(w *World) {
+	applyAll(w, RescanReconciliationSystem(w))
+	applyAll(w, VerificationSystem(w))
+}
+
 // raiseInto raises a Finding attributed to missionID and then sets its status,
 // which is how every Finding reaches `fixed` in production: an agent moves it
 // after the scan that raised it.
 func raiseInto(w *World, id, missionID, status string) {
-	Reduce(w, FindingRaised{ID: id, MissionID: missionID})
+	Reduce(w, FindingRaised{ID: id, MissionID: missionID, CheckKind: "scan"})
 	if status != "" && status != FindingStatusOpen {
-		Reduce(w, FindingStatusChanged{ID: id, Status: status})
+		walk(w, id, status, "mr-"+id)
+	}
+	if status == FindingStatusFixed {
+		// A fixed Finding has a deploy and a health signal that held.
+		Reduce(w, DeployObserved{MergeRequest: "mr-" + id, At: testDeployTime})
+		Reduce(w, HealthObserved{MergeRequest: "mr-" + id, Held: true, At: testDeployTime})
+	}
+}
+
+// walk moves a Finding along its lifecycle to the status: open, fixing,
+// fixed, verified. The fixing step records the merge request (review M4).
+func walk(w *World, id, status, mr string) {
+	for _, s := range []string{FindingStatusFixing, FindingStatusFixed, FindingStatusVerified} {
+		ev := FindingStatusChanged{ID: id, Status: s}
+		if s == FindingStatusFixing {
+			ev.MergeRequest = mr
+		}
+		Reduce(w, ev)
+		if s == status {
+			return
+		}
 	}
 }
 
@@ -53,10 +91,10 @@ func TestRescan_FixedAndUnseen_BecomesVerified(t *testing.T) {
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
 	// A second scan of the same target runs and does NOT re-raise f1.
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 
-	applyAll(w, RescanReconciliationSystem(w))
+	settleRescan(w)
 
 	if got := findingByID(t, w, "f1").Status; got != FindingStatusVerified {
 		t.Fatalf("a fixed Finding the rescan did not see must be verified, got %q", got)
@@ -69,11 +107,11 @@ func TestRescan_FixedAndSeenAgain_ReturnsToOpen(t *testing.T) {
 	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-2"}) // seen again
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 
-	applyAll(w, RescanReconciliationSystem(w))
+	settleRescan(w)
 
 	if got := findingByID(t, w, "f1").Status; got != FindingStatusOpen {
 		t.Fatalf("a fixed Finding the rescan saw again must return to open, got %q", got)
@@ -88,10 +126,10 @@ func TestRescan_OpenAndUnseen_DoesNotMove(t *testing.T) {
 	raiseInto(w, "open-one", "scan-1", FindingStatusOpen)
 	raiseInto(w, "fixing-one", "scan-1", FindingStatusFixing)
 
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 
-	applyAll(w, RescanReconciliationSystem(w))
+	settleRescan(w)
 
 	if got := findingByID(t, w, "open-one").Status; got != FindingStatusOpen {
 		t.Errorf("an open Finding must survive a rescan that did not see it, got %q", got)
@@ -108,7 +146,7 @@ func TestRescan_FailedScan_VerifiesNothing(t *testing.T) {
 	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionFailed})
 
 	evs := RescanReconciliationSystem(w)
@@ -136,7 +174,7 @@ func TestRescan_OutOfScopeFinding_IsNeverTouched(t *testing.T) {
 	raiseInto(w, "from-pentest", "pentest-1", FindingStatusFixed)
 
 	Reduce(w, MissionDone{ID: "scan-1", Outcome: MissionCompleted})
-	applyAll(w, RescanReconciliationSystem(w))
+	settleRescan(w)
 
 	for _, id := range []string{"hand-filed", "from-pentest"} {
 		f := findingByID(t, w, id)
@@ -155,10 +193,10 @@ func TestRescan_AnotherTargetsScan_DoesNotReconcile(t *testing.T) {
 	w := scanWorld(t, "scan-a", "target-a", MissionWorking)
 	raiseInto(w, "f-a", "scan-a", FindingStatusFixed)
 
-	Reduce(w, MissionStarted{ID: "scan-b", RunID: "run-scan-b", Name: ScanMissionName, TargetID: "target-b"})
+	Reduce(w, MissionStarted{ID: "scan-b", RunID: "run-scan-b", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-b"})
 	Reduce(w, MissionDone{ID: "scan-b", Outcome: MissionCompleted})
 
-	applyAll(w, RescanReconciliationSystem(w))
+	settleRescan(w)
 
 	if got := findingByID(t, w, "f-a").Status; got != FindingStatusFixed {
 		t.Fatalf("a scan of another target reconciled target-a's Finding, status %q", got)
@@ -174,10 +212,10 @@ func TestRescan_RunsOncePerScan(t *testing.T) {
 	raiseInto(w, "f1", "scan-1", FindingStatusOpen)
 	Reduce(w, MissionDone{ID: "scan-1", Outcome: MissionCompleted})
 
-	applyAll(w, RescanReconciliationSystem(w))
+	settleRescan(w)
 
 	// The agent fixes it AFTER the scan completed.
-	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
+	walk(w, "f1", FindingStatusFixed, "")
 
 	if evs := RescanReconciliationSystem(w); len(evs) != 0 {
 		t.Fatalf("a reconciled scan judged a fix it never saw: %#v", evs)
@@ -233,9 +271,9 @@ func TestRescan_BranchCompletionCannotVerify(t *testing.T) {
 func TestRescan_ReRaiseKeepsStatusAndMovesLastScan(t *testing.T) {
 	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-1", Title: "original", Severity: "high"})
-	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
+	walk(w, "f1", FindingStatusFixed, "")
 
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-2", Title: "ignored", Severity: "low"})
 
 	f := findingByID(t, w, "f1")
@@ -309,7 +347,7 @@ func TestRescan_ScanWithNoTarget_ReconcilesNothing(t *testing.T) {
 	raiseInto(w, "hand-filed", "", FindingStatusFixed)
 
 	// A scan mission that never bound a target.
-	Reduce(w, MissionStarted{ID: "scan-untargeted", RunID: "run-scan-untargeted", Name: ScanMissionName, TargetID: ""})
+	Reduce(w, MissionStarted{ID: "scan-untargeted", RunID: "run-scan-untargeted", Name: ScanMissionName, StartedAt: testScanTime, TargetID: ""})
 	Reduce(w, MissionDone{ID: "scan-untargeted", Outcome: MissionCompleted})
 
 	for _, ev := range RescanReconciliationSystem(w) {
@@ -354,8 +392,9 @@ func TestScanReconciled_RoundTripsThroughTheTimeline(t *testing.T) {
 // intact.
 func TestRescan_ReplayAfterRestart_DoesNotReReconcile(t *testing.T) {
 	timeline := []Event{
-		MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, TargetID: "target-a"},
+		MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"},
 		FindingRaised{ID: "f1", MissionID: "scan-1"},
+		FindingStatusChanged{ID: "f1", Status: FindingStatusFixing},
 		FindingStatusChanged{ID: "f1", Status: FindingStatusFixed},
 		MissionDone{ID: "scan-1", Outcome: MissionCompleted},
 		ScanReconciled{MissionID: "scan-1"},
@@ -385,10 +424,17 @@ func TestRescan_ReplayAfterRestart_DoesNotReReconcile(t *testing.T) {
 	}
 }
 
+// fix moves a Finding to fixed with a deploy and a health signal that held.
+func fix(w *World, id string) {
+	walk(w, id, FindingStatusFixed, "mr-"+id)
+	Reduce(w, DeployObserved{MergeRequest: "mr-" + id, At: testDeployTime})
+	Reduce(w, HealthObserved{MergeRequest: "mr-" + id, Held: true, At: testDeployTime})
+}
+
 // scanRun projects one run of a recurring scan. The mission ID is the record ID
 // and is the same for every run (gibson#1217).
 func scanRun(w *World, runID string) {
-	Reduce(w, MissionProjected{ID: "scan", RunID: runID, Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionProjected{ID: "scan", RunID: runID, Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 }
 
 // TestRescan_SecondRunOfOneScanRecord_FixedFindingEndsVerified is the rescan
@@ -398,15 +444,16 @@ func scanRun(w *World, runID string) {
 // the Finding.
 func TestRescan_SecondRunOfOneScanRecord_FixedFindingEndsVerified(t *testing.T) {
 	w := NewWorld("t1")
+	w.clock = func() time.Time { return testScanTime }
 	scanRun(w, "run-1")
-	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1"})
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1", CheckKind: "scan"})
 	Reduce(w, MissionDone{ID: "scan", RunID: "run-1", Outcome: MissionCompleted})
-	applyAll(w, RescanReconciliationSystem(w))
-	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
+	settleRescan(w)
+	fix(w, "f1")
 
 	scanRun(w, "run-2")
 	Reduce(w, MissionDone{ID: "scan", RunID: "run-2", Outcome: MissionCompleted})
-	applyAll(w, RescanReconciliationSystem(w))
+	settleRescan(w)
 
 	if got := findingByID(t, w, "f1").Status; got != FindingStatusVerified {
 		t.Fatalf("a fixed Finding that run 2 did not see must be verified, got %q", got)
@@ -418,15 +465,16 @@ func TestRescan_SecondRunOfOneScanRecord_FixedFindingEndsVerified(t *testing.T) 
 // Finding.
 func TestRescan_LateFindingOfRun1DoesNotCountForRun2(t *testing.T) {
 	w := NewWorld("t1")
+	w.clock = func() time.Time { return testScanTime }
 	scanRun(w, "run-1")
-	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1"})
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1", CheckKind: "scan"})
 	Reduce(w, MissionDone{ID: "scan", RunID: "run-1", Outcome: MissionFailed, Reason: "stopped by user"})
-	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
+	fix(w, "f1")
 
 	scanRun(w, "run-2")
-	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1"}) // late
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1", CheckKind: "scan"}) // late
 	Reduce(w, MissionDone{ID: "scan", RunID: "run-2", Outcome: MissionCompleted})
-	applyAll(w, RescanReconciliationSystem(w))
+	settleRescan(w)
 
 	if got := findingByID(t, w, "f1").Status; got != FindingStatusVerified {
 		t.Fatalf("a late finding of run 1 must not count for run 2, got %q", got)
@@ -438,6 +486,7 @@ func TestRescan_LateFindingOfRun1DoesNotCountForRun2(t *testing.T) {
 // so no rescan of the record reconciles it or counts it as seen.
 func TestRescan_LateFindingOfRun1IsKeptWithNoScanProvenance(t *testing.T) {
 	w := NewWorld("t1")
+	w.clock = func() time.Time { return testScanTime }
 	scanRun(w, "run-1")
 	Reduce(w, MissionDone{ID: "scan", RunID: "run-1", Outcome: MissionFailed, Reason: "stopped by user"})
 	scanRun(w, "run-2")
@@ -446,5 +495,100 @@ func TestRescan_LateFindingOfRun1IsKeptWithNoScanProvenance(t *testing.T) {
 	f := findingByID(t, w, "late")
 	if f.ScanScope != "" || f.LastScan != "" {
 		t.Fatalf("a late finding has scan scope %q and last scan %q, want none", f.ScanScope, f.LastScan)
+	}
+}
+
+// TestRescan_ASecurityTestDoesNotVerifyBySilence: a mission that runs an attack
+// predicate and ends without a proof for a fixed finding is no rerun of
+// its check. The finding stays fixed (ADR-0178). Only the settlement of the
+// attack predicate can verify it.
+func TestRescan_ASecurityTestDoesNotVerifyBySilence(t *testing.T) {
+	for _, name := range []string{"attack-test", "red-team-run"} {
+		t.Run(name, func(t *testing.T) {
+			w := NewWorld("t1")
+			w.clock = func() time.Time { return testScanTime }
+			Reduce(w, MissionProjected{ID: "red-1", RunID: "run-1", Name: name, TargetID: "target-a"})
+			Reduce(w, FindingRaised{ID: "f1", MissionID: "red-1", MissionRunID: "run-1"})
+			Reduce(w, MissionDone{ID: "red-1", RunID: "run-1", Outcome: MissionCompleted})
+			fix(w, "f1")
+
+			Reduce(w, MissionProjected{ID: "red-1", RunID: "run-2", Name: name, TargetID: "target-a"})
+			Reduce(w, MissionDone{ID: "red-1", RunID: "run-2", Outcome: MissionCompleted})
+			if evs := RescanReconciliationSystem(w); len(evs) != 0 {
+				t.Fatalf("a %s run gave %+v, want no rerun", name, evs)
+			}
+			settleRescan(w)
+			if got := findingByID(t, w, "f1").Status; got != FindingStatusFixed {
+				t.Fatalf("status = %q, want fixed", got)
+			}
+		})
+	}
+}
+
+// A scan that started before the deploy of a fix never saw the fix. It ends
+// after the deploy, and the reconciliation runs later still. Its rerun has the
+// time of the start of the scan, so it neither verifies the fix nor reopens it
+// (review B2).
+func TestRescan_AScanThatStartedBeforeTheDeployDecidesNothing(t *testing.T) {
+	for _, seen := range []bool{false, true} {
+		w := NewWorld("t1")
+		w.clock = func() time.Time { return testScanTime } // the reconciliation runs after the deploy
+		Reduce(w, MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+		raiseInto(w, "f1", "scan-1", FindingStatusFixed)
+		Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName,
+			StartedAt: testDeployTime.Add(-time.Minute), TargetID: "target-a"})
+		if seen {
+			Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-2", MissionRunID: "run-scan-2"})
+		}
+		Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
+		settleRescan(w)
+		f := findingByID(t, w, "f1")
+		if f.Status != FindingStatusFixed {
+			t.Fatalf("seen=%v: status = %q, want fixed", seen, f.Status)
+		}
+		if !f.RerunAt.Equal(testDeployTime.Add(-time.Minute)) {
+			t.Fatalf("seen=%v: rerun at = %v, want the start of the scan", seen, f.RerunAt)
+		}
+	}
+}
+
+// A scan with no start time has no time of evidence, so it gives no rerun.
+func TestRescan_AScanWithNoStartGivesNoRerun(t *testing.T) {
+	w := NewWorld("t1")
+	w.clock = func() time.Time { return testScanTime }
+	Reduce(w, MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, TargetID: "target-a"})
+	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
+	Reduce(w, MissionDone{ID: "scan-1", Outcome: MissionCompleted})
+	for _, ev := range RescanReconciliationSystem(w) {
+		if _, ok := ev.(CheckRerun); ok {
+			t.Fatalf("a scan with no start gave a rerun: %+v", ev)
+		}
+	}
+}
+
+// A scan that sees a verified Finding again, on evidence newer than the
+// verification, opens it again. A scan that started before the verification
+// decides nothing (review r8).
+func TestRescan_AVerifiedFindingSeenAgainOpens(t *testing.T) {
+	for _, tc := range []struct {
+		start time.Time
+		want  string
+	}{{testScanTime.Add(2 * time.Hour), FindingStatusOpen}, {testScanTime.Add(-time.Minute), FindingStatusVerified}} {
+		w := scanWorld(t, "scan-1", "target-a", MissionWorking)
+		raiseInto(w, "f1", "scan-1", FindingStatusFixed)
+		Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+		Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
+		settleRescan(w)
+		if got := findingByID(t, w, "f1").Status; got != FindingStatusVerified {
+			t.Fatalf("status = %q, want verified before the next scan", got)
+		}
+		w.clock = func() time.Time { return testScanTime.Add(3 * time.Hour) }
+		Reduce(w, MissionStarted{ID: "scan-3", RunID: "run-scan-3", Name: ScanMissionName, StartedAt: tc.start, TargetID: "target-a"})
+		Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-3", MissionRunID: "run-scan-3"})
+		Reduce(w, MissionDone{ID: "scan-3", Outcome: MissionCompleted})
+		settleRescan(w)
+		if got := findingByID(t, w, "f1").Status; got != tc.want {
+			t.Fatalf("scan from %v: status = %q, want %q", tc.start, got, tc.want)
+		}
 	}
 }

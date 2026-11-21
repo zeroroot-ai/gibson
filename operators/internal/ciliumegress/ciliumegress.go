@@ -94,3 +94,50 @@ func Rules(entries []string) ([]interface{}, error) {
 	}
 	return rules, nil
 }
+
+// DeniedRanges are the address ranges that a workload with a host list must
+// never reach: the private ranges of RFC 1918, link-local (with the cloud
+// metadata address 169.254.169.254), loopback, CGNAT, unique local, and the
+// unspecified addresses. A host name of the list can resolve to one of them
+// (DNS rebinding), so the allow rules alone do not stop it (review B3).
+var DeniedRanges = []string{
+	"10.0.0.0/8",
+	"172.16.0.0/12",
+	"192.168.0.0/16",
+	"169.254.0.0/16",
+	"127.0.0.0/8",
+	"100.64.0.0/10",
+	"0.0.0.0/8",
+	"fc00::/7",
+	"fe80::/10",
+	"::1/128",
+	"::/128",
+}
+
+// DenyRules returns the egressDeny rules of a workload with a host list: one
+// rule that denies DeniedRanges and the cluster ranges that the caller gives
+// (the pod and the service CIDRs of the install).
+//
+// A Cilium deny rule wins over every allow rule, a toFQDNs allow too
+// (docs.cilium.io, "Deny Policies"). A deny rule cannot name a host, but it
+// can name a CIDR. The address that a toFQDNs name resolves to is then denied
+// when it is in one of these ranges, whatever the name is. Cilium before
+// 1.14.16, 1.15.10 and 1.16.3 can drop a CIDR deny when a narrower CIDR allow
+// with a port exists (CVE-2024-47825). Cilium turns each address that a
+// toFQDNs allow resolves to into such a narrow allow with a port, so this
+// policy has the shape of that fault on an old Cilium. An install must run a
+// fixed version (review r1).
+func DenyRules(clusterCIDRs []string) ([]interface{}, error) {
+	cidrs := make([]interface{}, 0, len(DeniedRanges)+len(clusterCIDRs))
+	for _, c := range append(append([]string(nil), DeniedRanges...), clusterCIDRs...) {
+		_, n, err := net.ParseCIDR(strings.TrimSpace(c))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %q", ErrBadCIDR, c)
+		}
+		cidrs = append(cidrs, map[string]interface{}{"cidr": n.String()})
+	}
+	return []interface{}{map[string]interface{}{"toCIDRSet": cidrs}}, nil
+}
+
+// ErrBadCIDR reports a cluster range that is not a CIDR.
+var ErrBadCIDR = errors.New("a cluster range is not a CIDR")

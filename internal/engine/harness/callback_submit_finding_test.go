@@ -322,3 +322,38 @@ func TestValidateFinding_UsesTheOneConversion(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, resp.GetError())
 }
+
+// A submit with an idempotency key needs an authenticated caller, and its id
+// binds to the subject of that caller, never to ContextInfo.agent_name, which
+// the caller sets (review R6). The component path writes the same form, so one
+// key of one caller gives one id on both paths.
+func TestSubmitFinding_TheIdempotencyKeyBindsToTheSubject(t *testing.T) {
+	h := &submitFindingHarness{submitProofMockHarness: submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}}
+	registry := NewCallbackHarnessRegistry()
+	mustRegister(t, registry, h.missionID.String(), "recon-agent", h)
+	mustRegister(t, registry, h.missionID.String(), "another-name", h)
+	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry,
+		WithProofSettlement(newTestProofSettlementEngine(t, "acme", nil)), testEventBus())
+
+	req := submitFindingRequest("mission-A", nil)
+	req.IdempotencyKey = "qualys:host-9:qid-1"
+	_, err := svc.SubmitFinding(auth.ContextWithTenantString(context.Background(), "acme"), req)
+	require.Equal(t, codes.Unauthenticated, status.Code(err), "no caller identity")
+	require.Empty(t, h.submitted)
+
+	asCaller := func(subject, agentName string) types.ID {
+		ctx := auth.ContextWithTenantString(auth.WithIdentity(context.Background(),
+			auth.Identity{Subject: subject, CredentialType: auth.CredentialCapabilityGrant}), "acme")
+		r := submitFindingRequest("mission-A", nil)
+		r.IdempotencyKey = "qualys:host-9:qid-1"
+		r.Context.AgentName = agentName
+		resp, err := svc.SubmitFinding(ctx, r)
+		require.NoError(t, err)
+		require.Nil(t, resp.GetError())
+		return h.submitted[len(h.submitted)-1].ID
+	}
+	first := asCaller("agent_principal:sa-1", "recon-agent")
+	assert.Equal(t, finding.ResultID("acme", "agent_principal:sa-1", "qualys:host-9:qid-1"), first)
+	assert.Equal(t, first, asCaller("agent_principal:sa-1", "another-name"), "the agent name does not change the id")
+	assert.NotEqual(t, first, asCaller("agent_principal:sa-2", "recon-agent"), "another caller gets another id")
+}

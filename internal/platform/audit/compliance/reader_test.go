@@ -262,3 +262,61 @@ func TestEvidence_TheNISTPackRuns(t *testing.T) {
 	require.Len(t, rep.Events, 1)
 	assert.Equal(t, []string{"ac-6"}, rep.Events[0].ControlIDs)
 }
+
+// TestEvidence_NamesTheCountermeasureNextToTheControl: when the tenant
+// enabled the D3FEND pack, a control that D3FEND maps to a countermeasure
+// names it. A control with no mapping names none. Without the pack enabled,
+// no control names a countermeasure.
+func TestEvidence_NamesTheCountermeasureNextToTheControl(t *testing.T) {
+	run := func(t *testing.T, enabled enabledSet) *Report {
+		t.Helper()
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		mock.ExpectQuery("FROM   audit_log").WillReturnRows(sqlmock.NewRows(auditColumns))
+		r, err := NewReader(db, ontology.EmbeddedCatalog(), enabled)
+		require.NoError(t, err)
+		rep, err := r.Evidence(context.Background(), Query{Tenant: "acme", Pack: "nist-800-53-r5", Start: start, End: end})
+		require.NoError(t, err)
+		return rep
+	}
+	byID := func(rep *Report, id string) ControlEvidence {
+		for _, c := range rep.Controls {
+			if c.ID == id {
+				return c
+			}
+		}
+		t.Fatalf("control %q is not in the report", id)
+		return ControlEvidence{}
+	}
+
+	rep := run(t, enabledSet{"acme/nist-800-53-r5": true, "acme/mitre-d3fend": true})
+	si3 := byID(rep, "si-3")
+	ids := make([]string, 0, len(si3.Countermeasures))
+	for _, cm := range si3.Countermeasures {
+		ids = append(ids, cm.ID)
+	}
+	assert.Contains(t, ids, "D3-FA")
+	for _, cm := range si3.Countermeasures {
+		if cm.ID == "D3-FA" {
+			assert.Equal(t, "File Analysis", cm.Name)
+			assert.Equal(t, "Detect", cm.Tactic)
+			assert.Equal(t, []string{"si-3"}, cm.MappedControls)
+		}
+	}
+	// D3FEND maps D3-AL to enhancements of ac-2, so ac-2 names it, with the
+	// exact enhancements.
+	var found bool
+	for _, cm := range byID(rep, "ac-2").Countermeasures {
+		if cm.ID == "D3-AL" {
+			found = true
+			assert.Contains(t, cm.MappedControls, "ac-2.1")
+		}
+	}
+	assert.True(t, found, "ac-2 must name D3-AL through its enhancements")
+	assert.Empty(t, byID(rep, "ac-1").Countermeasures)
+
+	for _, c := range run(t, enabledSet{"acme/nist-800-53-r5": true}).Controls {
+		assert.Empty(t, c.Countermeasures, "the control %s names a countermeasure with the pack not enabled", c.ID)
+	}
+}

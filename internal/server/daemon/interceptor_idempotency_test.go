@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/infra/idempotency"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc"
 	grpccodes "google.golang.org/grpc/codes"
@@ -185,6 +186,26 @@ func TestIdempotency_CacheMissThenHit(t *testing.T) {
 	got, ok := resp2.(*wrapperspb.StringValue)
 	require.True(t, ok, "cached response unmarshalled to %T", resp2)
 	assert.Equal(t, "once", got.Value)
+}
+
+// The idempotency key of a component finding names the finding, so a second
+// submit with the same key reaches the handler and updates the finding. The
+// cache never answers it (review R6).
+func TestIdempotency_AFindingSubmitAlwaysReachesTheHandler(t *testing.T) {
+	store, _ := newTestStoreT(t)
+	intr := idempotencyUnaryInterceptor(store, time.Hour, newTestLogger())
+	var calls atomic.Int32
+	handler := func(context.Context, any) (any, error) {
+		calls.Add(1)
+		return wrapperspb.String("stored"), nil
+	}
+	ctx := ctxWithTenant(t)
+	req := newIdemRequest("result-1", "payload")
+	for range 2 {
+		_, err := intr(ctx, req, info(componentpb.ComponentService_SubmitFinding_FullMethodName), handler)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, int32(2), calls.Load(), "the second submit must update the finding")
 }
 
 func TestIdempotency_TerminalErrorIsCached(t *testing.T) {

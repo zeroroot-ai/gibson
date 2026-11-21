@@ -1,0 +1,39 @@
+# CrowdStrike Falcon connector. The image is the falcon-mcp server that
+# CrowdStrike publishes (ADR-0114, ADR-0177).
+# Source of the image: https://github.com/CrowdStrike/falcon-mcp (README, "Container Usage")
+# The digest is the manifest list of the tag 0.20.2, read from quay.io on 2026-11-20.
+# The server speaks stdio when it gets no transport flag. It reads the variables
+# FALCON_CLIENT_ID, FALCON_CLIENT_SECRET and FALCON_BASE_URL.
+# CrowdStrike put falcon-mcp in maintenance mode. New tools go to the hosted
+# CrowdStrike MCP, whose docs need a Falcon login.
+id: crowdstrike-falcon
+kind: connector
+displayName: CrowdStrike Falcon
+description: >-
+  The falcon-mcp server of CrowdStrike. It reads detections, hosts and
+  vulnerabilities of the Falcon tenant of the customer.
+egressAllow:
+  - api.crowdstrike.com:443
+spec:
+  vendor: crowdstrike
+  class: edr
+  shape: Hosted
+  image: quay.io/crowdstrike/falcon-mcp@sha256:4d932ad6252fef828b1be646091586f4704ede5ac1a225dfaa6e83eda26087ad
+  transport: stdio
+  # The two credentials are names of secrets in the secret store of the tenant.
+  # The tenant creates them with the SecretsService. The daemon reads the
+  # values, and the operator puts them in the pod. No value is in this file.
+  auth: none
+  credentials:
+    - secret: crowdstrike-falcon-client-id
+      env: FALCON_CLIENT_ID
+    - secret: crowdstrike-falcon-client-secret
+      env: FALCON_CLIENT_SECRET
+  # The default of falcon-mcp is the US-1 cloud. Another cloud needs another
+  # entry and another egress host.
+  env:
+    FALCON_BASE_URL: https://api.crowdstrike.com
+  # Source of the flag: README of falcon-mcp, "no tool that mutates tenant
+  # state is registered". The intake agent only reads.
+  args:
+    - --read-only

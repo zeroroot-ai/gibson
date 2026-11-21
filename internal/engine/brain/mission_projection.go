@@ -113,6 +113,11 @@ type MissionProjected struct {
 	// the second run of a mission a new run and not a repeat of the first
 	// (gibson#1217).
 	RunID string
+
+	// StartedAt is when the run started. A scan saw its evidence no earlier
+	// than this time, so the rerun of a check reads it as the time of the
+	// evidence (review B2). The daemon sets it. Reduce never reads the clock.
+	StartedAt time.Time
 }
 
 func (MissionProjected) Kind() string { return "mission.projected" }
@@ -150,6 +155,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 		Description:    e.Description,
 		TargetID:       e.TargetID,
 		TenantID:       e.TenantID,
+		StartedAt:      e.StartedAt,
 	})
 	projectWork(w, e)
 }
@@ -232,6 +238,7 @@ func nodeName(workID string) string {
 // the projection. The entity keeps what creation recorded, such as the creator.
 func startRun(m *Mission, e MissionProjected) {
 	m.RunID = e.RunID
+	m.StartedAt = e.StartedAt
 	m.Goal = e.Goal
 	m.Status = MissionWorking
 	m.Budget = e.Budget

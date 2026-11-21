@@ -827,6 +827,24 @@ message DesiredConnector {
   string auth = 7;
   // egress_allow is the egress list of the catalog entry, as "host:port".
   repeated string egress_allow = 8;
+  // credential_header is the name of the header that carries the credential of
+  // a Remote connector. Empty means Authorization (gibson#1535).
+  string credential_header = 9;
+  // credentials are the vendor credentials of a Hosted connector. Each one is
+  // a named secret of the tenant that reaches the pod as an environment
+  // variable (gibson#1536).
+  repeated ConnectorCredentialRef credentials = 10;
+  // env holds the plain environment variables of a Hosted connector.
+  map<string, string> env = 11;
+  // args are the arguments of the server process of a Hosted connector.
+  repeated string args = 12;
+  // port is the port that the server of a Hosted connector listens on. Zero
+  // means the default.
+  int32 port = 13;
+  // image_pull_secret is the name of the secret of the tenant that holds the
+  // Docker config JSON for the registry of the image. Empty means no pull
+  // secret.
+  string image_pull_secret = 14;
 }
 
 message ListDesiredConnectorsResponse {

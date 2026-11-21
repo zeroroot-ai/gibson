@@ -90,6 +90,35 @@ message CatalogEntry {
   // "https://gitlab.com"). Empty for a self-hostable vendor with no single
   // default, so the operator enters their own instance URL.
   string default_instance_url = 6;
+  // tool_class is the tool class of the connector (ADR-0177): siem, edr,
+  // scanner, identity, cloud, observability, git-host, ticket, paging or
+  // patch.
+  string tool_class = 7;
+  // endpoint_patterns are the endpoints that a tenant may give when it enables
+  // a Remote connector (gibson#1534). Empty means the entry takes no tenant
+  // endpoint. A pattern is an https URL. Its host is exact or starts with one
+  // wildcard label, and a path segment can be one "*".
+  repeated string endpoint_patterns = 8;
+  // oauth_client is "dynamic" when the daemon registers an OAuth client at the
+  // vendor, and "tenant" when the tenant registers it and gives the client id
+  // and the name of the secret at enable time (gibson#1538). It is empty for an
+  // entry that does not use OAuth.
+  string oauth_client = 9;
+  // variables are the values that a tenant gives when it enables a Hosted
+  // connector (gibson#1508). A connector with variables takes a value for each
+  // of them in EnableConnectorRequest.variables.
+  repeated CatalogVariable variables = 10;
+}
+
+// CatalogVariable declares one value that a tenant gives for a Hosted
+// connector, for example the address of its own Ansible Automation Platform.
+message CatalogVariable {
+  // name is the key of the value in EnableConnectorRequest.variables.
+  string name = 1;
+  // kind is "endpoint": an https URL of a public DNS name.
+  string kind = 2;
+  // patterns limit the value. Empty means any public DNS name.
+  repeated string patterns = 3;
 }
 
 message ListCatalogRequest {}
@@ -101,6 +130,28 @@ message ListCatalogResponse {
 message EnableConnectorRequest {
   // catalog_id is the id of the entry to enable (for example "gitlab").
   string catalog_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  // endpoint is the MCP endpoint of a Remote connector with endpoint_patterns
+  // (gibson#1534). The daemon refuses an endpoint outside the patterns. Empty
+  // selects the default endpoint of the catalog entry.
+  string endpoint = 2 [(buf.validate.field).string = { max_len: 2048 }];
+  // oauth_client_id is the id of the OAuth client that the tenant registered at
+  // its identity provider. It is required when the entry has
+  // oauth_client = "tenant", and refused otherwise (gibson#1538).
+  string oauth_client_id = 3 [(buf.validate.field).string = { max_len: 512 }];
+  // oauth_client_secret_name is the name of the secret in the secret store of
+  // the tenant that holds the client secret. The request never carries the
+  // secret value. It is required with oauth_client_id.
+  string oauth_client_secret_name = 4 [(buf.validate.field).string = { max_len: 512 }];
+  // variables are the values for the variables of a Hosted connector, by
+  // name (gibson#1508). The daemon refuses a missing value, a value that the
+  // entry does not declare, and a value that breaks the rules of the entry: an
+  // https URL of a public DNS name, with no IP address, no private or cluster
+  // name and no system port. The egress of the connector follows the values.
+  map<string, string> variables = 5 [(buf.validate.field).map = {
+    max_pairs: 8
+    keys: { string: { max_len: 64 } }
+    values: { string: { max_len: 2048 } }
+  }];
 }
 
 message EnableConnectorResponse {
@@ -120,6 +171,15 @@ message Connector {
   string phase = 4;
   int32 discovered_tools = 5;
   string last_error = 6;
+  // tool_class is the tool class of the catalog entry of the connector. It is
+  // empty when the connector left the catalog.
+  string tool_class = 7;
+  // endpoint is the endpoint that the tenant gave. It is empty when the
+  // connector uses the default endpoint of the catalog entry.
+  string endpoint = 8;
+  // variables are the values that the tenant gave for the variables of a Hosted
+  // connector. A value is the URL of a host and never a credential.
+  map<string, string> variables = 9;
 }
 
 message ListConnectorsRequest {}

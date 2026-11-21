@@ -44,6 +44,25 @@ type ClosedJob struct {
 	// Inputs are the ids the spec started from (JobSpec.inputs), verbatim.
 	Inputs       []string
 	Deliverables []job.Deliverable
+	// Countermeasure is the id of the countermeasure that the fix applies, as
+	// the spec names it (CountermeasureContextKey). It is empty when the spec
+	// names none.
+	Countermeasure string
+}
+
+// ErrFindingClaimed means that another fix job holds a Finding that the spec
+// names. The node opens no job.
+var ErrFindingClaimed = errors.New("jobnode: another fix job works on this finding")
+
+// FixClaims holds one fix job at a time on each Finding (see brain.FixClaimed).
+// The daemon backs it with the tenant World.
+type FixClaims interface {
+	// Claim claims each input that is a Finding for the job. It fails with an
+	// error that wraps ErrFindingClaimed when another job holds one of them,
+	// and then holds none of them.
+	Claim(ctx context.Context, tenantID, claim, missionRunID string, inputs []string) error
+	// Release ends the claims of the job.
+	Release(ctx context.Context, tenantID, claim, missionRunID string, inputs []string)
 }
 
 // CloseObserver is told once for each job the node closes as accomplished.
@@ -89,6 +108,8 @@ type Input struct {
 	Verifier Verifier
 	// Closed hears about each accomplished close. Required.
 	Closed CloseObserver
+	// Claims holds the Findings of the job while it runs. Required.
+	Claims FixClaims
 	// Findings resolves the {{findings.open}} input reference to real finding
 	// ids, server-side, from the run's own target. Required only when a spec
 	// uses the reference; a spec that names its inputs outright needs none.
@@ -144,8 +165,12 @@ func Run(ctx context.Context, in Input) (Outcome, error) {
 	}
 	in.Spec = stampContext(resolved, in.MissionRunID, in.NodeID)
 	spec := in.Spec
+	if err := in.Claims.Claim(ctx, in.TenantID, in.claim(), in.MissionRunID, spec.GetInputs()); err != nil {
+		return Outcome{}, fmt.Errorf("jobnode: claim the findings of the job: %w", err)
+	}
 	opened, err := in.Ops.Open(ctx, in.TenantID, job.OpenInput{BankID: in.BankID, Spec: spec, OpenedBy: in.Opener})
 	if err != nil {
+		in.release(ctx)
 		return Outcome{}, fmt.Errorf("jobnode: open a job on bank %s: %w", in.BankID, err)
 	}
 
@@ -169,6 +194,9 @@ func Run(ctx context.Context, in Input) (Outcome, error) {
 			if gerr != nil {
 				return Outcome{}, fmt.Errorf("jobnode: read a job closed elsewhere: %w", gerr)
 			}
+			// The node links no merge request of a job that it did not close,
+			// so nothing ends the claim later. It ends now (review M3).
+			in.release(ctx)
 			result, rerr := job.ResultOf(j)
 			if rerr != nil {
 				return Outcome{}, fmt.Errorf("jobnode: %w", rerr)
@@ -205,6 +233,8 @@ func (in Input) validate() error {
 		return errors.New("jobnode: Verifier is required")
 	case in.Closed == nil:
 		return errors.New("jobnode: Closed is required")
+	case in.Claims == nil:
+		return errors.New("jobnode: Claims is required")
 	case in.TenantID == "" || in.BankID == "":
 		return errors.New("jobnode: a tenant and a bank are required")
 	case in.Spec == nil || in.Spec.GetGoal() == "":
@@ -301,12 +331,19 @@ func closeWith(ctx context.Context, in Input, jobID string, verdict job.Verdict,
 	if err != nil {
 		return Outcome{}, fmt.Errorf("jobnode: %w", err)
 	}
+	// A job that ends with no merge request leaves its findings to the next
+	// job. A merge request moves them to `fixing`, and the claim ends with the
+	// fix.
+	if verdict != job.VerdictAccomplished || !hasMergeRequest(result.Deliverables) {
+		in.release(ctx)
+	}
 	// Only accomplished work is reported. A failed job's deliverables did not
 	// pass acceptance, so they claim no fix.
 	if verdict == job.VerdictAccomplished {
 		in.Closed.JobClosed(ctx, ClosedJob{
 			TenantID: in.TenantID, MissionRunID: in.MissionRunID, NodeID: in.NodeID,
 			JobID: jobID, Inputs: in.Spec.GetInputs(), Deliverables: result.Deliverables,
+			Countermeasure: countermeasureOf(in.Spec),
 		})
 	}
 	return Outcome{Result: result, Passes: pass, Report: report}, nil
@@ -319,8 +356,39 @@ func closeWith(ctx context.Context, in Input, jobID string, verdict job.Verdict,
 func abandon(ctx context.Context, in Input, jobID string, pass int32, report string, cause error) (Outcome, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
+	in.release(ctx)
 	if _, err := in.Ops.Close(ctx, in.TenantID, job.CloseInput{JobID: jobID, Verdict: job.VerdictAbandoned, Closer: in.Opener}); err != nil {
 		return Outcome{Passes: pass, Report: report}, fmt.Errorf("jobnode: %w (and the job could not be abandoned: %w)", cause, err)
 	}
 	return Outcome{Passes: pass, Report: report}, fmt.Errorf("jobnode: %w", cause)
+}
+
+// claim names the fix job of this node run.
+func (in Input) claim() string { return ClaimName(in.MissionRunID, in.NodeID) }
+
+// ClaimName is the name of the fix claim of one node run: the mission run and
+// the node. The graph link reads it to find the claims of a closed job.
+func ClaimName(missionRunID, nodeID string) string { return missionRunID + "/" + nodeID }
+
+// JobBranch is the branch that the member driver commits the work of a job on
+// (zeroroot-ai/zerocool-plugins, claude-member workspace.ts jobBranch). A merge
+// request of the job comes from this branch and from no other.
+func JobBranch(jobID string) string { return "job/" + jobID }
+
+// release ends the claims of the job on a bound that drops the cancellation of
+// the caller, because the bound of the caller may be the thing that ended.
+func (in Input) release(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	in.Claims.Release(ctx, in.TenantID, in.claim(), in.MissionRunID, in.Spec.GetInputs())
+}
+
+// hasMergeRequest reports whether the job delivered a merge request.
+func hasMergeRequest(ds []job.Deliverable) bool {
+	for _, d := range ds {
+		if d.Kind == "merge_request" && (d.URL != "" || d.Ref != "") {
+			return true
+		}
+	}
+	return false
 }

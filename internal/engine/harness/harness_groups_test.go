@@ -35,8 +35,7 @@ func TestAgentHarnessMethodSetUnchanged(t *testing.T) {
 		// Graph reads, added deliberately (#492): the daemon-side harness had no
 		// graph surface at all, which is why a dispatched agent could not read
 		// the tenant graph.
-		"QueryNodes", "FindSimilarAttacks", "GetAttackChains",
-		"FindSimilarFindings", "GetRelatedFindings",
+		"QueryNodes", "FindSimilarFindings", "GetRelatedFindings",
 		// ApplicationFindings is a traversal rather than a search, added because
 		// the reads above could not answer whether a running Deployment actually
 		// contains the code a Finding affects (gibson#1669).
@@ -116,10 +115,10 @@ func TestGroupsAreDisjoint(t *testing.T) {
 // pinned so the next addition is as deliberate as this one.
 func TestKnowledgeReaderConvergedWithTheSDK(t *testing.T) {
 	tp := reflect.TypeOf((*KnowledgeReader)(nil)).Elem()
-	if got := tp.NumMethod(); got != 9 {
-		t.Fatalf("daemon-side KnowledgeReader has %d reads, expected 9", got)
+	if got := tp.NumMethod(); got != 7 {
+		t.Fatalf("daemon-side KnowledgeReader has %d reads, expected 7", got)
 	}
-	for _, graphRead := range []string{"QueryNodes", "FindSimilarAttacks", "GetAttackChains", "FindSimilarFindings", "GetRelatedFindings", "ApplicationFindings"} {
+	for _, graphRead := range []string{"QueryNodes", "FindSimilarFindings", "GetRelatedFindings", "ApplicationFindings"} {
 		if _, ok := tp.MethodByName(graphRead); !ok {
 			t.Errorf("%s is missing; a dispatched agent cannot read the graph without it", graphRead)
 		}

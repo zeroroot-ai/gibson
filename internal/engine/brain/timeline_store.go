@@ -5,7 +5,10 @@
 // event Timeline (ADR-0163, gibson#1112/#1113).
 package brain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // TimelineStore is the durable-log abstraction the brain writes through
 // (ADR-0163). The brain package depends only on this interface — no Redis
@@ -68,6 +71,19 @@ type TimelineStore interface {
 	// bucket (gibson#992). A replay of an old frame and the belief trainer
 	// read it.
 	LoadHistory(ctx context.Context, tenant string) ([]Event, error)
+
+	// LoadHistoryRange returns the part of LoadHistory that a bounded reader
+	// needs (review M6): the events that the store appended at from or later,
+	// of the kinds named, in order. No kind means each kind. A reader of the
+	// blue team views reads the events of a few kinds in the last periods, not
+	// the whole history of the tenant.
+	LoadHistoryRange(ctx context.Context, tenant string, from time.Time, kinds []string) ([]Event, error)
+
+	// CountHistoryBefore returns how many events of LoadHistory the store
+	// appended before the time. A reader that reads the range from that time
+	// on, of each kind, adds it to the index of an event to get the position
+	// of the event in the whole history (review R5).
+	CountHistoryBefore(ctx context.Context, tenant string, before time.Time) (int, error)
 
 	// WriteSnapshot persists a serialised World snapshot for the tenant and
 	// returns an opaque snapshot handle. The handle is passed to TrimTo to

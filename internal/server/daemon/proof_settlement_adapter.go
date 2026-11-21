@@ -163,4 +163,6 @@ func (s *tenantRoutedProofSettlement) SubmitProofForReview(ctx context.Context, 
 // independent of Start()'s much larger bootstrap sequence.
 func wireProofSettlement(callback *harness.CallbackManager, registry *brain.Registry) {
 	callback.SetProofSettlement(newTenantRoutedProofSettlement(registry))
+	// invoke_tool sends a call of a marked tool to the same queue (gibson#1474).
+	callback.SetToolApproval(newTenantRoutedToolApproval(registry))
 }
