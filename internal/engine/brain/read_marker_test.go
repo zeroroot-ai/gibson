@@ -74,3 +74,40 @@ func TestReadMarker_SurvivesARestart(t *testing.T) {
 		t.Fatalf("markers did not round-trip:\n got %+v\nwant %+v", got, want)
 	}
 }
+
+// A write that the Timeline replays out of order does not move the marker
+// back, and the Engine reads the marker of a subject (gibson#1569).
+func TestReadMarker_OldWriteDoesNotMoveTheMarkerBack(t *testing.T) {
+	w := NewWorld("acme")
+	Reduce(w, ReadMarkerWritten{Subject: "s", Connector: "c", Cursor: "new", RecordedAtUnixNano: 20})
+	Reduce(w, ReadMarkerWritten{Subject: "s", Connector: "c", Cursor: "old", RecordedAtUnixNano: 10})
+	if m, _ := w.LastReadMarker("s", "c"); m.Cursor != "new" {
+		t.Fatalf("cursor = %q, want new", m.Cursor)
+	}
+	if w.ReadMarkerSnapshot() == nil {
+		t.Fatal("the snapshot is empty")
+	}
+	if got := NewWorld("empty").ReadMarkerSnapshot(); got != nil {
+		t.Fatalf("an empty World snapshot = %v, want nil", got)
+	}
+}
+
+// The Engine folds a write and reads the marker back. The snapshot orders the
+// markers of one subject by Connector.
+func TestReadMarker_EngineReadsTheFoldedMarker(t *testing.T) {
+	e := newTestEngine()
+	e.Submit(ReadMarkerWritten{Subject: "s", Connector: "b", Cursor: "2", RecordedAtUnixNano: 2})
+	e.Submit(ReadMarkerWritten{Subject: "s", Connector: "a", Cursor: "1", RecordedAtUnixNano: 1})
+	e.Tick()
+	m, ok := e.LastReadMarker("s", "a")
+	if !ok || m.Cursor != "1" {
+		t.Fatalf("marker = %+v, %v", m, ok)
+	}
+	if _, ok := e.LastReadMarker("s", "none"); ok {
+		t.Fatal("a Connector with no marker returned one")
+	}
+	snap := e.World.ReadMarkerSnapshot()
+	if len(snap) != 2 || snap[0].Connector != "a" || snap[1].Connector != "b" {
+		t.Fatalf("snapshot = %+v, want a then b", snap)
+	}
+}

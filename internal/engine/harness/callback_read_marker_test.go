@@ -103,3 +103,47 @@ func TestWriteReadMarker_RefusalsUseHarnessError(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, w.GetError().GetCode())
 }
+
+type failingMarkerStore struct{}
+
+func (failingMarkerStore) WriteReadMarker(context.Context, string, brain.ReadMarker) error {
+	return assert.AnError
+}
+
+func (failingMarkerStore) LastReadMarker(context.Context, string, string, string) (brain.ReadMarker, bool, error) {
+	return brain.ReadMarker{}, false, assert.AnError
+}
+
+// A store that fails answers with an in-band INTERNAL error. A failed read
+// never looks like "no marker" (gibson#1569).
+func TestLastReadMarker_AFailingStoreIsAnErrorNotNoMarker(t *testing.T) {
+	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), NewCallbackHarnessRegistry(),
+		WithReadMarkerStore(failingMarkerStore{}), testEventBus())
+	ctx := readMarkerCtx("acme", "s")
+
+	r, err := svc.LastReadMarker(ctx, &harnesspb.LastReadMarkerRequest{Connector: "c"})
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INTERNAL, r.GetError().GetCode())
+	assert.False(t, r.GetFound())
+
+	w, err := svc.WriteReadMarker(ctx, &harnesspb.WriteReadMarkerRequest{Connector: "c"})
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INTERNAL, w.GetError().GetCode())
+
+	r, err = svc.LastReadMarker(ctx, &harnesspb.LastReadMarkerRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, r.GetError().GetCode())
+}
+
+func TestWriteReadMarker_ANilTimelineFails(t *testing.T) {
+	store := NewBrainReadMarkerStore(nil)
+	require.Error(t, store.WriteReadMarker(context.Background(), "acme", brain.ReadMarker{Subject: "s", Connector: "c"}))
+	_, _, err := store.LastReadMarker(context.Background(), "acme", "s", "c")
+	require.Error(t, err)
+}
+
+func TestSetReadMarkerStore_WiresTheStore(t *testing.T) {
+	m := &CallbackManager{server: &CallbackServer{service: &HarnessCallbackService{}}}
+	m.SetReadMarkerStore(failingMarkerStore{})
+	require.NotNil(t, m.server.service.readMarkers)
+}
