@@ -123,8 +123,10 @@ var DeniedRanges = []string{
 // can name a CIDR. The address that a toFQDNs name resolves to is then denied
 // when it is in one of these ranges, whatever the name is. Cilium before
 // 1.14.16, 1.15.10 and 1.16.3 can drop a CIDR deny when a narrower CIDR allow
-// exists (CVE-2024-47825). This policy has no CIDR allow, and an install must
-// run a fixed version.
+// with a port exists (CVE-2024-47825). Cilium turns each address that a
+// toFQDNs allow resolves to into such a narrow allow with a port, so this
+// policy has the shape of that fault on an old Cilium. An install must run a
+// fixed version (review r1).
 func DenyRules(clusterCIDRs []string) ([]interface{}, error) {
 	cidrs := make([]interface{}, 0, len(DeniedRanges)+len(clusterCIDRs))
 	for _, c := range append(append([]string(nil), DeniedRanges...), clusterCIDRs...) {
