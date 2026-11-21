@@ -154,14 +154,19 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.tenant.v1.AgentSkillService/GetAgentSkill":     true,
 			"/gibson.tenant.v1.AgentSkillService/GrantAgentSkill":   true,
 			"/gibson.tenant.v1.AgentSkillService/DeleteAgentSkill":  true,
-			"/gibson.component.v1.ComponentService/CallTool":        true,
-			"/gibson.component.v1.ComponentService/SubmitFinding":   true,
-			"/gibson.component.v1.ComponentService/ResolveModel":    true,
-			"/gibson.component.v1.ComponentService/ResolveAgent":    true,
-			"/gibson.tenant.v1.TenantService/GetFinding":            true,
-			"/gibson.tenant.v1.TenantService/ExportFindings":        true,
-			"/gibson.world.v1.WorldService/GetTimeline":             true,
-			"/gibson.world.v1.WorldService/GetLlmCall":              true,
+			// The Shared Agent Skill path of the same test (gibson#1376): the
+			// runner lists the offers of the operator and enables one as the
+			// tenant admin.
+			"/gibson.tenant.v1.AgentSkillService/ListSharedAgentSkills":  true,
+			"/gibson.tenant.v1.AgentSkillService/EnableSharedAgentSkill": true,
+			"/gibson.component.v1.ComponentService/CallTool":             true,
+			"/gibson.component.v1.ComponentService/SubmitFinding":        true,
+			"/gibson.component.v1.ComponentService/ResolveModel":         true,
+			"/gibson.component.v1.ComponentService/ResolveAgent":         true,
+			"/gibson.tenant.v1.TenantService/GetFinding":                 true,
+			"/gibson.tenant.v1.TenantService/ExportFindings":             true,
+			"/gibson.world.v1.WorldService/GetTimeline":                  true,
+			"/gibson.world.v1.WorldService/GetLlmCall":                   true,
 			// The A2A inbound exit test (tests/e2e/a2a_inbound_test.go, epic
 			// gibson#1367). The runner publishes a mission definition for inbound
 			// calls as the tenant admin, grants and revokes a caller identity, and
