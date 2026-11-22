@@ -111,8 +111,11 @@ const (
 	ErrCodePendingAuthorization ErrCode = "pending_authorization"
 	// ErrCodeMergeNotGranted means the merge request has no merge slot yet.
 	ErrCodeMergeNotGranted ErrCode = "merge_not_granted"
-	// ErrCodeRefused means the daemon refused the call by policy: the mission
-	// deny list, an inactive run or the denial of a person.
+	// ErrCodeRefused means the daemon refused the call by policy. CodeOf gives
+	// it for the mission deny list, an inactive run and the denial of a person.
+	// Only the denial of a person reaches the flight recorder and the incident
+	// report. A call on the deny list or in an inactive run returns before the
+	// record, so it has no record.
 	ErrCodeRefused ErrCode = "refused"
 	// ErrCodeFailed means the call ran or could not run, and it returned an error.
 	ErrCodeFailed ErrCode = "failed"

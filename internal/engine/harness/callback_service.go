@@ -2291,7 +2291,10 @@ func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 		Confidence:  pf.Confidence,
 		Category:    pf.Category,
 		// The remediation text is part of the finding that the agent authors.
-		// The fix loop and the dashboard read it (gibson#1574).
+		// The finding store keeps it in the document of the finding, and an
+		// agent reads it back through GetFindings (agentFindingToProto)
+		// (gibson#1574). A second submit replaces it with what that submit
+		// holds, so a second submit with no remediation clears it.
 		Remediation: pf.Remediation,
 	}
 

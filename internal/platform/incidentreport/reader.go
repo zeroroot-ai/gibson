@@ -52,7 +52,7 @@ const historySlack = time.Hour
 // or one of its alerts has no first sight. The read then starts at now less
 // this window, and never covers the whole history of the tenant (gibson#1583,
 // as review item r13 does for the views).
-const historyLookback = 90 * 24 * time.Hour
+const historyLookback = brain.MaxViewLookback
 
 // Grant is a grant of a capability to an agent, and the person who gave it.
 type Grant struct {
