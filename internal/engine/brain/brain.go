@@ -562,6 +562,8 @@ func Reduce(w *World, ev Event) {
 		applyMergeGranted(w, e)
 	case MergeSlotExpired:
 		applyMergeSlotExpired(w, e)
+	case MergeAsked:
+		applyMergeAsked(w, e)
 	case MergeRequestObserved:
 		applyMergeRequestObserved(w, e)
 	case VoIPlanRequested:

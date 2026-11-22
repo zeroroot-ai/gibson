@@ -30,7 +30,16 @@ type Watcher struct {
 	// refused is the last refusal that the Watcher reported for each merge
 	// request, so that one refusal is one Timeline event.
 	refused map[string]string
+	// released is the time when the Watcher freed the slot of a merge request
+	// whose waiting run had ended with the merge request still open. The Watcher
+	// queues the merge request again only after RequeueBackoff, so a merge
+	// request that no agent merges does not churn the queue (gibson#1609).
+	released map[string]time.Time
 }
+
+// RequeueBackoff is how long the Watcher waits before it queues a merge request
+// again after it freed the slot of that merge request.
+const RequeueBackoff = 10 * time.Minute
 
 // NewWatcher builds a Watcher. The reader, the reverter and the placer are
 // required. A nil policy source means DefaultPolicy.
@@ -47,7 +56,7 @@ func NewWatcher(r Reader, rv Reverter, p Placer, policy PolicySource, logger *sl
 	return &Watcher{
 		reader: r, reverter: rv, placer: p, policy: policy,
 		now: func() time.Time { return time.Now().UTC() }, logger: logger,
-		refused: map[string]string{},
+		refused: map[string]string{}, released: map[string]time.Time{},
 	}, nil
 }
 
@@ -67,9 +76,9 @@ func (w *Watcher) Step(ctx context.Context, tenant string, findings []brain.Find
 	}
 	sort.Strings(keys)
 
-	slotOf := map[string]bool{}
+	slotOf := map[string]brain.MergeSlot{}
 	for _, s := range slots {
-		slotOf[s.MergeRequest] = true
+		slotOf[s.MergeRequest] = s
 	}
 	var out []brain.Event
 	for _, mr := range keys {
@@ -78,7 +87,8 @@ func (w *Watcher) Step(ctx context.Context, tenant string, findings []brain.Find
 		var err error
 		switch {
 		case anyStatus(fs, brain.FindingStatusFixing):
-			evs, err = w.stepFixing(ctx, tenant, mr, fs, slotOf[mr])
+			slot, hasSlot := slotOf[mr]
+			evs, err = w.stepFixing(ctx, tenant, mr, fs, slot, hasSlot)
 		case anyStatus(fs, brain.FindingStatusFixed):
 			evs, err = w.stepFixed(ctx, tenant, mr, fs)
 		}
@@ -119,7 +129,9 @@ func (w *Watcher) stampOr(t time.Time) time.Time {
 }
 
 // stepFixing reads the merge request of a `fixing` finding.
-func (w *Watcher) stepFixing(ctx context.Context, tenant, mr string, fs []brain.FindingSnapshot, hasSlot bool) ([]brain.Event, error) {
+func (w *Watcher) stepFixing(
+	ctx context.Context, tenant, mr string, fs []brain.FindingSnapshot, slot brain.MergeSlot, hasSlot bool,
+) ([]brain.Event, error) {
 	fact, err := w.reader.MergeRequest(ctx, tenant, fixMission(fs), mr)
 	if err != nil {
 		return nil, fmt.Errorf("read merge request: %w", err)
@@ -136,9 +148,26 @@ func (w *Watcher) stepFixing(ctx context.Context, tenant, mr string, fs []brain.
 			Key: mr, State: brain.MergeRequestRefused, At: w.stampOr(fact.At), MissionID: fixMission(fs),
 		}}, nil
 	}
-	// The merge request is open. A green pipeline asks for the slot of its
-	// Application. The queue grants one slot at a time.
-	if hasSlot || !fact.PipelineGreen {
+	// The merge request is open.
+	if hasSlot {
+		// The run that waited for the slot has ended and the host shows the merge
+		// request still open, so the run did not merge. The slot leaves the
+		// queue, and the next fix of the Application gets its turn. The host is
+		// read first: a run that merged and then ended is seen above as merged
+		// and keeps its slot until its health signal answers (gibson#1609).
+		if slot.WaiterEnded {
+			w.noteRelease(mr)
+			return []brain.Event{brain.MergeSlotExpired{
+				MergeRequest: mr, Application: slot.Application, At: w.now(), MissionID: fixMission(fs),
+				Reason: "the agent run that waited for the slot ended with the merge request still open",
+			}}, nil
+		}
+		return nil, nil
+	}
+	// A green pipeline asks for the slot of its Application. The queue grants
+	// one slot at a time. A slot that the Watcher freed is not asked for again
+	// until the backoff has passed.
+	if !fact.PipelineGreen || w.inBackoff(mr) {
 		return nil, nil
 	}
 	mission := fixMission(fs)
@@ -159,6 +188,28 @@ func (w *Watcher) stepFixing(ctx context.Context, tenant, mr string, fs []brain.
 	return []brain.Event{brain.MergeRequestQueued{
 		MergeRequest: mr, Application: app, At: w.now(), MissionID: mission,
 	}}, nil
+}
+
+func (w *Watcher) noteRelease(mr string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.released[mr] = w.now()
+}
+
+// inBackoff reports whether the Watcher freed the slot of the merge request
+// less than RequeueBackoff ago. A merge request past its backoff is forgotten.
+func (w *Watcher) inBackoff(mr string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	at, ok := w.released[mr]
+	if !ok {
+		return false
+	}
+	if w.now().Sub(at) < RequeueBackoff {
+		return true
+	}
+	delete(w.released, mr)
+	return false
 }
 
 func (w *Watcher) noteRefusal(mr, reason string) bool {

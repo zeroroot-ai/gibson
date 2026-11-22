@@ -238,6 +238,8 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		return e.MissionID != "" && e.MissionID == missionID
 	case MergeSlotExpired:
 		return e.MissionID != "" && e.MissionID == missionID
+	case MergeAsked:
+		return e.MissionID != "" && e.MissionID == missionID
 	case FixLinkRefused:
 		return e.MissionID != "" && e.MissionID == missionID
 	case FixLinkPending:

@@ -55,13 +55,16 @@ type MergeSlot struct {
 	// MissionID is the mission of the fix that holds the slot. Only a call
 	// of that mission may merge with it (review m16).
 	MissionID string
-	// Abandoned is true when the agent run that queued the merge request ended
-	// with no merge (gibson#1609). An abandoned slot holds no place: no call
-	// merges with it, the gate never grants it, and it does not block the other
-	// merge requests of the Application. It stays in the queue, so the fix loop
-	// does not ask for a new slot for the same merge request. It leaves with the
-	// merge request, as any slot does.
-	Abandoned bool
+	// WaiterMission and WaiterRun name the mission and the run of the agent that
+	// asked for the merge and waits for the slot (gibson#1609). MergeAsked sets
+	// them. Both are empty until an agent asks.
+	WaiterMission string
+	WaiterRun     string
+	// WaiterEnded is derived by MergeSlots and never stored. It is true when the
+	// World knows that the waiting run has ended: its mission is terminal in that
+	// run, or a later run of the mission replaced it. A waiter that the World
+	// does not know has not ended.
+	WaiterEnded bool
 }
 
 // MergeSlotHold is how long a granted slot waits for its merge request to
@@ -79,23 +82,36 @@ type MergeSlotExpired struct {
 	Reason       string
 	At           time.Time
 	MissionID    string
-	// Abandoned says that the slot is not removed: the agent run that queued
-	// the merge request ended with no merge, so the slot gives up its place and
-	// stays in the queue as abandoned (gibson#1609).
-	Abandoned bool
 }
 
 // Kind identifies the merge_request.slot_expired brain event.
 func (MergeSlotExpired) Kind() string { return "merge_request.slot_expired" }
 
-func applyMergeSlotExpired(w *World, e MergeSlotExpired) {
-	if e.Abandoned {
-		if s := findMergeSlot(w, e.MergeRequest); s != nil {
-			s.Abandoned = true
-		}
+func applyMergeSlotExpired(w *World, e MergeSlotExpired) { releaseMergeSlot(w, e.MergeRequest) }
+
+// MergeAsked records that a run of an agent asked for the merge of a merge
+// request and was refused because the slot is not granted yet (gibson#1609). The
+// run is the waiter of the slot. The daemon reads the mission and the run from
+// the verified grant of the call, never from the request.
+type MergeAsked struct {
+	MergeRequest string
+	MissionID    string
+	RunID        string
+	At           time.Time
+}
+
+// Kind identifies the merge_request.asked brain event.
+func (MergeAsked) Kind() string { return "merge_request.asked" }
+
+// applyMergeAsked sets the waiter of the slot. The latest ask wins, because the
+// run that asks now is the run that waits now.
+func applyMergeAsked(w *World, e MergeAsked) {
+	if e.RunID == "" || e.MissionID == "" {
 		return
 	}
-	releaseMergeSlot(w, e.MergeRequest)
+	if s := findMergeSlot(w, e.MergeRequest); s != nil {
+		s.WaiterMission, s.WaiterRun = e.MissionID, e.RunID
+	}
 }
 
 func findMergeSlot(w *World, mr string) *MergeSlot {
@@ -134,7 +150,13 @@ func releaseMergeSlot(w *World, mr string) {
 }
 
 // MergeSlots returns the queue in the order of the Timeline.
-func (w *World) MergeSlots() []MergeSlot { return append([]MergeSlot(nil), w.mergeSlots...) }
+func (w *World) MergeSlots() []MergeSlot {
+	out := append([]MergeSlot(nil), w.mergeSlots...)
+	for i := range out {
+		out[i].WaiterEnded = w.waiterEnded(out[i])
+	}
+	return out
+}
 
 // MayMerge reports whether the merge request holds a granted slot for a call
 // of the mission. A call with no mission never merges. A slot that names its
@@ -143,7 +165,7 @@ func (w *World) MergeSlots() []MergeSlot { return append([]MergeSlot(nil), w.mer
 // own mission (review m16).
 func (w *World) MayMerge(mr, missionID string) bool {
 	s := findMergeSlot(w, mr)
-	if s == nil || !s.Granted || s.Abandoned || missionID == "" {
+	if s == nil || !s.Granted || missionID == "" {
 		return false
 	}
 	if s.MissionID == "" {
@@ -161,13 +183,13 @@ func (w *World) MayMerge(mr, missionID string) bool {
 func MergeGateSystem(w *World) []Event {
 	busy := map[string]bool{}
 	for _, s := range w.mergeSlots {
-		if s.Granted && !s.Abandoned {
+		if s.Granted {
 			busy[s.Application] = true
 		}
 	}
 	var out []Event
 	for _, s := range w.mergeSlots { // the slice is in Timeline order
-		if s.Granted || s.Abandoned || busy[s.Application] {
+		if s.Granted || busy[s.Application] {
 			continue
 		}
 		busy[s.Application] = true
@@ -182,9 +204,11 @@ func MergeGateSystem(w *World) []Event {
 //	                                                 Finding again, or it moved on)
 //	granted, not merged after MergeSlotHold        → free (the merge request did
 //	                                                 not merge)
-//	the agent run that queued it has ended         → abandon (no merge, so the
-//	                                                 slot gives up its place at
-//	                                                 once, gibson#1609)
+//
+// A slot whose waiting run has ended is not freed here. This System cannot read
+// the merge request on the host, and a run can end because it merged. The fix
+// loop watcher reads the host first and frees the slot only when the merge
+// request is still open (gibson#1609).
 //
 // The System is quiescent: a freed slot leaves the queue.
 func MergeSlotExpirySystem(w *World) []Event {
@@ -210,42 +234,38 @@ func MergeSlotExpirySystem(w *World) []Event {
 	var out []Event
 	for _, s := range w.mergeSlots {
 		var reason string
-		abandon := false
 		switch {
 		case !carried[s.MergeRequest]:
 			reason = "no finding carries the merge request"
-		case !s.Abandoned && !merged[s.MergeRequest] && w.mergeWaiterEnded(s.MissionID):
-			reason = "the agent run that queued the merge request ended with no merge"
-			abandon = true
-		case !s.Abandoned && s.Granted && !merged[s.MergeRequest] && !s.GrantedAt.IsZero() && now.Sub(s.GrantedAt) > MergeSlotHold:
+		case s.Granted && !merged[s.MergeRequest] && !s.GrantedAt.IsZero() && now.Sub(s.GrantedAt) > MergeSlotHold:
 			reason = "the merge request did not merge " + MergeSlotHold.String() + " after the grant"
 		default:
 			continue
 		}
 		out = append(out, MergeSlotExpired{
 			MergeRequest: s.MergeRequest, Application: s.Application, Reason: reason, At: now,
-			MissionID: mission[s.MergeRequest], Abandoned: abandon,
+			MissionID: mission[s.MergeRequest],
 		})
 	}
 	return out
 }
 
-// mergeWaiterEnded reports whether the agent run that waits for a merge slot has
-// ended. The fix agent merges from its own mission, which originated the fix
-// mission of the slot, so the parent mission is the run that waits. A fix
-// mission that no mission originated is its own waiter. The run has ended when
-// the World knows that mission and its status is terminal. A mission that the
-// World does not know has not ended, as far as the World can tell.
-func (w *World) mergeWaiterEnded(fixMission string) bool {
-	candidates := make([]string, 0, 2)
-	if l, ok := w.MissionLineage(fixMission); ok && l.ParentMissionID != "" {
-		candidates = append(candidates, l.ParentMissionID)
+// waiterEnded reports whether the run that waits for the slot has ended. The run
+// is the key, because a mission has many runs. The run has ended when the World
+// knows its mission and either the mission is terminal in that run, or the
+// mission has a later run. A slot with no waiter, and a mission that the World
+// does not know, have not ended.
+func (w *World) waiterEnded(s MergeSlot) bool {
+	if s.WaiterMission == "" || s.WaiterRun == "" {
+		return false
 	}
-	candidates = append(candidates, fixMission)
-	for _, id := range candidates {
-		if ent, ok := findMission(w, id); ok {
-			return w.missions.Get(ent).Status.IsTerminal()
-		}
+	ent, ok := findMission(w, s.WaiterMission)
+	if !ok {
+		return false
 	}
-	return false
+	m := w.missions.Get(ent)
+	if m.RunID != "" && m.RunID != s.WaiterRun {
+		return true
+	}
+	return m.Status.IsTerminal()
 }
