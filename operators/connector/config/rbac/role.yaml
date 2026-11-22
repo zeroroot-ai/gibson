@@ -17,12 +17,6 @@ rules:
   - update
   - watch
 - apiGroups:
-  - apps
-  resources:
-  - daemonsets
-  verbs:
-  - get
-- apiGroups:
   - cilium.io
   resources:
   - ciliumnetworkpolicies
@@ -85,3 +79,25 @@ rules:
   - patch
   - update
   - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: connector-operator-role
+  namespace: kube-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - apps
+  resourceNames:
+  - cilium
+  resources:
+  - daemonsets
+  verbs:
+  - get

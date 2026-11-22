@@ -1048,7 +1048,7 @@ func main() {
 	// The egress policy of a plugin has the shape of CVE-2024-47825. The
 	// operator refuses to start on a Cilium below the fixed release, and when
 	// it cannot read the version (gibson#1580).
-	if err := ciliumegress.RequireFixedVersion(context.Background(), mgr.GetAPIReader()); err != nil {
+	if err := ciliumegress.RequireFixedVersion(context.Background(), mgr.GetAPIReader(), ciliumegress.DaemonSetFromEnv(os.Getenv)); err != nil {
 		setupLog.Error(err, "Cilium version")
 		os.Exit(1)
 	}

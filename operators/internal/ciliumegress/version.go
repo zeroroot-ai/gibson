@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -21,12 +22,39 @@ import (
 // minor line can drop the deny. An operator reads the version of the agent
 // and refuses to start below the fixed release.
 const (
-	// DaemonSetNamespace and DaemonSetName name the Cilium agent DaemonSet.
-	DaemonSetNamespace = DNSNamespace
-	DaemonSetName      = "cilium"
-	// agentContainer is the container of the DaemonSet that runs the agent.
+	// EnvDaemonSetNamespace and EnvDaemonSetName name the settings that tell the
+	// operator where the Cilium agent runs. The chart sets them when the install
+	// does not use the defaults. The Role of the operator follows the namespace.
+	EnvDaemonSetNamespace = "CILIUM_DAEMONSET_NAMESPACE"
+	EnvDaemonSetName      = "CILIUM_DAEMONSET_NAME"
+	// DefaultDaemonSetNamespace and DefaultDaemonSetName are what a Cilium
+	// install gives the agent DaemonSet.
+	DefaultDaemonSetNamespace = "kube-system"
+	DefaultDaemonSetName      = "cilium"
+	// agentContainer is the container of the DaemonSet and of each pod that
+	// runs the agent.
 	agentContainer = "cilium-agent"
+	// agentPodLabel selects the pods of the Cilium agent.
+	agentPodLabel = "k8s-app"
+	// agentPodLabelValue is the value of agentPodLabel on an agent pod.
+	agentPodLabelValue = "cilium"
 )
+
+// DaemonSetRef names the Cilium agent DaemonSet.
+type DaemonSetRef struct{ Namespace, Name string }
+
+// DaemonSetFromEnv reads where the Cilium agent runs. An unset value takes the
+// default of a Cilium install.
+func DaemonSetFromEnv(getenv func(string) string) DaemonSetRef {
+	ref := DaemonSetRef{Namespace: DefaultDaemonSetNamespace, Name: DefaultDaemonSetName}
+	if v := strings.TrimSpace(getenv(EnvDaemonSetNamespace)); v != "" {
+		ref.Namespace = v
+	}
+	if v := strings.TrimSpace(getenv(EnvDaemonSetName)); v != "" {
+		ref.Name = v
+	}
+	return ref
+}
 
 // ErrCiliumVersion reports a Cilium agent that the operator cannot accept. It
 // covers a version below the minimum and a version that the operator cannot
@@ -67,7 +95,9 @@ func CheckVersion(version string) error {
 	}
 	fixed := fixedPatch[minor]
 	if patch < fixed || (patch == fixed && pre != "") {
-		return fmt.Errorf("%w: %s is below 1.%d.%d, which fixes CVE-2024-47825", ErrCiliumVersion, version, minor, fixed)
+		return fmt.Errorf("%w: %s is below 1.%d.%d, which fixes CVE-2024-47825. A tag with a suffix, such as "+
+			"-cee.1 of a distro build or -rc.1, counts as below the release itself, so use a build with no suffix "+
+			"or a later patch", ErrCiliumVersion, version, minor, fixed)
 	}
 	return nil
 }
@@ -85,27 +115,58 @@ func ImageVersion(image string) (string, error) {
 	return ref[colon+1:], nil
 }
 
-// RequireFixedVersion reads the Cilium agent DaemonSet and refuses a version
-// below the minimum. It fails closed: a DaemonSet that the operator cannot
-// read, a missing agent container and an image with no tag all refuse.
-func RequireFixedVersion(ctx context.Context, r client.Reader) error {
+// RequireFixedVersion reads the Cilium agent DaemonSet and the pods that run
+// the agent, and refuses a version below the minimum. It checks the image of the
+// DaemonSet template and the image of the cilium-agent container of each running
+// pod, so a node that still runs an old agent after a rollout is found. It fails
+// closed: a DaemonSet that the operator cannot read, a missing agent container
+// and an image with no tag all refuse.
+func RequireFixedVersion(ctx context.Context, r client.Reader, ref DaemonSetRef) error {
 	var ds appsv1.DaemonSet
-	key := client.ObjectKey{Namespace: DaemonSetNamespace, Name: DaemonSetName}
+	key := client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}
 	if err := r.Get(ctx, key, &ds); err != nil {
 		return fmt.Errorf("%w: read the DaemonSet %s/%s: %w", ErrCiliumVersion, key.Namespace, key.Name, err)
 	}
+	found := false
 	for _, c := range ds.Spec.Template.Spec.Containers {
 		if c.Name != agentContainer {
 			continue
 		}
-		v, err := ImageVersion(c.Image)
-		if err != nil {
-			return err
+		found = true
+		if err := checkImage(c.Image); err != nil {
+			return fmt.Errorf("DaemonSet %s/%s: %w", key.Namespace, key.Name, err)
 		}
-		return CheckVersion(v)
 	}
-	return fmt.Errorf("%w: the DaemonSet %s/%s has no container %q",
-		ErrCiliumVersion, key.Namespace, key.Name, agentContainer)
+	if !found {
+		return fmt.Errorf("%w: the DaemonSet %s/%s has no container %q",
+			ErrCiliumVersion, key.Namespace, key.Name, agentContainer)
+	}
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(ref.Namespace),
+		client.MatchingLabels{agentPodLabel: agentPodLabelValue}); err != nil {
+		return fmt.Errorf("%w: list the agent pods in %s: %w", ErrCiliumVersion, ref.Namespace, err)
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		for _, st := range pod.Status.ContainerStatuses {
+			if st.Name != agentContainer {
+				continue
+			}
+			if err := checkImage(st.Image); err != nil {
+				return fmt.Errorf("agent pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// checkImage reads the tag of an image and checks it against the minimum.
+func checkImage(image string) error {
+	v, err := ImageVersion(image)
+	if err != nil {
+		return err
+	}
+	return CheckVersion(v)
 }
 
 // ParseClusterCIDRs parses the pod and the service ranges of the cluster, the

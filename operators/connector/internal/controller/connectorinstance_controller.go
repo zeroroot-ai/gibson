@@ -140,7 +140,8 @@ type ConnectorInstanceReconciler struct {
 // +kubebuilder:rbac:groups=toolhive.stacklok.dev,resources=mcpservers;mcpremoteproxies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get
+// +kubebuilder:rbac:groups=apps,namespace=kube-system,resources=daemonsets,resourceNames=cilium,verbs=get
+// +kubebuilder:rbac:groups=core,namespace=kube-system,resources=pods,verbs=get;list
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile drives a ConnectorInstance toward its desired state.

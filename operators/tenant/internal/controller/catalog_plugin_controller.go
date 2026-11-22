@@ -179,7 +179,8 @@ func (c CatalogPluginConfig) Validate() error {
 // ClusterRole gibson-tenant-operator-plugin-namespace, and ensureNamespaceRBAC
 // binds it into each plugin namespace.
 // +kubebuilder:rbac:groups=spire.spiffe.io,resources=clusterspiffeids,verbs=get;list;create;update;delete
-// +kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get
+// +kubebuilder:rbac:groups=apps,namespace=kube-system,resources=daemonsets,resourceNames=cilium,verbs=get
+// +kubebuilder:rbac:groups=core,namespace=kube-system,resources=pods,verbs=get;list
 
 // CatalogPluginRunnable converges the cluster to the catalog plugins the
 // tenants enabled.
