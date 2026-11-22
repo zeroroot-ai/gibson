@@ -793,3 +793,84 @@ func (r *perTenantReader) MergeRequest(ctx context.Context, tenant, _, _ string)
 	}
 	return r.good, nil
 }
+
+const testHeadSHA = "1111111111111111111111111111111111111111"
+
+func headMR() *fakeMRReader {
+	r := jobMR()
+	r.fact.HeadSHA = testHeadSHA
+	r.fact.ChangedFiles = []fixloop.ChangedFile{
+		{Path: "go.mod", Change: "modified", BlobSHA: "2222222222222222222222222222222222222222"},
+		{Path: "new.go", Change: "renamed", PreviousPath: "old.go", BlobSHA: "3333333333333333333333333333333333333333"},
+	}
+	return r
+}
+
+// After the checks pass, the daemon records the head and the files that it read
+// on the Git host. The deliverable of the agent carries neither, so no agent claim
+// feeds them (gibson#1579).
+func TestJobGraphLink_RecordsTheHeadAndTheFilesFromTheHost(t *testing.T) {
+	var evs []brain.Event
+	l := &jobGraphLink{
+		submit:   func(_ string, ev brain.Event) { evs = append(evs, ev) },
+		findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: headMR(),
+		now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
+	}
+	l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
+	var head *brain.FixHeadRecorded
+	for _, ev := range evs {
+		if h, ok := ev.(brain.FixHeadRecorded); ok {
+			head = &h
+		}
+	}
+	if head == nil {
+		t.Fatalf("events = %+v, want a FixHeadRecorded", evs)
+	}
+	if head.ID != "f-1" || head.MergeRequest != testMRURL || head.HeadSHA != testHeadSHA {
+		t.Fatalf("head event = %+v", head)
+	}
+	if !strings.Contains(head.Files, `"path":"go.mod"`) || !strings.Contains(head.Files, `"previous_path":"old.go"`) {
+		t.Fatalf("files = %s", head.Files)
+	}
+}
+
+// A refused link records no head, and a host that gives no valid head or no
+// complete list of files leaves the fields empty.
+func TestJobGraphLink_NoHeadWhenTheLinkIsRefusedOrTheHostGivesNone(t *testing.T) {
+	run := func(mrs *fakeMRReader) []brain.Event {
+		var evs []brain.Event
+		l := &jobGraphLink{
+			submit:   func(_ string, ev brain.Event) { evs = append(evs, ev) },
+			findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: mrs,
+			now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
+		}
+		l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
+		return evs
+	}
+	hasHead := func(evs []brain.Event) bool {
+		for _, ev := range evs {
+			if _, ok := ev.(brain.FixHeadRecorded); ok {
+				return true
+			}
+		}
+		return false
+	}
+	merged := headMR()
+	merged.fact.State = fixloop.MRMerged
+	badSHA := headMR()
+	badSHA.fact.HeadSHA = "not-a-sha"
+	truncated := headMR()
+	truncated.fact.ChangedFilesTruncated = true
+	listError := headMR()
+	listError.fact.ChangedFilesError = "the host gave no list"
+	noFiles := headMR()
+	noFiles.fact.ChangedFiles = nil
+	for name, mrs := range map[string]*fakeMRReader{
+		"a merged merge request": merged, "a head that is no sha": badSHA, "a truncated list": truncated,
+		"a list error": listError, "no files": noFiles,
+	} {
+		if hasHead(run(mrs)) {
+			t.Errorf("%s: the daemon recorded a head", name)
+		}
+	}
+}
