@@ -139,17 +139,10 @@ func readFrom(findings []brain.FindingSnapshot, fallback time.Time) time.Time {
 	return from.Add(-historySlack)
 }
 
-// maxViewLookback bounds the history read of a view over many findings, so
-// one old open finding, or one finding with no time, never makes the read
-// cover the whole history of the tenant (review r13). A window that started
-// before the bound has no start in the read, so the trend leaves it out, and
-// a refusal older than the bound does not count as a wait.
-const maxViewLookback = 90 * 24 * time.Hour
-
 // boundedFrom is the start of the read of a view over many findings: readFrom,
-// and never before now less maxViewLookback.
+// and never before now less brain.MaxViewLookback.
 func boundedFrom(from, now time.Time) time.Time {
-	if floor := now.Add(-maxViewLookback); from.Before(floor) {
+	if floor := now.Add(-brain.MaxViewLookback); from.Before(floor) {
 		return floor
 	}
 	return from

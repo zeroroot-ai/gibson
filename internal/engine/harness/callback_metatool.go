@@ -261,7 +261,7 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		// CallToolProto call, so each call is recorded, a failed one too.
 		Recorder: func(rctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
 			callID = s.captureGrantedToolCall(rctx, contextInfo, newToolCallID(contextInfo), rec.Canonical,
-				string(rec.ArgsJSON), string(resultJSON), errText, rec.GrantID)
+				string(rec.ArgsJSON), string(resultJSON), errText, rec.GrantID, string(rec.ErrCode))
 			return callID
 		},
 		Observer: &harnessCallObserver{s: s},
@@ -403,7 +403,7 @@ func (s *HarnessCallbackService) MissionPolicyForRun(ctx context.Context, tenant
 // ComponentService.CallTool. The tenant is on ctx.
 func (s *HarnessCallbackService) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
 	return s.captureGrantedToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID},
-		uuid.NewString(), rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText, rec.GrantID)
+		uuid.NewString(), rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText, rec.GrantID, string(rec.ErrCode))
 }
 
 // TenantGrantSubject is the FGA subject of a connector call that the daemon

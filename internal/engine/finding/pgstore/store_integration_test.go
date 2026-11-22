@@ -445,3 +445,25 @@ func TestStore_Integration_ASecondSubmitKeepsTheFieldsOfTheDaemon(t *testing.T) 
 	assert.Equal(t, finding.PriorityP1, got.Priority)
 	assert.Equal(t, finding.CheckTool, got.Check.Kind)
 }
+
+// A second submit with no remediation clears the stored remediation: the
+// submitter owns the field, and the document of the second submit replaces the
+// document (gibson#1574). The test pins this on a real Postgres.
+func TestStore_Integration_ASecondSubmitWithNoRemediationClearsIt(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("open port", "d", agent.SeverityHigh), types.NewID(), "intake")
+	f.Check = finding.Check{Kind: finding.CheckTool, Ref: "wiz/r-1"}
+	f.Remediation = "Close the port."
+	require.NoError(t, s.Store(ctx, "acme", f))
+	got, err := s.Get(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Close the port.", got.Remediation)
+
+	again := f
+	again.Remediation = ""
+	require.NoError(t, s.Store(ctx, "acme", again))
+	got, err = s.Get(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.Remediation, "a second submit with no remediation keeps the old text")
+}

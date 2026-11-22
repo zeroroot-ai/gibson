@@ -798,3 +798,9 @@ func TestApplicationFindingsToProto_CarriesThePriorityTriple(t *testing.T) {
 			full.GetPriority(), full.GetPriorityRule(), full.GetPriorityReason())
 	}
 }
+
+// A finding that an agent reads back holds the remediation text (gibson#1574).
+func TestAgentFindingToProto_CarriesTheRemediation(t *testing.T) {
+	pf := agentFindingToProto(&agent.Finding{Title: "t", Remediation: "Restrict the redirect target."})
+	assert.Equal(t, "Restrict the redirect target.", pf.GetRemediation())
+}

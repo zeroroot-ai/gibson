@@ -522,6 +522,24 @@ jobs:
     if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.go == 'true')
     runs-on: ubuntu-latest
     name: integration suite (testcontainers + envtest)
+    # The finding store tests (internal/engine/finding/pgstore) make a fresh
+    # database on a real Postgres server, apply the shipped migrations and run
+    # the store on it. FINDING_TEST_PG_DSN names the server. Without it the
+    # tests skip, so a store change would never meet a real Postgres.
+    services:
+      postgres:
+        image: ghcr.io/zeroroot-ai/mirror/postgres:16.4-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      FINDING_TEST_PG_DSN: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
