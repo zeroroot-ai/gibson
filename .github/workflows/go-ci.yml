@@ -463,8 +463,14 @@ jobs:
         # watches (it was red on main for five days before gibson#1166). The
         # make target runs the offline fixture first. Every consumer is
         # public, so the default token reads them all. About one minute.
+        # A stale verdict (its field now has a consumer) only warns on a PR and
+        # in the merge queue, because a merge in a consumer repo changes the
+        # result of an unrelated PR. It fails on main and on dispatch
+        # (proto-field-consumers.yml). A field with no consumer and no verdict
+        # fails here.
         env:
           GH_TOKEN: ${{ github.token }}
+          STALE_VERDICTS: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'warn' || 'fail' }}
         run: |
           set -euo pipefail
           bash scripts/__tests__/proto-field-consumer-roots.test.sh

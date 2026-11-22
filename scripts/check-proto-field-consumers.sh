@@ -27,19 +27,29 @@
 # gen/ trees touch every field. Tests are not consumers either: a test that
 # reads a field proves the field can be read, not that anything does.
 #
-# THE TS AND PYTHON MATCH IS BY NAME, NOT BY TYPE. A read of `acked` on any
-# message keeps every `acked` alive. That errs toward "live", never toward a
-# false deletion. Go reads outside gibson are matched by <Type>.<Field>:
-# those modules cannot import gibson's internal packages, so a generated copy
-# of the same message is the only way they could read it.
+# THE TS AND PYTHON MATCH IS BY NAME, EXCEPT FOR A NAME THAT MORE THAN ONE
+# MESSAGE DECLARES. A read of `acked` keeps `acked` alive when one message
+# declares it. When several messages declare the same name (`toolClass` is on
+# four), a TypeScript file that names some of those message types reads those
+# messages only, so a read of X.toolClass beside the type X keeps only X
+# alive. A file that names none of them reads every one, because its type
+# cannot be told.
+# Python keeps the match by name. Go reads outside gibson are matched by
+# <Type>.<Field>: those modules cannot import gibson's internal packages, so a
+# generated copy of the same message is the only way they could read it.
 #
-# WHY ON DISPATCH, NOT THE MERGE GATE
+# WHERE IT RUNS, AND WHAT FAILS WHERE
 #
-# The consumer set spans seven repositories. A PR gate would need every
-# checkout at every merge. ADR-0094 puts this layer on main and on
-# dispatch (.github/workflows/proto-field-consumers.yml). The fixture that
-# proves the decision half can fail runs on every PR
-# (scripts/__tests__/check-proto-field-consumers.test.sh).
+# The consumer set spans seven repositories. The merge gate runs the scan
+# (go-ci, since gibson#1166) with the consumers at their main, and the
+# workflow proto-field-consumers.yml runs it on main and on dispatch. A field
+# with no consumer and no verdict fails every run. A STALE verdict (the field
+# now has a consumer, or no longer exists) is a warning on a PR and in the
+# merge queue, because a consumer repo that merges changes the result of an
+# unrelated PR. It fails on main and on dispatch, where nothing else is in
+# flight. STALE_VERDICTS=warn selects the warning, and the default is fail.
+# The fixture (scripts/__tests__/check-proto-field-consumers.test.sh) proves
+# each rule can fail.
 #
 # Usage:
 #   CONSUMER_ROOTS=". ../sdk ../adk ..." check-proto-field-consumers.sh
@@ -49,7 +59,8 @@
 # half is tested without loading a module.
 #
 # Exit 0 = every served field has a consumer or a recorded verdict.
-# Exit 1 = at least one does not, a verdict is stale, or a root is missing.
+# Exit 1 = at least one does not, a verdict is stale (unless STALE_VERDICTS=warn),
+# or a root is missing.
 set -euo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
@@ -93,7 +104,8 @@ else
 fi
 
 PROTO_DIR="$PROTO_DIR" EXEMPT_FILE="$EXEMPT_FILE" CONSUMER_ROOTS="$CONSUMER_ROOTS" \
-MIN_FIELDS="$MIN_FIELDS" GO_READS="$GO_READS" GO_PREFIX="$GO_PREFIX" python3 - <<'PY'
+MIN_FIELDS="$MIN_FIELDS" GO_READS="$GO_READS" GO_PREFIX="$GO_PREFIX" \
+STALE_VERDICTS="${STALE_VERDICTS:-fail}" python3 - <<'PY'
 import os, re, sys
 
 proto_dir = os.environ["PROTO_DIR"]
@@ -203,10 +215,12 @@ SKIP_DIRS = {"node_modules", "vendor", "gen", "generated", "dist", "build",
 generated_marker = re.compile(r"Code generated .* DO NOT EDIT|@generated|AUTO-GENERATED", re.I)
 
 ts_reads, py_reads = set(), set()
+ts_files = []  # the identifiers of each hand-written TS file, for the type match
 go_reads = set()
 with open(os.environ["GO_READS"], encoding="utf-8") as fh:
     go_reads.update(l.strip() for l in fh if l.strip())
 ts_pat = re.compile(r'\b([a-z]\w*)\b')
+ts_ident = re.compile(r'\b([A-Za-z_]\w*)\b')
 py_pat = re.compile(r'\b([a-z_]\w*)\b')
 
 def strip_comments(text, line_marker):
@@ -241,6 +255,8 @@ def scan(root):
             # A comment naming a consumer is not evidence (ADR-0094 rule 6).
             text = strip_comments(text, "#" if pat is py_pat else "//")
             bucket.update(pat.findall(text))
+            if pat is ts_pat:
+                ts_files.append(frozenset(ts_ident.findall(text)))
 
 for root in roots:
     scan(root)
@@ -272,13 +288,40 @@ if os.path.exists(exempt_file):
                 sys.exit(1)
             exempt[parts[0]] = parts[1]
 
+# The messages that declare each TS field name. A name that one message
+# declares matches by name. A shared name is read by the messages that the
+# reading file names: a file that names some declaring message attributes the
+# read to those messages only, and a file that names none gives the read to
+# every declaring message, because the type cannot be told (that errs toward
+# "live", never toward a false deletion).
+ts_declarers = {}
+for k in declared:
+    n = ts_name(k.rsplit(".", 1)[1])
+    ts_declarers.setdefault(n, set()).add(k.rsplit(".", 2)[1])  # innermost message
+
+def ts_read(key, f):
+    n = ts_name(f)
+    if n not in ts_reads:
+        return False
+    declarers = ts_declarers.get(n, set())
+    if len(declarers) <= 1:
+        return True
+    msg = key.rsplit(".", 2)[1]
+    for ids in ts_files:
+        if n not in ids:
+            continue
+        named = declarers & ids
+        if not named or msg in named:
+            return True
+    return False
+
 def is_read(field, go_key):
     f = field.rsplit(".", 1)[1]
     if go_key in go_reads:
         return True
     # A read in another Go module, keyed <Type>.<Field>.
     short = ".".join(go_key.rsplit(".", 2)[1:])
-    return short in go_reads or ts_name(f) in ts_reads or f in py_reads
+    return short in go_reads or ts_read(field, f) or f in py_reads
 
 dead, stale = [], []
 for key, (path, lineno, go_key) in sorted(declared.items()):
@@ -295,10 +338,11 @@ for key in sorted(exempt):
 
 for line in dead:
     print(line)
+warn_stale = os.environ.get("STALE_VERDICTS", "fail") == "warn"
 for line in stale:
-    print(f"stale\t{line}")
+    print(f"{'warn' if warn_stale else 'stale'}\t{line}")
 served = len(declared)
 print(f"check-proto-field-consumers: {served} fields served, {len(dead)} without a consumer, "
       f"{len(exempt)} verdicts, {len(stale)} stale, {len(roots)} consumer roots")
-sys.exit(1 if dead or stale else 0)
+sys.exit(1 if dead or (stale and not warn_stale) else 0)
 PY

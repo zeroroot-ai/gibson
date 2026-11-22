@@ -108,6 +108,56 @@ gibson.fx.v1.AckResponse.b_side | #502 | kept
 gibson.fx.v1.AckResponse.only_test | #502 | kept" "$GO_OK"
 unset PROTO_FIELD_TODAY
 
+# --- A name that two messages declare is matched by message type in TS. ---
+mkdir -p "$tmp/proto2/gibson/fx/v1" "$tmp/consumer2/src"
+cat > "$tmp/proto2/gibson/fx/v1/fx.proto" <<'PROTO'
+syntax = "proto3";
+package gibson.fx.v1;
+option go_package = "example.com/fx/api/gibson/fx/v1;fxv1";
+
+message CatalogEntry {
+  string tool_class = 1;   // read by TS in a file that names CatalogEntry
+}
+
+message Connector {
+  string tool_class = 1;   // same name, but no TS file that reads it names Connector
+}
+
+message Solo {
+  string solo_field = 1;   // one message declares it, so the name alone is a read
+}
+PROTO
+cat > "$tmp/consumer2/src/page.ts" <<'TS'
+import type { CatalogEntry } from "./gen/fx";
+export function show(e: CatalogEntry, s: { soloField: string }) {
+  return e.toolClass + s.soloField;
+}
+TS
+printf '' > "$tmp/goreads2"
+check2() {
+  printf '%s\n' "$4" > "$tmp/exempt2"
+  out="$(PROTO_DIR="$tmp/proto2" EXEMPT_FILE="$tmp/exempt2" MIN_FIELDS=3 STALE_VERDICTS="${5:-fail}" \
+    GO_PREFIX="example.com/fx/api/" GO_READS_FILE="$tmp/goreads2" \
+    CONSUMER_ROOTS="$tmp/consumer2" bash "$GATE" 2>&1)"; rc=$?
+  if [ "$rc" -eq "$2" ] && [[ "$out" == *"$3"* ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL: $1 (rc=$rc)"; echo "$out" | sed 's/^/    /'; fi
+}
+check2 "a same-name field on another message does not count as a reader" 1 "dead	gibson.fx.v1.Connector.tool_class" ""
+check2 "the message that the file names keeps its field alive" 1 "1 without a consumer" ""
+mkdir -p "$tmp/consumer3/src"
+cat > "$tmp/consumer3/src/untyped.ts" <<'TS'
+export const f = (x: any) => x.toolClass;
+TS
+out="$(PROTO_DIR="$tmp/proto2" EXEMPT_FILE=/dev/null MIN_FIELDS=3 GO_PREFIX="example.com/fx/api/" GO_READS_FILE="$tmp/goreads2" CONSUMER_ROOTS="$tmp/consumer3" bash "$GATE" 2>&1)"
+if [[ "$out" == *"dead	gibson.fx.v1.CatalogEntry.tool_class"* ]] || [[ "$out" == *"dead	gibson.fx.v1.Connector.tool_class"* ]]; then FAIL=$((FAIL+1)); echo "FAIL: a file that names no declaring message must keep every declaring message alive"; echo "$out" | sed 's/^/    /'; else PASS=$((PASS+1)); fi
+check2 "a field that one message declares is a read by its name" 1 "3 fields served" ""
+check2 "a verdict for the field with no reader makes the gate green" 0 "0 without a consumer, 1 verdicts" "gibson.fx.v1.Connector.tool_class | #502 | kept"
+# A stale verdict fails a run on main and warns on a PR (STALE_VERDICTS=warn).
+check2 "a stale verdict fails by default" 1 "stale	gibson.fx.v1.CatalogEntry.tool_class now has a consumer" "gibson.fx.v1.CatalogEntry.tool_class | #502 | kept
+gibson.fx.v1.Connector.tool_class | #502 | kept"
+check2 "a stale verdict only warns on a PR run" 0 "warn	gibson.fx.v1.CatalogEntry.tool_class now has a consumer" "gibson.fx.v1.CatalogEntry.tool_class | #502 | kept
+gibson.fx.v1.Connector.tool_class | #502 | kept" warn
+check2 "a field with no reader and no verdict still fails a PR run" 1 "dead	gibson.fx.v1.Connector.tool_class" "" warn
+
 out="$(PROTO_DIR="$tmp/proto" EXEMPT_FILE=/dev/null MIN_FIELDS=500 GO_READS_FILE="$tmp/goreads" CONSUMER_ROOTS="$tmp/consumer" bash "$GATE" 2>&1)"; rc=$?
 if [ "$rc" -eq 1 ] && [[ "$out" == *"below the floor"* ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL: the floor fails a run that measured too little (rc=$rc)"; echo "$out" | sed 's/^/    /'; fi
 out="$(PROTO_DIR="$tmp/proto" EXEMPT_FILE=/dev/null MIN_FIELDS=5 GO_READS_FILE="$tmp/goreads" CONSUMER_ROOTS="$tmp/consumer $tmp/missing" bash "$GATE" 2>&1)"; rc=$?
