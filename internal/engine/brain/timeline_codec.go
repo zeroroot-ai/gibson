@@ -108,6 +108,7 @@ func init() {
 	registerEvent("finding.fix_claimed", func() Event { return &FixClaimed{} })
 	registerEvent("finding.fix_claim_released", func() Event { return &FixClaimReleased{} })
 	registerEvent("finding.fix_link_refused", func() Event { return &FixLinkRefused{} })
+	registerEvent("finding.fix_link_pending", func() Event { return &FixLinkPending{} })
 	registerEvent("finding.fix_claim_expired", func() Event { return &FixClaimExpired{} })
 	registerEvent("fix.reverted", func() Event { return &FixReverted{} })
 	registerEvent("check.rerun", func() Event { return &CheckRerun{} })
@@ -308,6 +309,10 @@ func dereferenceEvent(ev Event) Event {
 	case *AgentToolCallObserved:
 		return *v
 	case *AgentSkillLoaded:
+		return *v
+	case *FixLinkPending:
+		return *v
+	case *FixLinkRefused:
 		return *v
 	case *ReadMarkerWritten:
 		return *v
