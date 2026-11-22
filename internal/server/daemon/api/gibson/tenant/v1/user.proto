@@ -645,7 +645,10 @@ message WidgetConfig {
 message UserLayoutPreferences {
   repeated WidgetConfig widgets = 1;
   int32 cols = 2;
-  int32 row_height = 3;
+  // Number 3 held row_height. The dashboard does not read it, and nobody
+  // outside the repo uses it, so the field went away (ADR-0094 rule 5).
+  reserved 3;
+  reserved "row_height";
 }
 
 message GetUserLayoutRequest {
