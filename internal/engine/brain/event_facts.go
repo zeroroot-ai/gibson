@@ -16,8 +16,10 @@ import (
 // MaxViewLookback bounds the history read of a view or a report when a node
 // has no time, or one old node would stretch the read over the whole history
 // of the tenant (review r13, gibson#1583). The world views and the incident
-// report share this one window. An action of an incident that is older than the
-// window is not in a report whose nodes have no first-seen time.
+// report share this one window. A window that started before the bound has no
+// start in the read, so a trend leaves it out, and a refusal older than the
+// bound does not count as a wait. An action of an incident that is older than
+// the window is not in a report whose nodes have no first-seen time.
 const MaxViewLookback = 90 * 24 * time.Hour
 
 // EventTime returns the time that the event holds. It reads the field At, then
