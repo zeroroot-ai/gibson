@@ -262,8 +262,9 @@ func TestFixLinkPending_TheWaitKeepsTheClaimAcrossAResume(t *testing.T) {
 	}
 
 	// The resume ends the claim of f2 and keeps the claim of f1.
-	var ended []string
-	for _, ev := range ResumeReleaseFixClaims(w) {
+	released := ResumeReleaseFixClaims(w)
+	ended := make([]string, 0, len(released))
+	for _, ev := range released {
 		ended = append(ended, ev.(FixClaimExpired).ID)
 	}
 	if len(ended) != 1 || ended[0] != "f2" {
