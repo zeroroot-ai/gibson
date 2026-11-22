@@ -4,15 +4,16 @@
 // LoopGrantService manages the loop grants of one tenant (gibson#1612).
 //
 // An always-on member of a bank has no mission turn, so it has no grant of a
-// sender to call a tool of the buyer with. A tenant admin gives the agent of
-// the member a loop grant instead. The grant names the tool classes that the
-// member may call and the harness calls that it may make. A class covers every
-// connector of that class that the tenant has enabled, now and later. The grant
-// does not replace the can_execute check on the connector, so the tenant switch
-// of a connector still stops the member.
+// sender to call a tool of the buyer with. A tenant admin gives the member a
+// loop grant instead. The grant names the tool classes that the member may call
+// and the harness calls that it may make. A class covers every connector of that
+// class that the tenant has enabled, now and later. The grant does not replace
+// the can_execute check on the connector, so the tenant switch of a connector
+// still stops the member.
 //
-// A loop grant is bound to one tenant and to one agent. It never reaches
-// another tenant.
+// A loop grant is bound to one bank member and to one tenant. It never reaches
+// another member or another tenant. The manifest of the agent of the member
+// limits the classes of the grant.
 //
 // Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
 syntax = "proto3";
@@ -26,9 +27,10 @@ import "gibson/auth/v1/options.proto";
 import "google/protobuf/timestamp.proto";
 
 service LoopGrantService {
-  // GrantLoop gives the members of one catalog agent a loop grant. A second
-  // call for the same agent replaces the first grant and gives it a new id.
-  // The audit record names the admin who made the call.
+  // GrantLoop gives one bank member a loop grant. A second call for the same
+  // member replaces the first grant and gives it a new id. The audit record
+  // names the admin who made the call. When the audit record cannot be written,
+  // the daemon restores the prior grant of the member.
   rpc GrantLoop(GrantLoopRequest) returns (GrantLoopResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "admin"
@@ -38,8 +40,8 @@ service LoopGrantService {
     };
   }
 
-  // RevokeLoop removes the loop grant of one agent. It is idempotent. A member
-  // of the agent then has its tool calls refused.
+  // RevokeLoop removes the loop grant of one member. It is idempotent. The
+  // member then has its tool calls refused.
   rpc RevokeLoop(RevokeLoopRequest) returns (RevokeLoopResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "admin"
@@ -49,8 +51,8 @@ service LoopGrantService {
     };
   }
 
-  // ListLoopGrants returns one page of the loop grants of the tenant, in agent
-  // name order.
+  // ListLoopGrants returns one page of the loop grants of the tenant, in member
+  // id order.
   rpc ListLoopGrants(ListLoopGrantsRequest) returns (ListLoopGrantsResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "admin"
@@ -61,28 +63,30 @@ service LoopGrantService {
   }
 }
 
-// LoopGrant is the loop grant of one agent in the tenant.
+// LoopGrant is the loop grant of one bank member in the tenant.
 message LoopGrant {
   // id names the grant. The audit record of each member call holds it.
   string id = 1;
-  // agent_name is the name of the catalog agent whose members hold the grant.
-  string agent_name = 2;
+  // member_id is the bank member that holds the grant.
+  string member_id = 2;
+  // agent_name is the catalog agent of the member.
+  string agent_name = 3;
   // tool_classes are the tool classes of the catalog, for example ticket or
   // paging.
-  repeated string tool_classes = 3;
+  repeated string tool_classes = 4;
   // harness_calls are the harness calls, besides the tool call, that the
   // member may make. The only value now is SubmitFinding.
-  repeated string harness_calls = 4;
+  repeated string harness_calls = 5;
   // grantor is the subject of the admin who made the grant.
-  string grantor = 5;
-  google.protobuf.Timestamp granted_at = 6;
+  string grantor = 6;
+  google.protobuf.Timestamp granted_at = 7;
 }
 
 message GrantLoopRequest {
-  // agent_name is the name of a catalog agent that can run as a member.
-  string agent_name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
-  // tool_classes must be tool classes that the catalog manifest of the agent
-  // names in loopGrant.classes.
+  // member_id is the id of a bank member of the tenant.
+  string member_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 128 }];
+  // tool_classes must be tool classes that the catalog manifest of the agent of
+  // the member names in loopGrant.classes.
   repeated string tool_classes = 2 [(buf.validate.field).repeated = { max_items: 16 }];
   repeated string harness_calls = 3 [(buf.validate.field).repeated = { max_items: 8 }];
 }
@@ -92,7 +96,7 @@ message GrantLoopResponse {
 }
 
 message RevokeLoopRequest {
-  string agent_name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+  string member_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 128 }];
 }
 
 message RevokeLoopResponse {}

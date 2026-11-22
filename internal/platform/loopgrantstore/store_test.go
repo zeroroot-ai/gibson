@@ -62,7 +62,7 @@ type tenantDB struct {
 }
 
 func (d *tenantDB) row(g Grant) []any {
-	return []any{g.ID, g.AgentName, g.ToolClasses, g.HarnessCalls, g.Grantor, stamp}
+	return []any{g.ID, g.MemberID, g.AgentName, g.ToolClasses, g.HarnessCalls, g.Grantor, stamp}
 }
 
 func (d *tenantDB) SQL() datapool.SQL { return d }
@@ -80,12 +80,13 @@ func (d *tenantDB) QueryRow(_ context.Context, _ string, args ...any) datapool.R
 	if d.rowErr != nil {
 		return fakeRow{err: d.rowErr}
 	}
-	if len(args) == 5 { // the upsert
+	if len(args) == 7 { // the upsert
 		g := Grant{
-			ID: args[0].(string), AgentName: args[1].(string), ToolClasses: args[2].([]string),
-			HarnessCalls: args[3].([]string), Grantor: args[4].(string),
+			ID: args[0].(string), MemberID: args[1].(string), AgentName: args[2].(string),
+			ToolClasses: args[3].([]string), HarnessCalls: args[4].([]string), Grantor: args[5].(string),
+			GrantedAt: args[6].(time.Time),
 		}
-		d.grants[g.AgentName] = g
+		d.grants[g.MemberID] = g
 		return fakeRow{values: d.row(g)}
 	}
 	g, ok := d.grants[args[0].(string)]
@@ -102,7 +103,7 @@ func (d *tenantDB) Query(_ context.Context, _ string, args ...any) (datapool.Row
 	// The paging arguments are hasAfter, after and limit.
 	hasAfter, after, limit := args[0].(bool), args[1].(string), args[2].(int)
 	rows := &fakeRows{err: d.rowsErr, scanBad: d.scanBad}
-	for _, name := range []string{"a-agent", "b-agent", "c-agent"} {
+	for _, name := range []string{"m-a", "m-b", "m-c"} {
 		if hasAfter && name <= after {
 			continue
 		}
@@ -136,7 +137,7 @@ func newStore() *postgresStore {
 
 func sample(id string) Grant {
 	return Grant{
-		ID: id, AgentName: "a-agent", ToolClasses: []string{"ticket", "paging"},
+		ID: id, MemberID: "m-a", AgentName: "intake-agent", ToolClasses: []string{"ticket", "paging"},
 		HarnessCalls: []string{"SubmitFinding"}, Grantor: "user:alice",
 	}
 }
@@ -148,8 +149,9 @@ func TestPutGetListDelete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "g1", put.ID)
 	assert.Equal(t, stamp, put.GrantedAt)
+	assert.Equal(t, "intake-agent", put.AgentName)
 
-	got, err := s.Get(ctx, "tenant-a", "a-agent")
+	got, err := s.Get(ctx, "tenant-a", "m-a")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"ticket", "paging"}, got.ToolClasses)
 	assert.Equal(t, "user:alice", got.Grantor)
@@ -158,9 +160,9 @@ func TestPutGetListDelete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, all, 1)
 
-	require.NoError(t, s.Delete(ctx, "tenant-a", "a-agent"))
-	require.NoError(t, s.Delete(ctx, "tenant-a", "a-agent"), "a second delete is idempotent")
-	_, err = s.Get(ctx, "tenant-a", "a-agent")
+	require.NoError(t, s.Delete(ctx, "tenant-a", "m-a"))
+	require.NoError(t, s.Delete(ctx, "tenant-a", "m-a"), "a second delete is idempotent")
+	_, err = s.Get(ctx, "tenant-a", "m-a")
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
@@ -171,7 +173,7 @@ func TestGetIsPerTenant(t *testing.T) {
 	_, err := s.Put(ctx, "tenant-b", sample("gB"))
 	require.NoError(t, err)
 
-	_, err = s.Get(ctx, "tenant-a", "a-agent")
+	_, err = s.Get(ctx, "tenant-a", "m-a")
 	require.ErrorIs(t, err, ErrNotFound)
 	all, err := s.ListPage(ctx, "tenant-a", "", false, 10)
 	require.NoError(t, err)
@@ -180,7 +182,10 @@ func TestGetIsPerTenant(t *testing.T) {
 
 func TestPutRefusesIncompleteGrant(t *testing.T) {
 	s := newStore()
-	for _, g := range []Grant{{AgentName: "a", Grantor: "u"}, {ID: "i", Grantor: "u"}, {ID: "i", AgentName: "a"}} {
+	for _, g := range []Grant{
+		{MemberID: "m", AgentName: "a", Grantor: "u"}, {ID: "i", AgentName: "a", Grantor: "u"},
+		{ID: "i", MemberID: "m", Grantor: "u"}, {ID: "i", MemberID: "m", AgentName: "a"},
+	} {
 		_, err := s.Put(context.Background(), "t", g)
 		assert.Error(t, err)
 	}
@@ -193,22 +198,22 @@ func TestConnectionErrorIsWrapped(t *testing.T) {
 	assert.ErrorIs(t, err, boom)
 }
 
-func TestListPage_PagesByAgentNameWithAKeyset(t *testing.T) {
+func TestListPage_PagesByMemberIDWithAKeyset(t *testing.T) {
 	s := newStore()
 	ctx := context.Background()
-	for _, name := range []string{"a-agent", "b-agent", "c-agent"} {
+	for _, name := range []string{"m-a", "m-b", "m-c"} {
 		g := sample("g-" + name)
-		g.AgentName = name
+		g.MemberID = name
 		_, err := s.Put(ctx, "t", g)
 		require.NoError(t, err)
 	}
 	first, err := s.ListPage(ctx, "t", "", false, 2)
 	require.NoError(t, err)
 	require.Len(t, first, 2)
-	second, err := s.ListPage(ctx, "t", first[1].AgentName, true, 2)
+	second, err := s.ListPage(ctx, "t", first[1].MemberID, true, 2)
 	require.NoError(t, err)
 	require.Len(t, second, 1)
-	assert.Equal(t, "c-agent", second[0].AgentName)
+	assert.Equal(t, "m-c", second[0].MemberID)
 }
 
 // Each method wraps the failure of the connection, of the statement and of the
@@ -218,7 +223,7 @@ func TestStoreFailuresAreWrapped(t *testing.T) {
 	ctx := context.Background()
 	fail := func(mut func(*tenantDB)) *postgresStore {
 		s := newStore()
-		db := &tenantDB{grants: map[string]Grant{"a-agent": sample("g1")}}
+		db := &tenantDB{grants: map[string]Grant{"m-a": sample("g1")}}
 		mut(db)
 		s.conns.(*fakeConns).dbs["t"] = db
 		return s
@@ -228,12 +233,12 @@ func TestStoreFailuresAreWrapped(t *testing.T) {
 		require.ErrorIs(t, err, boom)
 	})
 	t.Run("get", func(t *testing.T) {
-		_, err := fail(func(d *tenantDB) { d.rowErr = boom }).Get(ctx, "t", "a-agent")
+		_, err := fail(func(d *tenantDB) { d.rowErr = boom }).Get(ctx, "t", "m-a")
 		require.ErrorIs(t, err, boom)
 		assert.NotErrorIs(t, err, ErrNotFound)
 	})
 	t.Run("delete", func(t *testing.T) {
-		require.ErrorIs(t, fail(func(d *tenantDB) { d.execErr = boom }).Delete(ctx, "t", "a-agent"), boom)
+		require.ErrorIs(t, fail(func(d *tenantDB) { d.execErr = boom }).Delete(ctx, "t", "m-a"), boom)
 	})
 	t.Run("list query", func(t *testing.T) {
 		_, err := fail(func(d *tenantDB) { d.queryErr = boom }).ListPage(ctx, "t", "", false, 5)

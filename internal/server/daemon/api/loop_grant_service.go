@@ -32,7 +32,20 @@ const (
 	loopGrantAuditResource = "loop_grant"
 )
 
-var loopGrantAgentPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+// loopGrantMemberPattern is the shape of a bank member id. It is a conservative
+// check of the input. The bank store decides if the member exists.
+var loopGrantMemberPattern = regexp.MustCompile(`^[A-Za-z0-9][-A-Za-z0-9_.]{0,127}$`)
+
+// ErrLoopMemberNotFound is what a LoopGrantMembers answers for a member that the
+// tenant does not have.
+var ErrLoopMemberNotFound = errors.New("api: the tenant has no such bank member")
+
+// LoopGrantMembers reads the agent of a bank member of a tenant. The daemon backs
+// it with the bank store. The store reads the database of the tenant, so a member
+// of another tenant is not found.
+type LoopGrantMembers interface {
+	AgentOfMember(ctx context.Context, tenant, memberID string) (agentName string, err error)
+}
 
 // LoopGrantAudit is the part of the audit logger that the service uses.
 type LoopGrantAudit interface {
@@ -49,6 +62,8 @@ type LoopGrantService struct {
 
 	store loopgrantstore.Store
 	audit LoopGrantAudit
+	// members reads the agent of a bank member.
+	members LoopGrantMembers
 	// agents finds a catalog agent. The daemon passes componentcatalog.LookupAgent.
 	agents func(id string) (componentcatalog.AgentEntry, bool)
 	// harnessCalls are the harness calls that a grant may hold.
@@ -59,14 +74,15 @@ type LoopGrantService struct {
 
 // NewLoopGrantService returns the service. Each argument is required.
 func NewLoopGrantService(
-	store loopgrantstore.Store, auditLog LoopGrantAudit,
+	store loopgrantstore.Store, members LoopGrantMembers, auditLog LoopGrantAudit,
 	agents func(id string) (componentcatalog.AgentEntry, bool), grantableHarnessCalls []string, pageKeys *pagetoken.Keys,
 ) (*LoopGrantService, error) {
-	if store == nil || auditLog == nil || agents == nil || pageKeys == nil {
-		return nil, errors.New("api: LoopGrantService needs a store, the audit logger, the agent catalog and the page keys")
+	if store == nil || members == nil || auditLog == nil || agents == nil || pageKeys == nil {
+		return nil, errors.New(
+			"api: LoopGrantService needs a store, the bank members, the audit logger, the agent catalog and the page keys")
 	}
 	return &LoopGrantService{
-		store: store, audit: auditLog, agents: agents, harnessCalls: grantableHarnessCalls, pageKeys: pageKeys,
+		store: store, members: members, audit: auditLog, agents: agents, harnessCalls: grantableHarnessCalls, pageKeys: pageKeys,
 	}, nil
 }
 
@@ -88,7 +104,7 @@ func loopGrantStatus(rpc string, err error) error {
 
 func loopGrantProto(g loopgrantstore.Grant) *tenantv1.LoopGrant {
 	return &tenantv1.LoopGrant{
-		Id: g.ID, AgentName: g.AgentName, ToolClasses: g.ToolClasses, HarnessCalls: g.HarnessCalls,
+		Id: g.ID, MemberId: g.MemberID, AgentName: g.AgentName, ToolClasses: g.ToolClasses, HarnessCalls: g.HarnessCalls,
 		Grantor: g.Grantor, GrantedAt: timestamppb.New(g.GrantedAt),
 	}
 }
@@ -106,9 +122,16 @@ func (s *LoopGrantService) GrantLoop(ctx context.Context, req *tenantv1.GrantLoo
 	if err != nil || id.Subject == "" {
 		return nil, status_grpc.Error(codes.Unauthenticated, rpc+": the grantor has no identity")
 	}
-	name := req.GetAgentName()
-	if !loopGrantAgentPattern.MatchString(name) {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: %q is not a valid agent name", rpc, name)
+	memberID := req.GetMemberId()
+	if !loopGrantMemberPattern.MatchString(memberID) {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: %q is not a valid member id", rpc, memberID)
+	}
+	name, err := s.members.AgentOfMember(ctx, tenant, memberID)
+	if errors.Is(err, ErrLoopMemberNotFound) {
+		return nil, status_grpc.Errorf(codes.NotFound, "%s: the tenant has no bank member %q", rpc, memberID)
+	}
+	if err != nil {
+		return nil, loopGrantStatus(rpc, err)
 	}
 	agent, ok := s.agents(name)
 	if !ok {
@@ -135,20 +158,33 @@ func (s *LoopGrantService) GrantLoop(ctx context.Context, req *tenantv1.GrantLoo
 	if len(req.GetToolClasses()) == 0 && len(req.GetHarnessCalls()) == 0 {
 		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": a loop grant names a tool class or a harness call")
 	}
+	// The prior grant of the member, so a failed audit write restores it and
+	// does not delete a grant that worked.
+	prior, perr := s.store.Get(ctx, tenant, memberID)
+	if perr != nil && !errors.Is(perr, loopgrantstore.ErrNotFound) {
+		return nil, loopGrantStatus(rpc, perr)
+	}
 	g, err := s.store.Put(ctx, tenant, loopgrantstore.Grant{
-		ID: uuid.NewString(), AgentName: name, ToolClasses: dedupe(req.GetToolClasses()),
+		ID: uuid.NewString(), MemberID: memberID, AgentName: name, ToolClasses: dedupe(req.GetToolClasses()),
 		HarnessCalls: dedupe(req.GetHarnessCalls()), Grantor: id.Subject,
 	})
 	if err != nil {
 		return nil, loopGrantStatus(rpc, err)
 	}
-	if _, err := s.audit.Record(ctx, loopGrantAuditGrant, loopGrantAuditResource, name, map[string]any{
-		"loop_grant_id": g.ID, "grantor": g.Grantor, "tool_classes": g.ToolClasses, "harness_calls": g.HarnessCalls,
+	if _, err := s.audit.Record(ctx, loopGrantAuditGrant, loopGrantAuditResource, memberID, map[string]any{
+		"loop_grant_id": g.ID, "grantor": g.Grantor, "agent": name,
+		"tool_classes": g.ToolClasses, "harness_calls": g.HarnessCalls,
 	}); err != nil {
-		// The grant exists and no record names it. Remove it, so no grant
-		// stands without its record.
-		if derr := s.store.Delete(ctx, tenant, name); derr != nil {
-			return nil, status_grpc.Error(codes.Internal, rpc+": the audit record failed and the grant stays: "+derr.Error())
+		// No grant stands without its record. The prior grant comes back, or the
+		// row goes when there was none.
+		var rerr error
+		if prior != nil {
+			_, rerr = s.store.Put(ctx, tenant, *prior)
+		} else {
+			rerr = s.store.Delete(ctx, tenant, memberID)
+		}
+		if rerr != nil {
+			return nil, status_grpc.Error(codes.Internal, rpc+": the audit record failed and the grant could not be restored: "+rerr.Error())
 		}
 		return nil, status_grpc.Error(codes.Unavailable, rpc+": the audit record could not be written")
 	}
@@ -165,15 +201,15 @@ func (s *LoopGrantService) RevokeLoop(ctx context.Context, req *tenantv1.RevokeL
 	if id, err := auth.IdentityFromContext(ctx); err != nil || id.Subject == "" {
 		return nil, status_grpc.Error(codes.Unauthenticated, rpc+": the caller has no identity")
 	}
-	name := req.GetAgentName()
-	if !loopGrantAgentPattern.MatchString(name) {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: %q is not a valid agent name", rpc, name)
+	memberID := req.GetMemberId()
+	if !loopGrantMemberPattern.MatchString(memberID) {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: %q is not a valid member id", rpc, memberID)
 	}
-	prior, gerr := s.store.Get(ctx, tenant, name)
+	prior, gerr := s.store.Get(ctx, tenant, memberID)
 	if gerr != nil && !errors.Is(gerr, loopgrantstore.ErrNotFound) {
 		return nil, loopGrantStatus(rpc, gerr)
 	}
-	if err := s.store.Delete(ctx, tenant, name); err != nil {
+	if err := s.store.Delete(ctx, tenant, memberID); err != nil {
 		return nil, loopGrantStatus(rpc, err)
 	}
 	details := map[string]any{}
@@ -181,7 +217,7 @@ func (s *LoopGrantService) RevokeLoop(ctx context.Context, req *tenantv1.RevokeL
 		details["loop_grant_id"] = prior.ID
 		details["grantor"] = prior.Grantor
 	}
-	if _, err := s.audit.Record(ctx, loopGrantAuditRevoke, loopGrantAuditResource, name, details); err != nil {
+	if _, err := s.audit.Record(ctx, loopGrantAuditRevoke, loopGrantAuditResource, memberID, details); err != nil {
 		return nil, status_grpc.Error(codes.Unavailable, rpc+": the grant is removed and its audit record could not be written")
 	}
 	return &tenantv1.RevokeLoopResponse{}, nil
@@ -212,7 +248,7 @@ func (s *LoopGrantService) ListLoopGrants(ctx context.Context, req *tenantv1.Lis
 		resp.Grants[i] = loopGrantProto(grants[i])
 	}
 	if hasMore {
-		resp.NextPageToken = page.Token(grants[len(grants)-1].AgentName, true)
+		resp.NextPageToken = page.Token(grants[len(grants)-1].MemberID, true)
 	}
 	return resp, nil
 }

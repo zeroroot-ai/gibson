@@ -375,14 +375,33 @@ func TestCall_LoopCheckDoesNotReplaceCanExecute(t *testing.T) {
 }
 
 // A loop grant covers connector tools only.
-func TestCall_LoopCheckRefusesANativeTool(t *testing.T) {
+func TestCall_LoopCheckRefusesANativeToolAndRecordsTheGrant(t *testing.T) {
 	obs := &seqObserver{}
 	h := NewHandler(nil, allowAll("native:nmap"), &seqQuerier{obs: obs})
 	_, err := h.Call(context.Background(), Call{
-		Caller: callerAlice, ID: "native:nmap", Observer: obs, Recorder: obs.record,
-		Loop: func(context.Context, string) (LoopAllow, error) { return LoopAllow{}, nil },
+		Caller: callerAlice, ID: "native:nmap", Observer: obs, Recorder: obs.record, MemberID: "m-1",
+		Loop: func(context.Context, string) (LoopAllow, error) { return LoopAllow{GrantID: "lg-1", Grantor: "user:admin"}, nil },
 	})
 	if !errors.Is(err, ErrLoopGrantDenied) {
 		t.Fatalf("err = %v, want ErrLoopGrantDenied", err)
+	}
+	if obs.last.LoopGrantID != "lg-1" || obs.last.Grantor != "user:admin" || obs.last.MemberID != "m-1" {
+		t.Errorf("record = %+v, want the grant, the grantor and the member of the refusal", obs.last)
+	}
+}
+
+// An id that does not decode is refused, and the record still names the member.
+func TestCall_LoopCheckRefusalOfABadIDNamesTheMember(t *testing.T) {
+	obs := &seqObserver{}
+	h := NewHandler(nil, allowAll(), &seqQuerier{obs: obs})
+	_, err := h.Call(context.Background(), Call{
+		Caller: callerAlice, ID: "not-an-id", Observer: obs, Recorder: obs.record, MemberID: "m-1",
+		Loop: func(context.Context, string) (LoopAllow, error) { return LoopAllow{}, nil },
+	})
+	if err == nil {
+		t.Fatal("a bad id was accepted")
+	}
+	if obs.last.MemberID != "m-1" {
+		t.Errorf("record = %+v, want the member on the refusal", obs.last)
 	}
 }

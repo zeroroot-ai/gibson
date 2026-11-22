@@ -673,6 +673,13 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithOutsideAgentStore(d.outsideAgentStore),
 		harness.WithMemberLookup(&lazyMemberLookup{daemon: d}),
 		harness.WithLoopGrants(&lazyLoopGrants{daemon: d}),
+		// The findings of bank members, stored and raised as the member. The
+		// pool and the brain registry start after these options, so each reads
+		// its seam on first use.
+		harness.WithMemberFindings(
+			harness.NewPostgresFindingStore(func() datapool.Pool { return d.pool }),
+			func(ctx context.Context, f harness.FindingRaised) { ingestHarnessFinding(d.brainRegistry)(ctx, f) },
+		),
 		harness.WithTurnGrantMinter(&lazyTurnGrantMinter{daemon: d}),
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),
 		harness.WithMemberControl(d.memberControl),

@@ -95,7 +95,7 @@ func (l *memberLauncher) LaunchMember(ctx context.Context, tenantID string, b *b
 	// The base grant holds the loop grant of the agent of the bank. A store
 	// that cannot be read gives the base surface only, which is the least a
 	// member can hold. The next renewal adds the loop grant.
-	allowedRPCs, rpcErr := l.daemon.memberGrantRPCs(tctx, tenantID, b.AgentName)
+	allowedRPCs, rpcErr := l.daemon.memberGrantRPCs(tctx, tenantID, memberID, b.AgentName)
 	if rpcErr != nil {
 		l.daemon.logger.Warn(ctx, "member launched with the base grant only: the loop grant could not be read",
 			"tenant", tenantID, "agent", b.AgentName, "error", rpcErr)

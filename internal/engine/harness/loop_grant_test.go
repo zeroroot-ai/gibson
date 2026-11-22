@@ -13,13 +13,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
@@ -47,17 +50,17 @@ func (f loopFakeMembers) MemberByRun(_ context.Context, tenant, run string) (mem
 
 // loopFakeSource keeps the grants of each tenant apart, as the store does.
 type loopFakeSource struct {
-	grants map[string]*LoopGrant // "tenant/agent"
+	grants map[string]*LoopGrant // "tenant/member"
 	err    error
 	reads  []string
 }
 
-func (f *loopFakeSource) LoopGrantFor(_ context.Context, tenant, agent string) (*LoopGrant, error) {
-	f.reads = append(f.reads, tenant+"/"+agent)
+func (f *loopFakeSource) LoopGrantFor(_ context.Context, tenant, member string) (*LoopGrant, error) {
+	f.reads = append(f.reads, tenant+"/"+member)
 	if f.err != nil {
 		return nil, f.err
 	}
-	g, ok := f.grants[tenant+"/"+agent]
+	g, ok := f.grants[tenant+"/"+member]
 	if !ok {
 		return nil, ErrNoLoopGrant
 	}
@@ -133,7 +136,7 @@ func invokeReq(id string) *harnesspb.CallToolProtoRequest {
 }
 
 func grantOf(id string, classes ...string) *LoopGrant {
-	return &LoopGrant{ID: id, AgentName: "intake-agent", ToolClasses: classes, Grantor: "user:admin"}
+	return &LoopGrant{ID: id, MemberID: "member-1", AgentName: "intake-agent", ToolClasses: classes, Grantor: "user:admin"}
 }
 
 func (f *loopFixture) auditText() string {
@@ -148,7 +151,7 @@ func (f *loopFixture) auditText() string {
 // enabled. The call runs, and the audit record names the grant, the grantor and
 // the member.
 func TestMemberInvoke_AGrantedClassRunsAndTheRecordNamesGrantAndGrantor(t *testing.T) {
-	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/intake-agent": grantOf("lg-1", "ticket")}, "jira")
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": grantOf("lg-1", "ticket")}, "jira")
 	resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), invokeReq("mcp:jira:create_issue"))
 	require.NoError(t, err)
 	require.Nil(t, resp.GetError(), "a granted class must run: %v", resp.GetError())
@@ -166,7 +169,7 @@ func TestMemberInvoke_AGrantedClassRunsAndTheRecordNamesGrantAndGrantor(t *testi
 // The class is read at call time, so a connector of the class that the tenant
 // enables later is covered with no change of the grant.
 func TestMemberInvoke_AGrantCoversAnotherConnectorOfTheSameClass(t *testing.T) {
-	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/intake-agent": grantOf("lg-1", "paging")}, "pagerduty")
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": grantOf("lg-1", "paging")}, "pagerduty")
 	resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), invokeReq("mcp:pagerduty:page"))
 	require.NoError(t, err)
 	require.Nil(t, resp.GetError())
@@ -185,7 +188,7 @@ func TestMemberInvoke_NoGrantIsRefusedAndRecorded(t *testing.T) {
 
 // A grant of other classes does not cover the connector.
 func TestMemberInvoke_AClassThatTheGrantLacksIsRefusedAndRecordsTheGrant(t *testing.T) {
-	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/intake-agent": grantOf("lg-1", "paging")}, "jira")
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": grantOf("lg-1", "paging")}, "jira")
 	resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), invokeReq("mcp:jira:create_issue"))
 	require.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode())
@@ -198,7 +201,7 @@ func TestMemberInvoke_AClassThatTheGrantLacksIsRefusedAndRecordsTheGrant(t *test
 // The loop grant sits beside can_execute. A connector that the tenant switched
 // off still stops the member, whatever the grant holds.
 func TestMemberInvoke_TheTenantSwitchOfAConnectorStillStopsTheMember(t *testing.T) {
-	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/intake-agent": grantOf("lg-1", "ticket")} /* jira not enabled */)
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": grantOf("lg-1", "ticket")} /* jira not enabled */)
 	resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), invokeReq("mcp:jira:create_issue"))
 	require.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode())
@@ -208,12 +211,12 @@ func TestMemberInvoke_TheTenantSwitchOfAConnectorStillStopsTheMember(t *testing.
 // A member of tenant A cannot use a grant of tenant B. The grant of tenant B
 // exists for the same agent, and the member of tenant A is still refused.
 func TestMemberInvoke_AMemberOfTenantACannotUseTheGrantOfTenantB(t *testing.T) {
-	f := newLoopFixture(t, map[string]*LoopGrant{"tenant-b/intake-agent": grantOf("lg-b", "ticket")}, "jira")
+	f := newLoopFixture(t, map[string]*LoopGrant{"tenant-b/member-1": grantOf("lg-b", "ticket")}, "jira")
 	resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), invokeReq("mcp:jira:create_issue"))
 	require.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode())
 	assert.Empty(t, f.connected)
-	assert.Equal(t, []string{"tenant-a/intake-agent"}, f.source.reads, "the grant is read for the tenant of the verified grant only")
+	assert.Equal(t, []string{"tenant-a/member-1"}, f.source.reads, "the grant is read for the tenant of the verified grant only")
 }
 
 // A body field cannot name another tenant or member. The tenant and the member
@@ -258,7 +261,7 @@ func TestMemberInvoke_OutagesRefuse(t *testing.T) {
 
 // search_tools shows a member only the tools of the classes of its grant.
 func TestMemberSearch_ListsOnlyTheGrantedClasses(t *testing.T) {
-	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/intake-agent": grantOf("lg-1", "ticket", "paging")},
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": grantOf("lg-1", "ticket", "paging")},
 		"jira", "pagerduty", "microsoft-sentinel")
 	resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), &harnesspb.CallToolProtoRequest{
 		Context: &harnesspb.ContextInfo{MissionId: "bank-1", MissionRunId: "run-1"},
@@ -333,7 +336,7 @@ func TestMemberSearch_AnUnreadGrantIsUnavailable(t *testing.T) {
 // no grant.
 func TestMemberLoopGrant_NoSourceAndAnEmptyAnswerAreNoGrant(t *testing.T) {
 	f := newLoopFixture(t, nil, "jira")
-	m := memberCall{tenant: loopTenantA, agent: "intake-agent"}
+	m := memberCall{tenant: loopTenantA, agent: "intake-agent", memberID: "member-1"}
 
 	f.svc.loopGrants = nil
 	_, err := f.svc.loopGrant(context.Background(), m)
@@ -352,7 +355,7 @@ func (nilGrantSource) LoopGrantFor(context.Context, string, string) (*LoopGrant,
 
 // A member call of the other meta-tool names, and of a native tool, are refused.
 func TestMemberMetaTool_UnknownNameAndNativeToolAreRefused(t *testing.T) {
-	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/intake-agent": grantOf("lg-1", "ticket")}, "jira")
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": grantOf("lg-1", "ticket")}, "jira")
 	ctx := loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1")
 
 	resp, err := f.svc.serveMemberMetaTool(ctx, &harnesspb.CallToolProtoRequest{Name: "other"}, memberCall{
@@ -374,4 +377,213 @@ func TestMemberSearch_HidesSkillsAndNativeTools(t *testing.T) {
 	assert.True(t, hidden(toolid.ID{Source: toolid.SourceMCP, Connector: "pagerduty", Tool: "page"}))
 	assert.True(t, hidden(toolid.ID{Source: toolid.SourceNative, Tool: "nmap"}))
 	assert.True(t, hidden(toolid.ID{Source: toolid.SourceSkill, Tool: "s"}))
+}
+
+// The grant is bound to the member. Another member of the same agent, in the same
+// tenant, holds nothing (gibson#1612).
+func TestMemberInvoke_AnotherMemberOfTheSameAgentHoldsNoGrant(t *testing.T) {
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": grantOf("lg-1", "ticket")}, "jira")
+	f.svc.members = loopFakeMembers{runs: map[string]string{loopTenantA + "/run-2": "member-2/bank-1"}}
+	req := invokeReq("mcp:jira:create_issue")
+	req.Context = nil
+	resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-2", "run-2"), req)
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode())
+	assert.Empty(t, f.connected)
+	assert.Equal(t, []string{"tenant-a/member-2"}, f.source.reads)
+}
+
+// A grant of the member that names another agent than the agent of the verified
+// grant of the call is no grant.
+func TestMemberInvoke_AGrantOfAnotherAgentIsNoGrant(t *testing.T) {
+	g := grantOf("lg-1", "ticket")
+	g.AgentName = "other-agent"
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": g}, "jira")
+	resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), invokeReq("mcp:jira:create_issue"))
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode())
+	assert.Empty(t, f.connected)
+}
+
+// A member owns its bank, its run and its agent and nothing else. A request that
+// names another mission is refused, whatever the grant holds, and it reaches no
+// connector, no merge check and no flight recorder of another mission.
+func TestMemberInvoke_ARequestThatNamesAnotherMissionIsRefused(t *testing.T) {
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": grantOf("lg-1", "ticket")}, "jira")
+	for name, info := range map[string]*harnesspb.ContextInfo{
+		"another mission": {MissionId: "mission-of-someone-else", MissionRunId: "run-1"},
+		"another run":     {MissionId: "bank-1", MissionRunId: "run-of-someone-else"},
+		"another agent":   {MissionId: "bank-1", MissionRunId: "run-1", AgentName: "zerocool"},
+	} {
+		req := invokeReq("mcp:jira:create_issue")
+		req.Context = info
+		resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), req)
+		require.NoError(t, err, name)
+		assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode(), name)
+	}
+	assert.Empty(t, f.connected)
+	assert.Empty(t, f.captured)
+}
+
+// The mission and the run of a member call come from the verified grant. A call
+// with no ContextInfo still runs, and the flight recorder holds it under the bank
+// and the run of the member (ADR-0131).
+func TestMemberInvoke_TheRecordUsesTheVerifiedContextAndASilentRequestStillRecords(t *testing.T) {
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": grantOf("lg-1", "ticket")}, "jira")
+	req := invokeReq("mcp:jira:create_issue")
+	req.Context = nil
+	resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), req)
+	require.NoError(t, err)
+	require.Nil(t, resp.GetError(), "%v", resp.GetError())
+	require.Len(t, f.captured, 1, "the flight recorder must hold the call")
+	assert.Equal(t, loopTenantA, f.captured[0].tenant)
+	assert.Equal(t, "bank-1", f.captured[0].call.MissionID)
+	assert.Equal(t, "run-1", f.captured[0].call.MissionRunID)
+}
+
+type memFindings struct {
+	stored []agent.Finding
+	tenant string
+	err    error
+}
+
+func (m *memFindings) Store(_ context.Context, tenant string, _ types.ID, f agent.Finding) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.tenant = tenant
+	m.stored = append(m.stored, f)
+	return nil
+}
+
+func (m *memFindings) Get(context.Context, string, types.ID, FindingFilter) ([]agent.Finding, error) {
+	return nil, nil
+}
+
+func submitReq() *harnesspb.SubmitFindingRequest {
+	return &harnesspb.SubmitFindingRequest{
+		Context: &harnesspb.ContextInfo{MissionId: "bank-1", MissionRunId: "run-1"},
+		Finding: &typespb.Finding{
+			Title: "open ticket queue", Severity: typespb.FindingSeverity_FINDING_SEVERITY_HIGH,
+			AgentName: "someone-else",
+		},
+	}
+}
+
+func findingGrant() *LoopGrant {
+	g := grantOf("lg-1", "ticket")
+	g.HarnessCalls = []string{"SubmitFinding"}
+	return g
+}
+
+func (f *loopFixture) withFindings() (*memFindings, *[]FindingRaised) {
+	store := &memFindings{}
+	var raised []FindingRaised
+	WithMemberFindings(store, func(_ context.Context, r FindingRaised) { raised = append(raised, r) })(f.svc)
+	return store, &raised
+}
+
+// A granted member submits a finding. The daemon stores it as the member: the
+// tenant is the tenant of the verified grant, SubmittedBy is the member
+// principal, and the agent name is the verified agent, not the payload.
+func TestMemberSubmitFinding_AGrantedMemberStoresAFindingAsTheMember(t *testing.T) {
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": findingGrant()})
+	store, raised := f.withFindings()
+
+	resp, err := f.svc.SubmitFinding(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), submitReq())
+	require.NoError(t, err)
+	require.Nil(t, resp.GetError(), "%v", resp.GetError())
+	require.Len(t, store.stored, 1)
+	got := store.stored[0]
+	assert.Equal(t, loopTenantA, store.tenant)
+	assert.Equal(t, loopTenantA, got.TenantID)
+	assert.Equal(t, "member:member-1", got.SubmittedBy)
+	require.Len(t, *raised, 1)
+	assert.Equal(t, "member:member-1", (*raised)[0].SubmittedBy)
+	assert.Equal(t, "intake-agent", (*raised)[0].AgentName, "the name of the payload must not win")
+	text := f.auditText()
+	assert.Contains(t, text, memberFindingAuditAction)
+	assert.Contains(t, text, `"loop_grant_id":"lg-1"`)
+}
+
+// A member with no grant, a grant with no finding right, and a grant of another
+// tenant are each refused. Nothing is stored.
+func TestMemberSubmitFinding_UngrantedMembersAreRefused(t *testing.T) {
+	for name, grants := range map[string]map[string]*LoopGrant{
+		"no grant":                    nil,
+		"a grant with no right":       {loopTenantA + "/member-1": grantOf("lg-1", "ticket")},
+		"a grant of tenant B":         {"tenant-b/member-1": findingGrant()},
+		"a grant of the other member": {loopTenantA + "/member-2": findingGrant()},
+	} {
+		f := newLoopFixture(t, grants)
+		store, raised := f.withFindings()
+		resp, err := f.svc.SubmitFinding(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), submitReq())
+		require.NoError(t, err, name)
+		assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode(), name)
+		assert.Empty(t, store.stored, name)
+		assert.Empty(t, *raised, name)
+	}
+}
+
+// A revoked grant stops the next finding at once. It does not wait for the
+// renewal of the token.
+func TestMemberSubmitFinding_ARevokedGrantStopsTheNextFinding(t *testing.T) {
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": findingGrant()})
+	store, _ := f.withFindings()
+	ctx := loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1")
+
+	resp, err := f.svc.SubmitFinding(ctx, submitReq())
+	require.NoError(t, err)
+	require.Nil(t, resp.GetError())
+
+	delete(f.source.grants, loopTenantA+"/member-1") // the admin revokes the grant
+	resp, err = f.svc.SubmitFinding(ctx, submitReq())
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode())
+	assert.Len(t, store.stored, 1)
+}
+
+func TestMemberSubmitFinding_RefusalsAndOutages(t *testing.T) {
+	ctx := loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1")
+	grants := map[string]*LoopGrant{loopTenantA + "/member-1": findingGrant()}
+
+	f := newLoopFixture(t, grants)
+	f.withFindings()
+	req := submitReq()
+	req.Context = &harnesspb.ContextInfo{MissionId: "mission-of-someone-else"}
+	resp, err := f.svc.SubmitFinding(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode(), "another mission")
+
+	f = newLoopFixture(t, grants)
+	f.source.err = errors.New("tenant database down")
+	f.withFindings()
+	resp, err = f.svc.SubmitFinding(ctx, submitReq())
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, resp.GetError().GetCode(), "grant store down")
+
+	f = newLoopFixture(t, grants)
+	resp, err = f.svc.SubmitFinding(ctx, submitReq())
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, resp.GetError().GetCode(), "no finding store wired")
+
+	f = newLoopFixture(t, grants)
+	store, _ := f.withFindings()
+	store.err = errors.New("db down")
+	resp, err = f.svc.SubmitFinding(ctx, submitReq())
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, resp.GetError().GetCode(), "finding store down")
+
+	f = newLoopFixture(t, grants)
+	f.withFindings()
+	f.svc.connectorAudit = nil
+	resp, err = f.svc.SubmitFinding(ctx, submitReq())
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, resp.GetError().GetCode(), "no finding without its audit record")
+
+	f = newLoopFixture(t, grants)
+	f.svc.members = loopFakeMembers{err: errors.New("bank store down")}
+	resp, err = f.svc.SubmitFinding(ctx, submitReq())
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, resp.GetError().GetCode(), "bank store down")
 }

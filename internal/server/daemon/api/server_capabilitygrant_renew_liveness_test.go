@@ -361,10 +361,13 @@ func TestRenewCapabilityGrant_RefusesAGrantWithNoRun(t *testing.T) {
 
 // memberLookup answers whether claims are the base grant of a live member, from
 // a fixed set keyed by "tenant/bank/run".
-type memberLookup struct{ live map[string]bool }
+type memberLookup struct {
+	live map[string]bool
+	err  error
+}
 
-func (l memberLookup) IsMemberBaseGrantLive(_ context.Context, c sdkcg.Claims) bool {
-	return l.live[c.Tenant.String()+"/"+c.MissionID+"/"+c.MissionRunID]
+func (l memberLookup) IsMemberBaseGrantLive(_ context.Context, c sdkcg.Claims) (bool, error) {
+	return l.live[c.Tenant.String()+"/"+c.MissionID+"/"+c.MissionRunID], l.err
 }
 
 func TestRenewCapabilityGrant_RenewsTheBaseGrantOfALiveBankMember(t *testing.T) {
@@ -522,5 +525,43 @@ func TestRenewCapabilityGrant_NonMemberRenewalIgnoresTheSource(t *testing.T) {
 	}
 	if payload := renewedRPCs(t, resp.GetCapabilityGrant()); strings.Contains(payload, "/x/Y") {
 		t.Errorf("a mission grant must not take member RPCs, payload = %s", payload)
+	}
+}
+
+// A renewal that cannot read the liveness of the member fails. It does not read
+// the member as gone, and it does not keep the old RPCs of the grant.
+func TestRenewCapabilityGrant_RefusesWhenTheMemberLivenessCannotBeRead(t *testing.T) {
+	s := newRenewServer(t, liveLookup{live: map[string]bool{}})
+	s.WithLiveMemberLookup(memberLookup{err: context.DeadlineExceeded})
+	s.WithMemberGrantRPCs(memberRPCStub{rpcs: []string{"/x/Y"}})
+	_, err := s.RenewCapabilityGrant(renewCtx(), renewRequest())
+	if got := status.Code(err); got != codes.Unavailable {
+		t.Fatalf("code = %s (%v), want Unavailable", got, err)
+	}
+}
+
+// The liveness is read once. A lookup that answers live once and not live the
+// second time cannot give a renewal with the old RPCs.
+type flippingLookup struct{ calls *int }
+
+func (f flippingLookup) IsMemberBaseGrantLive(context.Context, sdkcg.Claims) (bool, error) {
+	*f.calls++
+	return *f.calls == 1, nil
+}
+
+func TestRenewCapabilityGrant_ReadsTheMemberLivenessOnce(t *testing.T) {
+	calls := 0
+	s := newRenewServer(t, liveLookup{live: map[string]bool{}})
+	s.WithLiveMemberLookup(flippingLookup{calls: &calls})
+	s.WithMemberGrantRPCs(memberRPCStub{rpcs: []string{"/x/Y"}})
+	resp, err := s.RenewCapabilityGrant(renewCtx(), renewRequest())
+	if err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("the liveness was read %d times, want 1", calls)
+	}
+	if payload := renewedRPCs(t, resp.GetCapabilityGrant()); !strings.Contains(payload, "/x/Y") {
+		t.Errorf("the renewed grant must take the RPCs of the member source, payload = %s", payload)
 	}
 }

@@ -222,6 +222,11 @@ type HarnessCallbackService struct {
 	// member is refused.
 	loopGrants LoopGrantSource
 
+	// memberFindings and memberFindingSink store and raise the findings that
+	// bank members submit (gibson#1612).
+	memberFindings    FindingStore
+	memberFindingSink FindingSink
+
 	// tracerProvider for creating real spans from proxy span data
 	tracerProvider *sdktrace.TracerProvider
 
@@ -1480,6 +1485,17 @@ func (s *HarnessCallbackService) ListPlugins(ctx context.Context, req *harnesspb
 
 // SubmitFinding implements the finding submission RPC.
 func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harnesspb.SubmitFindingRequest) (*harnesspb.SubmitFindingResponse, error) {
+	// A bank member has no mission harness. Its loop grant decides, at the time
+	// of the call (gibson#1612).
+	member, isMember, merr := s.memberOfCall(ctx)
+	if merr != nil {
+		s.logger.ErrorContext(ctx, "SubmitFinding: the calling member could not be resolved", "err", merr)
+		return findingErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the calling member could not be resolved"), nil
+	}
+	if isMember {
+		return s.submitMemberFinding(ctx, req, member)
+	}
+
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err

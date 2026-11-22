@@ -131,6 +131,14 @@ func memberCaller(m memberCall) catalog.Caller {
 // the one connector call path with the loop check in front of can_execute. A
 // member with no loop grant gets a refusal, and a refused invoke is recorded.
 func (s *HarnessCallbackService) serveMemberMetaTool(ctx context.Context, req *harnesspb.CallToolProtoRequest, m memberCall) (*harnesspb.CallToolProtoResponse, error) {
+	// A member owns its bank, its run and its agent, and nothing else. A request
+	// that names another mission is refused before any lookup.
+	if !m.ownsContext(req.GetContext()) {
+		// gibson:no-tool-executed — the member names a mission that it does not own.
+		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "a member call names a mission that the member does not own"), nil
+	}
+	// The rest of the path reads the verified context, never the request.
+	req = &harnesspb.CallToolProtoRequest{Context: m.contextInfo(), Name: req.GetName(), InputJson: req.GetInputJson()}
 	handler := s.metaHandler(req)
 	caller := memberCaller(m)
 	switch req.GetName() {

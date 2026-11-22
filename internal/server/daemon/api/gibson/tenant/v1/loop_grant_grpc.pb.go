@@ -4,15 +4,16 @@
 // LoopGrantService manages the loop grants of one tenant (gibson#1612).
 //
 // An always-on member of a bank has no mission turn, so it has no grant of a
-// sender to call a tool of the buyer with. A tenant admin gives the agent of
-// the member a loop grant instead. The grant names the tool classes that the
-// member may call and the harness calls that it may make. A class covers every
-// connector of that class that the tenant has enabled, now and later. The grant
-// does not replace the can_execute check on the connector, so the tenant switch
-// of a connector still stops the member.
+// sender to call a tool of the buyer with. A tenant admin gives the member a
+// loop grant instead. The grant names the tool classes that the member may call
+// and the harness calls that it may make. A class covers every connector of that
+// class that the tenant has enabled, now and later. The grant does not replace
+// the can_execute check on the connector, so the tenant switch of a connector
+// still stops the member.
 //
-// A loop grant is bound to one tenant and to one agent. It never reaches
-// another tenant.
+// A loop grant is bound to one bank member and to one tenant. It never reaches
+// another member or another tenant. The manifest of the agent of the member
+// limits the classes of the grant.
 //
 // Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
 
@@ -46,15 +47,16 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LoopGrantServiceClient interface {
-	// GrantLoop gives the members of one catalog agent a loop grant. A second
-	// call for the same agent replaces the first grant and gives it a new id.
-	// The audit record names the admin who made the call.
+	// GrantLoop gives one bank member a loop grant. A second call for the same
+	// member replaces the first grant and gives it a new id. The audit record
+	// names the admin who made the call. When the audit record cannot be written,
+	// the daemon restores the prior grant of the member.
 	GrantLoop(ctx context.Context, in *GrantLoopRequest, opts ...grpc.CallOption) (*GrantLoopResponse, error)
-	// RevokeLoop removes the loop grant of one agent. It is idempotent. A member
-	// of the agent then has its tool calls refused.
+	// RevokeLoop removes the loop grant of one member. It is idempotent. The
+	// member then has its tool calls refused.
 	RevokeLoop(ctx context.Context, in *RevokeLoopRequest, opts ...grpc.CallOption) (*RevokeLoopResponse, error)
-	// ListLoopGrants returns one page of the loop grants of the tenant, in agent
-	// name order.
+	// ListLoopGrants returns one page of the loop grants of the tenant, in member
+	// id order.
 	ListLoopGrants(ctx context.Context, in *ListLoopGrantsRequest, opts ...grpc.CallOption) (*ListLoopGrantsResponse, error)
 }
 
@@ -100,15 +102,16 @@ func (c *loopGrantServiceClient) ListLoopGrants(ctx context.Context, in *ListLoo
 // All implementations must embed UnimplementedLoopGrantServiceServer
 // for forward compatibility.
 type LoopGrantServiceServer interface {
-	// GrantLoop gives the members of one catalog agent a loop grant. A second
-	// call for the same agent replaces the first grant and gives it a new id.
-	// The audit record names the admin who made the call.
+	// GrantLoop gives one bank member a loop grant. A second call for the same
+	// member replaces the first grant and gives it a new id. The audit record
+	// names the admin who made the call. When the audit record cannot be written,
+	// the daemon restores the prior grant of the member.
 	GrantLoop(context.Context, *GrantLoopRequest) (*GrantLoopResponse, error)
-	// RevokeLoop removes the loop grant of one agent. It is idempotent. A member
-	// of the agent then has its tool calls refused.
+	// RevokeLoop removes the loop grant of one member. It is idempotent. The
+	// member then has its tool calls refused.
 	RevokeLoop(context.Context, *RevokeLoopRequest) (*RevokeLoopResponse, error)
-	// ListLoopGrants returns one page of the loop grants of the tenant, in agent
-	// name order.
+	// ListLoopGrants returns one page of the loop grants of the tenant, in member
+	// id order.
 	ListLoopGrants(context.Context, *ListLoopGrantsRequest) (*ListLoopGrantsResponse, error)
 	mustEmbedUnimplementedLoopGrantServiceServer()
 }

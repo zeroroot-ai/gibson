@@ -190,6 +190,7 @@ func ingestHarnessFinding(reg *brain.Registry) harness.FindingSink {
 			MissionID:    f.MissionID,
 			MissionRunID: f.MissionRunID,
 			AgentName:    f.AgentName,
+			SubmittedBy:  f.SubmittedBy,
 			// The check that raised it (ADR-0178): the mission run, or the
 			// read of a connector tool (harness.SubmittedFindingCheck).
 			CheckKind: f.CheckKind,

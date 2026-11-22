@@ -262,6 +262,11 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 		Tenant: c.Caller.Tenant, Subject: c.Caller.Subject, Canonical: canon,
 		ArgsJSON: argsJSON, WorkID: c.WorkID, MissionID: c.MissionID, RunID: c.RunID,
 	}
+	if c.Loop != nil {
+		// The record names the member of every refusal, also one before the id
+		// is decoded.
+		rec.MemberID = c.MemberID
+	}
 
 	finish := func(resultJSON []byte, err error) {
 		errText := ""
@@ -278,12 +283,13 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 	}
 	rec.Connector, rec.Tool = tid.Connector, tid.Tool
 	if c.Loop != nil {
-		rec.MemberID = c.MemberID
 		// A loop grant covers connector tools. A skill or a native tool is
-		// refused, and the refusal is recorded.
+		// refused, and the refusal is recorded with the grant that the member
+		// holds, when it holds one. An empty connector is covered by no class.
 		var allow LoopAllow
 		var lerr error
 		if tid.Source != toolid.SourceMCP {
+			allow, _ = c.Loop(ctx, "")
 			lerr = fmt.Errorf("%w: only a connector tool is covered", ErrLoopGrantDenied)
 		} else {
 			allow, lerr = c.Loop(ctx, tid.Connector)

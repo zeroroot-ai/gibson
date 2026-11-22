@@ -4,8 +4,8 @@
 // Package loopgrantstore keeps the loop grants of each tenant in the
 // per-tenant Postgres database (migration 025, gibson#1612).
 //
-// A loop grant lets the members of one catalog agent call the tools of the
-// connectors that the tenant enabled, by tool class. The database is the tenant
+// A loop grant lets one bank member call the tools of the connectors that the
+// tenant enabled, by tool class. It is bound to the member and to the tenant. The database is the tenant
 // scope: a read for one tenant cannot return a row of another.
 package loopgrantstore
 
@@ -19,14 +19,17 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// ErrNotFound marks an agent that holds no loop grant in the tenant.
+// ErrNotFound marks a member that holds no loop grant in the tenant.
 var ErrNotFound = errors.New("loopgrantstore: no loop grant")
 
-// Grant is the loop grant of one agent.
+// Grant is the loop grant of one bank member.
 type Grant struct {
 	// ID names the grant. The audit record of each member call holds it.
 	ID string
-	// AgentName is the catalog agent whose members hold the grant.
+	// MemberID is the bank member that holds the grant.
+	MemberID string
+	// AgentName is the catalog agent of the member. The manifest of the agent
+	// limits the classes of the grant.
 	AgentName string
 	// ToolClasses are tool classes of the catalog, for example ticket.
 	ToolClasses []string
@@ -39,15 +42,16 @@ type Grant struct {
 
 // Store reads and writes the loop grants of one tenant.
 type Store interface {
-	// Put saves the grant of an agent. A grant that exists is replaced.
+	// Put saves the grant of a member. A grant that exists is replaced. A grant
+	// with a GrantedAt keeps that time, so a restore of a prior grant is exact.
 	Put(ctx context.Context, tenant string, g Grant) (*Grant, error)
-	// Get returns the grant of an agent, or ErrNotFound.
-	Get(ctx context.Context, tenant, agentName string) (*Grant, error)
-	// ListPage returns at most limit grants of the tenant, in agent name order.
-	// With hasAfter it returns the grants whose agent name is larger than after.
+	// Get returns the grant of a member, or ErrNotFound.
+	Get(ctx context.Context, tenant, memberID string) (*Grant, error)
+	// ListPage returns at most limit grants of the tenant, in member id order.
+	// With hasAfter it returns the grants whose member id is larger than after.
 	ListPage(ctx context.Context, tenant, after string, hasAfter bool, limit int) ([]Grant, error)
-	// Delete removes the grant of an agent. It is idempotent.
-	Delete(ctx context.Context, tenant, agentName string) error
+	// Delete removes the grant of a member. It is idempotent.
+	Delete(ctx context.Context, tenant, memberID string) error
 }
 
 type conn interface {
@@ -86,7 +90,7 @@ func NewPostgresStore(pool datapool.Pool) Store {
 
 var _ Store = (*postgresStore)(nil)
 
-const columns = `id, agent_name, tool_classes, harness_calls, grantor, granted_at`
+const columns = `id, member_id, agent_name, tool_classes, harness_calls, grantor, granted_at`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -94,7 +98,7 @@ type scanner interface {
 
 func scanGrant(row scanner) (*Grant, error) {
 	var g Grant
-	if err := row.Scan(&g.ID, &g.AgentName, &g.ToolClasses, &g.HarnessCalls, &g.Grantor, &g.GrantedAt); err != nil {
+	if err := row.Scan(&g.ID, &g.MemberID, &g.AgentName, &g.ToolClasses, &g.HarnessCalls, &g.Grantor, &g.GrantedAt); err != nil {
 		return nil, fmt.Errorf("scan loop grant row: %w", err)
 	}
 	g.GrantedAt = g.GrantedAt.UTC()
@@ -109,8 +113,12 @@ func nonNil(s []string) []string {
 }
 
 func (s *postgresStore) Put(ctx context.Context, tenant string, g Grant) (*Grant, error) {
-	if g.ID == "" || g.AgentName == "" || g.Grantor == "" {
-		return nil, errors.New("loopgrantstore: a grant needs an id, an agent and a grantor")
+	if g.ID == "" || g.MemberID == "" || g.AgentName == "" || g.Grantor == "" {
+		return nil, errors.New("loopgrantstore: a grant needs an id, a member, an agent and a grantor")
+	}
+	grantedAt := g.GrantedAt
+	if grantedAt.IsZero() {
+		grantedAt = time.Now().UTC()
 	}
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
@@ -118,31 +126,31 @@ func (s *postgresStore) Put(ctx context.Context, tenant string, g Grant) (*Grant
 	}
 	defer c.Release()
 	out, err := scanGrant(c.SQL().QueryRow(ctx,
-		`INSERT INTO loop_grants (id, agent_name, tool_classes, harness_calls, grantor)
-		 VALUES ($1,$2,$3,$4,$5)
-		 ON CONFLICT (agent_name) DO UPDATE
-		   SET id = EXCLUDED.id, tool_classes = EXCLUDED.tool_classes,
-		       harness_calls = EXCLUDED.harness_calls, grantor = EXCLUDED.grantor, granted_at = now()
+		`INSERT INTO loop_grants (id, member_id, agent_name, tool_classes, harness_calls, grantor, granted_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)
+		 ON CONFLICT (member_id) DO UPDATE
+		   SET id = EXCLUDED.id, agent_name = EXCLUDED.agent_name, tool_classes = EXCLUDED.tool_classes,
+		       harness_calls = EXCLUDED.harness_calls, grantor = EXCLUDED.grantor, granted_at = EXCLUDED.granted_at
 		 RETURNING `+columns,
-		g.ID, g.AgentName, nonNil(g.ToolClasses), nonNil(g.HarnessCalls), g.Grantor))
+		g.ID, g.MemberID, g.AgentName, nonNil(g.ToolClasses), nonNil(g.HarnessCalls), g.Grantor, grantedAt))
 	if err != nil {
-		return nil, fmt.Errorf("loopgrantstore: put %s: %w", g.AgentName, err)
+		return nil, fmt.Errorf("loopgrantstore: put %s: %w", g.MemberID, err)
 	}
 	return out, nil
 }
 
-func (s *postgresStore) Get(ctx context.Context, tenant, agentName string) (*Grant, error) {
+func (s *postgresStore) Get(ctx context.Context, tenant, memberID string) (*Grant, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
 		return nil, fmt.Errorf("loopgrantstore: %w", err)
 	}
 	defer c.Release()
-	g, err := scanGrant(c.SQL().QueryRow(ctx, `SELECT `+columns+` FROM loop_grants WHERE agent_name = $1`, agentName))
+	g, err := scanGrant(c.SQL().QueryRow(ctx, `SELECT `+columns+` FROM loop_grants WHERE member_id = $1`, memberID))
 	if errors.Is(err, datapool.ErrNoRows) {
-		return nil, fmt.Errorf("%w: %s", ErrNotFound, agentName)
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, memberID)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("loopgrantstore: get %s: %w", agentName, err)
+		return nil, fmt.Errorf("loopgrantstore: get %s: %w", memberID, err)
 	}
 	return g, nil
 }
@@ -154,7 +162,7 @@ func (s *postgresStore) ListPage(ctx context.Context, tenant, after string, hasA
 	}
 	defer c.Release()
 	rows, err := c.SQL().Query(ctx,
-		`SELECT `+columns+` FROM loop_grants WHERE (NOT $1 OR agent_name > $2) ORDER BY agent_name ASC LIMIT $3`,
+		`SELECT `+columns+` FROM loop_grants WHERE (NOT $1 OR member_id > $2) ORDER BY member_id ASC LIMIT $3`,
 		hasAfter, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("loopgrantstore: list: %w", err)
@@ -174,14 +182,14 @@ func (s *postgresStore) ListPage(ctx context.Context, tenant, after string, hasA
 	return out, nil
 }
 
-func (s *postgresStore) Delete(ctx context.Context, tenant, agentName string) error {
+func (s *postgresStore) Delete(ctx context.Context, tenant, memberID string) error {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
 		return fmt.Errorf("loopgrantstore: %w", err)
 	}
 	defer c.Release()
-	if _, err := c.SQL().Exec(ctx, `DELETE FROM loop_grants WHERE agent_name = $1`, agentName); err != nil {
-		return fmt.Errorf("loopgrantstore: delete %s: %w", agentName, err)
+	if _, err := c.SQL().Exec(ctx, `DELETE FROM loop_grants WHERE member_id = $1`, memberID); err != nil {
+		return fmt.Errorf("loopgrantstore: delete %s: %w", memberID, err)
 	}
 	return nil
 }
