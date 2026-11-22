@@ -826,7 +826,7 @@ func TestApplicationFindingsToProto_ReturnsTheFixFields(t *testing.T) {
 // (gibson#1579).
 func TestApplicationFindingsToProto_FixHeadAndFilesAreValidated(t *testing.T) {
 	good := `[{"finding_id":"f-1","status":"fixing","fix_head_sha":"1111111111111111111111111111111111111111",` +
-		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\"},` +
+		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\",\"mode\":\"100755\"},` +
 		`{\"path\":\"b.go\",\"change\":\"renamed\",\"previous_path\":\"c.go\",\"blob_sha\":\"3333333333333333333333333333333333333333\"}]"},` +
 		`{"finding_id":"f-2","status":"fixing","merge_request":"mr-2","fix_head_sha":"not-a-sha",` +
 		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\"}]"},` +
@@ -840,7 +840,7 @@ func TestApplicationFindingsToProto_FixHeadAndFilesAreValidated(t *testing.T) {
 	}
 	if got[0].GetFixHeadSha() != "1111111111111111111111111111111111111111" || len(got[0].GetFixFiles()) != 2 ||
 		got[0].GetFixFiles()[1].GetChange() != harnesspb.FixFileChange_FIX_FILE_CHANGE_RENAMED ||
-		got[0].GetFixFiles()[1].GetPreviousPath() != "c.go" {
+		got[0].GetFixFiles()[1].GetPreviousPath() != "c.go" || got[0].GetFixFiles()[0].GetMode() != "100755" {
 		t.Errorf("finding 1 = %+v", got[0])
 	}
 	// An invalid head drops both fix fields. The rest of the finding stays.
