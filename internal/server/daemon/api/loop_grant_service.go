@@ -200,24 +200,30 @@ func (s *LoopGrantService) ListLoopGrants(ctx context.Context, req *tenantv1.Lis
 		return nil, err
 	}
 	after, hasAfter := page.After()
-	// One more row than the page tells whether a next page exists.
-	limit := page.Limit()
-	grants, err := s.store.ListPage(ctx, tenant, after, hasAfter, limit+1)
+	// The store reads one grant more than the page holds. That extra grant tells
+	// whether a next page exists.
+	fetched, err := s.store.ListPage(ctx, tenant, after, hasAfter, page.Limit()+1)
 	if err != nil {
 		return nil, loopGrantStatus(rpc, err)
 	}
-	more := len(grants) > limit
-	if more {
-		grants = grants[:limit]
+	grants, hasMore := splitPage(fetched, page.Limit())
+	resp := &tenantv1.ListLoopGrantsResponse{Grants: make([]*tenantv1.LoopGrant, len(grants))}
+	for i := range grants {
+		resp.Grants[i] = loopGrantProto(grants[i])
 	}
-	out := &tenantv1.ListLoopGrantsResponse{Grants: make([]*tenantv1.LoopGrant, 0, len(grants))}
-	for _, g := range grants {
-		out.Grants = append(out.Grants, loopGrantProto(g))
+	if hasMore {
+		resp.NextPageToken = page.Token(grants[len(grants)-1].AgentName, true)
 	}
-	if more {
-		out.NextPageToken = page.Token(grants[len(grants)-1].AgentName, true)
+	return resp, nil
+}
+
+// splitPage cuts the extra grant that the store read, and reports whether it was
+// there.
+func splitPage(fetched []loopgrantstore.Grant, limit int) (page []loopgrantstore.Grant, hasMore bool) {
+	if len(fetched) <= limit {
+		return fetched, false
 	}
-	return out, nil
+	return fetched[:limit], true
 }
 
 func dedupe(in []string) []string {
