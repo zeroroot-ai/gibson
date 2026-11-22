@@ -111,8 +111,9 @@ func readMarkerCaller(ctx context.Context) (tenant, subject string, refusal *har
 // World with a large marker. The caps hold for the cursor, for the count of
 // the result ids and for the length of each id.
 const (
-	maxReadMarkerCursor    = 1024
-	maxReadMarkerResultIDs = 500
+	maxReadMarkerCursor = 1024
+	// maxReadMarkerResultIDs is the batch of the intake agent (1000 results).
+	maxReadMarkerResultIDs = 1000
 	maxReadMarkerResultID  = 512
 )
 
@@ -232,21 +233,32 @@ func (s *HarnessCallbackService) LastReadMarker(
 	}, nil
 }
 
-// tenantHasConnector reports whether the tenant has a connector with the name.
-// It reads the connectors of the tenant through the one MCP client of the
-// daemon. A daemon with no client cannot tell, and the write fails.
-func (s *HarnessCallbackService) tenantHasConnector(ctx context.Context, tenant, name string) (bool, error) {
-	if s.connectors == nil {
-		return false, errors.New("this daemon has no connector client")
+// EnabledConnectorLister lists the connectors that a tenant has enabled. The
+// daemon backs it with the tenant connector configuration in the platform
+// database. It opens no connection to a connector.
+type EnabledConnectorLister interface {
+	ListEnabledConnectors(ctx context.Context, tenant string) ([]string, error)
+}
+
+// WithEnabledConnectors sets the lister that a read marker write checks the
+// connector name against.
+func WithEnabledConnectors(l EnabledConnectorLister) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.enabledConnectors = l
 	}
-	tools, err := s.connectors.ListConnectorTools(ctx, tenant)
+}
+
+// tenantHasConnector reports whether the tenant has enabled a connector with the
+// name. It reads the configuration of the tenant, so a slow or down connector is
+// no reason to refuse a marker. A daemon with no lister cannot tell, and the
+// write fails with an error, never with "not found".
+func (s *HarnessCallbackService) tenantHasConnector(ctx context.Context, tenant, name string) (bool, error) {
+	if s.enabledConnectors == nil {
+		return false, errors.New("this daemon has no list of the connectors of a tenant")
+	}
+	ids, err := s.enabledConnectors.ListEnabledConnectors(ctx, tenant)
 	if err != nil {
 		return false, fmt.Errorf("list the connectors of the tenant: %w", err)
 	}
-	for _, t := range tools {
-		if t.Connector == name {
-			return true, nil
-		}
-	}
-	return false, nil
+	return slices.Contains(ids, name), nil
 }

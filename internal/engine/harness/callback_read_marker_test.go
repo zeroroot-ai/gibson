@@ -19,8 +19,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
-	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
-	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 )
 
 func readMarkerService(t *testing.T) *HarnessCallbackService {
@@ -29,7 +27,7 @@ func readMarkerService(t *testing.T) *HarnessCallbackService {
 	t.Cleanup(cancel)
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), NewCallbackHarnessRegistry(),
-		WithReadMarkerStore(NewBrainReadMarkerStore(reg)), WithConnectors(markerConnectors()), testEventBus())
+		WithReadMarkerStore(NewBrainReadMarkerStore(reg)), WithEnabledConnectors(markerConnectors()), testEventBus())
 }
 
 func readMarkerCtx(tenant, subject string) context.Context {
@@ -123,7 +121,7 @@ func (failingMarkerStore) LastReadMarker(context.Context, string, string, string
 // never looks like "no marker" (gibson#1569).
 func TestLastReadMarker_AFailingStoreIsAnErrorNotNoMarker(t *testing.T) {
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), NewCallbackHarnessRegistry(),
-		WithReadMarkerStore(failingMarkerStore{}), WithConnectors(markerConnectors()), testEventBus())
+		WithReadMarkerStore(failingMarkerStore{}), WithEnabledConnectors(markerConnectors()), testEventBus())
 	ctx := readMarkerCtx("acme", "s")
 
 	r, err := svc.LastReadMarker(ctx, &harnesspb.LastReadMarkerRequest{Connector: "c"})
@@ -153,14 +151,17 @@ func TestSetReadMarkerStore_WiresTheStore(t *testing.T) {
 	require.NotNil(t, m.server.service.readMarkers)
 }
 
-// markerConnectors is the connectors of the test tenant: edr, siem and c.
-func markerConnectors() fakeConnectors {
-	tools := make([]catalog.ToolEntry, 0, 3)
-	for _, c := range []string{"edr", "siem", "c"} {
-		tools = append(tools, catalog.ToolEntry{Source: toolid.SourceMCP, Connector: c, Tool: "list"})
-	}
-	return fakeConnectors{tools: tools}
+// markerConnectors lists the connectors that the test tenant enabled: edr, siem and c.
+type markerLister struct {
+	ids []string
+	err error
 }
+
+func (m markerLister) ListEnabledConnectors(context.Context, string) ([]string, error) {
+	return m.ids, m.err
+}
+
+func markerConnectors() markerLister { return markerLister{ids: []string{"edr", "siem", "c"}} }
 
 // A marker for a name that is no connector of the tenant is refused, and a
 // daemon that cannot list the connectors fails the write (gibson#1569).
@@ -174,15 +175,15 @@ func TestWriteReadMarker_TheConnectorMustBeOneOfTheTenant(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, r.GetFound(), "a refused write left a marker")
 
-	for name, conns := range map[string]ConnectorClient{
-		"no client":   nil,
-		"list failed": fakeConnectors{listErr: errors.New("down")},
+	for name, conns := range map[string]EnabledConnectorLister{
+		"no lister":   nil,
+		"list failed": markerLister{err: errors.New("down")},
 	} {
 		ctxc, cancel := context.WithCancel(context.Background())
 		reg := brain.NewRegistry(ctxc, braintest.StoreFactory())
 		opts := []CallbackServiceOption{WithReadMarkerStore(NewBrainReadMarkerStore(reg)), testEventBus()}
 		if conns != nil {
-			opts = append(opts, WithConnectors(conns))
+			opts = append(opts, WithEnabledConnectors(conns))
 		}
 		s := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), NewCallbackHarnessRegistry(), opts...)
 		w, err := s.WriteReadMarker(ctx, &harnesspb.WriteReadMarkerRequest{Connector: "edr"})
@@ -212,7 +213,7 @@ func TestWriteReadMarker_AnUnchangedWriteIsANoOp(t *testing.T) {
 	t.Cleanup(cancel)
 	store := &countingMarkerStore{ReadMarkerStore: NewBrainReadMarkerStore(brain.NewRegistry(ctxb, braintest.StoreFactory()))}
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), NewCallbackHarnessRegistry(),
-		WithReadMarkerStore(store), WithConnectors(markerConnectors()), testEventBus())
+		WithReadMarkerStore(store), WithEnabledConnectors(markerConnectors()), testEventBus())
 	ctx := readMarkerCtx("acme", "s")
 	write := func(cursor string, ids ...string) {
 		t.Helper()
