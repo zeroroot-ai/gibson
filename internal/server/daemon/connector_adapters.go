@@ -4,8 +4,8 @@
 package daemon
 
 import (
-	"errors"
 	"context"
+	"errors"
 	"fmt"
 
 	"google.golang.org/grpc"
