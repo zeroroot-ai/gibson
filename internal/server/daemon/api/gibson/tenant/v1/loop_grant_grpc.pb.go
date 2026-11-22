@@ -53,9 +53,8 @@ type LoopGrantServiceClient interface {
 	// RevokeLoop removes the loop grant of one agent. It is idempotent. A member
 	// of the agent then has its tool calls refused.
 	RevokeLoop(ctx context.Context, in *RevokeLoopRequest, opts ...grpc.CallOption) (*RevokeLoopResponse, error)
-	// ListLoopGrants returns each loop grant of the tenant. A tenant holds at
-	// most one grant for each catalog agent, so the list is small and it has no
-	// pages.
+	// ListLoopGrants returns one page of the loop grants of the tenant, in agent
+	// name order.
 	ListLoopGrants(ctx context.Context, in *ListLoopGrantsRequest, opts ...grpc.CallOption) (*ListLoopGrantsResponse, error)
 }
 
@@ -108,9 +107,8 @@ type LoopGrantServiceServer interface {
 	// RevokeLoop removes the loop grant of one agent. It is idempotent. A member
 	// of the agent then has its tool calls refused.
 	RevokeLoop(context.Context, *RevokeLoopRequest) (*RevokeLoopResponse, error)
-	// ListLoopGrants returns each loop grant of the tenant. A tenant holds at
-	// most one grant for each catalog agent, so the list is small and it has no
-	// pages.
+	// ListLoopGrants returns one page of the loop grants of the tenant, in agent
+	// name order.
 	ListLoopGrants(context.Context, *ListLoopGrantsRequest) (*ListLoopGrantsResponse, error)
 	mustEmbedUnimplementedLoopGrantServiceServer()
 }

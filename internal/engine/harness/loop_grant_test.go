@@ -102,7 +102,6 @@ func newLoopFixture(t *testing.T, grants map[string]*LoopGrant, enabled ...strin
 		}},
 		connectorAudit:      newConnectorAudit(t, f.durable),
 		missionBlockedTools: noBlockedTools,
-		loopGrants:          f.source,
 		members: loopFakeMembers{runs: map[string]string{
 			loopTenantA + "/run-1": "member-1/bank-1",
 			"tenant-b/run-9":       "member-9/bank-9",
@@ -111,6 +110,7 @@ func newLoopFixture(t *testing.T, grants map[string]*LoopGrant, enabled ...strin
 			f.captured = append(f.captured, capturedTool{tenant: tn, call: call})
 		},
 	}
+	WithLoopGrants(f.source)(f.svc)
 	return f
 }
 
@@ -312,3 +312,66 @@ func TestGrantableMemberHarnessCalls_AreRealMethods(t *testing.T) {
 }
 
 var _ = component.ComponentInfo{}
+
+func searchReq() *harnesspb.CallToolProtoRequest {
+	return &harnesspb.CallToolProtoRequest{
+		Context: &harnesspb.ContextInfo{MissionId: "bank-1", MissionRunId: "run-1"},
+		Name:    metatool.SearchToolsName, InputJson: []byte(`{}`),
+	}
+}
+
+// An unread grant is not an empty one: search_tools says unavailable.
+func TestMemberSearch_AnUnreadGrantIsUnavailable(t *testing.T) {
+	f := newLoopFixture(t, nil, "jira")
+	f.source.err = errors.New("tenant database down")
+	resp, err := f.svc.CallToolProto(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), searchReq())
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, resp.GetError().GetCode())
+}
+
+// A daemon with no grant source, and a source that returns nothing, both read as
+// no grant.
+func TestMemberLoopGrant_NoSourceAndAnEmptyAnswerAreNoGrant(t *testing.T) {
+	f := newLoopFixture(t, nil, "jira")
+	m := memberCall{tenant: loopTenantA, agent: "intake-agent"}
+
+	f.svc.loopGrants = nil
+	_, err := f.svc.loopGrant(context.Background(), m)
+	require.ErrorIs(t, err, ErrNoLoopGrant)
+
+	f.svc.loopGrants = nilGrantSource{}
+	_, err = f.svc.loopGrant(context.Background(), m)
+	require.ErrorIs(t, err, ErrNoLoopGrant)
+}
+
+type nilGrantSource struct{}
+
+func (nilGrantSource) LoopGrantFor(context.Context, string, string) (*LoopGrant, error) {
+	return nil, nil
+}
+
+// A member call of the other meta-tool names, and of a native tool, are refused.
+func TestMemberMetaTool_UnknownNameAndNativeToolAreRefused(t *testing.T) {
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/intake-agent": grantOf("lg-1", "ticket")}, "jira")
+	ctx := loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1")
+
+	resp, err := f.svc.serveMemberMetaTool(ctx, &harnesspb.CallToolProtoRequest{Name: "other"}, memberCall{
+		tenant: loopTenantA, agent: "intake-agent", memberID: "member-1", bankID: "bank-1", runID: "run-1",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, resp.GetError().GetCode())
+
+	resp, err = f.svc.CallToolProto(ctx, invokeReq("native:nmap"))
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode())
+	assert.Empty(t, f.connected)
+}
+
+func TestMemberSearch_HidesSkillsAndNativeTools(t *testing.T) {
+	g := grantOf("lg-1", "ticket")
+	hidden := memberHidden(g)
+	assert.False(t, hidden(toolid.ID{Source: toolid.SourceMCP, Connector: "jira", Tool: "create_issue"}))
+	assert.True(t, hidden(toolid.ID{Source: toolid.SourceMCP, Connector: "pagerduty", Tool: "page"}))
+	assert.True(t, hidden(toolid.ID{Source: toolid.SourceNative, Tool: "nmap"}))
+	assert.True(t, hidden(toolid.ID{Source: toolid.SourceSkill, Tool: "s"}))
+}

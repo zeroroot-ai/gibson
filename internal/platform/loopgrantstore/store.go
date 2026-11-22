@@ -43,8 +43,9 @@ type Store interface {
 	Put(ctx context.Context, tenant string, g Grant) (*Grant, error)
 	// Get returns the grant of an agent, or ErrNotFound.
 	Get(ctx context.Context, tenant, agentName string) (*Grant, error)
-	// List returns each grant of the tenant, in agent name order.
-	List(ctx context.Context, tenant string) ([]Grant, error)
+	// ListPage returns at most limit grants of the tenant, in agent name order.
+	// With hasAfter it returns the grants whose agent name is larger than after.
+	ListPage(ctx context.Context, tenant, after string, hasAfter bool, limit int) ([]Grant, error)
 	// Delete removes the grant of an agent. It is idempotent.
 	Delete(ctx context.Context, tenant, agentName string) error
 }
@@ -146,13 +147,15 @@ func (s *postgresStore) Get(ctx context.Context, tenant, agentName string) (*Gra
 	return g, nil
 }
 
-func (s *postgresStore) List(ctx context.Context, tenant string) ([]Grant, error) {
+func (s *postgresStore) ListPage(ctx context.Context, tenant, after string, hasAfter bool, limit int) ([]Grant, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
 		return nil, fmt.Errorf("loopgrantstore: %w", err)
 	}
 	defer c.Release()
-	rows, err := c.SQL().Query(ctx, `SELECT `+columns+` FROM loop_grants ORDER BY agent_name ASC`)
+	rows, err := c.SQL().Query(ctx,
+		`SELECT `+columns+` FROM loop_grants WHERE (NOT $1 OR agent_name > $2) ORDER BY agent_name ASC LIMIT $3`,
+		hasAfter, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("loopgrantstore: list: %w", err)
 	}

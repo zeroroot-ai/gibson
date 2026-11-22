@@ -14,6 +14,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/loopgrantstore"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
@@ -22,7 +23,7 @@ import (
 // registerLoopGrant registers gibson.tenant.v1.LoopGrantService on srv
 // (gibson#1612). The service keeps the loop grants in the database of the
 // tenant. The daemon cannot start without the per-tenant data pool.
-func (d *daemonImpl) registerLoopGrant(ctx context.Context, srv *grpc.Server, auditLog *audit.AuditLogger) error {
+func (d *daemonImpl) registerLoopGrant(ctx context.Context, srv *grpc.Server, auditLog *audit.AuditLogger, pageKeys *pagetoken.Keys) error {
 	if d.pool == nil {
 		return errors.New("daemon: LoopGrantService needs the per-tenant data pool")
 	}
@@ -30,7 +31,7 @@ func (d *daemonImpl) registerLoopGrant(ctx context.Context, srv *grpc.Server, au
 		return errors.New("daemon: LoopGrantService needs the audit logger")
 	}
 	svc, err := api.NewLoopGrantService(loopgrantstore.NewPostgresStore(d.pool), auditLog,
-		componentcatalog.LookupAgent, harness.GrantableMemberHarnessCalls())
+		componentcatalog.LookupAgent, harness.GrantableMemberHarnessCalls(), pageKeys)
 	if err != nil {
 		return fmt.Errorf("daemon: LoopGrantService: %w", err)
 	}
@@ -50,7 +51,12 @@ func (d *daemonImpl) loopGrantStore() (loopgrantstore.Store, error) {
 }
 
 // lazyLoopGrants reads the loop grant of an agent for the harness callbacks.
-type lazyLoopGrants struct{ daemon *daemonImpl }
+type lazyLoopGrants struct {
+	daemon *daemonImpl
+	// stores overrides where the store comes from. Tests set it. The daemon
+	// leaves it nil and reads the pool.
+	stores func() (loopgrantstore.Store, error)
+}
 
 var _ harness.LoopGrantSource = (*lazyLoopGrants)(nil)
 
@@ -58,7 +64,13 @@ var _ harness.LoopGrantSource = (*lazyLoopGrants)(nil)
 // grant gives harness.ErrNoLoopGrant. The tenant is the tenant of the verified
 // grant of the member, and the store reads the database of that tenant only.
 func (l *lazyLoopGrants) LoopGrantFor(ctx context.Context, tenant, agentName string) (*harness.LoopGrant, error) {
-	store, err := l.daemon.loopGrantStore()
+	var store loopgrantstore.Store
+	var err error
+	if l.stores != nil {
+		store, err = l.stores()
+	} else {
+		store, err = l.daemon.loopGrantStore()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -75,14 +87,20 @@ func (l *lazyLoopGrants) LoopGrantFor(ctx context.Context, tenant, agentName str
 }
 
 // memberGrantRPCs derives the allowed_rpcs of the base grant of a member: the
-// base surface plus the calls of the loop grant of its agent.
+// base surface plus the calls of the loop grant of its agent. A daemon with no
+// data plane has no loop grant, so it gives the base surface.
 func (d *daemonImpl) memberGrantRPCs(ctx context.Context, tenant, agentName string) ([]string, error) {
-	rpcs := harness.MemberBaseGrantRPCs()
 	if d.pool == nil {
-		// No data plane means no loop grant can exist.
-		return rpcs, nil
+		return harness.MemberBaseGrantRPCs(), nil
 	}
-	g, err := (&lazyLoopGrants{daemon: d}).LoopGrantFor(ctx, tenant, agentName)
+	return deriveMemberRPCs(ctx, &lazyLoopGrants{daemon: d}, tenant, agentName)
+}
+
+// deriveMemberRPCs is the base surface plus the calls of the loop grant that
+// the source holds for the agent in the tenant.
+func deriveMemberRPCs(ctx context.Context, src harness.LoopGrantSource, tenant, agentName string) ([]string, error) {
+	rpcs := harness.MemberBaseGrantRPCs()
+	g, err := src.LoopGrantFor(ctx, tenant, agentName)
 	switch {
 	case errors.Is(err, harness.ErrNoLoopGrant):
 		return rpcs, nil

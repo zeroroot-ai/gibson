@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -23,6 +24,8 @@ import (
 // memLoopStore keeps one table for each tenant, as the per-tenant database does.
 type memLoopStore struct {
 	byTenant map[string]map[string]loopgrantstore.Grant
+	// err makes each method fail. getErr makes Get fail alone, deleteErr Delete.
+	err, getErr, deleteErr error
 }
 
 func newMemLoopStore() *memLoopStore {
@@ -37,12 +40,18 @@ func (m *memLoopStore) table(t string) map[string]loopgrantstore.Grant {
 }
 
 func (m *memLoopStore) Put(_ context.Context, t string, g loopgrantstore.Grant) (*loopgrantstore.Grant, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
 	g.GrantedAt = time.Unix(1, 0).UTC()
 	m.table(t)[g.AgentName] = g
 	return &g, nil
 }
 
 func (m *memLoopStore) Get(_ context.Context, t, a string) (*loopgrantstore.Grant, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
 	g, ok := m.table(t)[a]
 	if !ok {
 		return nil, loopgrantstore.ErrNotFound
@@ -50,15 +59,30 @@ func (m *memLoopStore) Get(_ context.Context, t, a string) (*loopgrantstore.Gran
 	return &g, nil
 }
 
-func (m *memLoopStore) List(_ context.Context, t string) ([]loopgrantstore.Grant, error) {
-	out := make([]loopgrantstore.Grant, 0, len(m.table(t)))
-	for _, g := range m.table(t) {
-		out = append(out, g)
+func (m *memLoopStore) ListPage(_ context.Context, t, after string, hasAfter bool, limit int) ([]loopgrantstore.Grant, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	names := make([]string, 0, len(m.table(t)))
+	for name := range m.table(t) {
+		if !hasAfter || name > after {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	out := make([]loopgrantstore.Grant, 0, limit)
+	for _, name := range names {
+		if len(out) < limit {
+			out = append(out, m.table(t)[name])
+		}
 	}
 	return out, nil
 }
 
 func (m *memLoopStore) Delete(_ context.Context, t, a string) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
 	delete(m.table(t), a)
 	return nil
 }
@@ -106,7 +130,7 @@ func loopCtx(t *testing.T, tenant, subject string) context.Context {
 func newLoopSvc(t *testing.T) (*LoopGrantService, *memLoopStore, *fakeLoopAudit) {
 	t.Helper()
 	st, au := newMemLoopStore(), &fakeLoopAudit{}
-	svc, err := NewLoopGrantService(st, au, loopAgents, []string{"SubmitFinding"})
+	svc, err := NewLoopGrantService(st, au, loopAgents, []string{"SubmitFinding"}, testPageKeys(t))
 	require.NoError(t, err)
 	return svc, st, au
 }
@@ -231,4 +255,75 @@ func TestRevokeLoop_RefusesABadAgentName(t *testing.T) {
 	svc, _, _ := newLoopSvc(t)
 	_, err := svc.RevokeLoop(loopCtx(t, tenantA, "user:alice"), &tenantv1.RevokeLoopRequest{AgentName: "Bad Name"})
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestListLoopGrants_PagesWithAKeysetToken(t *testing.T) {
+	svc, st, _ := newLoopSvc(t)
+	ctx := loopCtx(t, tenantA, "user:alice")
+	for _, name := range []string{"a-agent", "b-agent", "c-agent"} {
+		_, err := st.Put(ctx, tenantA, loopgrantstore.Grant{ID: "g-" + name, AgentName: name, Grantor: "u", ToolClasses: []string{"ticket"}})
+		require.NoError(t, err)
+	}
+	first, err := svc.ListLoopGrants(ctx, &tenantv1.ListLoopGrantsRequest{PageSize: 2})
+	require.NoError(t, err)
+	require.Len(t, first.GetGrants(), 2)
+	require.NotEmpty(t, first.GetNextPageToken())
+	second, err := svc.ListLoopGrants(ctx, &tenantv1.ListLoopGrantsRequest{PageSize: 2, PageToken: first.GetNextPageToken()})
+	require.NoError(t, err)
+	require.Len(t, second.GetGrants(), 1)
+	assert.Equal(t, "c-agent", second.GetGrants()[0].GetAgentName())
+	assert.Empty(t, second.GetNextPageToken())
+
+	// A token of tenant A does not open a page of tenant B.
+	_, err = svc.ListLoopGrants(loopCtx(t, tenantB, "user:bob"),
+		&tenantv1.ListLoopGrantsRequest{PageSize: 2, PageToken: first.GetNextPageToken()})
+	require.Error(t, err)
+}
+
+func TestLoopGrantService_StoreFailuresAreStatuses(t *testing.T) {
+	svc, st, au := newLoopSvc(t)
+	ctx := loopCtx(t, tenantA, "user:alice")
+	grant := &tenantv1.GrantLoopRequest{AgentName: "intake-agent", ToolClasses: []string{"ticket"}}
+
+	st.err = errors.New("db down")
+	_, err := svc.GrantLoop(ctx, grant)
+	assert.Equal(t, codes.Internal, status.Code(err))
+	_, err = svc.ListLoopGrants(ctx, &tenantv1.ListLoopGrantsRequest{})
+	assert.Equal(t, codes.Internal, status.Code(err))
+	st.err = nil
+
+	// A failed audit record whose cleanup also fails leaves a grant, and the
+	// call says so.
+	au.err = errors.New("audit down")
+	st.deleteErr = errors.New("delete down")
+	_, err = svc.GrantLoop(ctx, grant)
+	assert.Equal(t, codes.Internal, status.Code(err))
+	st.deleteErr = nil
+	au.err = nil
+
+	// The revoke reports a failed read, a failed delete and a failed record.
+	st.getErr = errors.New("read down")
+	_, err = svc.RevokeLoop(ctx, &tenantv1.RevokeLoopRequest{AgentName: "intake-agent"})
+	assert.Equal(t, codes.Internal, status.Code(err))
+	st.getErr = nil
+	st.deleteErr = errors.New("delete down")
+	_, err = svc.RevokeLoop(ctx, &tenantv1.RevokeLoopRequest{AgentName: "intake-agent"})
+	assert.Equal(t, codes.Internal, status.Code(err))
+	st.deleteErr = nil
+	au.err = errors.New("audit down")
+	_, err = svc.RevokeLoop(ctx, &tenantv1.RevokeLoopRequest{AgentName: "intake-agent"})
+	assert.Equal(t, codes.Unavailable, status.Code(err))
+}
+
+func TestNewLoopGrantService_NeedsEachCollaborator(t *testing.T) {
+	_, err := NewLoopGrantService(nil, nil, nil, nil, nil)
+	require.Error(t, err)
+}
+
+func TestRevokeLoop_RefusesNoTenantAndNoIdentity(t *testing.T) {
+	svc, _, _ := newLoopSvc(t)
+	_, err := svc.RevokeLoop(context.Background(), &tenantv1.RevokeLoopRequest{AgentName: "intake-agent"})
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	_, err = svc.RevokeLoop(loopCtx(t, tenantA, ""), &tenantv1.RevokeLoopRequest{AgentName: "intake-agent"})
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/loopgrantstore"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -52,17 +53,21 @@ type LoopGrantService struct {
 	agents func(id string) (componentcatalog.AgentEntry, bool)
 	// harnessCalls are the harness calls that a grant may hold.
 	harnessCalls []string
+	// pageKeys derives the signer of the page tokens of ListLoopGrants.
+	pageKeys *pagetoken.Keys
 }
 
 // NewLoopGrantService returns the service. Each argument is required.
 func NewLoopGrantService(
 	store loopgrantstore.Store, auditLog LoopGrantAudit,
-	agents func(id string) (componentcatalog.AgentEntry, bool), grantableHarnessCalls []string,
+	agents func(id string) (componentcatalog.AgentEntry, bool), grantableHarnessCalls []string, pageKeys *pagetoken.Keys,
 ) (*LoopGrantService, error) {
-	if store == nil || auditLog == nil || agents == nil {
-		return nil, errors.New("api: LoopGrantService needs a store, the audit logger and the agent catalog")
+	if store == nil || auditLog == nil || agents == nil || pageKeys == nil {
+		return nil, errors.New("api: LoopGrantService needs a store, the audit logger, the agent catalog and the page keys")
 	}
-	return &LoopGrantService{store: store, audit: auditLog, agents: agents, harnessCalls: grantableHarnessCalls}, nil
+	return &LoopGrantService{
+		store: store, audit: auditLog, agents: agents, harnessCalls: grantableHarnessCalls, pageKeys: pageKeys,
+	}, nil
 }
 
 func loopGrantTenant(ctx context.Context, rpc string) (string, error) {
@@ -157,7 +162,7 @@ func (s *LoopGrantService) RevokeLoop(ctx context.Context, req *tenantv1.RevokeL
 	if err != nil {
 		return nil, err
 	}
-	if _, err := auth.IdentityFromContext(ctx); err != nil {
+	if id, err := auth.IdentityFromContext(ctx); err != nil || id.Subject == "" {
 		return nil, status_grpc.Error(codes.Unauthenticated, rpc+": the caller has no identity")
 	}
 	name := req.GetAgentName()
@@ -182,20 +187,35 @@ func (s *LoopGrantService) RevokeLoop(ctx context.Context, req *tenantv1.RevokeL
 	return &tenantv1.RevokeLoopResponse{}, nil
 }
 
-// ListLoopGrants returns each loop grant of the tenant of the caller.
-func (s *LoopGrantService) ListLoopGrants(ctx context.Context, _ *tenantv1.ListLoopGrantsRequest) (*tenantv1.ListLoopGrantsResponse, error) {
+// ListLoopGrants returns one page of the loop grants of the tenant of the
+// caller. The store pages by agent name with a keyset.
+func (s *LoopGrantService) ListLoopGrants(ctx context.Context, req *tenantv1.ListLoopGrantsRequest) (*tenantv1.ListLoopGrantsResponse, error) {
 	const rpc = "ListLoopGrants"
 	tenant, err := loopGrantTenant(ctx, rpc)
 	if err != nil {
 		return nil, err
 	}
-	grants, err := s.store.List(ctx, tenant)
+	page, err := pageOf(s.pageKeys, "tenant-loop-grants", req.GetPageSize(), req.GetPageToken(), tenant)
+	if err != nil {
+		return nil, err
+	}
+	after, hasAfter := page.After()
+	// One more row than the page tells whether a next page exists.
+	limit := page.Limit()
+	grants, err := s.store.ListPage(ctx, tenant, after, hasAfter, limit+1)
 	if err != nil {
 		return nil, loopGrantStatus(rpc, err)
+	}
+	more := len(grants) > limit
+	if more {
+		grants = grants[:limit]
 	}
 	out := &tenantv1.ListLoopGrantsResponse{Grants: make([]*tenantv1.LoopGrant, 0, len(grants))}
 	for _, g := range grants {
 		out.Grants = append(out.Grants, loopGrantProto(g))
+	}
+	if more {
+		out.NextPageToken = page.Token(grants[len(grants)-1].AgentName, true)
 	}
 	return out, nil
 }

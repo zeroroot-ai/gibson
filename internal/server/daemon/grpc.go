@@ -1711,7 +1711,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if err := d.registerInboundMission(ctx, srv, pageKeys); err != nil {
 		return nil, err
 	}
-	if err := d.registerLoopGrant(ctx, srv, auditLogger); err != nil {
+	if err := d.registerLoopGrant(ctx, srv, auditLogger, pageKeys); err != nil {
 		return nil, err
 	}
 	// The tenant operator pulls the outside agent records and their credential
