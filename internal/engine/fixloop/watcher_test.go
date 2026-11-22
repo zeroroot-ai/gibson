@@ -91,6 +91,12 @@ func (g *rig) tick() []brain.Event {
 		brain.MergeRequestReconciliationSystem, brain.MergeGateSystem, brain.VerificationSystem,
 	} {
 		for _, e := range sys(g.w) {
+			// The World stamps a grant with its own clock. The rig puts the time of
+			// the rig on it, so the grant window is a rig time.
+			if mg, ok := e.(brain.MergeGranted); ok {
+				mg.At = g.now
+				e = mg
+			}
 			brain.Reduce(g.w, e)
 		}
 	}
@@ -448,17 +454,6 @@ func TestStep_NoSlotForAMergeRequestWithNoMission(t *testing.T) {
 	}
 }
 
-// agentWaits makes a run of an agent mission ask for the merge of mr-1, as the
-// merge call of the agent does when the slot is not granted yet.
-func (g *rig) agentWaits() {
-	brain.Reduce(g.w, brain.MissionStarted{ID: "agent-1", RunID: "run-1"})
-	brain.Reduce(g.w, brain.MergeAsked{MergeRequest: "mr-1", MissionID: "agent-1", RunID: "run-1", At: at(5)})
-}
-
-func (g *rig) agentRunEnds() {
-	brain.Reduce(g.w, brain.MissionDone{ID: "agent-1", RunID: "run-1", Outcome: brain.MissionCompleted})
-}
-
 func hasEvent[T brain.Event](evs []brain.Event) bool {
 	for _, e := range evs {
 		if _, ok := e.(T); ok {
@@ -486,54 +481,34 @@ func (g *rig) hasSlot(mr string) bool {
 	return false
 }
 
-// The run that waited for the slot ends, and the host shows the merge request
-// merged. The slot is not freed early: the merge request keeps its slot until its
-// health signal answers, and the next fix of the Application does not get it
-// (gibson#1609).
-func TestStep_ARunThatMergedAndEndedFreesNoSlotEarly(t *testing.T) {
-	g := newRig(t, "scan")
-	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
-	g.tick()
-	brain.Reduce(g.w, brain.MergeRequestQueued{MergeRequest: "mr-2", Application: "app-1", At: at(5), MissionID: "fix-run-2"})
-	g.agentWaits()
-	g.agentRunEnds()
-
-	g.r.mr = MergeFact{State: MRMerged, At: at(6)}
-	evs := g.tick()
-
-	if hasEvent[brain.MergeSlotExpired](evs) {
-		t.Fatalf("a slot was freed for a merge request that the host shows as merged: %+v", evs)
-	}
-	if !hasEvent[brain.MergeRequestObserved](evs) {
-		t.Fatalf("events = %+v, want the merged state recorded", evs)
-	}
-	if !g.hasSlot("mr-1") {
-		t.Fatal("the merged fix lost its slot before its health signal")
-	}
-	if g.granted("mr-2") {
-		t.Fatal("a second fix of the Application was granted before the health verdict of the first")
-	}
+// queueSecondFix puts a second fix of the same Application in the queue. It has
+// no finding, so the Watcher reads only the first merge request.
+func (g *rig) queueSecondFix() {
+	brain.Reduce(g.w, brain.MergeRequestQueued{MergeRequest: "mr-2", Application: "app-1", At: g.now, MissionID: "fix-run-2"})
 }
 
-// The run ends and the host shows the merge request open. The slot leaves the
-// queue, the other fix of the Application gets its slot after that, and the
-// finding stays fixing with its merge request.
-func TestStep_ARunThatEndedWithTheMergeRequestOpenFreesTheSlotForTheNextFix(t *testing.T) {
+// A granted slot that no merge used is freed after the grant window, and the
+// other fix of the Application gets its slot only after the first slot is gone.
+// The finding stays fixing with its open merge request (gibson#1609).
+func TestStep_AGrantedSlotThatNoMergeUsedIsQueuedAgainAfterTheWindow(t *testing.T) {
 	g := newRig(t, "scan")
 	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
 	g.tick()
-	brain.Reduce(g.w, brain.MergeRequestQueued{MergeRequest: "mr-2", Application: "app-1", At: at(5), MissionID: "fix-run-2"})
-	g.agentWaits()
+	g.queueSecondFix()
+	g.tick()
 	if !g.granted("mr-1") || g.granted("mr-2") {
 		t.Fatalf("slots = %+v, want mr-1 granted and mr-2 waiting", g.w.MergeSlots())
 	}
 
-	// The run still waits: nothing is freed.
+	// Inside the window nothing is freed.
+	g.now = g.now.Add(DefaultPolicy().MergeGrantWindow - time.Minute)
 	if evs := g.tick(); hasEvent[brain.MergeSlotExpired](evs) || g.granted("mr-2") {
-		t.Fatalf("a live run lost its slot: %+v", evs)
+		t.Fatalf("a slot was freed inside the window: %+v", evs)
 	}
 
-	g.agentRunEnds()
+	// After the window the host shows the merge request open. The slot leaves the
+	// queue, and the next fix of the Application gets its slot after that.
+	g.now = g.now.Add(2 * time.Minute)
 	evs := g.tick()
 	if !hasEvent[brain.MergeSlotExpired](evs) {
 		t.Fatalf("events = %+v, want the slot of mr-1 freed", evs)
@@ -549,21 +524,60 @@ func TestStep_ARunThatEndedWithTheMergeRequestOpenFreesTheSlotForTheNextFix(t *t
 	}
 }
 
-// A slot that the Watcher freed is asked for again only after the backoff, so a
-// merge request that no agent merges does not churn the queue. After the backoff
-// it is queued again, and the next merge call of the agent can be granted.
+// A granted slot whose merge request merged on the host is closed as merged. It
+// is not freed and not queued again, and the second fix does not get the slot
+// before the health verdict (gibson#1609).
+func TestStep_AMergedMergeRequestIsNotFreedAfterTheWindow(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	g.queueSecondFix()
+	g.now = g.now.Add(DefaultPolicy().MergeGrantWindow + time.Hour)
+
+	g.r.mr = MergeFact{State: MRMerged, At: g.now}
+	evs := g.tick()
+
+	if hasEvent[brain.MergeSlotExpired](evs) {
+		t.Fatalf("a slot was freed for a merge request that the host shows as merged: %+v", evs)
+	}
+	if !hasEvent[brain.MergeRequestObserved](evs) {
+		t.Fatalf("events = %+v, want the merged state recorded", evs)
+	}
+	if !g.hasSlot("mr-1") || g.granted("mr-2") {
+		t.Fatalf("slots = %+v, want mr-1 kept and mr-2 waiting for the health verdict", g.w.MergeSlots())
+	}
+}
+
+// A merge call inside the window merges, and the slot is not freed by the
+// window afterwards: the merge request is merged on the host.
+func TestStep_ALateMergeCallInsideTheWindowMerges(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	g.now = g.now.Add(DefaultPolicy().MergeGrantWindow - time.Minute)
+	if !g.w.MayMerge("mr-1", "fix-run-1") {
+		t.Fatal("the granted slot refused the merge call inside the window")
+	}
+	g.tick()
+	if !g.granted("mr-1") {
+		t.Fatal("the slot was freed inside the window")
+	}
+}
+
+// A freed slot is asked for again only after the backoff, so a merge request that
+// no agent merges does not churn the queue. After the backoff it is queued again
+// behind the others, and the next merge call of the agent can be granted.
 func TestStep_AFreedSlotIsQueuedAgainAfterTheBackoff(t *testing.T) {
 	g := newRig(t, "scan")
 	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
 	g.tick()
-	g.agentWaits()
-	g.agentRunEnds()
+	g.now = g.now.Add(DefaultPolicy().MergeGrantWindow + time.Minute)
 	g.tick() // frees mr-1
 	if g.hasSlot("mr-1") {
 		t.Fatal("the slot was not freed")
 	}
 
-	g.now = g.now.Add(RequeueBackoff - time.Minute)
+	g.now = g.now.Add(DefaultPolicy().RequeueBackoff - time.Minute)
 	for range 3 {
 		g.tick()
 	}
@@ -573,10 +587,19 @@ func TestStep_AFreedSlotIsQueuedAgainAfterTheBackoff(t *testing.T) {
 
 	g.now = g.now.Add(2 * time.Minute)
 	g.tick()
-	if !g.hasSlot("mr-1") {
-		t.Fatal("the merge request was not queued again after the backoff")
+	if !g.hasSlot("mr-1") || !g.granted("mr-1") {
+		t.Fatalf("slots = %+v, want the merge request queued again and granted", g.w.MergeSlots())
 	}
-	if !g.granted("mr-1") {
-		t.Fatal("the new slot was not granted, so the next merge call of the agent would be refused")
+}
+
+// A policy that states no window takes the default, so a slot is never freed at
+// the moment of its grant.
+func TestStep_AZeroWindowTakesTheDefault(t *testing.T) {
+	g := newRig(t, "scan")
+	g.wt.policy = func(string) Policy { return Policy{HoldTime: time.Minute} }
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	if evs := g.tick(); hasEvent[brain.MergeSlotExpired](evs) {
+		t.Fatalf("a slot was freed at the moment of its grant: %+v", evs)
 	}
 }

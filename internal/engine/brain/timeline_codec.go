@@ -116,7 +116,6 @@ func init() {
 	registerEvent("merge_request.queued", func() Event { return &MergeRequestQueued{} })
 	registerEvent("merge_request.granted", func() Event { return &MergeGranted{} })
 	registerEvent("merge_request.slot_expired", func() Event { return &MergeSlotExpired{} })
-	registerEvent("merge_request.asked", func() Event { return &MergeAsked{} })
 
 	// priority.go
 	registerEvent("finding.prioritized", func() Event { return &FindingPrioritized{} })

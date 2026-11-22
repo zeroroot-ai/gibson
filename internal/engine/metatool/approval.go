@@ -92,14 +92,6 @@ type ApprovalGate interface {
 	MayMerge(ctx context.Context, tenant, missionID, mergeRequest string) (bool, error)
 }
 
-// MergeAskRecorder is an optional part of an ApprovalGate. The gate records that
-// a run asked for a merge and was refused, so the World knows which run waits for
-// the slot (gibson#1609). The mission and the run come from the verified grant of
-// the call.
-type MergeAskRecorder interface {
-	AskedForMerge(ctx context.Context, tenant, missionID, runID, mergeRequest string)
-}
-
 // MergeRequestArg is the argument of a merge tool that names the merge
 // request. Its value is the key that the fix job recorded.
 const MergeRequestArg = "merge_request"
@@ -190,11 +182,6 @@ func (h *Handler) mergeGranted(ctx context.Context, c Call, connector, tool stri
 		return fmt.Errorf("metatool: the merge check of %s:%s failed: %w", connector, tool, err)
 	}
 	if !ok {
-		// The run waits for the slot. The World keeps the run, so a slot whose
-		// run ended is found.
-		if rec, isRec := h.gate.(MergeAskRecorder); isRec && c.RunID != "" {
-			rec.AskedForMerge(ctx, c.Caller.Tenant, c.MissionID, c.RunID, mr)
-		}
 		return fmt.Errorf("%w: %s", ErrMergeNotGranted, mr)
 	}
 	return nil

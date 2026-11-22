@@ -13,9 +13,10 @@ import "time"
 // after MergeGranted. The slot is free again when the health signal holds,
 // when the merge is reverted after a failed signal, when the service has no
 // health signal, or when the merge request closes. MergeSlotExpirySystem
-// frees a slot that no Finding carries any more, and a granted slot whose
-// merge request has no deploy after MergeSlotHold (review M1). A released slot
-// leaves the queue (review m10). Fixes for different Applications never wait
+// frees a slot that no Finding carries any more (review M1). The fix loop
+// watcher frees a granted slot that no merge used within the grant window, after
+// it reads the merge request on the host (gibson#1609). A released slot leaves
+// the queue (review m10). Fixes for different Applications never wait
 // on each other.
 //
 // The time that a merge request waits in this queue is agent time. It is not an
@@ -55,24 +56,7 @@ type MergeSlot struct {
 	// MissionID is the mission of the fix that holds the slot. Only a call
 	// of that mission may merge with it (review m16).
 	MissionID string
-	// WaiterMission and WaiterRun name the mission and the run of the agent that
-	// asked for the merge and waits for the slot (gibson#1609). MergeAsked sets
-	// them. Both are empty until an agent asks.
-	WaiterMission string
-	WaiterRun     string
-	// WaiterEnded is derived by MergeSlots and never stored. It is true when the
-	// World knows that the waiting run has ended: its mission is terminal in that
-	// run, or a later run of the mission replaced it. A waiter that the World
-	// does not know has not ended.
-	WaiterEnded bool
 }
-
-// MergeSlotHold is how long a granted slot waits for its merge request to
-// merge. A merge request that is not merged by then frees the slot. A merged
-// merge request keeps the slot until its health signal answers, its revert
-// merges, or its service shows no health signal (review R4): the fix is out,
-// and the next fix of the Application must wait for its verdict.
-const MergeSlotHold = 24 * time.Hour
 
 // MergeSlotExpired records that the daemon freed a slot that nothing else
 // frees (review M1). Reason says why.
@@ -88,31 +72,6 @@ type MergeSlotExpired struct {
 func (MergeSlotExpired) Kind() string { return "merge_request.slot_expired" }
 
 func applyMergeSlotExpired(w *World, e MergeSlotExpired) { releaseMergeSlot(w, e.MergeRequest) }
-
-// MergeAsked records that a run of an agent asked for the merge of a merge
-// request and was refused because the slot is not granted yet (gibson#1609). The
-// run is the waiter of the slot. The daemon reads the mission and the run from
-// the verified grant of the call, never from the request.
-type MergeAsked struct {
-	MergeRequest string
-	MissionID    string
-	RunID        string
-	At           time.Time
-}
-
-// Kind identifies the merge_request.asked brain event.
-func (MergeAsked) Kind() string { return "merge_request.asked" }
-
-// applyMergeAsked sets the waiter of the slot. The latest ask wins, because the
-// run that asks now is the run that waits now.
-func applyMergeAsked(w *World, e MergeAsked) {
-	if e.RunID == "" || e.MissionID == "" {
-		return
-	}
-	if s := findMergeSlot(w, e.MergeRequest); s != nil {
-		s.WaiterMission, s.WaiterRun = e.MissionID, e.RunID
-	}
-}
 
 func findMergeSlot(w *World, mr string) *MergeSlot {
 	for i := range w.mergeSlots {
@@ -150,19 +109,19 @@ func releaseMergeSlot(w *World, mr string) {
 }
 
 // MergeSlots returns the queue in the order of the Timeline.
-func (w *World) MergeSlots() []MergeSlot {
-	out := append([]MergeSlot(nil), w.mergeSlots...)
-	for i := range out {
-		out[i].WaiterEnded = w.waiterEnded(out[i])
-	}
-	return out
-}
+func (w *World) MergeSlots() []MergeSlot { return append([]MergeSlot(nil), w.mergeSlots...) }
 
 // MayMerge reports whether the merge request holds a granted slot for a call
-// of the mission. A call with no mission never merges. A slot that names its
-// mission lets only a call of that mission merge, or of the mission that
-// originated it: the fix agent originates the fix mission and merges from its
-// own mission (review m16).
+// of the mission. A call with no mission never merges. The slot lets three
+// missions merge: the mission that it names, the mission that originated that
+// one (the fix agent originates the fix mission and merges from its own mission,
+// review m16), and any mission that works on the same Application. The last rule
+// is for a later pass of the fix agent, which can be a new dispatch with a new
+// mission and merges a merge request that an earlier mission opened (gibson#1609).
+// A mission works on an Application when the World holds the Application as its
+// target. A mission of another Application, and a mission with no target, do not
+// merge. The tenant is the World itself, so a mission of another tenant is never
+// here. One slot for each Application stays the rule of the gate.
 func (w *World) MayMerge(mr, missionID string) bool {
 	s := findMergeSlot(w, mr)
 	if s == nil || !s.Granted || missionID == "" {
@@ -174,8 +133,20 @@ func (w *World) MayMerge(mr, missionID string) bool {
 	if s.MissionID == missionID {
 		return true
 	}
-	l, ok := w.MissionLineage(s.MissionID)
-	return ok && l.ParentMissionID == missionID
+	if l, ok := w.MissionLineage(s.MissionID); ok && l.ParentMissionID == missionID {
+		return true
+	}
+	return s.Application != "" && w.missionTarget(missionID) == s.Application
+}
+
+// missionTarget returns the target of the mission, or "" when the World does not
+// know the mission.
+func (w *World) missionTarget(missionID string) string {
+	ent, ok := findMission(w, missionID)
+	if !ok {
+		return ""
+	}
+	return w.missions.Get(ent).TargetID
 }
 
 // MergeGateSystem grants the slot of an Application to its oldest queued merge
@@ -202,70 +173,38 @@ func MergeGateSystem(w *World) []Event {
 //
 //	no Finding carries the merge request          → free (a rerun opened the
 //	                                                 Finding again, or it moved on)
-//	granted, not merged after MergeSlotHold        → free (the merge request did
-//	                                                 not merge)
 //
-// A slot whose waiting run has ended is not freed here. This System cannot read
-// the merge request on the host, and a run can end because it merged. The fix
-// loop watcher reads the host first and frees the slot only when the merge
-// request is still open (gibson#1609).
+// This System frees no slot on a clock. A slot that no merge used is freed by the
+// fix loop watcher, because only the watcher can read the merge request on the
+// host: a merged merge request keeps its slot until its health signal answers,
+// and no second fix of the Application ships before that (gibson#1609).
 //
 // The System is quiescent: a freed slot leaves the queue.
 func MergeSlotExpirySystem(w *World) []Event {
 	if len(w.mergeSlots) == 0 {
 		return nil
 	}
-	now := w.Now()
 	carried := map[string]bool{}
-	merged := map[string]bool{}
 	mission := map[string]string{}
 	for _, f := range w.FindingSnapshot() {
 		if f.MergeRequest == "" {
 			continue
 		}
 		carried[f.MergeRequest] = true
-		if f.MergeRequestState == MergeRequestMerged || !f.DeployedAt.IsZero() {
-			merged[f.MergeRequest] = true
-		}
 		if f.FixMissionID != "" {
 			mission[f.MergeRequest] = f.FixMissionID
 		}
 	}
 	var out []Event
 	for _, s := range w.mergeSlots {
-		var reason string
-		switch {
-		case !carried[s.MergeRequest]:
-			reason = "no finding carries the merge request"
-		case s.Granted && !merged[s.MergeRequest] && !s.GrantedAt.IsZero() && now.Sub(s.GrantedAt) > MergeSlotHold:
-			reason = "the merge request did not merge " + MergeSlotHold.String() + " after the grant"
-		default:
+		if carried[s.MergeRequest] {
 			continue
 		}
 		out = append(out, MergeSlotExpired{
-			MergeRequest: s.MergeRequest, Application: s.Application, Reason: reason, At: now,
+			MergeRequest: s.MergeRequest, Application: s.Application, At: w.Now(),
+			Reason:    "no finding carries the merge request",
 			MissionID: mission[s.MergeRequest],
 		})
 	}
 	return out
-}
-
-// waiterEnded reports whether the run that waits for the slot has ended. The run
-// is the key, because a mission has many runs. The run has ended when the World
-// knows its mission and either the mission is terminal in that run, or the
-// mission has a later run. A slot with no waiter, and a mission that the World
-// does not know, have not ended.
-func (w *World) waiterEnded(s MergeSlot) bool {
-	if s.WaiterMission == "" || s.WaiterRun == "" {
-		return false
-	}
-	ent, ok := findMission(w, s.WaiterMission)
-	if !ok {
-		return false
-	}
-	m := w.missions.Get(ent)
-	if m.RunID != "" && m.RunID != s.WaiterRun {
-		return true
-	}
-	return m.Status.IsTerminal()
 }

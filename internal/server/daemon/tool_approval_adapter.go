@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -85,30 +84,4 @@ func (a *tenantRoutedToolApproval) MayMerge(_ context.Context, tenant, missionID
 	var granted bool
 	eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge(mergeRequest, missionID) })
 	return granted, nil
-}
-
-var _ metatool.MergeAskRecorder = (*tenantRoutedToolApproval)(nil)
-
-// AskedForMerge implements metatool.MergeAskRecorder. It records the run that
-// waits for the slot of the merge request, and it records nothing when the slot
-// already names that run, so a run that polls writes one event (gibson#1609).
-func (a *tenantRoutedToolApproval) AskedForMerge(_ context.Context, tenant, missionID, runID, mergeRequest string) {
-	if tenant == "" || missionID == "" || runID == "" {
-		return
-	}
-	eng, ok := api.TenantEngine(a.registry, tenant)
-	if !ok {
-		return
-	}
-	var known bool
-	eng.ReadWorld(func(w *brain.World) {
-		for _, s := range w.MergeSlots() {
-			if s.MergeRequest == mergeRequest {
-				known = s.WaiterMission != missionID || s.WaiterRun != runID
-			}
-		}
-	})
-	if known {
-		eng.Submit(brain.MergeAsked{MergeRequest: mergeRequest, MissionID: missionID, RunID: runID, At: time.Now().UTC()})
-	}
 }

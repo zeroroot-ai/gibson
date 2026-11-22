@@ -30,16 +30,12 @@ type Watcher struct {
 	// refused is the last refusal that the Watcher reported for each merge
 	// request, so that one refusal is one Timeline event.
 	refused map[string]string
-	// released is the time when the Watcher freed the slot of a merge request
-	// whose waiting run had ended with the merge request still open. The Watcher
-	// queues the merge request again only after RequeueBackoff, so a merge
-	// request that no agent merges does not churn the queue (gibson#1609).
+	// released is the time when the Watcher freed the unused slot of a merge
+	// request. The Watcher queues the merge request again only after the
+	// RequeueBackoff of the policy, so a merge request that no agent merges does
+	// not churn the queue (gibson#1609).
 	released map[string]time.Time
 }
-
-// RequeueBackoff is how long the Watcher waits before it queues a merge request
-// again after it freed the slot of that merge request.
-const RequeueBackoff = 10 * time.Minute
 
 // NewWatcher builds a Watcher. The reader, the reverter and the placer are
 // required. A nil policy source means DefaultPolicy.
@@ -150,16 +146,16 @@ func (w *Watcher) stepFixing(
 	}
 	// The merge request is open.
 	if hasSlot {
-		// The run that waited for the slot has ended and the host shows the merge
-		// request still open, so the run did not merge. The slot leaves the
-		// queue, and the next fix of the Application gets its turn. The host is
-		// read first: a run that merged and then ended is seen above as merged
-		// and keeps its slot until its health signal answers (gibson#1609).
-		if slot.WaiterEnded {
+		// No merge used the granted slot within the window, and the host shows the
+		// merge request still open. The slot leaves the queue, and the next fix of
+		// the Application gets its turn. The host is read first: a merge request
+		// that merged is seen above and keeps its slot until its health signal
+		// answers (gibson#1609).
+		if slot.Granted && !slot.GrantedAt.IsZero() && w.now().Sub(slot.GrantedAt) >= w.policy(tenant).grantWindow() {
 			w.noteRelease(mr)
 			return []brain.Event{brain.MergeSlotExpired{
 				MergeRequest: mr, Application: slot.Application, At: w.now(), MissionID: fixMission(fs),
-				Reason: "the agent run that waited for the slot ended with the merge request still open",
+				Reason: "no merge used the granted slot within the grant window and the merge request is still open",
 			}}, nil
 		}
 		return nil, nil
@@ -167,7 +163,7 @@ func (w *Watcher) stepFixing(
 	// A green pipeline asks for the slot of its Application. The queue grants
 	// one slot at a time. A slot that the Watcher freed is not asked for again
 	// until the backoff has passed.
-	if !fact.PipelineGreen || w.inBackoff(mr) {
+	if !fact.PipelineGreen || w.inBackoff(tenant, mr) {
 		return nil, nil
 	}
 	mission := fixMission(fs)
@@ -197,15 +193,15 @@ func (w *Watcher) noteRelease(mr string) {
 }
 
 // inBackoff reports whether the Watcher freed the slot of the merge request
-// less than RequeueBackoff ago. A merge request past its backoff is forgotten.
-func (w *Watcher) inBackoff(mr string) bool {
+// less than the RequeueBackoff of the policy ago. A merge request past its backoff is forgotten.
+func (w *Watcher) inBackoff(tenant, mr string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	at, ok := w.released[mr]
 	if !ok {
 		return false
 	}
-	if w.now().Sub(at) < RequeueBackoff {
+	if w.now().Sub(at) < w.policy(tenant).requeueBackoff() {
 		return true
 	}
 	delete(w.released, mr)

@@ -122,11 +122,12 @@ func TestMergeGate_AReleasedSlotLeavesTheQueue(t *testing.T) {
 }
 
 // The expiry frees a slot that no Finding carries (a rerun opened the Finding
-// again), and a granted slot with no deploy after MergeSlotHold. A deployed
-// merge request keeps its slot (review M1).
+// again). It frees no granted slot on a clock: only the watcher, which reads the
+// host, frees a slot that no merge used (gibson#1609). A deployed merge request
+// keeps its slot (review M1).
 func TestMergeSlotExpirySystem(t *testing.T) {
 	w := NewWorld("t1")
-	now := at(0).Add(MergeSlotHold + time.Hour)
+	now := at(0).Add(1000 * time.Hour)
 	w.clock = func() time.Time { return now }
 	for _, id := range []string{"f-1", "f-2", "f-3"} {
 		Reduce(w, FindingRaised{ID: id, At: at(0)})
@@ -146,20 +147,17 @@ func TestMergeSlotExpirySystem(t *testing.T) {
 		got[e.MergeRequest] = true
 		Reduce(w, e)
 	}
-	if !got["mr-f-1"] || !got["mr-f-2"] || got["mr-f-3"] {
-		t.Fatalf("expired = %v, want mr-f-1 and mr-f-2", got)
+	if !got["mr-f-1"] || got["mr-f-2"] || got["mr-f-3"] {
+		t.Fatalf("expired = %v, want only mr-f-1, whatever the time since the grant", got)
 	}
 	if len(MergeSlotExpirySystem(w)) != 0 {
 		t.Fatal("not quiescent")
 	}
-	if !w.MayMerge("mr-f-3", "m1") || w.MayMerge("mr-f-2", "m1") {
-		t.Fatal("the deployed slot must stay and the expired one must go")
+	if !w.MayMerge("mr-f-3", "m1") || w.MayMerge("mr-f-1", "m1") {
+		t.Fatal("the deployed slot must stay and the freed one must go")
 	}
-	w.clock = func() time.Time { return at(0).Add(time.Hour) }
-	Reduce(w, MergeRequestQueued{MergeRequest: "mr-f-2", Application: "a2", At: at(0)})
-	Reduce(w, MergeGranted{MergeRequest: "mr-f-2", Application: "a2", At: at(0)})
-	if len(MergeSlotExpirySystem(w)) != 0 {
-		t.Fatal("a young slot expired")
+	if !w.MayMerge("mr-f-2", "m1") {
+		t.Fatal("a granted slot that a Finding carries must stay, whatever the time since the grant")
 	}
 }
 
@@ -189,11 +187,10 @@ func TestMergeGate_TheSlotIsBoundToItsMission(t *testing.T) {
 }
 
 // A merged merge request keeps its slot, whatever the time since the grant,
-// until its health signal answers (review R4). Only a merge request that did
-// not merge loses the slot after MergeSlotHold.
+// until its health signal answers (review R4).
 func TestMergeSlotExpirySystem_KeepsTheSlotOfAMergedFix(t *testing.T) {
 	w := NewWorld("t1")
-	w.clock = func() time.Time { return at(0).Add(10 * MergeSlotHold) }
+	w.clock = func() time.Time { return at(0).Add(240 * time.Hour) }
 	Reduce(w, FindingRaised{ID: "f1", At: at(0)})
 	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixing, MergeRequest: "mr-1", At: at(0)})
 	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "a", At: at(0)})
@@ -201,101 +198,6 @@ func TestMergeSlotExpirySystem_KeepsTheSlotOfAMergedFix(t *testing.T) {
 	Reduce(w, MergeRequestObserved{Key: "mr-1", State: MergeRequestMerged, At: at(30)})
 	if evs := MergeSlotExpirySystem(w); len(evs) != 0 {
 		t.Fatalf("a merged fix with no health result lost its slot: %+v", evs)
-	}
-}
-
-// asked records that a run of the agent mission asked for the merge.
-func asked(w *World, mr, mission, run string) {
-	Reduce(w, MergeAsked{MergeRequest: mr, MissionID: mission, RunID: run, At: at(2)})
-}
-
-func slotOf(w *World, mr string) MergeSlot {
-	for _, s := range w.MergeSlots() {
-		if s.MergeRequest == mr {
-			return s
-		}
-	}
-	return MergeSlot{}
-}
-
-// The waiter of a slot is a run. It has ended when its mission is terminal in
-// that run, or a later run replaced it. A slot with no waiter, and a mission that
-// the World does not know, have not ended (gibson#1609).
-func TestMergeSlots_WaiterEndedIsKeyedByTheRun(t *testing.T) {
-	w := NewWorld("t1")
-	Reduce(w, MissionStarted{ID: "agent-1", RunID: "run-1"})
-	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
-	if slotOf(w, "mr-1").WaiterEnded {
-		t.Fatal("a slot with no waiter ended")
-	}
-
-	asked(w, "mr-1", "agent-1", "run-1")
-	if s := slotOf(w, "mr-1"); s.WaiterMission != "agent-1" || s.WaiterRun != "run-1" || s.WaiterEnded {
-		t.Fatalf("slot = %+v, want the waiter run-1 and not ended", s)
-	}
-
-	// The mission ends in the run that waits.
-	Reduce(w, MissionDone{ID: "agent-1", RunID: "run-1", Outcome: MissionCompleted})
-	if !slotOf(w, "mr-1").WaiterEnded {
-		t.Fatal("the run ended and the slot says it did not")
-	}
-
-	// A mission has many runs. A waiter in a run that a later run replaced has
-	// ended, and a waiter in the current run has not.
-	w2 := NewWorld("t1")
-	Reduce(w2, MissionStarted{ID: "agent-1", RunID: "run-2"})
-	Reduce(w2, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
-	asked(w2, "mr-1", "agent-1", "run-1")
-	if !slotOf(w2, "mr-1").WaiterEnded {
-		t.Fatal("a waiter in an older run did not end")
-	}
-	asked(w2, "mr-1", "agent-1", "run-2")
-	if slotOf(w2, "mr-1").WaiterEnded {
-		t.Fatal("the latest ask names the current run, and it has not ended")
-	}
-
-	// A waiter that the World does not know has not ended: no fallback to the
-	// fix mission or to any other mission.
-	w3 := NewWorld("t1")
-	Reduce(w3, MissionStarted{ID: "fix-1"})
-	Reduce(w3, MissionDone{ID: "fix-1", Outcome: MissionCompleted})
-	Reduce(w3, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
-	asked(w3, "mr-1", "ghost", "run-1")
-	if slotOf(w3, "mr-1").WaiterEnded {
-		t.Fatal("an unknown waiter ended")
-	}
-}
-
-// MergeAsked changes nothing for a merge request with no slot, and it ignores an
-// ask with no run or no mission.
-func TestMergeAsked_NeedsASlotAndAnIdentity(t *testing.T) {
-	w := NewWorld("t1")
-	Reduce(w, MergeAsked{MergeRequest: "mr-9", MissionID: "m", RunID: "r"})
-	if len(w.MergeSlots()) != 0 {
-		t.Fatal("an ask made a slot")
-	}
-	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
-	Reduce(w, MergeAsked{MergeRequest: "mr-1", MissionID: "m"})
-	Reduce(w, MergeAsked{MergeRequest: "mr-1", RunID: "r"})
-	if s := slotOf(w, "mr-1"); s.WaiterRun != "" || s.WaiterMission != "" {
-		t.Fatalf("slot = %+v, want no waiter", s)
-	}
-}
-
-// The World alone never frees a slot because its waiter ended. The run may have
-// merged, and only the host says so. The watcher frees the slot.
-func TestMergeSlotExpirySystem_DoesNotFreeASlotWhoseWaiterEnded(t *testing.T) {
-	w := NewWorld("t1")
-	w.clock = func() time.Time { return at(3) }
-	Reduce(w, MissionStarted{ID: "agent-1", RunID: "run-1"})
-	Reduce(w, FindingRaised{ID: "f1", At: at(0)})
-	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixing, MergeRequest: "mr-1", MissionID: "fix-1", At: at(0)})
-	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
-	Reduce(w, MergeGranted{MergeRequest: "mr-1", Application: "shop", At: at(1)})
-	asked(w, "mr-1", "agent-1", "run-1")
-	Reduce(w, MissionDone{ID: "agent-1", RunID: "run-1", Outcome: MissionCompleted})
-	if evs := MergeSlotExpirySystem(w); len(evs) != 0 {
-		t.Fatalf("the World freed a slot that the host may show as merged: %+v", evs)
 	}
 }
 
@@ -313,5 +215,67 @@ func TestMergeGate_TheNextFixWaitsUntilTheFirstSlotIsGone(t *testing.T) {
 	next := grants(w)
 	if len(next) != 1 || next[0].MergeRequest != "mr-2" {
 		t.Fatalf("grants = %+v, want mr-2 after the slot of mr-1 is gone", next)
+	}
+}
+
+// A later pass of the fix agent can be a new mission. It merges a granted merge
+// request that an earlier mission opened when it works on the same Application. A
+// mission of another Application, a mission with no target and a call with no
+// mission are refused (gibson#1609).
+func TestMayMerge_AnyMissionOfTheSameApplicationMergesAGrantedSlot(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, MissionStarted{ID: "later-pass", TargetID: "shop"})
+	Reduce(w, MissionStarted{ID: "other-app-pass", TargetID: "bank"})
+	Reduce(w, MissionStarted{ID: "no-target-pass"})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
+
+	if w.MayMerge("mr-1", "later-pass") {
+		t.Fatal("a slot that is not granted let a call merge")
+	}
+	Reduce(w, grants(w)[0])
+	if !w.MayMerge("mr-1", "later-pass") {
+		t.Fatal("a new mission of the same Application must merge a granted merge request that an earlier mission opened")
+	}
+	for name, mission := range map[string]string{
+		"a mission of another Application": "other-app-pass",
+		"a mission with no target":         "no-target-pass",
+		"a mission that the World lacks":   "ghost",
+		"no mission":                       "",
+	} {
+		if w.MayMerge("mr-1", mission) {
+			t.Errorf("%s merged with the slot of another Application", name)
+		}
+	}
+	// A slot that names no mission lets no call merge, also of the same Application.
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "shop", At: at(2)})
+	Reduce(w, MergeGranted{MergeRequest: "mr-2", Application: "shop", At: at(2)})
+	if w.MayMerge("mr-2", "later-pass") {
+		t.Fatal("a slot with no mission let a call merge")
+	}
+}
+
+// The World of one tenant knows no mission of another tenant, so a mission of
+// another tenant never merges with a slot of this tenant.
+func TestMayMerge_AMissionOfAnotherTenantIsRefused(t *testing.T) {
+	a, b := NewWorld("tenant-a"), NewWorld("tenant-b")
+	Reduce(a, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
+	Reduce(a, grants(a)[0])
+	Reduce(b, MissionStarted{ID: "pass-of-b", TargetID: "shop"})
+	if a.MayMerge("mr-1", "pass-of-b") {
+		t.Fatal("a mission of tenant B merged with a slot of tenant A")
+	}
+}
+
+// The System frees no granted slot on a clock, whatever the time since the grant.
+// The watcher frees it after it reads the host.
+func TestMergeSlotExpirySystem_FreesNoGrantedSlotOnAClock(t *testing.T) {
+	w := NewWorld("t1")
+	w.clock = func() time.Time { return at(0).Add(1000 * time.Hour) }
+	Reduce(w, FindingRaised{ID: "f1", At: at(0)})
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixing, MergeRequest: "mr-1", MissionID: "fix-1", At: at(0)})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
+	Reduce(w, grants(w)[0])
+	if evs := MergeSlotExpirySystem(w); len(evs) != 0 {
+		t.Fatalf("the World freed a granted slot on a clock: %+v", evs)
 	}
 }
