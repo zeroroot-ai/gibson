@@ -33,7 +33,8 @@
 # four), a TypeScript file that names some of those message types reads those
 # messages only, so a read of X.toolClass beside the type X keeps only X
 # alive. A file that names none of them reads every one, because its type
-# cannot be told.
+# cannot be told. The message type is matched as Name, Outer_Inner for a nested
+# message, and each with the Schema suffix of protobuf-es v2.
 # Python keeps the match by name. Go reads outside gibson are matched by
 # <Type>.<Field>: those modules cannot import gibson's internal packages, so a
 # generated copy of the same message is the only way they could read it.
@@ -43,11 +44,12 @@
 # The consumer set spans seven repositories. The merge gate runs the scan
 # (go-ci, since gibson#1166) with the consumers at their main, and the
 # workflow proto-field-consumers.yml runs it on main and on dispatch. A field
-# with no consumer and no verdict fails every run. A STALE verdict (the field
-# now has a consumer, or no longer exists) is a warning on a PR and in the
+# with no consumer and no verdict fails every run. A verdict for a field that
+# is not declared fails every run too, because only this repo decides it. A
+# verdict for a field that NOW HAS A CONSUMER is a warning on a PR and in the
 # merge queue, because a consumer repo that merges changes the result of an
-# unrelated PR. It fails on main and on dispatch, where nothing else is in
-# flight. STALE_VERDICTS=warn selects the warning, and the default is fail.
+# unrelated PR. It fails on main and on dispatch (proto-field-consumers.yml).
+# STALE_VERDICTS=warn selects the warning, and the default is fail.
 # The fixture (scripts/__tests__/check-proto-field-consumers.test.sh) proves
 # each rule can fail.
 #
@@ -59,8 +61,8 @@
 # half is tested without loading a module.
 #
 # Exit 0 = every served field has a consumer or a recorded verdict.
-# Exit 1 = at least one does not, a verdict is stale (unless STALE_VERDICTS=warn),
-# or a root is missing.
+# Exit 1 = at least one does not, a verdict names an undeclared field, a verdict
+# is stale (unless STALE_VERDICTS=warn), or a root is missing.
 set -euo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
@@ -288,30 +290,38 @@ if os.path.exists(exempt_file):
                 sys.exit(1)
             exempt[parts[0]] = parts[1]
 
-# The messages that declare each TS field name. A name that one message
-# declares matches by name. A shared name is read by the messages that the
-# reading file names: a file that names some declaring message attributes the
-# read to those messages only, and a file that names none gives the read to
-# every declaring message, because the type cannot be told (that errs toward
-# "live", never toward a false deletion).
-ts_declarers = {}
+# The messages that declare each TS field name. A shared name is read by the
+# messages that the reading file names: a file that names some declaring
+# message attributes the read to those messages only, and a file that names
+# none gives the read to every declaring message, because the type cannot be
+# told (that errs toward "live", never toward a false deletion). A file that
+# holds the name but no declaring message type still reads every declarer.
+def msg_idents(key):
+    # The identifiers that name the message in generated TypeScript: the
+    # innermost name, protobuf-es v2's Outer_Inner for a nested message, and
+    # each with the Schema suffix of protobuf-es v2.
+    msgs = [p for p in key.rsplit(".", 1)[0].split(".") if p[:1].isupper()]
+    names = {msgs[-1], "_".join(msgs)}
+    return names | {n + "Schema" for n in names}
+
+def msg_id(key):
+    return key.rsplit(".", 1)[0]
+
+ts_declarers = {}  # lowerCamel name -> {message id -> identifiers of the message}
 for k in declared:
     n = ts_name(k.rsplit(".", 1)[1])
-    ts_declarers.setdefault(n, set()).add(k.rsplit(".", 2)[1])  # innermost message
+    ts_declarers.setdefault(n, {})[msg_id(k)] = msg_idents(k)
 
 def ts_read(key, f):
     n = ts_name(f)
     if n not in ts_reads:
         return False
-    declarers = ts_declarers.get(n, set())
-    if len(declarers) <= 1:
-        return True
-    msg = key.rsplit(".", 2)[1]
+    declarers = ts_declarers.get(n, {})
     for ids in ts_files:
         if n not in ids:
             continue
-        named = declarers & ids
-        if not named or msg in named:
+        named = {m for m, idents in declarers.items() if idents & ids}
+        if not named or msg_id(key) in named:
             return True
     return False
 
@@ -323,7 +333,7 @@ def is_read(field, go_key):
     short = ".".join(go_key.rsplit(".", 2)[1:])
     return short in go_reads or ts_read(field, f) or f in py_reads
 
-dead, stale = [], []
+dead, stale, undeclared = [], [], []
 for key, (path, lineno, go_key) in sorted(declared.items()):
     read = is_read(key, go_key)
     if key in exempt:
@@ -334,15 +344,19 @@ for key, (path, lineno, go_key) in sorted(declared.items()):
         dead.append(f"dead\t{key}\t{path}:{lineno}")
 for key in sorted(exempt):
     if key not in declared:
-        stale.append(f"{key} is not a declared field; drop its verdict ({exempt[key]})")
+        undeclared.append(f"{key} is not a declared field; drop its verdict ({exempt[key]})")
 
 for line in dead:
     print(line)
 warn_stale = os.environ.get("STALE_VERDICTS", "fail") == "warn"
 for line in stale:
     print(f"{'warn' if warn_stale else 'stale'}\t{line}")
+# A verdict for a field that is not declared depends on this repo alone, so it
+# fails every run, a PR run too.
+for line in undeclared:
+    print(f"stale\t{line}")
 served = len(declared)
 print(f"check-proto-field-consumers: {served} fields served, {len(dead)} without a consumer, "
-      f"{len(exempt)} verdicts, {len(stale)} stale, {len(roots)} consumer roots")
-sys.exit(1 if dead or (stale and not warn_stale) else 0)
+      f"{len(exempt)} verdicts, {len(stale) + len(undeclared)} stale, {len(roots)} consumer roots")
+sys.exit(1 if dead or undeclared or (stale and not warn_stale) else 0)
 PY
