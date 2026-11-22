@@ -96,9 +96,7 @@
 # service and method now, so each line is a handler with no test of its own.
 # Write a Test<Method> test in the package of the service, then delete the line.
 /gibson.component.v1.ComponentService/CancelMission
-/gibson.component.v1.ComponentService/FindSimilarAttacks
 /gibson.component.v1.ComponentService/FindSimilarFindings
-/gibson.component.v1.ComponentService/GetAttackChains
 /gibson.component.v1.ComponentService/GetCredential
 /gibson.component.v1.ComponentService/GetFindings
 /gibson.component.v1.ComponentService/GetMissionResults

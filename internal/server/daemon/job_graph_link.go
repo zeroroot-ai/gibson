@@ -5,14 +5,19 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/fixloop"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
+	"github.com/zeroroot-ai/gibson/internal/platform/job"
 )
 
 const (
@@ -40,11 +45,52 @@ type jobGraphLink struct {
 	findings func(tenant string) map[string]findingRef
 	// mergeRequests reads a merge request on the Git host of the tenant.
 	mergeRequests mergeRequestReader
-	// retryWaits replace mergeReadWaits. A test sets them.
-	retryWaits []time.Duration
-	now        func() time.Time
-	logger     *slog.Logger
+	now           func() time.Time
+	logger        *slog.Logger
+
+	// pending holds the closes whose merge request the daemon could not read
+	// on the Git host, keyed by job id (gibson#1581). RetryPending reads them
+	// again. The close path never waits for a retry.
+	mu      sync.Mutex
+	pending map[string]*pendingLink
+	// running is true while Run loops. A test reads it.
+	running atomic.Bool
+	// readTimeout bounds one read of a merge request. Zero means
+	// pendingReadTimeout. A test sets it.
+	readTimeout time.Duration
 }
+
+// read bounds one read of a merge request, so a hung connector of one tenant
+// stops neither a close nor the links of the other tenants.
+func (l *jobGraphLink) read(ctx context.Context, c jobnode.ClosedJob, mrKey string, held []string, known map[string]findingRef) (string, fixloop.MergeFact, error) {
+	d := l.readTimeout
+	if d == 0 {
+		d = pendingReadTimeout
+	}
+	readCtx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	return l.vet(readCtx, c, mrKey, held, known)
+}
+
+// pendingLink is a close that waits for a good read of the merge request.
+type pendingLink struct {
+	closed  jobnode.ClosedJob
+	mrKey   string
+	since   time.Time
+	lastErr string
+}
+
+const (
+	// pendingLinkInterval is how often Run reads the pending merge requests.
+	pendingLinkInterval = 30 * time.Second
+	// pendingReadTimeout bounds one read of a merge request in RetryPending, so
+	// a hung connector of one tenant does not stop the links of the others.
+	pendingReadTimeout = 20 * time.Second
+	// pendingLinkLimit is how long a link stays pending. A link that no read
+	// settles in this time is refused, so a claim does not wait for a Git host
+	// that stays down.
+	pendingLinkLimit = 30 * time.Minute
+)
 
 // mergeRequestReader reads one merge request through the governed connector
 // path. fixloop.ConnectorReader satisfies it.
@@ -78,15 +124,13 @@ func newJobGraphLink(reg *brain.Registry, mrs mergeRequestReader, logger *slog.L
 	}
 }
 
-// JobClosed submits the events for one accomplished close.
+// JobClosed submits the events for one accomplished close. It reads the merge
+// request on the Git host one time. When the read fails, the link is pending
+// and RetryPending reads it again (gibson#1581). The close path does not wait.
 func (l *jobGraphLink) JobClosed(ctx context.Context, c jobnode.ClosedJob) {
 	mrKey, _, _ := deliveredMergeRequest(c)
 	if mrKey == "" {
 		return
-	}
-	now := time.Now().UTC()
-	if l.now != nil {
-		now = l.now()
 	}
 	known := l.findings(c.TenantID)
 	claim := jobnode.ClaimName(c.MissionRunID, c.NodeID)
@@ -97,12 +141,32 @@ func (l *jobGraphLink) JobClosed(ctx context.Context, c jobnode.ClosedJob) {
 		l.logger.Warn("a fix job closed with a merge request and holds no finding",
 			"job_id", c.JobID, "merge_request", mrKey, "claim", claim)
 	}
+	now := l.clock()
+	var fact fixloop.MergeFact
 	if len(held) > 0 {
-		if reason := l.vet(ctx, c, mrKey, held, known); reason != "" {
+		reason, f, readErr := l.read(ctx, c, mrKey, held, known)
+		fact = f
+		if readErr != nil {
+			l.markPending(c, mrKey, held, readErr, now)
+			return
+		}
+		if reason != "" {
 			l.refuse(c, mrKey, claim, held, reason, now)
 			return
 		}
 	}
+	l.link(c, known, held, fact, now)
+}
+
+func (l *jobGraphLink) clock() time.Time {
+	if l.now != nil {
+		return l.now()
+	}
+	return time.Now().UTC()
+}
+
+// link submits the FIXED_BY events for the findings that the job holds.
+func (l *jobGraphLink) link(c jobnode.ClosedJob, known map[string]findingRef, held []string, fact fixloop.MergeFact, now time.Time) {
 	// Only the findings that this job holds take the link. A finding that no
 	// job holds, or that another job holds, keeps what it has.
 	events, skipped := fixedByEvents(c, func(string) map[string]findingRef { return onlyHeld(known, held) }, now)
@@ -113,6 +177,151 @@ func (l *jobGraphLink) JobClosed(ctx context.Context, c jobnode.ClosedJob) {
 	for _, ev := range events {
 		l.submit(c.TenantID, ev)
 	}
+	// The head and the files come from the read of the host that passed the
+	// checks of the caller, never from the deliverable of the agent
+	// (gibson#1579).
+	mrKey, _, _ := deliveredMergeRequest(c)
+	for _, ev := range l.headEvents(c, mrKey, held, fact, now) {
+		l.submit(c.TenantID, ev)
+	}
+}
+
+// fixFileJSON is the shape of one file in FixHeadRecorded.Files.
+type fixFileJSON struct {
+	Path         string `json:"path"`
+	Change       string `json:"change"`
+	PreviousPath string `json:"previous_path,omitempty"`
+	BlobSHA      string `json:"blob_sha,omitempty"`
+}
+
+// maxFixFiles is the largest list that the harness read returns (the SDK allows
+// 100 files).
+const maxFixFiles = 100
+
+var headSHARe = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// headEvents builds the events that record the head commit and the changed files
+// of the merge request. It builds none when the host gave no valid head or no
+// complete list: the fields stay empty, and the log says why.
+func (l *jobGraphLink) headEvents(c jobnode.ClosedJob, mrKey string, held []string, fact fixloop.MergeFact, now time.Time) []brain.Event {
+	if len(held) == 0 {
+		return nil
+	}
+	switch {
+	case !headSHARe.MatchString(fact.HeadSHA):
+		l.logger.Warn("the host gave no valid head commit for the merge request of a fix job, so the fix has no head",
+			"job_id", c.JobID, "merge_request", mrKey)
+		return nil
+	case fact.ChangedFilesError != "":
+		l.logger.Warn("the host gave no list of the files of the merge request of a fix job",
+			"job_id", c.JobID, "merge_request", mrKey, "error", fact.ChangedFilesError)
+		return nil
+	case fact.ChangedFilesTruncated || len(fact.ChangedFiles) == 0 || len(fact.ChangedFiles) > maxFixFiles:
+		l.logger.Warn("the list of the files of the merge request of a fix job is not complete or is over the limit",
+			"job_id", c.JobID, "merge_request", mrKey, "files", len(fact.ChangedFiles), "truncated", fact.ChangedFilesTruncated)
+		return nil
+	}
+	files := make([]fixFileJSON, 0, len(fact.ChangedFiles))
+	for _, f := range fact.ChangedFiles {
+		files = append(files, fixFileJSON{Path: f.Path, Change: f.Change, PreviousPath: f.PreviousPath, BlobSHA: f.BlobSHA})
+	}
+	enc, err := json.Marshal(files)
+	if err != nil {
+		l.logger.Warn("the files of a fix could not be encoded", "job_id", c.JobID, "error", err)
+		return nil
+	}
+	out := make([]brain.Event, 0, len(held))
+	for _, id := range held {
+		out = append(out, brain.FixHeadRecorded{
+			ID: id, MergeRequest: mrKey, HeadSHA: fact.HeadSHA, Files: string(enc), MissionID: c.MissionRunID, At: now,
+		})
+	}
+	return out
+}
+
+// markPending keeps the close for RetryPending and records the wait on each
+// finding that the job holds. The claims stay, so no second job takes the
+// findings while the link waits.
+func (l *jobGraphLink) markPending(c jobnode.ClosedJob, mrKey string, held []string, readErr error, now time.Time) {
+	reason := "the daemon could not read the merge request on the Git host: " + readErr.Error()
+	_, url, ref := deliveredMergeRequest(c)
+	l.logger.Warn("the read of the merge request of a fix job failed, so the link is pending",
+		"job_id", c.JobID, "merge_request", mrKey, "error", readErr)
+	l.mu.Lock()
+	if l.pending == nil {
+		l.pending = map[string]*pendingLink{}
+	}
+	l.pending[c.JobID] = &pendingLink{closed: c, mrKey: mrKey, since: now, lastErr: readErr.Error()}
+	l.mu.Unlock()
+	for _, id := range held {
+		l.submit(c.TenantID, brain.FixLinkPending{
+			ID: id, MergeRequest: mrKey, JobID: c.JobID, Reason: reason, MissionID: c.MissionRunID,
+			NodeID: c.NodeID, URL: url, Ref: ref, Countermeasure: c.Countermeasure, At: now,
+		})
+	}
+}
+
+// Run reads the pending merge requests again at each pendingLinkInterval, until
+// ctx ends.
+func (l *jobGraphLink) Run(ctx context.Context) {
+	l.running.Store(true)
+	defer l.running.Store(false)
+	t := time.NewTicker(pendingLinkInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			l.RetryPending(ctx)
+		}
+	}
+}
+
+// RetryPending reads the merge request of each pending link once. A good read
+// links the fix or refuses it, as a close does. A failed read keeps the link
+// pending until pendingLinkLimit, and then refuses it.
+func (l *jobGraphLink) RetryPending(ctx context.Context) {
+	l.mu.Lock()
+	list := make([]*pendingLink, 0, len(l.pending))
+	for _, p := range l.pending {
+		list = append(list, p)
+	}
+	l.mu.Unlock()
+
+	for _, p := range list {
+		c := p.closed
+		now := l.clock()
+		known := l.findings(c.TenantID)
+		claim := jobnode.ClaimName(c.MissionRunID, c.NodeID)
+		held := heldFindings(c, known, claim)
+		if len(held) == 0 {
+			// The claims ended, so no finding waits for this link.
+			l.dropPending(c.JobID)
+			continue
+		}
+		reason, fact, readErr := l.read(ctx, c, p.mrKey, held, known)
+		switch {
+		case readErr != nil && now.Sub(p.since) < pendingLinkLimit:
+			l.logger.Warn("the read of the merge request of a pending fix link failed again",
+				"job_id", c.JobID, "merge_request", p.mrKey, "error", readErr)
+			continue
+		case readErr != nil:
+			l.refuse(c, p.mrKey, claim, held, fmt.Sprintf(
+				"the daemon could not read the merge request on the Git host for %s: %s", pendingLinkLimit, readErr), now)
+		case reason != "":
+			l.refuse(c, p.mrKey, claim, held, reason, now)
+		default:
+			l.link(c, known, held, fact, now)
+		}
+		l.dropPending(c.JobID)
+	}
+}
+
+func (l *jobGraphLink) dropPending(jobID string) {
+	l.mu.Lock()
+	delete(l.pending, jobID)
+	l.mu.Unlock()
 }
 
 // deliveredMergeRequest returns the key, the URL and the ref of the first merge
@@ -151,15 +360,18 @@ func onlyHeld(known map[string]findingRef, held []string) map[string]findingRef 
 	return out
 }
 
-// vet reads the merge request on the Git host and returns why the link is
-// refused, or "" when the merge request is the work of this job.
-func (l *jobGraphLink) vet(ctx context.Context, c jobnode.ClosedJob, mrKey string, held []string, known map[string]findingRef) string {
+// vet reads the merge request on the Git host one time. It returns why the
+// link is refused, or "" when the merge request is the work of this job. A
+// failed read is the error, and no verdict: the link is then pending.
+func (l *jobGraphLink) vet(
+	ctx context.Context, c jobnode.ClosedJob, mrKey string, held []string, known map[string]findingRef,
+) (reason string, fact fixloop.MergeFact, readErr error) {
 	if l.mergeRequests == nil {
-		return "the daemon has no reader of the Git host, so it cannot check the merge request"
+		return "the daemon has no reader of the Git host, so it cannot check the merge request", fixloop.MergeFact{}, nil
 	}
-	fact, err := l.readMergeRequest(ctx, c, mrKey)
+	fact, err := l.mergeRequests.MergeRequest(ctx, c.TenantID, c.MissionRunID, mrKey)
 	if err != nil {
-		return "the daemon could not read the merge request on the Git host: " + err.Error()
+		return "", fixloop.MergeFact{}, fmt.Errorf("read merge request %s: %w", mrKey, err)
 	}
 	var claimedAt time.Time
 	for _, id := range held {
@@ -167,36 +379,7 @@ func (l *jobGraphLink) vet(ctx context.Context, c jobnode.ClosedJob, mrKey strin
 			claimedAt = t
 		}
 	}
-	return mergeRequestRefusal(fact, jobnode.JobBranch(c.JobID), claimedAt)
-}
-
-// mergeReadWaits are the waits between the reads of the merge request on the
-// Git host. One failed read does not refuse the link (review r10).
-var mergeReadWaits = []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second}
-
-// readMergeRequest reads the merge request, and reads it again after each wait
-// of retryWaits when a read fails. It stops early when ctx ends.
-func (l *jobGraphLink) readMergeRequest(ctx context.Context, c jobnode.ClosedJob, mrKey string) (fixloop.MergeFact, error) {
-	waits := l.retryWaits
-	if waits == nil {
-		waits = mergeReadWaits
-	}
-	for attempt := 0; ; attempt++ {
-		fact, err := l.mergeRequests.MergeRequest(ctx, c.TenantID, c.MissionRunID, mrKey)
-		if err == nil || attempt >= len(waits) {
-			if err != nil {
-				return fact, fmt.Errorf("after %d reads: %w", attempt+1, err)
-			}
-			return fact, nil
-		}
-		l.logger.Warn("the read of the merge request of a fix job failed, and the daemon reads it again",
-			"job_id", c.JobID, "merge_request", mrKey, "attempt", attempt+1, "error", err)
-		select {
-		case <-ctx.Done():
-			return fact, fmt.Errorf("the read of the merge request stopped: %w", ctx.Err())
-		case <-time.After(waits[attempt]):
-		}
-	}
+	return mergeRequestRefusal(fact, jobnode.JobBranch(c.JobID), claimedAt), fact, nil
 }
 
 // mergeRequestRefusal returns why a merge request is not the work of a fix job,
@@ -421,4 +604,57 @@ func (c fixClaims) Release(_ context.Context, tenantID, claim, missionRunID stri
 	for _, id := range findingInputs(eng, inputs) {
 		eng.Submit(brain.FixClaimReleased{ID: id, Claim: claim, MissionID: missionRunID, At: c.now()})
 	}
+}
+
+// Adopt rebuilds the pending links of a tenant after the engine hydrated its
+// World. A link that waited for the Git host when the daemon stopped has a
+// FixLinkWait on each finding that the job holds, and the claim of the job
+// stayed (gibson#1581). The daemon reads the merge request again, so a restart
+// does not orphan it.
+func (l *jobGraphLink) Adopt(tenant string, findings []brain.FindingSnapshot) {
+	jobs := map[string]*pendingLink{}
+	for _, f := range findings {
+		w := f.FixLinkWait
+		if w.JobID == "" || f.Status != brain.FindingStatusOpen || f.FixClaim == "" {
+			continue
+		}
+		p, ok := jobs[w.JobID]
+		if !ok {
+			p = &pendingLink{mrKey: w.MergeRequest, since: w.Since, lastErr: "the daemon restarted while the link was pending",
+				closed: jobnode.ClosedJob{
+					TenantID: tenant, MissionRunID: w.MissionRunID, NodeID: w.NodeID, JobID: w.JobID,
+					Deliverables:   []job.Deliverable{{Kind: mergeRequestDeliverable, URL: w.URL, Ref: w.Ref}},
+					Countermeasure: w.Countermeasure,
+				}}
+			jobs[w.JobID] = p
+		}
+		p.closed.Inputs = append(p.closed.Inputs, f.ID)
+	}
+	if len(jobs) == 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.pending == nil {
+		l.pending = map[string]*pendingLink{}
+	}
+	for id, p := range jobs {
+		l.pending[id] = p
+		l.logger.Info("a pending fix link was rebuilt after the start of the daemon",
+			"tenant", tenant, "job_id", id, "merge_request", p.mrKey)
+	}
+}
+
+// wireFixLink builds the link of closed fix jobs, rebuilds the pending links of
+// each tenant when its engine starts, and starts the loop that reads them again.
+func (d *daemonImpl) wireJobClosed(ctx context.Context, mrs mergeRequestReader, logger *slog.Logger) {
+	d.brainExecutor.jobClosed = wireFixLink(ctx, d.brainRegistry, mrs, logger)
+}
+
+// wireFixLink is the link that wireJobClosed installs.
+func wireFixLink(ctx context.Context, reg *brain.Registry, mrs mergeRequestReader, logger *slog.Logger) *jobGraphLink {
+	link := newJobGraphLink(reg, mrs, logger)
+	reg.OnEngine(func(e *brain.Engine) { link.Adopt(e.World.Tenant, e.Findings()) })
+	go link.Run(ctx)
+	return link
 }

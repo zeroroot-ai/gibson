@@ -87,6 +87,9 @@ func (s *HarnessCallbackService) SearchTools(ctx context.Context, req *harnesspb
 			Tool:            c.Tool,
 			Description:     c.Description,
 			InputSchemaJson: string(c.InputSchema),
+			// The tool class that the manifest of the connector states
+			// (ADR-0177). The agent uses it to pick the tool for its job.
+			ToolClass: connectorToolClass(c.Connector),
 		}
 	}
 	return &harnesspb.SearchToolsResponse{Candidates: out}, nil

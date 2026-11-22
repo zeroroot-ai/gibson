@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"google.golang.org/grpc"
@@ -57,4 +58,20 @@ func (l *tenantConnectorLister) ListEnabledConnectors(ctx context.Context, tenan
 // database.
 func (d *daemonImpl) connectorLister(_ context.Context) discoverysvc.ConnectorLister {
 	return &tenantConnectorLister{store: tenantconnector.NewStore(d.platformDB)}
+}
+
+// lazyEnabledConnectors reads the connectors that a tenant enabled from the
+// platform database. The database is built during Start, after the callback
+// options are assembled, so each call reads it lazily and fails when it is not up.
+type lazyEnabledConnectors struct{ daemon *daemonImpl }
+
+func (l *lazyEnabledConnectors) ListEnabledConnectors(ctx context.Context, tenant string) ([]string, error) {
+	if l.daemon.platformDB == nil {
+		return nil, errors.New("the platform database is not up")
+	}
+	ids, err := l.daemon.connectorLister(ctx).ListEnabledConnectors(ctx, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("list the enabled connectors: %w", err)
+	}
+	return ids, nil
 }

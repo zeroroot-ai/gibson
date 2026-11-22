@@ -45,6 +45,7 @@ import (
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
@@ -1041,6 +1042,14 @@ func main() {
 		return nil
 	}); err != nil {
 		setupLog.Error(err, "Failed to set up ready check")
+		os.Exit(1)
+	}
+
+	// The egress policy of a plugin has the shape of CVE-2024-47825. The
+	// operator refuses to start on a Cilium below the fixed release, and when
+	// it cannot read the version (gibson#1580).
+	if err := ciliumegress.RequireFixedVersion(context.Background(), mgr.GetAPIReader(), ciliumegress.DaemonSetFromEnv(os.Getenv)); err != nil {
+		setupLog.Error(err, "Cilium version")
 		os.Exit(1)
 	}
 

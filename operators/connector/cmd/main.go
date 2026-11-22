@@ -10,9 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"os"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,7 +27,12 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/connector/internal/controller"
 	"github.com/zeroroot-ai/gibson/operators/connector/internal/daemonclient"
 	"github.com/zeroroot-ai/gibson/operators/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 )
+
+// envClusterCIDRs names the variable that holds the pod and the service
+// ranges of the cluster. The chart sets it.
+const envClusterCIDRs = "CONNECTOR_CLUSTER_CIDRS"
 
 // wireReconciler registers the ConnectorInstance controller on the manager
 // with the daemon client it needs: the finalizer revokes the grant on delete
@@ -178,7 +181,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	clusterCIDRs, err := clusterCIDRSettings(os.Getenv)
+	clusterCIDRs, err := ciliumegress.ParseClusterCIDRs(envClusterCIDRs, os.Getenv(envClusterCIDRs))
 	if err != nil {
 		setupLog.Error(err, "cluster ranges")
 		os.Exit(1)
@@ -219,6 +222,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The egress policy has the shape of CVE-2024-47825. The operator refuses
+	// to start on a Cilium below the fixed release, and when it cannot read
+	// the version (gibson#1580).
+	if err := ciliumegress.RequireFixedVersion(context.Background(), mgr.GetAPIReader(), ciliumegress.DaemonSetFromEnv(os.Getenv)); err != nil {
+		setupLog.Error(err, "cilium version")
+		os.Exit(1)
+	}
+
 	// The daemon client closes when the manager stops. A setup failure above
 	// exits the process, which closes the connection.
 	defer func() { _ = daemon.Close() }()
@@ -228,27 +239,4 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
-}
-
-// clusterCIDRSettings reads the pod and the service ranges of the cluster
-// from CONNECTOR_CLUSTER_CIDRS, a comma list. The egress policy of each
-// connector denies them (review B3). The chart sets them for the install. The
-// value is required (review R7): a cluster range outside RFC 1918 and CGNAT
-// would otherwise stay open with no word. A missing value or a bad range
-// fails the start, so a typo never drops the deny rule.
-func clusterCIDRSettings(getenv func(string) string) ([]string, error) {
-	raw := strings.TrimSpace(getenv("CONNECTOR_CLUSTER_CIDRS"))
-	if raw == "" {
-		return nil, errors.New("CONNECTOR_CLUSTER_CIDRS is required: set the pod and the service ranges of the cluster, " +
-			"for example 10.244.0.0/16,10.96.0.0/12")
-	}
-	var out []string
-	for _, c := range strings.Split(raw, ",") {
-		c = strings.TrimSpace(c)
-		if _, _, err := net.ParseCIDR(c); err != nil {
-			return nil, fmt.Errorf("CONNECTOR_CLUSTER_CIDRS: %q is not a CIDR: %w", c, err)
-		}
-		out = append(out, c)
-	}
-	return out, nil
 }
