@@ -314,8 +314,7 @@ func persistOnboardingState(
 
 func defaultLayoutPreferences() *tenantv1.UserLayoutPreferences {
 	return &tenantv1.UserLayoutPreferences{
-		Cols:      12,
-		RowHeight: 80,
+		Cols: 12,
 		Widgets: []*tenantv1.WidgetConfig{
 			{Id: "kpi-summary", Type: "kpi-summary", Position: &tenantv1.WidgetPosition{X: 0, Y: 0, W: 12, H: 2}, Visible: true},
 			{Id: "findings-chart", Type: "findings-chart", Position: &tenantv1.WidgetPosition{X: 0, Y: 2, W: 8, H: 4}, Visible: true},
