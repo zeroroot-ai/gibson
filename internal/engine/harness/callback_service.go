@@ -260,6 +260,10 @@ type HarnessCallbackService struct {
 	// nil means this daemon keeps no read markers.
 	readMarkers ReadMarkerStore
 
+	// enabledConnectors lists the connectors that a tenant enabled. The read
+	// marker write checks the connector name against it.
+	enabledConnectors EnabledConnectorLister
+
 	// agentSkills returns the Agent Skill store. It is nil when no store is wired.
 	agentSkills AgentSkillStoreSource
 
