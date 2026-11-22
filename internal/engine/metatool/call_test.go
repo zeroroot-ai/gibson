@@ -16,6 +16,7 @@ import (
 // intent.
 type seqObserver struct {
 	recorded  []string
+	codes     []ErrCode
 	events    []string
 	intentErr error
 	last      CallRecord
@@ -24,6 +25,7 @@ type seqObserver struct {
 
 func (o *seqObserver) record(_ context.Context, rec CallRecord, _ []byte, errText string) string {
 	o.recorded = append(o.recorded, rec.Canonical+"|"+errText)
+	o.codes = append(o.codes, rec.ErrCode)
 	return fmt.Sprintf("rec-%d", len(o.recorded))
 }
 
@@ -250,5 +252,48 @@ func TestCall_TheRecordNamesTheGrantOfTheCall(t *testing.T) {
 	}
 	if len(asked) != 1 || asked[0] != "acme/user:alice/okta" {
 		t.Fatalf("lookups = %v", asked)
+	}
+}
+
+// The flight recorder gets the typed code of a refusal, so a reader tells the
+// kinds apart by the code and not by the words (gibson#1575).
+func TestCall_TheRecordHoldsTheTypedCode(t *testing.T) {
+	obs := &seqObserver{}
+	h := NewHandler(nil, allowAll(), &seqQuerier{obs: obs})
+	_, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:get_project", Observer: obs, Recorder: obs.record})
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("err = %v, want ErrUnauthorized", err)
+	}
+	if len(obs.codes) != 1 || obs.codes[0] != ErrCodeNotAuthorized {
+		t.Fatalf("codes = %v, want [%s]", obs.codes, ErrCodeNotAuthorized)
+	}
+
+	ok := &seqObserver{}
+	h = NewHandler(nil, allowAll("mcp:gitlab:get_project"), &seqQuerier{obs: ok})
+	if _, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:get_project", Observer: ok, Recorder: ok.record}); err != nil {
+		t.Fatal(err)
+	}
+	if len(ok.codes) != 1 || ok.codes[0] != "" {
+		t.Fatalf("a call that succeeded has code %v, want none", ok.codes)
+	}
+}
+
+func TestCodeOf(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want ErrCode
+	}{
+		{nil, ""},
+		{fmt.Errorf("%w: mcp:a:b", ErrUnauthorized), ErrCodeNotAuthorized},
+		{fmt.Errorf("%w: request 1", ErrApprovalPending), ErrCodePendingAuthorization},
+		{fmt.Errorf("%w: mr", ErrMergeNotGranted), ErrCodeMergeNotGranted},
+		{ErrBlocked, ErrCodeRefused},
+		{ErrRunInactive, ErrCodeRefused},
+		{ErrApprovalDenied, ErrCodeRefused},
+		{errors.New("vendor returned HTTP 500"), ErrCodeFailed},
+	} {
+		if got := CodeOf(tc.err); got != tc.want {
+			t.Errorf("CodeOf(%v) = %q, want %q", tc.err, got, tc.want)
+		}
 	}
 }

@@ -89,3 +89,32 @@ func TestEntityObservedFromSighting_ABadEdgeIsSkippedAndTheEntityStillLands(t *t
 		t.Errorf("only the admissible edge should survive, got %+v", ev.Edges)
 	}
 }
+
+// An alert names the host or the account that it affects with the key
+// "connector=<id>|vendor_id=<id>" (gibson#1577). The node that the tool of the
+// buyer reports has the same key, so the edge lands on that node.
+func TestEntityObservedFromSighting_AnAlertAffectsANodeByTheVendorKey(t *testing.T) {
+	node := func() map[string]string {
+		return map[string]string{"connector": "crowdstrike", "vendor_id": "aid-77"}
+	}
+	for _, label := range []string{"Host", "Account", "Service"} {
+		alert, skipped, ok := EntityObservedFromSighting(EntitySighting{
+			Label:        "Alert",
+			IDProperties: map[string]string{"connector": "crowdstrike", "vendor_id": "alert-1"},
+			Edges: []EntitySightingEdge{
+				{Type: "AFFECTS", TargetLabel: label, TargetIDProperties: node()},
+			},
+		}, "scope", "")
+		if !ok || skipped != 0 || len(alert.Edges) != 1 {
+			t.Fatalf("%s: ok = %v, skipped = %d, edges = %v", label, ok, skipped, alert.Edges)
+		}
+		const want = "connector=crowdstrike|vendor_id=aid-77"
+		if e := alert.Edges[0]; e.Type != "AFFECTS" || e.TargetLabel != label || e.TargetKey != want {
+			t.Errorf("%s: edge = %+v, want AFFECTS to %s %q", label, e, label, want)
+		}
+		target, _, ok := EntityObservedFromSighting(EntitySighting{Label: label, IDProperties: node()}, "scope", "")
+		if !ok || target.Key != want {
+			t.Errorf("%s: node key = %q, want the key of the edge %q", label, target.Key, want)
+		}
+	}
+}

@@ -852,3 +852,9 @@ func TestApplicationFindingsToProto_FixHeadAndFilesAreValidated(t *testing.T) {
 		t.Errorf("finding 3 = %+v", got[2])
 	}
 }
+
+// A finding that an agent reads back holds the remediation text (gibson#1574).
+func TestAgentFindingToProto_CarriesTheRemediation(t *testing.T) {
+	pf := agentFindingToProto(&agent.Finding{Title: "t", Remediation: "Restrict the redirect target."})
+	assert.Equal(t, "Restrict the redirect target.", pf.GetRemediation())
+}

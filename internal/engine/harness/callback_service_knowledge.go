@@ -151,6 +151,7 @@ func agentFindingToProto(f *agent.Finding) *typespb.Finding {
 		Category:    f.Category,
 		Confidence:  f.Confidence,
 		Severity:    agentSeverityToProto(f.Severity),
+		Remediation: f.Remediation,
 	}
 	if f.TargetID != nil {
 		pf.TargetId = f.TargetID.String()
