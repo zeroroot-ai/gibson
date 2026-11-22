@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"errors"
 	"strings"
 	"sync/atomic"
@@ -789,7 +790,7 @@ func (r *perTenantReader) MergeRequest(ctx context.Context, tenant, _, _ string)
 	if tenant == r.hungTenant {
 		r.hungSeen.Store(true)
 		<-ctx.Done()
-		return fixloop.MergeFact{}, ctx.Err()
+		return fixloop.MergeFact{}, fmt.Errorf("the hung read ended: %w", ctx.Err())
 	}
 	return r.good, nil
 }
