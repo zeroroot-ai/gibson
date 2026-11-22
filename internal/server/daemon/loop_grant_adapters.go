@@ -105,7 +105,7 @@ func deriveMemberRPCs(ctx context.Context, src harness.LoopGrantSource, tenant, 
 	case errors.Is(err, harness.ErrNoLoopGrant):
 		return rpcs, nil
 	case err != nil:
-		return nil, err
+		return nil, fmt.Errorf("read the loop grant of %q: %w", agentName, err)
 	}
 	return append(rpcs, harness.MemberLoopGrantRPCs(g)...), nil
 }

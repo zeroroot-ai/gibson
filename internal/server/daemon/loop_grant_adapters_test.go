@@ -52,12 +52,12 @@ func TestLazyLoopGrants_MapsTheStoreToTheHarnessSource(t *testing.T) {
 	}, got)
 
 	_, err = lazyOver(stubLoopStore{err: loopgrantstore.ErrNotFound}).LoopGrantFor(ctx, "t", "a")
-	assert.ErrorIs(t, err, harness.ErrNoLoopGrant)
+	require.ErrorIs(t, err, harness.ErrNoLoopGrant)
 
 	boom := errors.New("boom")
 	_, err = lazyOver(stubLoopStore{err: boom}).LoopGrantFor(ctx, "t", "a")
 	require.ErrorIs(t, err, boom)
-	assert.NotErrorIs(t, err, harness.ErrNoLoopGrant, "an outage is no empty grant")
+	require.NotErrorIs(t, err, harness.ErrNoLoopGrant, "an outage is no empty grant")
 
 	failing := &lazyLoopGrants{stores: func() (loopgrantstore.Store, error) { return nil, boom }}
 	_, err = failing.LoopGrantFor(ctx, "t", "a")
