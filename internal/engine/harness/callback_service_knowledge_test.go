@@ -799,31 +799,81 @@ func TestApplicationFindingsToProto_CarriesThePriorityTriple(t *testing.T) {
 	}
 }
 
-// The pinned SDK still declares the reads of attack patterns and attack
-// chains (gibson#1521). The daemon serves neither, so the embedded
-// UnimplementedHarnessCallbackServiceServer answers them. The tests reach the
-// RPC by its name through the service descriptor, so they compile against the
-// pinned SDK and against the SDK of zeroroot-ai/sdk#359, which deletes both.
-// After the SDK bump the descriptor holds neither, and both tests go.
-
-func TestFindSimilarAttacks_IsUnimplemented(t *testing.T) {
-	assertRetiredRPCIsUnimplemented(t, "FindSimilarAttacks")
+// The harness read returns the block reason and the merge request of a
+// finding. Before this the three fields were dropped, so the fix agent tried
+// the same blocked finding again in each pass (gibson#1579).
+func TestApplicationFindingsToProto_ReturnsTheFixFields(t *testing.T) {
+	raw := []byte(`[{"finding_id":"f-1","status":"fixing","fix_blocked_reason":"the patch needs a restart",` +
+		`"merge_request":"mr-9","merge_request_url":"https://git.example/mr/9"},{"finding_id":"f-2","status":"open"}]`)
+	got, err := applicationFindingsToProto(raw)
+	if err != nil {
+		t.Fatalf("applicationFindingsToProto: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("findings = %d, want 2", len(got))
+	}
+	if got[0].GetFixBlockedReason() != "the patch needs a restart" || got[0].GetMergeRequest() != "mr-9" ||
+		got[0].GetMergeRequestUrl() != "https://git.example/mr/9" {
+		t.Errorf("finding 1 = %+v", got[0])
+	}
+	if got[1].GetFixBlockedReason() != "" || got[1].GetMergeRequest() != "" || got[1].GetMergeRequestUrl() != "" {
+		t.Errorf("finding 2 has fix fields it should not have: %+v", got[1])
+	}
 }
 
-func TestGetAttackChains_IsUnimplemented(t *testing.T) {
-	assertRetiredRPCIsUnimplemented(t, "GetAttackChains")
+// The harness read returns the head and the files that the daemon stored, and a
+// finding that does not validate loses its fix fields and keeps the rest
+// (gibson#1579).
+func TestApplicationFindingsToProto_FixHeadAndFilesAreValidated(t *testing.T) {
+	good := `[{"finding_id":"f-1","status":"fixing","fix_head_sha":"1111111111111111111111111111111111111111",` +
+		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\",\"mode\":\"100755\"},` +
+		`{\"path\":\"b.go\",\"change\":\"renamed\",\"previous_path\":\"c.go\",\"blob_sha\":\"3333333333333333333333333333333333333333\"}]"},` +
+		`{"finding_id":"f-2","status":"fixing","merge_request":"mr-2","fix_head_sha":"not-a-sha",` +
+		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\"}]"},` +
+		`{"finding_id":"f-3","status":"fixing","fix_head_sha":"1111111111111111111111111111111111111111","fix_files":"{broken"}]`
+	got, err := applicationFindingsToProto([]byte(good))
+	if err != nil {
+		t.Fatalf("applicationFindingsToProto: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("findings = %d, want 3", len(got))
+	}
+	if got[0].GetFixHeadSha() != "1111111111111111111111111111111111111111" || len(got[0].GetFixFiles()) != 2 ||
+		got[0].GetFixFiles()[1].GetChange() != harnesspb.FixFileChange_FIX_FILE_CHANGE_RENAMED ||
+		got[0].GetFixFiles()[1].GetPreviousPath() != "c.go" || got[0].GetFixFiles()[0].GetMode() != "100755" {
+		t.Errorf("finding 1 = %+v", got[0])
+	}
+	// An invalid head drops both fix fields. The rest of the finding stays.
+	if got[1].GetFixHeadSha() != "" || len(got[1].GetFixFiles()) != 0 || got[1].GetMergeRequest() != "mr-2" {
+		t.Errorf("finding 2 = %+v", got[1])
+	}
+	// A list that cannot be read drops the fix fields too.
+	if got[2].GetFixHeadSha() != "" || len(got[2].GetFixFiles()) != 0 {
+		t.Errorf("finding 3 = %+v", got[2])
+	}
 }
 
-func assertRetiredRPCIsUnimplemented(t *testing.T, name string) {
-	t.Helper()
-	svc, _ := knowledgeService(t, &stubQuerier{})
-	for _, m := range harnesspb.HarnessCallbackService_ServiceDesc.Methods {
-		if m.MethodName != name {
-			continue
-		}
-		_, err := m.Handler(svc, acmeCtx(), func(any) error { return nil }, nil)
-		require.Equal(t, codes.Unimplemented, status.Code(err))
-		return
+// A mode that the SDK does not allow drops the fix fields of that finding only.
+// The SDK client would refuse the whole read otherwise (sdk#378).
+func TestApplicationFindingsToProto_ABadModeDropsTheFixFields(t *testing.T) {
+	raw := `[{"finding_id":"f-1","status":"fixing","merge_request":"mr-1",` +
+		`"fix_head_sha":"1111111111111111111111111111111111111111",` +
+		`"fix_files":"[{\"path\":\"d\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\",\"mode\":\"040000\"}]"},` +
+		`{"finding_id":"f-2","status":"fixing","fix_head_sha":"1111111111111111111111111111111111111111",` +
+		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"deleted\"}]"}]`
+	got, err := applicationFindingsToProto([]byte(raw))
+	if err != nil {
+		t.Fatalf("applicationFindingsToProto: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("findings = %d, want 2", len(got))
+	}
+	if got[0].GetFixHeadSha() != "" || len(got[0].GetFixFiles()) != 0 || got[0].GetMergeRequest() != "mr-1" {
+		t.Errorf("finding 1 = %+v, want no fix fields and the merge request kept", got[0])
+	}
+	// A deleted file has no mode, and an empty mode is valid.
+	if got[1].GetFixHeadSha() == "" || len(got[1].GetFixFiles()) != 1 {
+		t.Errorf("finding 2 = %+v, want its fix fields", got[1])
 	}
 }
 

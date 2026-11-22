@@ -674,6 +674,14 @@ func (e *Engine) AgentSkillLoads() []AgentSkillLoad {
 	return e.World.AgentSkillLoads()
 }
 
+// LastReadMarker returns the last read marker that the subject wrote for the
+// Connector (gibson#1569).
+func (e *Engine) LastReadMarker(subject, connector string) (ReadMarker, bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.LastReadMarker(subject, connector)
+}
+
 // OutsideAgentCalls returns each delegation to an outside A2A agent that the
 // gateway trace recorded, in the order of the Timeline (epic gibson#1366).
 func (e *Engine) OutsideAgentCalls() []OutsideAgentCall {

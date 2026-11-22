@@ -57,6 +57,7 @@ func TestFixLoopEvents_SurviveTheCodecAndTheMissionSlice(t *testing.T) {
 		FixClaimed{ID: "f1", Claim: "c", MissionID: "m1", At: at},
 		FixClaimReleased{ID: "f1", Claim: "c", MissionID: "m1", At: at},
 		FixLinkRefused{ID: "f1", MergeRequest: "mr-1", JobID: "j1", Reason: "r", MissionID: "m1", At: at},
+		FixLinkPending{ID: "f1", MergeRequest: "mr-1", JobID: "j1", Reason: "r", MissionID: "m1", At: at},
 		RevertRequested{MergeRequest: "mr-1", RevertMergeRequest: "mr-2", MissionID: "m1", At: at},
 	} {
 		data, err := EncodeEvent(ev)
@@ -217,5 +218,103 @@ func TestFixClaim_OnlyARestartEndsAClaimWithNoJob(t *testing.T) {
 	}
 	if w.FixClaimOf("old") != "" {
 		t.Fatal("a restart kept the claim of a job that is gone")
+	}
+}
+
+// A link that waits for the Git host leaves a FixLinkWait on the finding. A
+// restart keeps the claim of that finding, and a refusal ends the wait
+// (gibson#1581).
+func TestFixLinkPending_TheWaitKeepsTheClaimAcrossAResume(t *testing.T) {
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	events := []Event{
+		FindingRaised{ID: "f1", Title: "t", Severity: "high", ScopeID: "s", At: at},
+		FindingRaised{ID: "f2", Title: "t", Severity: "high", ScopeID: "s", At: at},
+		FixClaimed{ID: "f1", Claim: "run-1/fix", MissionID: "run-1", At: at},
+		FixClaimed{ID: "f2", Claim: "run-2/fix", MissionID: "run-2", At: at},
+		FixLinkPending{ID: "f1", MergeRequest: "!7", JobID: "j1", Reason: "down", MissionID: "run-1", NodeID: "fix",
+			URL: "https://git/mr/7", Ref: "!7", Countermeasure: "D3-X", At: at},
+	}
+	tl := &Timeline{}
+	for _, ev := range events {
+		if _, ok := ev.(FixLinkPending); ok {
+			data, err := EncodeEvent(ev)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ev, err = DecodeEvent(data) // a replay reads the decoded event
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		tl.Append(ev)
+	}
+	w := Replay("acme", tl)
+	var f1 FindingSnapshot
+	for _, f := range w.FindingSnapshot() {
+		if f.ID == "f1" {
+			f1 = f
+		}
+	}
+	want := FixLinkWait{JobID: "j1", MissionRunID: "run-1", NodeID: "fix", MergeRequest: "!7",
+		URL: "https://git/mr/7", Ref: "!7", Countermeasure: "D3-X", Since: at}
+	if f1.FixLinkWait != want {
+		t.Fatalf("wait = %+v, want %+v", f1.FixLinkWait, want)
+	}
+
+	// The resume ends the claim of f2 and keeps the claim of f1.
+	released := ResumeReleaseFixClaims(w)
+	ended := make([]string, 0, len(released))
+	for _, ev := range released {
+		ended = append(ended, ev.(FixClaimExpired).ID)
+	}
+	if len(ended) != 1 || ended[0] != "f2" {
+		t.Fatalf("the resume ended the claims of %v, want only f2", ended)
+	}
+
+	// The refusal ends the wait, and the claim release does too.
+	Reduce(w, FixLinkRefused{ID: "f1", MergeRequest: "!7", JobID: "j1", Reason: "r", MissionID: "run-1", At: at})
+	for _, f := range w.FindingSnapshot() {
+		if f.FixLinkWait.JobID != "" {
+			t.Fatalf("a refusal left the wait of %s: %+v", f.ID, f.FixLinkWait)
+		}
+	}
+}
+
+// The daemon records the head and the files of the merge request of the fix.
+// A reopened finding forgets them with the rest of the fix (gibson#1579).
+func TestFixHeadRecorded_KeepsTheHeadAndForgetsItOnReopen(t *testing.T) {
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	w := NewWorld("t1")
+	Reduce(w, FindingRaised{ID: "f1", At: at})
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixing, MergeRequest: "mr-1", At: at})
+	Reduce(w, FixHeadRecorded{ID: "f1", MergeRequest: "mr-1", HeadSHA: "abc", Files: `[{"path":"a.go"}]`, At: at})
+	f := w.FindingSnapshot()[0]
+	if f.FixHeadSHA != "abc" || f.FixFiles != `[{"path":"a.go"}]` {
+		t.Fatalf("head = %q, files = %q", f.FixHeadSHA, f.FixFiles)
+	}
+	// A head for another merge request does not change the finding.
+	Reduce(w, FixHeadRecorded{ID: "f1", MergeRequest: "mr-other", HeadSHA: "zzz", Files: "[]", At: at})
+	if got := w.FindingSnapshot()[0].FixHeadSHA; got != "abc" {
+		t.Fatalf("a head for another merge request changed the finding: %q", got)
+	}
+	// A finding with no merge request, for example after a reopen, gets no head
+	// from a late event.
+	Reduce(w, FindingRaised{ID: "f2", At: at})
+	Reduce(w, FixHeadRecorded{ID: "f2", MergeRequest: "mr-1", HeadSHA: "late", Files: "[]", At: at})
+	for _, g := range w.FindingSnapshot() {
+		if g.ID == "f2" && g.FixHeadSHA != "" {
+			t.Fatalf("a finding with no merge request took a head: %q", g.FixHeadSHA)
+		}
+	}
+	data, err := EncodeEvent(FixHeadRecorded{ID: "f1", MergeRequest: "mr-1", HeadSHA: "abc", Files: "[]", At: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back, err := DecodeEvent(data); err != nil || back.Kind() != "finding.fix_head_recorded" {
+		t.Fatalf("decode: %v, %v", back, err)
+	}
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusOpen, At: at})
+	if f := w.FindingSnapshot()[0]; f.FixHeadSHA != "" || f.FixFiles != "" {
+		t.Fatalf("a reopened finding kept the head: %q %q", f.FixHeadSHA, f.FixFiles)
 	}
 }

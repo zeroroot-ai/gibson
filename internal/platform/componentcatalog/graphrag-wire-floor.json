@@ -1,9 +1,6 @@
 {
   "floor": "v0.210.0",
   "reserved": [
-    "AttackPattern.data_sources",
-    "AttackPattern.platforms",
-    "AttackPattern.tactics",
     "Certificate.not_before",
     "Certificate.parent_type",
     "Certificate.san",

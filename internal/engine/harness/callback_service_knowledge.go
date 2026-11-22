@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 
+	"buf.build/go/protovalidate"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -278,7 +280,7 @@ func applicationFindingsToProto(raw []byte) ([]*harnesspb.ApplicationFinding, er
 	}
 	out := make([]*harnesspb.ApplicationFinding, 0, len(decoded))
 	for _, f := range decoded {
-		out = append(out, &harnesspb.ApplicationFinding{
+		pf := &harnesspb.ApplicationFinding{
 			FindingId:       f.FindingID,
 			Status:          f.Status,
 			Severity:        f.Severity,
@@ -292,7 +294,73 @@ func applicationFindingsToProto(raw []byte) ([]*harnesspb.ApplicationFinding, er
 			Priority:        f.Priority,
 			PriorityRule:    f.PriorityRule,
 			PriorityReason:  f.PriorityReason,
-		})
+
+			// The fix agent reads these. A block reason stops a second try of
+			// the same fix, and the merge request links to the current fix
+			// (gibson#1579).
+			FixBlockedReason: f.FixBlockedReason,
+			MergeRequest:     f.MergeRequest,
+			MergeRequestUrl:  f.MergeRequestURL,
+		}
+		fixFieldsToProto(pf, f.FixHeadSHA, f.FixFiles)
+		validateApplicationFinding(pf)
+		out = append(out, pf)
 	}
 	return out, nil
+}
+
+// fixFileChanges maps the change of a file in the stored list to the enum of the
+// harness read.
+var fixFileChanges = map[string]harnesspb.FixFileChange{
+	"added":    harnesspb.FixFileChange_FIX_FILE_CHANGE_ADDED,
+	"modified": harnesspb.FixFileChange_FIX_FILE_CHANGE_MODIFIED,
+	"deleted":  harnesspb.FixFileChange_FIX_FILE_CHANGE_DELETED,
+	"renamed":  harnesspb.FixFileChange_FIX_FILE_CHANGE_RENAMED,
+}
+
+// fixFieldsToProto fills fix_head_sha and fix_files of one finding from what the
+// daemon stored.
+func fixFieldsToProto(pf *harnesspb.ApplicationFinding, headSHA, filesJSON string) {
+	if headSHA == "" && filesJSON == "" {
+		return
+	}
+	var files []struct {
+		Path         string `json:"path"`
+		Change       string `json:"change"`
+		PreviousPath string `json:"previous_path"`
+		BlobSHA      string `json:"blob_sha"`
+		Mode         string `json:"mode"`
+	}
+	if filesJSON != "" {
+		if err := json.Unmarshal([]byte(filesJSON), &files); err != nil {
+			slog.Warn("the stored files of a fix cannot be read, so the fix fields are dropped",
+				"finding_id", pf.GetFindingId(), "error", err)
+			return
+		}
+	}
+	pf.FixHeadSha = headSHA
+	for _, f := range files {
+		pf.FixFiles = append(pf.FixFiles, &harnesspb.FixFile{
+			Path: f.Path, Change: fixFileChanges[f.Change], PreviousPath: f.PreviousPath, BlobSha: f.BlobSHA, Mode: f.Mode,
+		})
+	}
+}
+
+// validateApplicationFinding checks one finding with protovalidate, as the SDK
+// client checks it. A finding that does not validate loses its fix fields and the
+// daemon logs it, because a value that a client refuses must not stop the read of
+// every finding (gibson#1579). The other fields are the daemon's own and they are
+// not changed.
+func validateApplicationFinding(pf *harnesspb.ApplicationFinding) {
+	err := protovalidate.Validate(pf)
+	if err == nil {
+		return
+	}
+	slog.Warn("a finding does not validate, so its fix fields are dropped",
+		"finding_id", pf.GetFindingId(), "error", err)
+	pf.FixHeadSha, pf.FixFiles = "", nil
+	if err := protovalidate.Validate(pf); err != nil {
+		slog.Warn("a finding does not validate without its fix fields either",
+			"finding_id", pf.GetFindingId(), "error", err)
+	}
 }

@@ -92,6 +92,11 @@ type worldSnapshotData struct {
 	// the loads would vanish across a snapshot and trim cycle.
 	AgentSkillLoads []AgentSkillLoad `json:"agent_skill_loads,omitempty"`
 
+	// ReadMarkers is the last read marker of each agent and Connector
+	// (read_marker.go). Without it the markers would vanish across a snapshot
+	// and trim cycle.
+	ReadMarkers []ReadMarker `json:"read_markers,omitempty"`
+
 	// OutsideAgentCalls is each delegation to an outside agent (outside_call.go).
 	// Without it the calls would vanish across a snapshot and trim cycle.
 	OutsideAgentCalls []OutsideAgentCall `json:"outside_agent_calls,omitempty"`
@@ -147,6 +152,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		ProofReviews:         w.ProofReviewSnapshot(),
 		MissionRewinds:       w.MissionRewindSnapshot(),
 		AgentSkillLoads:      w.AgentSkillLoadSnapshot(),
+		ReadMarkers:          w.ReadMarkerSnapshot(),
 		OutsideAgentCalls:    w.OutsideAgentCallSnapshot(),
 
 		NextHostID:        w.nextHostID,
@@ -504,6 +510,9 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	}
 	for _, l := range data.AgentSkillLoads {
 		Reduce(w, AgentSkillLoaded(l))
+	}
+	for _, m := range data.ReadMarkers {
+		Reduce(w, ReadMarkerWritten(m))
 	}
 
 	// Replay the lineage of each originated mission (gibson#734). Identity is
