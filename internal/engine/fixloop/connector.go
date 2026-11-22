@@ -135,6 +135,7 @@ func (r *ConnectorReader) MergeRequest(ctx context.Context, tenant, missionID, k
 			if fm, ok := item.(map[string]any); ok {
 				f.ChangedFiles = append(f.ChangedFiles, ChangedFile{
 					Path: str(fm, "path"), Change: str(fm, "change"), PreviousPath: str(fm, "previous_path"), BlobSHA: str(fm, "blob_sha"),
+					Mode: str(fm, "mode"),
 				})
 			}
 		}

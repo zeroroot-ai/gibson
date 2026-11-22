@@ -50,11 +50,14 @@ type MergeFact struct {
 
 // ChangedFile is one file of a merge request as the host lists it. Change is
 // added, modified, deleted or renamed. BlobSHA is empty for a deleted file.
+// Mode is the git file mode of the new file (100644, 100755, 120000 or
+// 160000), or empty when the host gives none.
 type ChangedFile struct {
 	Path         string
 	Change       string
 	PreviousPath string
 	BlobSHA      string
+	Mode         string
 }
 
 // RestartFact is what the deploy tool says about a restart that a deploy

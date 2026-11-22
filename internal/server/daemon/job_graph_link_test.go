@@ -801,7 +801,7 @@ func headMR() *fakeMRReader {
 	r := jobMR()
 	r.fact.HeadSHA = testHeadSHA
 	r.fact.ChangedFiles = []fixloop.ChangedFile{
-		{Path: "go.mod", Change: "modified", BlobSHA: "2222222222222222222222222222222222222222"},
+		{Path: "go.mod", Change: "modified", BlobSHA: "2222222222222222222222222222222222222222", Mode: "100755"},
 		{Path: "new.go", Change: "renamed", PreviousPath: "old.go", BlobSHA: "3333333333333333333333333333333333333333"},
 	}
 	return r
@@ -830,7 +830,8 @@ func TestJobGraphLink_RecordsTheHeadAndTheFilesFromTheHost(t *testing.T) {
 	if head.ID != "f-1" || head.MergeRequest != testMRURL || head.HeadSHA != testHeadSHA {
 		t.Fatalf("head event = %+v", head)
 	}
-	if !strings.Contains(head.Files, `"path":"go.mod"`) || !strings.Contains(head.Files, `"previous_path":"old.go"`) {
+	if !strings.Contains(head.Files, `"path":"go.mod"`) || !strings.Contains(head.Files, `"previous_path":"old.go"`) ||
+		!strings.Contains(head.Files, `"mode":"100755"`) {
 		t.Fatalf("files = %s", head.Files)
 	}
 }

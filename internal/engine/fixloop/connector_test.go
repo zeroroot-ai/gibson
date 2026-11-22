@@ -151,7 +151,7 @@ func TestConnectorReader_MergeRequestHeadAndFiles(t *testing.T) {
 	w := &fakeTenantCaller{result: map[string]any{
 		"state": "open", "head_sha": "1111111111111111111111111111111111111111",
 		"changed_files": []any{
-			map[string]any{"path": "a.go", "change": "modified", "blob_sha": "2222222222222222222222222222222222222222"},
+			map[string]any{"path": "a.go", "change": "modified", "blob_sha": "2222222222222222222222222222222222222222", "mode": "100755"},
 			map[string]any{"path": "new.go", "change": "renamed", "previous_path": "old.go", "blob_sha": "3333333333333333333333333333333333333333"},
 		},
 		"changed_files_truncated": true, "changed_files_error": "the host timed out",
@@ -161,6 +161,7 @@ func TestConnectorReader_MergeRequestHeadAndFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.HeadSHA != "1111111111111111111111111111111111111111" || len(got.ChangedFiles) != 2 ||
+		got.ChangedFiles[0].Mode != "100755" ||
 		got.ChangedFiles[1] != (ChangedFile{Path: "new.go", Change: "renamed", PreviousPath: "old.go", BlobSHA: "3333333333333333333333333333333333333333"}) ||
 		!got.ChangedFilesTruncated || got.ChangedFilesError != "the host timed out" {
 		t.Fatalf("fact = %+v", got)

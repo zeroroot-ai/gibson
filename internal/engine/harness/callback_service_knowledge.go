@@ -326,6 +326,7 @@ func fixFieldsToProto(pf *harnesspb.ApplicationFinding, headSHA, filesJSON strin
 		Change       string `json:"change"`
 		PreviousPath string `json:"previous_path"`
 		BlobSHA      string `json:"blob_sha"`
+		Mode         string `json:"mode"`
 	}
 	if filesJSON != "" {
 		if err := json.Unmarshal([]byte(filesJSON), &files); err != nil {
@@ -337,7 +338,7 @@ func fixFieldsToProto(pf *harnesspb.ApplicationFinding, headSHA, filesJSON strin
 	pf.FixHeadSha = headSHA
 	for _, f := range files {
 		pf.FixFiles = append(pf.FixFiles, &harnesspb.FixFile{
-			Path: f.Path, Change: fixFileChanges[f.Change], PreviousPath: f.PreviousPath, BlobSha: f.BlobSHA,
+			Path: f.Path, Change: fixFileChanges[f.Change], PreviousPath: f.PreviousPath, BlobSha: f.BlobSHA, Mode: f.Mode,
 		})
 	}
 }

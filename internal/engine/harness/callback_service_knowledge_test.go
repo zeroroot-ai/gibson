@@ -826,7 +826,7 @@ func TestApplicationFindingsToProto_ReturnsTheFixFields(t *testing.T) {
 // (gibson#1579).
 func TestApplicationFindingsToProto_FixHeadAndFilesAreValidated(t *testing.T) {
 	good := `[{"finding_id":"f-1","status":"fixing","fix_head_sha":"1111111111111111111111111111111111111111",` +
-		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\"},` +
+		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\",\"mode\":\"100755\"},` +
 		`{\"path\":\"b.go\",\"change\":\"renamed\",\"previous_path\":\"c.go\",\"blob_sha\":\"3333333333333333333333333333333333333333\"}]"},` +
 		`{"finding_id":"f-2","status":"fixing","merge_request":"mr-2","fix_head_sha":"not-a-sha",` +
 		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\"}]"},` +
@@ -840,7 +840,7 @@ func TestApplicationFindingsToProto_FixHeadAndFilesAreValidated(t *testing.T) {
 	}
 	if got[0].GetFixHeadSha() != "1111111111111111111111111111111111111111" || len(got[0].GetFixFiles()) != 2 ||
 		got[0].GetFixFiles()[1].GetChange() != harnesspb.FixFileChange_FIX_FILE_CHANGE_RENAMED ||
-		got[0].GetFixFiles()[1].GetPreviousPath() != "c.go" {
+		got[0].GetFixFiles()[1].GetPreviousPath() != "c.go" || got[0].GetFixFiles()[0].GetMode() != "100755" {
 		t.Errorf("finding 1 = %+v", got[0])
 	}
 	// An invalid head drops both fix fields. The rest of the finding stays.
@@ -850,6 +850,30 @@ func TestApplicationFindingsToProto_FixHeadAndFilesAreValidated(t *testing.T) {
 	// A list that cannot be read drops the fix fields too.
 	if got[2].GetFixHeadSha() != "" || len(got[2].GetFixFiles()) != 0 {
 		t.Errorf("finding 3 = %+v", got[2])
+	}
+}
+
+// A mode that the SDK does not allow drops the fix fields of that finding only.
+// The SDK client would refuse the whole read otherwise (sdk#378).
+func TestApplicationFindingsToProto_ABadModeDropsTheFixFields(t *testing.T) {
+	raw := `[{"finding_id":"f-1","status":"fixing","merge_request":"mr-1",` +
+		`"fix_head_sha":"1111111111111111111111111111111111111111",` +
+		`"fix_files":"[{\"path\":\"d\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\",\"mode\":\"040000\"}]"},` +
+		`{"finding_id":"f-2","status":"fixing","fix_head_sha":"1111111111111111111111111111111111111111",` +
+		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"deleted\"}]"}]`
+	got, err := applicationFindingsToProto([]byte(raw))
+	if err != nil {
+		t.Fatalf("applicationFindingsToProto: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("findings = %d, want 2", len(got))
+	}
+	if got[0].GetFixHeadSha() != "" || len(got[0].GetFixFiles()) != 0 || got[0].GetMergeRequest() != "mr-1" {
+		t.Errorf("finding 1 = %+v, want no fix fields and the merge request kept", got[0])
+	}
+	// A deleted file has no mode, and an empty mode is valid.
+	if got[1].GetFixHeadSha() == "" || len(got[1].GetFixFiles()) != 1 {
+		t.Errorf("finding 2 = %+v, want its fix fields", got[1])
 	}
 }
 

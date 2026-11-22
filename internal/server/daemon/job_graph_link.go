@@ -192,6 +192,7 @@ type fixFileJSON struct {
 	Change       string `json:"change"`
 	PreviousPath string `json:"previous_path,omitempty"`
 	BlobSHA      string `json:"blob_sha,omitempty"`
+	Mode         string `json:"mode,omitempty"`
 }
 
 // maxFixFiles is the largest list that the harness read returns (the SDK allows
@@ -223,7 +224,7 @@ func (l *jobGraphLink) headEvents(c jobnode.ClosedJob, mrKey string, held []stri
 	}
 	files := make([]fixFileJSON, 0, len(fact.ChangedFiles))
 	for _, f := range fact.ChangedFiles {
-		files = append(files, fixFileJSON{Path: f.Path, Change: f.Change, PreviousPath: f.PreviousPath, BlobSHA: f.BlobSHA})
+		files = append(files, fixFileJSON{Path: f.Path, Change: f.Change, PreviousPath: f.PreviousPath, BlobSHA: f.BlobSHA, Mode: f.Mode})
 	}
 	enc, err := json.Marshal(files)
 	if err != nil {
