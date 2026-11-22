@@ -21,6 +21,7 @@ func TestCatalogPluginConfigFromEnv(t *testing.T) {
 		"PLUGIN_WAIT_FOR_SPIRE_IMAGE": "ghcr.io/x/wait@sha256:aa",
 		envOperatorSAName:             "tenant-operator",
 		envOperatorSANamespace:        "gibson",
+		envClusterCIDRs:               "10.244.0.0/16",
 	}
 	cfg := CatalogPluginConfigFromEnv(func(k string) string { return env[k] })
 	if cfg.SpireClassName != "gibson-plugins" || cfg.TrustDomain != "example.org" || cfg.GibsonURL != "https://gibson.example" ||
@@ -31,7 +32,7 @@ func TestCatalogPluginConfigFromEnv(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("a full config: %v", err)
 	}
-	for _, name := range []string{"PLUGIN_SPIRE_CLASS_NAME", "PLUGIN_TRUST_DOMAIN", "PLUGIN_GIBSON_URL", "PLUGIN_WAIT_FOR_SPIRE_IMAGE", envOperatorSAName, envOperatorSANamespace} {
+	for _, name := range []string{"PLUGIN_SPIRE_CLASS_NAME", "PLUGIN_TRUST_DOMAIN", "PLUGIN_GIBSON_URL", "PLUGIN_WAIT_FOR_SPIRE_IMAGE", envOperatorSAName, envOperatorSANamespace, envClusterCIDRs} {
 		partial := map[string]string{}
 		for k, v := range env {
 			partial[k] = v
