@@ -4,6 +4,7 @@
 package daemon
 
 import (
+	"errors"
 	"context"
 	"fmt"
 
@@ -66,7 +67,11 @@ type lazyEnabledConnectors struct{ daemon *daemonImpl }
 
 func (l *lazyEnabledConnectors) ListEnabledConnectors(ctx context.Context, tenant string) ([]string, error) {
 	if l.daemon.platformDB == nil {
-		return nil, fmt.Errorf("the platform database is not up")
+		return nil, errors.New("the platform database is not up")
 	}
-	return l.daemon.connectorLister(ctx).ListEnabledConnectors(ctx, tenant)
+	ids, err := l.daemon.connectorLister(ctx).ListEnabledConnectors(ctx, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("list the enabled connectors: %w", err)
+	}
+	return ids, nil
 }
