@@ -23,6 +23,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -162,10 +164,37 @@ type LaunchRequest struct {
 	// with the Egress rules, or NetworkModeNone. Empty keeps the rule above.
 	NetworkMode string
 
+	// Files are placed in the machine, read-only, below /setec/files before
+	// the workload starts. A launch from a snapshot takes none.
+	Files []File
+
 	// FromSnapshot names a snapshot that Snapshot took. The sandbox loads it
 	// with a new identity and the network of this request (setec#242). The
 	// class, the image and the size come from the snapshot.
 	FromSnapshot string
+}
+
+// launchFailure is the error of a launch that setec refused or could not
+// start. When the launch carried files and setec refused the request as
+// invalid, the answer says so and holds the text of setec: the author of an
+// Agent Skill reads there why a large or ill-formed Skill is refused.
+func launchFailure(toolName string, withFiles bool, err error) error {
+	if withFiles {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
+			return types.WrapError(types.SANDBOX_LAUNCH_FAILED,
+				fmt.Sprintf("launch sandbox for tool %q: the sandbox refused the files of the Agent Skill: %s", toolName, st.Message()), err)
+		}
+	}
+	return types.WrapError(types.SANDBOX_LAUNCH_FAILED,
+		fmt.Sprintf("launch sandbox for tool %q", toolName), err)
+}
+
+// File is one file that a launch places in the machine. Path is relative to
+// /setec/files. Mode has no write, setuid or setgid bit, so it is at most 0555.
+type File struct {
+	Path    string
+	Content []byte
+	Mode    uint32
 }
 
 // ErrSnapshotGone answers a launch from a snapshot that no longer exists.
@@ -379,11 +408,11 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 		Timeout:      e.callTimeout + killGrace,
 		Egress:       spec.Egress,
 		NetworkMode:  spec.NetworkMode,
+		Files:        spec.Files,
 	})
 	launchSpan.End()
 	if err != nil {
-		return types.WrapError(types.SANDBOX_LAUNCH_FAILED,
-			fmt.Sprintf("launch sandbox for tool %q", toolName), err)
+		return launchFailure(toolName, len(spec.Files) > 0, err)
 	}
 	span.SetAttributes(attribute.String("setec.sandbox_id", launchResp.SandboxID))
 

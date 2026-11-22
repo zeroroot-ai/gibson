@@ -1,5 +1,5 @@
 {
-  "image": "ghcr.io/zeroroot-ai/gibson-executor@sha256:12826078d28168d9c83a9f6b728bb9c63a1b07d84f61bd5f7e1f09754f8e0c05",
+  "image": "ghcr.io/zeroroot-ai/gibson-executor@sha256:14d500c02066672253f2a6c6e1b5c9f4e3aaa6a8b2568468e85404cbcd54b7de",
   "tools": [
     {
       "name": "dnsx",
@@ -262,6 +262,41 @@
         "memory": "2Gi"
       },
       "default_timeout_seconds": 600
+    },
+    {
+      "name": "skill-script",
+      "version": "0.1.0",
+      "description": "Runs a script of a loaded Agent Skill that was placed in the sandbox. Returns the exit code, stdout and stderr of the script.",
+      "tags": [
+        "agent-skill",
+        "script"
+      ],
+      "input_schema": {
+        "properties": {
+          "args": {
+            "description": "Arguments of the script.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "target": {
+            "description": "Path of the script as \"\u003cskill\u003e/\u003cpath\u003e\", for example \"pdf-tools/scripts/extract.sh\".",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "google.protobuf.Struct",
+      "default_parse_quality": 3,
+      "resources": {
+        "vcpu": 1,
+        "memory": "512Mi"
+      },
+      "default_timeout_seconds": 300
     },
     {
       "name": "subfinder",

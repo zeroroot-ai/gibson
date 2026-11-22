@@ -6,4 +6,4 @@ license: Elastic-2.0
 
 # Probe procedure
 
-Read the file scripts/probe.sh. Run the command in it with the execution tool.
+Run the script scripts/probe.sh with the skill-script tool. Do not read the script as text.

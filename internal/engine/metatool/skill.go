@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agentskill"
@@ -17,6 +18,14 @@ import (
 // ErrSkillPath is returned when a request names a file that is not inside the
 // folder of the Agent Skill.
 var ErrSkillPath = errors.New("metatool: the file is not inside the folder of the Agent Skill")
+
+// ErrSkillScript is returned for a request that reads a script of an Agent Skill
+// as text. A script runs with the skill-script tool, in the sandbox of the
+// agent, and its text never enters the context of the agent.
+var ErrSkillScript = errors.New("metatool: a script of an Agent Skill is not loaded as text; run it with the skill-script tool")
+
+// skillScriptDir is the folder of an Agent Skill that holds its scripts.
+const skillScriptDir = "scripts/"
 
 // ErrSkillNeedsMission is returned for a load with no mission. Only a mission
 // agent loads an Agent Skill.
@@ -84,7 +93,8 @@ type SkillFileResult struct {
 // loadSkill serves a skill: id. It checks FGA again, because the agent can pass
 // an id that it never got from the search. It pins the digest of the mission on
 // the first load, so a new publish does not change what the mission loads. The
-// args field "file" names one file inside the folder.
+// args field "file" names one reference file inside the folder. A script is
+// not a reference file: it runs with the skill-script tool.
 func (h *Handler) loadSkill(ctx context.Context, c Call, tid toolid.ID) (any, error) {
 	if h.skills == nil || h.onSkillLoad == nil {
 		return nil, errors.New("metatool: Agent Skills are not configured")
@@ -160,6 +170,9 @@ func skillFileArg(args map[string]any) (string, error) {
 	}
 	if err := agentskill.ValidPath(file); err != nil {
 		return "", fmt.Errorf("%w: %q", ErrSkillPath, file)
+	}
+	if strings.HasPrefix(file, skillScriptDir) {
+		return "", fmt.Errorf("%w: %q", ErrSkillScript, file)
 	}
 	return file, nil
 }

@@ -225,6 +225,7 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 	if req.Timeout > 0 {
 		pbReq.Lifecycle = &setecv1.Lifecycle{Timeout: req.Timeout.String()}
 	}
+	pbReq.Files = setecFiles(req.Files)
 	// Egress allow-list: connector launches (gibson#684) confine the sandbox
 	// to the targets declared in the connector manifest plus the platform
 	// endpoints. Empty Egress keeps setec's default network mode.
@@ -241,6 +242,19 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 		SandboxClass: resp.GetSandboxClass(),
 		Runtime:      resp.GetRuntime(),
 	}, nil
+}
+
+// setecFiles maps the files of a launch to the setec request. setec checks
+// the paths, the modes and the size, and its refusal is InvalidArgument.
+func setecFiles(files []sandboxed.File) []*setecv1.SandboxFile {
+	if len(files) == 0 {
+		return nil
+	}
+	out := make([]*setecv1.SandboxFile, 0, len(files))
+	for _, f := range files {
+		out = append(out, &setecv1.SandboxFile{Path: f.Path, Content: f.Content, Mode: f.Mode})
+	}
+	return out
 }
 
 // wrapSecretEnvVars envelope-wraps values whose key starts with secretEnvPrefix.
