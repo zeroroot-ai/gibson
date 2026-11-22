@@ -1196,7 +1196,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// later in Start, so the store is read per dispatch (gibson#1713).
 		// A close whose merge request could not be read stays pending. The loop
 		// of the link reads it again, also after a restart (gibson#1581).
-		d.brainExecutor.jobClosed = wireFixLink(ctx, d.brainRegistry, connectors, d.logger.WithComponent("job-graph-link").Slog())
+		d.wireJobClosed(ctx, connectors, d.logger.WithComponent("job-graph-link").Slog())
 		d.brainExecutor.jobFindings = openFindingsResolver(d.brainRegistry)
 		d.brainExecutor.jobClaims = newFixClaims(d.brainRegistry)
 		d.brainExecutor.jobs = func() (job.Store, error) {

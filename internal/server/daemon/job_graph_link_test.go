@@ -6,8 +6,8 @@ package daemon
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -660,7 +660,12 @@ func TestJobGraphLink_ARestartKeepsThePendingLinkAndLinksIt(t *testing.T) {
 	link := wireFixLink(ctx, second, mrs, testObsLogger().Slog())
 	e2 := second.For("acme") // hydrates and adopts
 
-	time.Sleep(200 * time.Millisecond) // a few ticks: a resume that released the claim would show now
+	// A no-op event that the engine folds proves that the events that the resume
+	// queued before it have been folded too, so a resume that released the
+	// claim would show now.
+	if err := e2.SubmitAndWait(ctx, brain.ReadMarkerWritten{Subject: "s", Connector: "c", RecordedAtUnixNano: 1}); err != nil {
+		t.Fatalf("barrier: %v", err)
+	}
 	if got := e2.Findings()[0].FixClaim; got != "run-1/fix" {
 		t.Fatalf("the restart released the claim: %q", got)
 	}
@@ -704,54 +709,87 @@ func TestJobGraphLink_APendingLinkThatReadsAMergedMergeRequestIsRefused(t *testi
 	}
 }
 
-// The daemon starts the loop of the link through wireFixLink. The test starts
-// the loop, and it reads daemon.go, so a daemon that drops the call fails here.
-func TestWireFixLink_StartsTheLoopAndTheDaemonCallsIt(t *testing.T) {
+// The daemon installs the link through wireJobClosed. The test calls it and
+// checks that the observer is the link and that its loop runs, and that a pending
+// link is read again by that loop.
+func TestWireJobClosed_InstallsTheLinkAndStartsItsLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	link := wireFixLink(ctx, brain.NewRegistry(ctx, braintest.StoreFactory()), nil, testObsLogger().Slog())
+	defer cancel()
+	d := &daemonImpl{brainRegistry: brain.NewRegistry(ctx, braintest.StoreFactory()), brainExecutor: &brainExecutor{}}
+	d.wireJobClosed(ctx, nil, testObsLogger().Slog())
+	link, ok := d.brainExecutor.jobClosed.(*jobGraphLink)
+	if !ok {
+		t.Fatalf("jobClosed is %T, want the job graph link", d.brainExecutor.jobClosed)
+	}
 	deadline := time.Now().Add(2 * time.Second)
 	for !link.running.Load() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	if !link.running.Load() {
-		t.Fatal("wireFixLink did not start the loop")
-	}
-	cancel()
-
-	src, err := os.ReadFile("daemon.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(src), "jobClosed = wireFixLink(") {
-		t.Fatal("daemon.go does not wire the fix link through wireFixLink, so a pending link is never read again")
+		t.Fatal("the loop of the link does not run")
 	}
 }
 
-// One read that hangs is cut by the timeout, and the other links still run.
+// One read that hangs is cut by the timeout, and the link of another tenant is
+// still read and linked.
 func TestJobGraphLink_AHungReadDoesNotStopTheOtherLinks(t *testing.T) {
 	var evs []brain.Event
-	hung := &hangingReader{}
+	reader := &perTenantReader{hungTenant: "slow", good: fixloop.MergeFact{
+		State: fixloop.MROpen, SourceBranch: "job/job-fast", CreatedAt: testClaimedAt.Add(10 * time.Minute)}}
+	known := heldWorld(map[string]string{"f-1": "s"})("")
 	l := &jobGraphLink{
 		submit:   func(_ string, ev brain.Event) { evs = append(evs, ev) },
-		findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: hung,
+		findings: func(string) map[string]findingRef { return known }, mergeRequests: reader,
 		now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
+		readTimeout: 50 * time.Millisecond,
 		pending: map[string]*pendingLink{
-			"job-1": {closed: closedJob([]string{"f-1"}, mrDeliverable), mrKey: testMRURL, since: testNow},
+			"job-slow": {closed: tenantJob("slow", "job-slow"), mrKey: testMRURL, since: testNow},
+			"job-fast": {closed: tenantJob("fast", "job-fast"), mrKey: testMRURL, since: testNow},
 		},
 	}
-	start := time.Now()
-	l.RetryPending(context.Background())
-	if hung.deadline.IsZero() {
-		t.Fatal("the read had no deadline")
+	done := make(chan struct{})
+	go func() { l.RetryPending(context.Background()); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("one hung reader stopped RetryPending")
 	}
-	if d := hung.deadline.Sub(start); d > pendingReadTimeout+time.Second {
-		t.Fatalf("the deadline is %s away, want about %s", d, pendingReadTimeout)
+	if !reader.hungSeen.Load() {
+		t.Fatal("the hung reader was never read")
+	}
+	var linked bool
+	for _, ev := range evs {
+		if c, ok := ev.(brain.FindingStatusChanged); ok && c.Status == brain.FindingStatusFixing {
+			linked = true
+		}
+	}
+	if !linked {
+		t.Fatalf("the link of the other tenant did not run: %+v", evs)
+	}
+	if _, stillPending := l.pending["job-slow"]; !stillPending {
+		t.Fatal("the link with the hung read must stay pending")
 	}
 }
 
-type hangingReader struct{ deadline time.Time }
+func tenantJob(tenant, jobID string) jobnode.ClosedJob {
+	c := closedJob([]string{"f-1"}, mrDeliverable)
+	c.TenantID, c.JobID = tenant, jobID
+	return c
+}
 
-func (h *hangingReader) MergeRequest(ctx context.Context, _, _, _ string) (fixloop.MergeFact, error) {
-	h.deadline, _ = ctx.Deadline()
-	return fixloop.MergeFact{}, errors.New("the connector did not answer")
+// perTenantReader hangs for one tenant until its context ends, and answers for
+// the others.
+type perTenantReader struct {
+	hungTenant string
+	good       fixloop.MergeFact
+	hungSeen   atomic.Bool
+}
+
+func (r *perTenantReader) MergeRequest(ctx context.Context, tenant, _, _ string) (fixloop.MergeFact, error) {
+	if tenant == r.hungTenant {
+		r.hungSeen.Store(true)
+		<-ctx.Done()
+		return fixloop.MergeFact{}, ctx.Err()
+	}
+	return r.good, nil
 }

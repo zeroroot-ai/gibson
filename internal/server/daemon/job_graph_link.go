@@ -53,6 +53,21 @@ type jobGraphLink struct {
 	pending map[string]*pendingLink
 	// running is true while Run loops. A test reads it.
 	running atomic.Bool
+	// readTimeout bounds one read of a merge request. Zero means
+	// pendingReadTimeout. A test sets it.
+	readTimeout time.Duration
+}
+
+// read bounds one read of a merge request, so a hung connector of one tenant
+// stops neither a close nor the links of the other tenants.
+func (l *jobGraphLink) read(ctx context.Context, c jobnode.ClosedJob, mrKey string, held []string, known map[string]findingRef) (string, error) {
+	d := l.readTimeout
+	if d == 0 {
+		d = pendingReadTimeout
+	}
+	readCtx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	return l.vet(readCtx, c, mrKey, held, known)
 }
 
 // pendingLink is a close that waits for a good read of the merge request.
@@ -126,7 +141,7 @@ func (l *jobGraphLink) JobClosed(ctx context.Context, c jobnode.ClosedJob) {
 	}
 	now := l.clock()
 	if len(held) > 0 {
-		reason, readErr := l.vet(ctx, c, mrKey, held, known)
+		reason, readErr := l.read(ctx, c, mrKey, held, known)
 		if readErr != nil {
 			l.markPending(c, mrKey, held, readErr, now)
 			return
@@ -221,9 +236,7 @@ func (l *jobGraphLink) RetryPending(ctx context.Context) {
 			l.dropPending(c.JobID)
 			continue
 		}
-		readCtx, cancel := context.WithTimeout(ctx, pendingReadTimeout)
-		reason, readErr := l.vet(readCtx, c, p.mrKey, held, known)
-		cancel()
+		reason, readErr := l.read(ctx, c, p.mrKey, held, known)
 		switch {
 		case readErr != nil && now.Sub(p.since) < pendingLinkLimit:
 			l.logger.Warn("the read of the merge request of a pending fix link failed again",
@@ -570,6 +583,11 @@ func (l *jobGraphLink) Adopt(tenant string, findings []brain.FindingSnapshot) {
 
 // wireFixLink builds the link of closed fix jobs, rebuilds the pending links of
 // each tenant when its engine starts, and starts the loop that reads them again.
+func (d *daemonImpl) wireJobClosed(ctx context.Context, mrs mergeRequestReader, logger *slog.Logger) {
+	d.brainExecutor.jobClosed = wireFixLink(ctx, d.brainRegistry, mrs, logger)
+}
+
+// wireFixLink is the link that wireJobClosed installs.
 func wireFixLink(ctx context.Context, reg *brain.Registry, mrs mergeRequestReader, logger *slog.Logger) *jobGraphLink {
 	link := newJobGraphLink(reg, mrs, logger)
 	reg.OnEngine(func(e *brain.Engine) { link.Adopt(e.World.Tenant, e.Findings()) })
