@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
@@ -126,9 +127,28 @@ func (s *HarnessCallbackService) WriteReadMarker(
 		return &harnesspb.WriteReadMarkerResponse{Error: readMarkerError(
 			commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "connector is required")}, nil
 	}
+	// The connector must be one of the tenant. A marker for a name that the
+	// tenant has no connector for would grow the Timeline with no meaning.
+	known, err := s.tenantHasConnector(ctx, tenant, req.GetConnector())
+	if err != nil {
+		s.logger.ErrorContext(ctx, "the connectors of the tenant are not readable",
+			slog.String("tenant", tenant), slog.Any("error", err))
+		return &harnesspb.WriteReadMarkerResponse{Error: readMarkerError(
+			commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the daemon could not read the connectors of the tenant")}, nil
+	}
+	if !known {
+		return &harnesspb.WriteReadMarkerResponse{Error: readMarkerError(
+			commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, "the tenant has no connector with this name")}, nil
+	}
+	// A write that holds the marker that is already there changes nothing, so
+	// an agent that polls in a loop does not grow the Timeline.
+	if last, found, lerr := s.readMarkers.LastReadMarker(ctx, tenant, subject, req.GetConnector()); lerr == nil && found &&
+		last.Cursor == req.GetCursor() && slices.Equal(last.ResultIDs, req.GetResultIds()) {
+		return &harnesspb.WriteReadMarkerResponse{}, nil
+	}
 	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readMarkerWriteWait)
 	defer cancel()
-	err := s.readMarkers.WriteReadMarker(waitCtx, tenant, brain.ReadMarker{
+	err = s.readMarkers.WriteReadMarker(waitCtx, tenant, brain.ReadMarker{
 		Subject:            subject,
 		Connector:          req.GetConnector(),
 		Cursor:             req.GetCursor(),
@@ -181,4 +201,23 @@ func (s *HarnessCallbackService) LastReadMarker(
 			At:        timestamppb.New(time.Unix(0, m.RecordedAtUnixNano).UTC()),
 		},
 	}, nil
+}
+
+// tenantHasConnector reports whether the tenant has a connector with the name.
+// It reads the connectors of the tenant through the one MCP client of the
+// daemon. A daemon with no client cannot tell, and the write fails.
+func (s *HarnessCallbackService) tenantHasConnector(ctx context.Context, tenant, name string) (bool, error) {
+	if s.connectors == nil {
+		return false, errors.New("this daemon has no connector client")
+	}
+	tools, err := s.connectors.ListConnectorTools(ctx, tenant)
+	if err != nil {
+		return false, fmt.Errorf("list the connectors of the tenant: %w", err)
+	}
+	for _, t := range tools {
+		if t.Connector == name {
+			return true, nil
+		}
+	}
+	return false, nil
 }

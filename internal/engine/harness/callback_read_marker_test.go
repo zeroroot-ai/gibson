@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 
@@ -16,6 +17,8 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
+	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
+	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 )
 
 func readMarkerService(t *testing.T) *HarnessCallbackService {
@@ -24,7 +27,7 @@ func readMarkerService(t *testing.T) *HarnessCallbackService {
 	t.Cleanup(cancel)
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), NewCallbackHarnessRegistry(),
-		WithReadMarkerStore(NewBrainReadMarkerStore(reg)), testEventBus())
+		WithReadMarkerStore(NewBrainReadMarkerStore(reg)), WithConnectors(markerConnectors()), testEventBus())
 }
 
 func readMarkerCtx(tenant, subject string) context.Context {
@@ -118,7 +121,7 @@ func (failingMarkerStore) LastReadMarker(context.Context, string, string, string
 // never looks like "no marker" (gibson#1569).
 func TestLastReadMarker_AFailingStoreIsAnErrorNotNoMarker(t *testing.T) {
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), NewCallbackHarnessRegistry(),
-		WithReadMarkerStore(failingMarkerStore{}), testEventBus())
+		WithReadMarkerStore(failingMarkerStore{}), WithConnectors(markerConnectors()), testEventBus())
 	ctx := readMarkerCtx("acme", "s")
 
 	r, err := svc.LastReadMarker(ctx, &harnesspb.LastReadMarkerRequest{Connector: "c"})
@@ -146,4 +149,80 @@ func TestSetReadMarkerStore_WiresTheStore(t *testing.T) {
 	m := &CallbackManager{server: &CallbackServer{service: &HarnessCallbackService{}}}
 	m.SetReadMarkerStore(failingMarkerStore{})
 	require.NotNil(t, m.server.service.readMarkers)
+}
+
+// markerConnectors is the connectors of the test tenant: edr, siem and c.
+func markerConnectors() fakeConnectors {
+	var tools []catalog.ToolEntry
+	for _, c := range []string{"edr", "siem", "c"} {
+		tools = append(tools, catalog.ToolEntry{Source: toolid.SourceMCP, Connector: c, Tool: "list"})
+	}
+	return fakeConnectors{tools: tools}
+}
+
+// A marker for a name that is no connector of the tenant is refused, and a
+// daemon that cannot list the connectors fails the write (gibson#1569).
+func TestWriteReadMarker_TheConnectorMustBeOneOfTheTenant(t *testing.T) {
+	svc := readMarkerService(t)
+	ctx := readMarkerCtx("acme", "s")
+	w, err := svc.WriteReadMarker(ctx, &harnesspb.WriteReadMarkerRequest{Connector: "no-such-connector", Cursor: "1"})
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, w.GetError().GetCode())
+	r, err := svc.LastReadMarker(ctx, &harnesspb.LastReadMarkerRequest{Connector: "no-such-connector"})
+	require.NoError(t, err)
+	assert.False(t, r.GetFound(), "a refused write left a marker")
+
+	for name, conns := range map[string]ConnectorClient{
+		"no client":   nil,
+		"list failed": fakeConnectors{listErr: errors.New("down")},
+	} {
+		ctxc, cancel := context.WithCancel(context.Background())
+		reg := brain.NewRegistry(ctxc, braintest.StoreFactory())
+		opts := []CallbackServiceOption{WithReadMarkerStore(NewBrainReadMarkerStore(reg)), testEventBus()}
+		if conns != nil {
+			opts = append(opts, WithConnectors(conns))
+		}
+		s := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), NewCallbackHarnessRegistry(), opts...)
+		w, err := s.WriteReadMarker(ctx, &harnesspb.WriteReadMarkerRequest{Connector: "edr"})
+		cancel()
+		require.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, w.GetError().GetCode(), name)
+	}
+}
+
+type countingMarkerStore struct {
+	ReadMarkerStore
+	writes int
+}
+
+func (c *countingMarkerStore) WriteReadMarker(ctx context.Context, tenant string, m brain.ReadMarker) error {
+	c.writes++
+	return c.ReadMarkerStore.WriteReadMarker(ctx, tenant, m)
+}
+
+// A write that holds the marker that is already there adds no Timeline event,
+// so an agent that polls in a loop does not grow the Timeline (gibson#1569).
+func TestWriteReadMarker_AnUnchangedWriteIsANoOp(t *testing.T) {
+	ctxb, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	store := &countingMarkerStore{ReadMarkerStore: NewBrainReadMarkerStore(brain.NewRegistry(ctxb, braintest.StoreFactory()))}
+	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), NewCallbackHarnessRegistry(),
+		WithReadMarkerStore(store), WithConnectors(markerConnectors()), testEventBus())
+	ctx := readMarkerCtx("acme", "s")
+	write := func(cursor string, ids ...string) {
+		t.Helper()
+		w, err := svc.WriteReadMarker(ctx, &harnesspb.WriteReadMarkerRequest{Connector: "edr", Cursor: cursor, ResultIds: ids})
+		require.NoError(t, err)
+		require.Nil(t, w.GetError())
+	}
+	write("1", "a")
+	write("1", "a")
+	write("1", "a")
+	assert.Equal(t, 1, store.writes, "an unchanged write added a Timeline event")
+	write("2", "a")
+	write("2", "a", "b")
+	assert.Equal(t, 3, store.writes, "a changed cursor or result list must write")
+	got, err := svc.LastReadMarker(ctx, &harnesspb.LastReadMarkerRequest{Connector: "edr"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b"}, got.GetMarker().GetResultIds())
 }
