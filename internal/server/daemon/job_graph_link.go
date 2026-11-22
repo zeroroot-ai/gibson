@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/fixloop"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
+	"github.com/zeroroot-ai/gibson/internal/platform/job"
 )
 
 const (
@@ -49,6 +51,8 @@ type jobGraphLink struct {
 	// again. The close path never waits for a retry.
 	mu      sync.Mutex
 	pending map[string]*pendingLink
+	// running is true while Run loops. A test reads it.
+	running atomic.Bool
 }
 
 // pendingLink is a close that waits for a good read of the merge request.
@@ -62,6 +66,9 @@ type pendingLink struct {
 const (
 	// pendingLinkInterval is how often Run reads the pending merge requests.
 	pendingLinkInterval = 30 * time.Second
+	// pendingReadTimeout bounds one read of a merge request in RetryPending, so
+	// a hung connector of one tenant does not stop the links of the others.
+	pendingReadTimeout = 20 * time.Second
 	// pendingLinkLimit is how long a link stays pending. A link that no read
 	// settles in this time is refused, so a claim does not wait for a Git host
 	// that stays down.
@@ -158,6 +165,7 @@ func (l *jobGraphLink) link(c jobnode.ClosedJob, known map[string]findingRef, he
 // findings while the link waits.
 func (l *jobGraphLink) markPending(c jobnode.ClosedJob, mrKey string, held []string, readErr error, now time.Time) {
 	reason := "the daemon could not read the merge request on the Git host: " + readErr.Error()
+	_, url, ref := deliveredMergeRequest(c)
 	l.logger.Warn("the read of the merge request of a fix job failed, so the link is pending",
 		"job_id", c.JobID, "merge_request", mrKey, "error", readErr)
 	l.mu.Lock()
@@ -168,7 +176,8 @@ func (l *jobGraphLink) markPending(c jobnode.ClosedJob, mrKey string, held []str
 	l.mu.Unlock()
 	for _, id := range held {
 		l.submit(c.TenantID, brain.FixLinkPending{
-			ID: id, MergeRequest: mrKey, JobID: c.JobID, Reason: reason, MissionID: c.MissionRunID, At: now,
+			ID: id, MergeRequest: mrKey, JobID: c.JobID, Reason: reason, MissionID: c.MissionRunID,
+			NodeID: c.NodeID, URL: url, Ref: ref, Countermeasure: c.Countermeasure, At: now,
 		})
 	}
 }
@@ -176,6 +185,8 @@ func (l *jobGraphLink) markPending(c jobnode.ClosedJob, mrKey string, held []str
 // Run reads the pending merge requests again at each pendingLinkInterval, until
 // ctx ends.
 func (l *jobGraphLink) Run(ctx context.Context) {
+	l.running.Store(true)
+	defer l.running.Store(false)
 	t := time.NewTicker(pendingLinkInterval)
 	defer t.Stop()
 	for {
@@ -210,7 +221,9 @@ func (l *jobGraphLink) RetryPending(ctx context.Context) {
 			l.dropPending(c.JobID)
 			continue
 		}
-		reason, readErr := l.vet(ctx, c, p.mrKey, held, known)
+		readCtx, cancel := context.WithTimeout(ctx, pendingReadTimeout)
+		reason, readErr := l.vet(readCtx, c, p.mrKey, held, known)
+		cancel()
 		switch {
 		case readErr != nil && now.Sub(p.since) < pendingLinkLimit:
 			l.logger.Warn("the read of the merge request of a pending fix link failed again",
@@ -514,4 +527,52 @@ func (c fixClaims) Release(_ context.Context, tenantID, claim, missionRunID stri
 	for _, id := range findingInputs(eng, inputs) {
 		eng.Submit(brain.FixClaimReleased{ID: id, Claim: claim, MissionID: missionRunID, At: c.now()})
 	}
+}
+
+// Adopt rebuilds the pending links of a tenant after the engine hydrated its
+// World. A link that waited for the Git host when the daemon stopped has a
+// FixLinkWait on each finding that the job holds, and the claim of the job
+// stayed (gibson#1581). The daemon reads the merge request again, so a restart
+// does not orphan it.
+func (l *jobGraphLink) Adopt(tenant string, findings []brain.FindingSnapshot) {
+	jobs := map[string]*pendingLink{}
+	for _, f := range findings {
+		w := f.FixLinkWait
+		if w.JobID == "" || f.Status != brain.FindingStatusOpen || f.FixClaim == "" {
+			continue
+		}
+		p, ok := jobs[w.JobID]
+		if !ok {
+			p = &pendingLink{mrKey: w.MergeRequest, since: w.Since, lastErr: "the daemon restarted while the link was pending",
+				closed: jobnode.ClosedJob{
+					TenantID: tenant, MissionRunID: w.MissionRunID, NodeID: w.NodeID, JobID: w.JobID,
+					Deliverables:   []job.Deliverable{{Kind: mergeRequestDeliverable, URL: w.URL, Ref: w.Ref}},
+					Countermeasure: w.Countermeasure,
+				}}
+			jobs[w.JobID] = p
+		}
+		p.closed.Inputs = append(p.closed.Inputs, f.ID)
+	}
+	if len(jobs) == 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.pending == nil {
+		l.pending = map[string]*pendingLink{}
+	}
+	for id, p := range jobs {
+		l.pending[id] = p
+		l.logger.Info("a pending fix link was rebuilt after the start of the daemon",
+			"tenant", tenant, "job_id", id, "merge_request", p.mrKey)
+	}
+}
+
+// wireFixLink builds the link of closed fix jobs, rebuilds the pending links of
+// each tenant when its engine starts, and starts the loop that reads them again.
+func wireFixLink(ctx context.Context, reg *brain.Registry, mrs mergeRequestReader, logger *slog.Logger) *jobGraphLink {
+	link := newJobGraphLink(reg, mrs, logger)
+	reg.OnEngine(func(e *brain.Engine) { link.Adopt(e.World.Tenant, e.Findings()) })
+	go link.Run(ctx)
+	return link
 }

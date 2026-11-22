@@ -148,6 +148,10 @@ type FixFacts struct {
 	// delivers must be newer than it (review B1).
 	FixClaim     string
 	FixClaimedAt time.Time
+	// FixLinkWait is the close of a fix job whose merge request the daemon
+	// could not read on the Git host yet (gibson#1581). It is the zero value
+	// when no link waits. A restart reads it to read the merge request again.
+	FixLinkWait FixLinkWait
 	// VerifiedAt is the time of the change to `verified`. A bounded reader
 	// of the history reads it to leave out an old fix (review M6).
 	VerifiedAt time.Time
@@ -472,5 +476,6 @@ func resetFix(f *Finding) {
 	f.FixMissionID = ""
 	f.RevertRequestedAt, f.RevertMergeRequest = time.Time{}, ""
 	f.FixClaim, f.FixClaimedAt = "", time.Time{}
+	f.FixLinkWait = FixLinkWait{}
 	f.VerifiedAt = time.Time{}
 }

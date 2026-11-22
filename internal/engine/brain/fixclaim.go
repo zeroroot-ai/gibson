@@ -63,6 +63,7 @@ func applyFixClaimReleased(w *World, e FixClaimReleased) {
 	forFinding(w, e.ID, func(f *Finding) {
 		if f.FixClaim == e.Claim {
 			f.FixClaim, f.FixClaimedAt = "", time.Time{}
+			f.FixLinkWait = FixLinkWait{}
 		}
 	})
 }
@@ -90,13 +91,57 @@ func (FixLinkRefused) Kind() string { return "finding.fix_link_refused" }
 // (gibson#1581). The Finding keeps its claim, and the daemon reads the merge
 // request again. A later read ends in a link or in a FixLinkRefused. The event
 // changes nothing else. It is the record of the wait in the Timeline.
+//
+// The event holds what the daemon needs to read the merge request again after
+// a restart: the node and the mission run of the job, the url and the ref of
+// the merge request and the countermeasure of the fix.
 type FixLinkPending struct {
-	ID           string
-	MergeRequest string
-	JobID        string
-	Reason       string
-	MissionID    string
-	At           time.Time
+	ID             string
+	MergeRequest   string
+	JobID          string
+	Reason         string
+	MissionID      string
+	NodeID         string
+	URL            string
+	Ref            string
+	Countermeasure string
+	At             time.Time
+}
+
+// FixLinkWait is the state that FixLinkPending leaves on a Finding.
+type FixLinkWait struct {
+	JobID          string
+	MissionRunID   string
+	NodeID         string
+	MergeRequest   string
+	URL            string
+	Ref            string
+	Countermeasure string
+	Since          time.Time
+}
+
+// applyFixLinkPending records the wait on an open Finding that a job claims.
+func applyFixLinkPending(w *World, e FixLinkPending) {
+	if e.ID == "" || e.JobID == "" {
+		return
+	}
+	forFinding(w, e.ID, func(f *Finding) {
+		if f.Status == FindingStatusOpen && f.FixClaim != "" {
+			f.FixLinkWait = FixLinkWait{
+				JobID: e.JobID, MissionRunID: e.MissionID, NodeID: e.NodeID, MergeRequest: e.MergeRequest,
+				URL: e.URL, Ref: e.Ref, Countermeasure: e.Countermeasure, Since: e.At,
+			}
+		}
+	})
+}
+
+// applyFixLinkRefused ends the wait of a link that the daemon refused.
+func applyFixLinkRefused(w *World, e FixLinkRefused) {
+	forFinding(w, e.ID, func(f *Finding) {
+		if f.FixLinkWait.JobID == e.JobID {
+			f.FixLinkWait = FixLinkWait{}
+		}
+	})
 }
 
 // Kind identifies the finding.fix_link_pending brain event.
@@ -148,7 +193,9 @@ func ResumeReleaseFixClaims(w *World) []Event {
 	now := w.Now()
 	var out []Event
 	for _, f := range w.FindingSnapshot() {
-		if f.FixClaim != "" && f.Status == FindingStatusOpen {
+		// A claim with a link that waits for the Git host stays. The daemon
+		// reads the merge request again (gibson#1581).
+		if f.FixClaim != "" && f.Status == FindingStatusOpen && f.FixLinkWait.JobID == "" {
 			out = append(out, FixClaimExpired{
 				ID: f.ID, Claim: f.FixClaim, Reason: "the daemon restarted, and the job of the claim ended with it", At: now,
 			})

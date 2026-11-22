@@ -310,6 +310,10 @@ func dereferenceEvent(ev Event) Event {
 		return *v
 	case *AgentSkillLoaded:
 		return *v
+	case *FixLinkPending:
+		return *v
+	case *FixLinkRefused:
+		return *v
 	case *ReadMarkerWritten:
 		return *v
 	case *OutsideAgentCalled:
