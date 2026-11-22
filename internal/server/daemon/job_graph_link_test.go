@@ -5,8 +5,8 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
