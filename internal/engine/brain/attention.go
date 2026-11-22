@@ -148,6 +148,10 @@ type FixFacts struct {
 	// delivers must be newer than it (review B1).
 	FixClaim     string
 	FixClaimedAt time.Time
+	// FixLinkWait is the close of a fix job whose merge request the daemon
+	// could not read on the Git host yet (gibson#1581). It is the zero value
+	// when no link waits. A restart reads it to read the merge request again.
+	FixLinkWait FixLinkWait
 	// FixHeadSHA is the head commit of the merge request of the current fix, and
 	// FixFiles is the JSON list of the files that it changes (path, change,
 	// previous_path, blob_sha). The daemon reads both from the Git host when it
@@ -479,6 +483,7 @@ func resetFix(f *Finding) {
 	f.FixMissionID = ""
 	f.RevertRequestedAt, f.RevertMergeRequest = time.Time{}, ""
 	f.FixClaim, f.FixClaimedAt = "", time.Time{}
+	f.FixLinkWait = FixLinkWait{}
 	f.FixHeadSHA, f.FixFiles = "", ""
 	f.VerifiedAt = time.Time{}
 }

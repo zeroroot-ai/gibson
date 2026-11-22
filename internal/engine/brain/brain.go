@@ -546,8 +546,12 @@ func Reduce(w *World, ev Event) {
 		applyFixClaimReleased(w, e)
 	case FixClaimExpired:
 		applyFixClaimExpired(w, e)
+	case FixLinkPending:
+		applyFixLinkPending(w, e)
 	case FixHeadRecorded:
 		applyFixHeadRecorded(w, e)
+	case FixLinkRefused:
+		applyFixLinkRefused(w, e)
 	case FixReverted:
 		applyFixReverted(w, e)
 	case CheckRerun:

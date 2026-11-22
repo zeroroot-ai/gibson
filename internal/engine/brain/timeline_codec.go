@@ -108,8 +108,9 @@ func init() {
 	registerEvent("finding.fix_claimed", func() Event { return &FixClaimed{} })
 	registerEvent("finding.fix_claim_released", func() Event { return &FixClaimReleased{} })
 	registerEvent("finding.fix_link_refused", func() Event { return &FixLinkRefused{} })
-	registerEvent("finding.fix_claim_expired", func() Event { return &FixClaimExpired{} })
+	registerEvent("finding.fix_link_pending", func() Event { return &FixLinkPending{} })
 	registerEvent("finding.fix_head_recorded", func() Event { return &FixHeadRecorded{} })
+	registerEvent("finding.fix_claim_expired", func() Event { return &FixClaimExpired{} })
 	registerEvent("fix.reverted", func() Event { return &FixReverted{} })
 	registerEvent("check.rerun", func() Event { return &CheckRerun{} })
 	registerEvent("merge_request.queued", func() Event { return &MergeRequestQueued{} })
@@ -310,7 +311,11 @@ func dereferenceEvent(ev Event) Event {
 		return *v
 	case *AgentSkillLoaded:
 		return *v
+	case *FixLinkPending:
+		return *v
 	case *FixHeadRecorded:
+		return *v
+	case *FixLinkRefused:
 		return *v
 	case *ReadMarkerWritten:
 		return *v

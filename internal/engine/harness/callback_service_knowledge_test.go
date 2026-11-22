@@ -798,3 +798,25 @@ func TestApplicationFindingsToProto_CarriesThePriorityTriple(t *testing.T) {
 			full.GetPriority(), full.GetPriorityRule(), full.GetPriorityReason())
 	}
 }
+
+// The harness read returns the block reason and the merge request of a
+// finding. Before this the three fields were dropped, so the fix agent tried
+// the same blocked finding again in each pass (gibson#1579).
+func TestApplicationFindingsToProto_ReturnsTheFixFields(t *testing.T) {
+	raw := []byte(`[{"finding_id":"f-1","status":"fixing","fix_blocked_reason":"the patch needs a restart",` +
+		`"merge_request":"mr-9","merge_request_url":"https://git.example/mr/9"},{"finding_id":"f-2","status":"open"}]`)
+	got, err := applicationFindingsToProto(raw)
+	if err != nil {
+		t.Fatalf("applicationFindingsToProto: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("findings = %d, want 2", len(got))
+	}
+	if got[0].GetFixBlockedReason() != "the patch needs a restart" || got[0].GetMergeRequest() != "mr-9" ||
+		got[0].GetMergeRequestUrl() != "https://git.example/mr/9" {
+		t.Errorf("finding 1 = %+v", got[0])
+	}
+	if got[1].GetFixBlockedReason() != "" || got[1].GetMergeRequest() != "" || got[1].GetMergeRequestUrl() != "" {
+		t.Errorf("finding 2 has fix fields it should not have: %+v", got[1])
+	}
+}
