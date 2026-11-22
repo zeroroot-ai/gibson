@@ -66,13 +66,6 @@ var paramsByMission = map[string]map[string]string{
 		"forgeConnector":   "gitlab-core",
 		"manifestsProject": "examplebank/cluster-manifests",
 	},
-	"incident-response": {
-		"alertId":                "alert-4471",
-		"bank":                   "bank/blue-team",
-		"forgeConnector":         "gitlab-core",
-		"manifestsProject":       "examplebank/cluster-manifests",
-		"observabilityConnector": "prometheus-core",
-	},
 }
 
 // validParams is the parameter set for the scan mission, which most tests in
