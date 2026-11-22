@@ -27,3 +27,4 @@ gibson.tenant.v1.ControlCountermeasure.mapped_control_ids | #1483 | hold until 2
 gibson.world.v1.ActionGroup.audit_record_ids | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
 gibson.world.v1.OpenFindingView.check_kind | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
 gibson.world.v1.OpenFindingView.target_belief | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
+gibson.world.v1.TimelineEvent.replay_seq | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet

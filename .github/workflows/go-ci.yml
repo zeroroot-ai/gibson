@@ -463,8 +463,15 @@ jobs:
         # watches (it was red on main for five days before gibson#1166). The
         # make target runs the offline fixture first. Every consumer is
         # public, so the default token reads them all. About one minute.
+        # go-ci runs on pull_request and merge_group only. A verdict whose field
+        # NOW HAS A CONSUMER is a warning here, because a merge in a consumer
+        # repo changes the result of an unrelated PR. A verdict for a field that
+        # no longer exists fails here too, and so does a field with no consumer
+        # and no verdict. The run that fails on a stale verdict is
+        # proto-field-consumers.yml, on main and on dispatch.
         env:
           GH_TOKEN: ${{ github.token }}
+          STALE_VERDICTS: warn
         run: |
           set -euo pipefail
           bash scripts/__tests__/proto-field-consumer-roots.test.sh
