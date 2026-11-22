@@ -667,6 +667,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithJobSurface(&lazyJobSurface{daemon: d}),
 		harness.WithJobDriver(&lazyJobDriver{daemon: d}),
 		harness.WithConnectors(d.connectorMCPClient()),
+		harness.WithEnabledConnectors(&lazyEnabledConnectors{daemon: d}),
 		harness.WithMissionBlockedTools(d.storedBlockedTools),
 		harness.WithAgentSkillStore(d.agentSkillStore),
 		harness.WithOutsideAgentStore(d.outsideAgentStore),
