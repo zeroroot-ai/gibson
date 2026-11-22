@@ -103,6 +103,10 @@ type World struct {
 	// gibson#1364), in Timeline order.
 	agentSkillLoads []AgentSkillLoad
 
+	// readMarkers holds the last read marker of each (subject, Connector)
+	// pair (read_marker.go, gibson#1569). Not ECS-backed: the last write wins.
+	readMarkers map[readMarkerKey]ReadMarker
+
 	// outsideAgentCalls holds each delegation to an outside A2A agent
 	// (outside_call.go, epic gibson#1366), in Timeline order.
 	outsideAgentCalls []OutsideAgentCall
@@ -566,6 +570,8 @@ func Reduce(w *World, ev Event) {
 		applyMissionOriginated(w, e)
 	case AgentSkillLoaded:
 		applyAgentSkillLoaded(w, e)
+	case ReadMarkerWritten:
+		applyReadMarkerWritten(w, e)
 	case OutsideAgentCalled:
 		applyOutsideAgentCalled(w, e)
 	case DomainPackEnabled:

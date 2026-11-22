@@ -799,34 +799,6 @@ func TestApplicationFindingsToProto_CarriesThePriorityTriple(t *testing.T) {
 	}
 }
 
-// The pinned SDK still declares the reads of attack patterns and attack
-// chains (gibson#1521). The daemon serves neither, so the embedded
-// UnimplementedHarnessCallbackServiceServer answers them. The tests reach the
-// RPC by its name through the service descriptor, so they compile against the
-// pinned SDK and against the SDK of zeroroot-ai/sdk#359, which deletes both.
-// After the SDK bump the descriptor holds neither, and both tests go.
-
-func TestFindSimilarAttacks_IsUnimplemented(t *testing.T) {
-	assertRetiredRPCIsUnimplemented(t, "FindSimilarAttacks")
-}
-
-func TestGetAttackChains_IsUnimplemented(t *testing.T) {
-	assertRetiredRPCIsUnimplemented(t, "GetAttackChains")
-}
-
-func assertRetiredRPCIsUnimplemented(t *testing.T, name string) {
-	t.Helper()
-	svc, _ := knowledgeService(t, &stubQuerier{})
-	for _, m := range harnesspb.HarnessCallbackService_ServiceDesc.Methods {
-		if m.MethodName != name {
-			continue
-		}
-		_, err := m.Handler(svc, acmeCtx(), func(any) error { return nil }, nil)
-		require.Equal(t, codes.Unimplemented, status.Code(err))
-		return
-	}
-}
-
 // A finding that an agent reads back holds the remediation text (gibson#1574).
 func TestAgentFindingToProto_CarriesTheRemediation(t *testing.T) {
 	pf := agentFindingToProto(&agent.Finding{Title: "t", Remediation: "Restrict the redirect target."})
