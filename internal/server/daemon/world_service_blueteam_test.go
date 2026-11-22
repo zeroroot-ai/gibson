@@ -323,6 +323,6 @@ func TestBlueTeamViews_TheReadIsBoundedWhateverTheOldestFinding(t *testing.T) {
 	require.NoError(t, err)
 	_, err = srv.ListWaitingOnPerson(wctx, &worldpb.ListWaitingOnPersonRequest{})
 	require.NoError(t, err)
-	floor := now.Add(-maxViewLookback).UTC().Format(time.RFC3339)
+	floor := now.Add(-brain.MaxViewLookback).UTC().Format(time.RFC3339)
 	require.Equal(t, []string{floor, floor}, ranges)
 }

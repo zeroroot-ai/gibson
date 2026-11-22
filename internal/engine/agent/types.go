@@ -235,8 +235,11 @@ type Finding struct {
 	Evidence    []*typespb.Evidence `json:"evidence,omitempty"`
 	CVSS        *CVSSScore          `json:"cvss,omitempty"`
 	CWE         []string            `json:"cwe,omitempty"`
-	Metadata    map[string]any      `json:"metadata,omitempty"`
-	CreatedAt   time.Time           `json:"created_at"`
+	// Remediation is the text that tells how to fix the flaw. The agent
+	// authors it, and the daemon keeps it (gibson#1574).
+	Remediation string         `json:"remediation,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
 
 	// SubmittedBy is the verified principal that submitted the finding over the
 	// component path (gibson#208), as the FGA user ref ext-authz asserted, for

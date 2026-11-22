@@ -205,3 +205,20 @@ func TestFindingErrorCode_Constants(t *testing.T) {
 	assert.Equal(t, FindingErrorCode("mitre_not_found"), ErrorMitreNotFound)
 	assert.Equal(t, FindingErrorCode("invalid_finding"), ErrorInvalidFinding)
 }
+
+// The remediation text of the base finding is in the stored document of the
+// enhanced finding, and it comes back (gibson#1574).
+func TestEnhancedFinding_DocumentKeepsTheRemediation(t *testing.T) {
+	base := agent.Finding{Title: "open redirect", Remediation: "Restrict the redirect target."}
+	doc, err := json.Marshal(NewEnhancedFinding(base, types.NewID(), ""))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back EnhancedFinding
+	if err := json.Unmarshal(doc, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.Remediation != "Restrict the redirect target." {
+		t.Fatalf("remediation = %q", back.Remediation)
+	}
+}

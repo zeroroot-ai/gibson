@@ -158,6 +158,12 @@ func admittedRelationship(relType string) (string, bool) {
 // vulnerability id matches it. Several properties are joined in sorted
 // key=value form, so the key is independent of map order. No properties, no
 // key: the entity cannot be merged idempotently and is skipped.
+//
+// A node that a tool of the buyer names (gibson#1577) has the identifying
+// properties "connector" and "vendor_id", and so the key
+// "connector=<id>|vendor_id=<id>". The vendor id is only unique in the scope of
+// its connector. An alert and the node that it affects use this one key, so an
+// AFFECTS edge from an Alert lands on the node that the tool reported.
 func EntityKey(idProps map[string]string) string {
 	switch len(idProps) {
 	case 0:
