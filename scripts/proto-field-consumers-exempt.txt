@@ -28,3 +28,9 @@ gibson.world.v1.ActionGroup.audit_record_ids | #1497 | hold until 2027-01-31: th
 gibson.world.v1.OpenFindingView.check_kind | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
 gibson.world.v1.OpenFindingView.target_belief | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
 gibson.world.v1.TimelineEvent.replay_seq | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
+
+# Loop grant (gibson#1612). The admin page of the dashboard that gives a member
+# its loop grant is not built yet. The API serves the fields now.
+gibson.tenant.v1.LoopGrant.granted_at | #1612 | hold until 2027-01-31: the loop grant page of the dashboard reads it; not built yet
+gibson.tenant.v1.LoopGrant.harness_calls | #1612 | hold until 2027-01-31: the loop grant page of the dashboard reads it; not built yet
+gibson.tenant.v1.LoopGrant.tool_classes | #1612 | hold until 2027-01-31: the loop grant page of the dashboard reads it; not built yet

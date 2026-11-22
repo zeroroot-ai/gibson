@@ -33,7 +33,7 @@ type loopFakeMembers struct {
 	err  error
 }
 
-func (f loopFakeMembers) MemberByRun(_ context.Context, tenant, run string) (string, string, error) {
+func (f loopFakeMembers) MemberByRun(_ context.Context, tenant, run string) (memberID, bankID string, err error) {
 	if f.err != nil {
 		return "", "", f.err
 	}
@@ -41,8 +41,8 @@ func (f loopFakeMembers) MemberByRun(_ context.Context, tenant, run string) (str
 	if !ok {
 		return "", "", ErrNotAMember
 	}
-	member, bank, _ := strings.Cut(v, "/")
-	return member, bank, nil
+	memberID, bankID, _ = strings.Cut(v, "/")
+	return memberID, bankID, nil
 }
 
 // loopFakeSource keeps the grants of each tenant apart, as the store does.

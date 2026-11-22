@@ -51,7 +51,7 @@ func (m *memLoopStore) Get(_ context.Context, t, a string) (*loopgrantstore.Gran
 }
 
 func (m *memLoopStore) List(_ context.Context, t string) ([]loopgrantstore.Grant, error) {
-	out := []loopgrantstore.Grant{}
+	out := make([]loopgrantstore.Grant, 0, len(m.table(t)))
 	for _, g := range m.table(t) {
 		out = append(out, g)
 	}
@@ -179,12 +179,12 @@ func TestRevokeLoop_RemovesAndAuditsAndIsIdempotent(t *testing.T) {
 	_, err = svc.RevokeLoop(ctx, &tenantv1.RevokeLoopRequest{AgentName: "intake-agent"})
 	require.NoError(t, err)
 	_, gerr := st.Get(context.Background(), tenantA, "intake-agent")
-	assert.ErrorIs(t, gerr, loopgrantstore.ErrNotFound)
+	require.ErrorIs(t, gerr, loopgrantstore.ErrNotFound)
 	assert.Equal(t, loopGrantAuditRevoke, au.recs[1].action)
 }
 
 // An admin of tenant B neither lists nor revokes the grant of tenant A.
-func TestLoopGrants_AreTenantScoped(t *testing.T) {
+func TestListLoopGrants_AreTenantScoped(t *testing.T) {
 	svc, st, _ := newLoopSvc(t)
 	_, err := svc.GrantLoop(loopCtx(t, tenantA, "user:alice"),
 		&tenantv1.GrantLoopRequest{AgentName: "intake-agent", ToolClasses: []string{"ticket"}})
@@ -201,11 +201,34 @@ func TestLoopGrants_AreTenantScoped(t *testing.T) {
 	assert.NoError(t, gerr, "the revoke of tenant B must leave the grant of tenant A")
 }
 
-func TestLoopGrantService_RefusesNoTenantAndNoIdentity(t *testing.T) {
+func TestGrantLoop_RefusesNoTenantAndNoIdentity(t *testing.T) {
 	svc, _, _ := newLoopSvc(t)
 	_, err := svc.GrantLoop(context.Background(), &tenantv1.GrantLoopRequest{AgentName: "intake-agent", ToolClasses: []string{"ticket"}})
 	assert.Equal(t, codes.PermissionDenied, status.Code(err))
 	tenantOnly := loopCtx(t, tenantA, "")
 	_, err = svc.GrantLoop(tenantOnly, &tenantv1.GrantLoopRequest{AgentName: "intake-agent", ToolClasses: []string{"ticket"}})
 	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+}
+
+func TestListLoopGrants_ReturnsTheGrantsOfTheTenant(t *testing.T) {
+	svc, _, _ := newLoopSvc(t)
+	ctx := loopCtx(t, tenantA, "user:alice")
+	_, err := svc.GrantLoop(ctx, &tenantv1.GrantLoopRequest{AgentName: "intake-agent", ToolClasses: []string{"ticket"}})
+	require.NoError(t, err)
+	list, err := svc.ListLoopGrants(ctx, &tenantv1.ListLoopGrantsRequest{})
+	require.NoError(t, err)
+	require.Len(t, list.GetGrants(), 1)
+	assert.Equal(t, "intake-agent", list.GetGrants()[0].GetAgentName())
+}
+
+func TestListLoopGrants_RefusesNoTenant(t *testing.T) {
+	svc, _, _ := newLoopSvc(t)
+	_, err := svc.ListLoopGrants(context.Background(), &tenantv1.ListLoopGrantsRequest{})
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
+func TestRevokeLoop_RefusesABadAgentName(t *testing.T) {
+	svc, _, _ := newLoopSvc(t)
+	_, err := svc.RevokeLoop(loopCtx(t, tenantA, "user:alice"), &tenantv1.RevokeLoopRequest{AgentName: "Bad Name"})
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }

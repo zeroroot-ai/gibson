@@ -64,7 +64,7 @@ func (d *tenantDB) Exec(_ context.Context, _ string, args ...any) (int64, error)
 	return 1, nil
 }
 
-func (d *tenantDB) QueryRow(_ context.Context, sql string, args ...any) datapool.Row {
+func (d *tenantDB) QueryRow(_ context.Context, _ string, args ...any) datapool.Row {
 	if len(args) == 5 { // the upsert
 		g := Grant{
 			ID: args[0].(string), AgentName: args[1].(string), ToolClasses: args[2].([]string),
@@ -138,7 +138,7 @@ func TestPutGetListDelete(t *testing.T) {
 	require.NoError(t, s.Delete(ctx, "tenant-a", "a-agent"))
 	require.NoError(t, s.Delete(ctx, "tenant-a", "a-agent"), "a second delete is idempotent")
 	_, err = s.Get(ctx, "tenant-a", "a-agent")
-	assert.ErrorIs(t, err, ErrNotFound)
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 // A grant of tenant B is not visible to tenant A.
@@ -149,7 +149,7 @@ func TestGetIsPerTenant(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = s.Get(ctx, "tenant-a", "a-agent")
-	assert.ErrorIs(t, err, ErrNotFound)
+	require.ErrorIs(t, err, ErrNotFound)
 	all, err := s.List(ctx, "tenant-a")
 	require.NoError(t, err)
 	assert.Empty(t, all)

@@ -113,7 +113,7 @@ func (s *postgresStore) Put(ctx context.Context, tenant string, g Grant) (*Grant
 	}
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loopgrantstore: %w", err)
 	}
 	defer c.Release()
 	out, err := scanGrant(c.SQL().QueryRow(ctx,
@@ -133,7 +133,7 @@ func (s *postgresStore) Put(ctx context.Context, tenant string, g Grant) (*Grant
 func (s *postgresStore) Get(ctx context.Context, tenant, agentName string) (*Grant, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loopgrantstore: %w", err)
 	}
 	defer c.Release()
 	g, err := scanGrant(c.SQL().QueryRow(ctx, `SELECT `+columns+` FROM loop_grants WHERE agent_name = $1`, agentName))
@@ -149,7 +149,7 @@ func (s *postgresStore) Get(ctx context.Context, tenant, agentName string) (*Gra
 func (s *postgresStore) List(ctx context.Context, tenant string) ([]Grant, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loopgrantstore: %w", err)
 	}
 	defer c.Release()
 	rows, err := c.SQL().Query(ctx, `SELECT `+columns+` FROM loop_grants ORDER BY agent_name ASC`)
@@ -174,7 +174,7 @@ func (s *postgresStore) List(ctx context.Context, tenant string) ([]Grant, error
 func (s *postgresStore) Delete(ctx context.Context, tenant, agentName string) error {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return err
+		return fmt.Errorf("loopgrantstore: %w", err)
 	}
 	defer c.Release()
 	if _, err := c.SQL().Exec(ctx, `DELETE FROM loop_grants WHERE agent_name = $1`, agentName); err != nil {

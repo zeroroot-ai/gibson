@@ -78,6 +78,10 @@ func (l *lazyLoopGrants) LoopGrantFor(ctx context.Context, tenant, agentName str
 // base surface plus the calls of the loop grant of its agent.
 func (d *daemonImpl) memberGrantRPCs(ctx context.Context, tenant, agentName string) ([]string, error) {
 	rpcs := harness.MemberBaseGrantRPCs()
+	if d.pool == nil {
+		// No data plane means no loop grant can exist.
+		return rpcs, nil
+	}
 	g, err := (&lazyLoopGrants{daemon: d}).LoopGrantFor(ctx, tenant, agentName)
 	switch {
 	case errors.Is(err, harness.ErrNoLoopGrant):
