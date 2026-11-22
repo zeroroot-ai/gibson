@@ -91,9 +91,9 @@ type EnhancedFinding struct {
 	Status      FindingStatus `json:"status"`
 	RiskScore   float64       `json:"risk_score"` // 0.0 - 10.0 (CVSS-like)
 
-	// Remediation
-	Remediation string   `json:"remediation"`
-	References  []string `json:"references,omitempty"`
+	// References are the URLs that back the remediation text of the embedded
+	// finding.
+	References []string `json:"references,omitempty"`
 
 	// Reproduction
 	ReproSteps []ReproStep `json:"repro_steps,omitempty"`

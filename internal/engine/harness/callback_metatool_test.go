@@ -226,6 +226,11 @@ func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
 	if got.Err == "" {
 		t.Fatal("failure must record the error")
 	}
+	// The record holds the typed code, so a reader tells a refusal from a
+	// failure by the code (gibson#1575).
+	if got.ErrCode != string(metatool.ErrCodeNotAuthorized) {
+		t.Fatalf("ErrCode = %q, want %q", got.ErrCode, metatool.ErrCodeNotAuthorized)
+	}
 	if got.Result != "" {
 		t.Fatalf("failure must not record a result, got %q", got.Result)
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 )
 
 // Labels of the nodes that the report reads.
@@ -158,10 +159,19 @@ func (ix *Index) missionIDs(incident string, alerts []string) map[string]bool {
 	return out
 }
 
-// classify maps the error and the result of a call to an outcome. The daemon
-// words a refusal and a wait for an approval in its error, so the match is on
-// the text. A text that matches nothing is a failure, never a success.
-func classify(errText, result string) Outcome {
+// classify maps a call to an outcome. The typed code that the daemon records
+// decides (gibson#1575). An event that has no code, because it came before the
+// code or the call succeeded, falls back to the words of the error. A text
+// that matches nothing is a failure, never a success.
+func classify(code, errText, result string) Outcome {
+	switch metatool.ErrCode(code) {
+	case metatool.ErrCodeNotAuthorized, metatool.ErrCodeRefused:
+		return OutcomeRefused
+	case metatool.ErrCodePendingAuthorization, metatool.ErrCodeMergeNotGranted:
+		return OutcomePending
+	case metatool.ErrCodeFailed:
+		return OutcomeFailed
+	}
 	e := strings.ToLower(errText)
 	r := strings.ToLower(result)
 	switch {

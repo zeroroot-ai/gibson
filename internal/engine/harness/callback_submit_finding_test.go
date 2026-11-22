@@ -357,3 +357,20 @@ func TestSubmitFinding_TheIdempotencyKeyBindsToTheSubject(t *testing.T) {
 	assert.Equal(t, first, asCaller("agent_principal:sa-1", "another-name"), "the agent name does not change the id")
 	assert.NotEqual(t, first, asCaller("agent_principal:sa-2", "recon-agent"), "another caller gets another id")
 }
+
+// The stored finding holds the remediation text that the agent sent
+// (gibson#1574).
+func TestSubmitFinding_KeepsTheRemediationText(t *testing.T) {
+	h := &submitFindingHarness{submitProofMockHarness: submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}}
+	svc := newSubmitFindingService(t, h, nil)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	req := submitFindingRequest("mission-A", nil)
+	req.Finding.Remediation = "Restrict the redirect target to the same host."
+	resp, err := svc.SubmitFinding(ctx, req)
+
+	require.NoError(t, err)
+	require.Nil(t, resp.GetError())
+	require.Len(t, h.submitted, 1)
+	assert.Equal(t, "Restrict the redirect target to the same host.", h.submitted[0].Remediation)
+}

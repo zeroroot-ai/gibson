@@ -514,6 +514,9 @@ type ToolCallRecord struct {
 	// GrantID is the capability grant that allowed a connector call. It is
 	// empty for a native tool and for a call with no grant row.
 	GrantID string
+	// ErrCode is the typed reason of a call that did not succeed (gibson#1575).
+	// It is empty for a call that succeeded, and for a path that has no code.
+	ErrCode string
 	// RecordedAtUnixNano stamps when the daemon observed this call, so a
 	// tenant's retention policy can be swept deterministically later.
 	RecordedAtUnixNano int64
@@ -816,14 +819,14 @@ func newToolCallID(contextInfo *harnesspb.ContextInfo) string {
 // recorded. The tool call reply carries this id as tool_call_id, so a finding
 // can cite the call.
 func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, toolCallID, toolName, argumentsJSON, resultJSON, callErr string) string {
-	return s.captureGrantedToolCall(ctx, contextInfo, toolCallID, toolName, argumentsJSON, resultJSON, callErr, "")
+	return s.captureGrantedToolCall(ctx, contextInfo, toolCallID, toolName, argumentsJSON, resultJSON, callErr, "", "")
 }
 
 // captureGrantedToolCall is captureToolCall for a connector call, with the
 // capability grant that allowed it.
 func (s *HarnessCallbackService) captureGrantedToolCall(
 	ctx context.Context, contextInfo *harnesspb.ContextInfo,
-	toolCallID, toolName, argumentsJSON, resultJSON, callErr, grantID string,
+	toolCallID, toolName, argumentsJSON, resultJSON, callErr, grantID, errCode string,
 ) string {
 	if s.toolCallSink == nil || contextInfo == nil {
 		return ""
@@ -846,6 +849,7 @@ func (s *HarnessCallbackService) captureGrantedToolCall(
 		Result:             resultJSON,
 		Err:                callErr,
 		GrantID:            grantID,
+		ErrCode:            errCode,
 		RecordedAtUnixNano: time.Now().UnixNano(),
 	})
 	return toolCallID
@@ -2286,6 +2290,12 @@ func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 		Severity:    protoSeverityToAgentSeverity(pf.Severity),
 		Confidence:  pf.Confidence,
 		Category:    pf.Category,
+		// The remediation text is part of the finding that the agent authors.
+		// The finding store keeps it in the document of the finding, and an
+		// agent reads it back through GetFindings (agentFindingToProto)
+		// (gibson#1574). A second submit replaces it with what that submit
+		// holds, so a second submit with no remediation clears it.
+		Remediation: pf.Remediation,
 	}
 
 	// Identity is assigned by the daemon and never read from the payload
