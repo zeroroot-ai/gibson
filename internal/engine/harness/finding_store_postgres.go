@@ -33,12 +33,28 @@ var _ FindingStore = (*PostgresFindingStore)(nil)
 
 // Store writes the finding as one row of the findings table.
 func (s *PostgresFindingStore) Store(ctx context.Context, tenantID string, missionID types.ID, f agent.Finding) error {
-	enhanced := finding.NewEnhancedFinding(f, missionID, "")
+	enhanced := enhancedForStore(f, missionID)
 	enhanced.Check = SubmittedFindingCheck(f, missionID)
 	if err := s.store.Store(ctx, tenantID, enhanced); err != nil {
 		return fmt.Errorf("store finding %s: %w", f.ID, err)
 	}
 	return nil
+}
+
+// enhancedForStore wraps a submitted finding for the store. EnhancedFinding has
+// its own agent name with the JSON key agent_name, and encoding/json drops the
+// name of the embedded finding, so the store keeps the name that the harness
+// stamped in the field of EnhancedFinding.
+func enhancedForStore(f agent.Finding, missionID types.ID) finding.EnhancedFinding {
+	return finding.NewEnhancedFinding(f, missionID, f.AgentName)
+}
+
+// findingFromStore is the reverse: it returns the stored agent name on the base
+// finding.
+func findingFromStore(f finding.EnhancedFinding) agent.Finding {
+	base := f.Finding
+	base.AgentName = f.AgentName
+	return base
 }
 
 // Get returns the findings of the mission that match the filter.
@@ -51,8 +67,9 @@ func (s *PostgresFindingStore) Get(
 	}
 	out := make([]agent.Finding, 0, len(stored))
 	for _, f := range stored {
-		if filter.Matches(f.Finding) {
-			out = append(out, f.Finding)
+		base := findingFromStore(f)
+		if filter.Matches(base) {
+			out = append(out, base)
 		}
 	}
 	return out, nil
