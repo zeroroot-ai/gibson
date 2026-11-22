@@ -26,9 +26,10 @@ func (s *HarnessCallbackService) GetCountermeasures(
 	_ context.Context, req *harnesspb.GetCountermeasuresRequest,
 ) (*harnesspb.GetCountermeasuresResponse, error) {
 	if err := protovalidate.Validate(req); err != nil {
-		return &harnesspb.GetCountermeasuresResponse{Error: &harnesspb.HarnessError{
+		return &harnesspb.GetCountermeasuresResponse{ //nolint:nilerr // the refusal is the response, not a transport error
+			Error: &harnesspb.HarnessError{
 			Code: commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, Message: "the technique is not an ATT&CK technique id",
-		}}, nil
+			}}, nil
 	}
 	pack, ok := ontology.EmbeddedCatalog().Get(ontology.D3FENDPackName)
 	if !ok {
