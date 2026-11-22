@@ -1,0 +1,27 @@
+id: fix-agent
+kind: agent
+displayName: Fix Agent
+description: >-
+  Takes the open Findings of one Application and sends each one to the fix
+  loop: it opens one fix job for a finding on a bank of coding agents, the job
+  delivers a merge request, and the daemon merges it on a green pipeline and
+  reads the health signal. The agent makes no model call and changes no code
+  itself. It never holds the token of the Git host.
+# No egress. The agent reaches only the harness callback service. The coding
+# agent of the bank does the work, and the driver of the job holds the token of
+# the Git host.
+spec:
+  runtime: setec
+  # Release 0.1.0 of zeroroot-ai/fix-agent, built on sdk v0.213.0.
+  image: ghcr.io/zeroroot-ai/fix-agent@sha256:8e55b40a467dff1ecfc07d2f55f04bd0888fdf6d07ccbd5062016b81c9f83b3a
+  dispatchMode: sandboxed
+  # Untrusted: the agent reads findings that tools of the buyer wrote, so it
+  # runs only in a sandbox.
+  contentTrust: untrusted
+  # The sandbox launch command: the image ENTRYPOINT is not consulted by setec.
+  command: "/fix-agent"
+  resources:
+    vcpu: 1
+    memory: 1Gi
+  # No credentials block. The agent holds nothing: it works over its
+  # per-dispatch task grant.
