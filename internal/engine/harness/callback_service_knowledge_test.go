@@ -853,6 +853,30 @@ func TestApplicationFindingsToProto_FixHeadAndFilesAreValidated(t *testing.T) {
 	}
 }
 
+// A mode that the SDK does not allow drops the fix fields of that finding only.
+// The SDK client would refuse the whole read otherwise (sdk#378).
+func TestApplicationFindingsToProto_ABadModeDropsTheFixFields(t *testing.T) {
+	raw := `[{"finding_id":"f-1","status":"fixing","merge_request":"mr-1",` +
+		`"fix_head_sha":"1111111111111111111111111111111111111111",` +
+		`"fix_files":"[{\"path\":\"d\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\",\"mode\":\"040000\"}]"},` +
+		`{"finding_id":"f-2","status":"fixing","fix_head_sha":"1111111111111111111111111111111111111111",` +
+		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"deleted\"}]"}]`
+	got, err := applicationFindingsToProto([]byte(raw))
+	if err != nil {
+		t.Fatalf("applicationFindingsToProto: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("findings = %d, want 2", len(got))
+	}
+	if got[0].GetFixHeadSha() != "" || len(got[0].GetFixFiles()) != 0 || got[0].GetMergeRequest() != "mr-1" {
+		t.Errorf("finding 1 = %+v, want no fix fields and the merge request kept", got[0])
+	}
+	// A deleted file has no mode, and an empty mode is valid.
+	if got[1].GetFixHeadSha() == "" || len(got[1].GetFixFiles()) != 1 {
+		t.Errorf("finding 2 = %+v, want its fix fields", got[1])
+	}
+}
+
 // A finding that an agent reads back holds the remediation text (gibson#1574).
 func TestAgentFindingToProto_CarriesTheRemediation(t *testing.T) {
 	pf := agentFindingToProto(&agent.Finding{Title: "t", Remediation: "Restrict the redirect target."})
