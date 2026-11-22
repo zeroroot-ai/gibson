@@ -20,15 +20,15 @@ import (
 //
 // The catalog is the same for every tenant, so the call reads no tenant. A
 // technique that no countermeasure counters, and an empty technique, give an empty
-// list and no error. A value that is not an ATT&CK technique id is refused in the
-// answer (INVALID_ARGUMENT).
+// list and no error. A request that fails its validation rules, such as a value that is not an
+// ATT&CK technique id, is refused in the answer (INVALID_ARGUMENT).
 func (s *HarnessCallbackService) GetCountermeasures(
 	_ context.Context, req *harnesspb.GetCountermeasuresRequest,
 ) (*harnesspb.GetCountermeasuresResponse, error) {
 	if err := protovalidate.Validate(req); err != nil {
 		return &harnesspb.GetCountermeasuresResponse{ //nolint:nilerr // the refusal is the response, not a transport error
 			Error: &harnesspb.HarnessError{
-				Code: commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, Message: "the technique is not an ATT&CK technique id",
+				Code: commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, Message: "the request is not valid: " + err.Error(),
 			}}, nil
 	}
 	pack, ok := ontology.EmbeddedCatalog().Get(ontology.D3FENDPackName)

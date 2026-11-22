@@ -297,6 +297,15 @@ func TestFixHeadRecorded_KeepsTheHeadAndForgetsItOnReopen(t *testing.T) {
 	if got := w.FindingSnapshot()[0].FixHeadSHA; got != "abc" {
 		t.Fatalf("a head for another merge request changed the finding: %q", got)
 	}
+	// A finding with no merge request, for example after a reopen, gets no head
+	// from a late event.
+	Reduce(w, FindingRaised{ID: "f2", At: at})
+	Reduce(w, FixHeadRecorded{ID: "f2", MergeRequest: "mr-1", HeadSHA: "late", Files: "[]", At: at})
+	for _, g := range w.FindingSnapshot() {
+		if g.ID == "f2" && g.FixHeadSHA != "" {
+			t.Fatalf("a finding with no merge request took a head: %q", g.FixHeadSHA)
+		}
+	}
 	data, err := EncodeEvent(FixHeadRecorded{ID: "f1", MergeRequest: "mr-1", HeadSHA: "abc", Files: "[]", At: at})
 	if err != nil {
 		t.Fatal(err)

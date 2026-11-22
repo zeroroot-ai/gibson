@@ -128,7 +128,7 @@ func (FixHeadRecorded) Kind() string { return "finding.fix_head_recorded" }
 // request is the one that the event names.
 func applyFixHeadRecorded(w *World, e FixHeadRecorded) {
 	forFinding(w, e.ID, func(f *Finding) {
-		if f.MergeRequest == e.MergeRequest || f.MergeRequest == "" {
+		if f.MergeRequest == e.MergeRequest {
 			f.FixHeadSHA, f.FixFiles = e.HeadSHA, e.Files
 		}
 	})
