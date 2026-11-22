@@ -58,3 +58,15 @@ func (l *tenantConnectorLister) ListEnabledConnectors(ctx context.Context, tenan
 func (d *daemonImpl) connectorLister(_ context.Context) discoverysvc.ConnectorLister {
 	return &tenantConnectorLister{store: tenantconnector.NewStore(d.platformDB)}
 }
+
+// lazyEnabledConnectors reads the connectors that a tenant enabled from the
+// platform database. The database is built during Start, after the callback
+// options are assembled, so each call reads it lazily and fails when it is not up.
+type lazyEnabledConnectors struct{ daemon *daemonImpl }
+
+func (l *lazyEnabledConnectors) ListEnabledConnectors(ctx context.Context, tenant string) ([]string, error) {
+	if l.daemon.platformDB == nil {
+		return nil, fmt.Errorf("the platform database is not up")
+	}
+	return l.daemon.connectorLister(ctx).ListEnabledConnectors(ctx, tenant)
+}
