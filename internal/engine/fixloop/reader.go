@@ -35,6 +35,26 @@ type MergeFact struct {
 	// SourceBranchReason is why the host gave no source branch, for example
 	// a branch in a fork. It is empty when the host gave the branch.
 	SourceBranchReason string
+	// HeadSHA is the head commit of the merge request. ChangedFiles are the
+	// files that it changes, with no content. The daemon reads both from the
+	// host and gives them to the fix agent as the head and the files that the
+	// agent must see again before it merges. ChangedFilesTruncated is true when
+	// the merge request has more files than the host list holds, and
+	// ChangedFilesError is not empty when the host gave no list. Then the files
+	// are not known.
+	HeadSHA               string
+	ChangedFiles          []ChangedFile
+	ChangedFilesTruncated bool
+	ChangedFilesError     string
+}
+
+// ChangedFile is one file of a merge request as the host lists it. Change is
+// added, modified, deleted or renamed. BlobSHA is empty for a deleted file.
+type ChangedFile struct {
+	Path         string
+	Change       string
+	PreviousPath string
+	BlobSHA      string
 }
 
 // RestartFact is what the deploy tool says about a restart that a deploy

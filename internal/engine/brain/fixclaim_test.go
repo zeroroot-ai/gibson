@@ -279,3 +279,42 @@ func TestFixLinkPending_TheWaitKeepsTheClaimAcrossAResume(t *testing.T) {
 		}
 	}
 }
+
+// The daemon records the head and the files of the merge request of the fix.
+// A reopened finding forgets them with the rest of the fix (gibson#1579).
+func TestFixHeadRecorded_KeepsTheHeadAndForgetsItOnReopen(t *testing.T) {
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	w := NewWorld("t1")
+	Reduce(w, FindingRaised{ID: "f1", At: at})
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixing, MergeRequest: "mr-1", At: at})
+	Reduce(w, FixHeadRecorded{ID: "f1", MergeRequest: "mr-1", HeadSHA: "abc", Files: `[{"path":"a.go"}]`, At: at})
+	f := w.FindingSnapshot()[0]
+	if f.FixHeadSHA != "abc" || f.FixFiles != `[{"path":"a.go"}]` {
+		t.Fatalf("head = %q, files = %q", f.FixHeadSHA, f.FixFiles)
+	}
+	// A head for another merge request does not change the finding.
+	Reduce(w, FixHeadRecorded{ID: "f1", MergeRequest: "mr-other", HeadSHA: "zzz", Files: "[]", At: at})
+	if got := w.FindingSnapshot()[0].FixHeadSHA; got != "abc" {
+		t.Fatalf("a head for another merge request changed the finding: %q", got)
+	}
+	// A finding with no merge request, for example after a reopen, gets no head
+	// from a late event.
+	Reduce(w, FindingRaised{ID: "f2", At: at})
+	Reduce(w, FixHeadRecorded{ID: "f2", MergeRequest: "mr-1", HeadSHA: "late", Files: "[]", At: at})
+	for _, g := range w.FindingSnapshot() {
+		if g.ID == "f2" && g.FixHeadSHA != "" {
+			t.Fatalf("a finding with no merge request took a head: %q", g.FixHeadSHA)
+		}
+	}
+	data, err := EncodeEvent(FixHeadRecorded{ID: "f1", MergeRequest: "mr-1", HeadSHA: "abc", Files: "[]", At: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back, err := DecodeEvent(data); err != nil || back.Kind() != "finding.fix_head_recorded" {
+		t.Fatalf("decode: %v, %v", back, err)
+	}
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusOpen, At: at})
+	if f := w.FindingSnapshot()[0]; f.FixHeadSHA != "" || f.FixFiles != "" {
+		t.Fatalf("a reopened finding kept the head: %q %q", f.FixHeadSHA, f.FixFiles)
+	}
+}

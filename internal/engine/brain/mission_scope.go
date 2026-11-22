@@ -242,6 +242,8 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		return e.MissionID != "" && e.MissionID == missionID
 	case FixLinkPending:
 		return e.MissionID != "" && e.MissionID == missionID
+	case FixHeadRecorded:
+		return e.MissionID != "" && e.MissionID == missionID
 	case FixClaimExpired:
 		return e.MissionID != "" && e.MissionID == missionID
 	case FindingPrioritized:

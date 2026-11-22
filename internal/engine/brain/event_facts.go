@@ -84,6 +84,8 @@ func findingSubject(ev Event) (id, mergeRequest string, ok bool) {
 		return e.ID, "", true
 	case FixLinkPending:
 		return e.ID, "", true
+	case FixHeadRecorded:
+		return e.ID, e.MergeRequest, true
 	case *FixLinkPending:
 		return e.ID, "", true
 	case FixClaimExpired:

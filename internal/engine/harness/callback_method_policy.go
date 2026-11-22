@@ -199,7 +199,10 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	},
 
 	// --- Taxonomy / validation ---
-	harnesspb.HarnessCallbackService_GetTaxonomySchema_FullMethodName:    {agentSurface: true, reason: reasonAgentCallbackSurface},
+	harnesspb.HarnessCallbackService_GetTaxonomySchema_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
+	// The countermeasures of one technique, from the catalog that is the same for
+	// every tenant (gibson#1487). Read-only.
+	harnesspb.HarnessCallbackService_GetCountermeasures_FullMethodName:   {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_GenerateNodeID_FullMethodName:       {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_ValidateFinding_FullMethodName:      {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_ValidateGraphNode_FullMethodName:    {agentSurface: true, reason: reasonAgentCallbackSurface},

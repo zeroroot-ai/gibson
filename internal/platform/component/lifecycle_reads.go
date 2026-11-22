@@ -94,6 +94,13 @@ type ApplicationFinding struct {
 	// Both are empty for a Finding with no fix.
 	MergeRequest    string `json:"merge_request,omitempty"`
 	MergeRequestURL string `json:"merge_request_url,omitempty"`
+	// FixHeadSHA and FixFiles are the head commit of that merge request and the
+	// JSON list of the files that it changes. The daemon wrote both from its own
+	// read of the Git host when it linked the merge request. FixFiles is the JSON
+	// text of a list of {path, change, previous_path, blob_sha}. Both are empty
+	// for a Finding with no fix, or with a merge request of an unknown head.
+	FixHeadSHA string `json:"fix_head_sha,omitempty"`
+	FixFiles   string `json:"fix_files,omitempty"`
 }
 
 // applicationFindingsCypher walks one Application's lifecycle subgraph.
@@ -139,7 +146,9 @@ RETURN
   coalesce(f.priority_reason, '')  AS priority_reason,
   coalesce(f.fix_blocked_reason, '') AS fix_blocked_reason,
   coalesce(mr.key, '')             AS merge_request,
-  coalesce(mr.url, '')             AS merge_request_url
+  coalesce(mr.url, '')             AS merge_request_url,
+  coalesce(f.fix_head_sha, '')     AS fix_head_sha,
+  coalesce(f.fix_files, '')        AS fix_files
 ORDER BY finding_id
 LIMIT $limit`
 
@@ -208,6 +217,8 @@ func encodeApplicationFindings(rows []map[string]any) ([]byte, error) {
 			FixBlockedReason: stringField(r, "fix_blocked_reason"),
 			MergeRequest:     stringField(r, "merge_request"),
 			MergeRequestURL:  stringField(r, "merge_request_url"),
+			FixHeadSHA:       stringField(r, "fix_head_sha"),
+			FixFiles:         stringField(r, "fix_files"),
 		})
 	}
 	encoded, err := json.Marshal(out)

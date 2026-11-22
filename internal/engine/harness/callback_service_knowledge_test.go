@@ -821,6 +821,38 @@ func TestApplicationFindingsToProto_ReturnsTheFixFields(t *testing.T) {
 	}
 }
 
+// The harness read returns the head and the files that the daemon stored, and a
+// finding that does not validate loses its fix fields and keeps the rest
+// (gibson#1579).
+func TestApplicationFindingsToProto_FixHeadAndFilesAreValidated(t *testing.T) {
+	good := `[{"finding_id":"f-1","status":"fixing","fix_head_sha":"1111111111111111111111111111111111111111",` +
+		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\"},` +
+		`{\"path\":\"b.go\",\"change\":\"renamed\",\"previous_path\":\"c.go\",\"blob_sha\":\"3333333333333333333333333333333333333333\"}]"},` +
+		`{"finding_id":"f-2","status":"fixing","merge_request":"mr-2","fix_head_sha":"not-a-sha",` +
+		`"fix_files":"[{\"path\":\"a.go\",\"change\":\"modified\",\"blob_sha\":\"2222222222222222222222222222222222222222\"}]"},` +
+		`{"finding_id":"f-3","status":"fixing","fix_head_sha":"1111111111111111111111111111111111111111","fix_files":"{broken"}]`
+	got, err := applicationFindingsToProto([]byte(good))
+	if err != nil {
+		t.Fatalf("applicationFindingsToProto: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("findings = %d, want 3", len(got))
+	}
+	if got[0].GetFixHeadSha() != "1111111111111111111111111111111111111111" || len(got[0].GetFixFiles()) != 2 ||
+		got[0].GetFixFiles()[1].GetChange() != harnesspb.FixFileChange_FIX_FILE_CHANGE_RENAMED ||
+		got[0].GetFixFiles()[1].GetPreviousPath() != "c.go" {
+		t.Errorf("finding 1 = %+v", got[0])
+	}
+	// An invalid head drops both fix fields. The rest of the finding stays.
+	if got[1].GetFixHeadSha() != "" || len(got[1].GetFixFiles()) != 0 || got[1].GetMergeRequest() != "mr-2" {
+		t.Errorf("finding 2 = %+v", got[1])
+	}
+	// A list that cannot be read drops the fix fields too.
+	if got[2].GetFixHeadSha() != "" || len(got[2].GetFixFiles()) != 0 {
+		t.Errorf("finding 3 = %+v", got[2])
+	}
+}
+
 // A finding that an agent reads back holds the remediation text (gibson#1574).
 func TestAgentFindingToProto_CarriesTheRemediation(t *testing.T) {
 	pf := agentFindingToProto(&agent.Finding{Title: "t", Remediation: "Restrict the redirect target."})
