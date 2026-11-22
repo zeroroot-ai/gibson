@@ -1,0 +1,105 @@
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
+
+// LoopGrantService manages the loop grants of one tenant (gibson#1612).
+//
+// An always-on member of a bank has no mission turn, so it has no grant of a
+// sender to call a tool of the buyer with. A tenant admin gives the agent of
+// the member a loop grant instead. The grant names the tool classes that the
+// member may call and the harness calls that it may make. A class covers every
+// connector of that class that the tenant has enabled, now and later. The grant
+// does not replace the can_execute check on the connector, so the tenant switch
+// of a connector still stops the member.
+//
+// A loop grant is bound to one tenant and to one agent. It never reaches
+// another tenant.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "buf/validate/validate.proto";
+import "gibson/auth/v1/options.proto";
+import "google/protobuf/timestamp.proto";
+
+service LoopGrantService {
+  // GrantLoop gives the members of one catalog agent a loop grant. A second
+  // call for the same agent replaces the first grant and gives it a new id.
+  // The audit record names the admin who made the call.
+  rpc GrantLoop(GrantLoopRequest) returns (GrantLoopResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // RevokeLoop removes the loop grant of one agent. It is idempotent. A member
+  // of the agent then has its tool calls refused.
+  rpc RevokeLoop(RevokeLoopRequest) returns (RevokeLoopResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListLoopGrants returns each loop grant of the tenant. A tenant holds at
+  // most one grant for each catalog agent, so the list is small and it has no
+  // pages.
+  rpc ListLoopGrants(ListLoopGrantsRequest) returns (ListLoopGrantsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// LoopGrant is the loop grant of one agent in the tenant.
+message LoopGrant {
+  // id names the grant. The audit record of each member call holds it.
+  string id = 1;
+  // agent_name is the name of the catalog agent whose members hold the grant.
+  string agent_name = 2;
+  // tool_classes are the tool classes of the catalog, for example ticket or
+  // paging.
+  repeated string tool_classes = 3;
+  // harness_calls are the harness calls, besides the tool call, that the
+  // member may make. The only value now is SubmitFinding.
+  repeated string harness_calls = 4;
+  // grantor is the subject of the admin who made the grant.
+  string grantor = 5;
+  google.protobuf.Timestamp granted_at = 6;
+}
+
+message GrantLoopRequest {
+  // agent_name is the name of a catalog agent that can run as a member.
+  string agent_name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+  // tool_classes must be tool classes that the catalog manifest of the agent
+  // names in loopGrant.classes.
+  repeated string tool_classes = 2 [(buf.validate.field).repeated = { max_items: 16 }];
+  repeated string harness_calls = 3 [(buf.validate.field).repeated = { max_items: 8 }];
+}
+
+message GrantLoopResponse {
+  LoopGrant grant = 1;
+}
+
+message RevokeLoopRequest {
+  string agent_name = 1 [(buf.validate.field).string = { min_len: 1, max_len: 63 }];
+}
+
+message RevokeLoopResponse {}
+
+message ListLoopGrantsRequest {}
+
+message ListLoopGrantsResponse {
+  repeated LoopGrant grants = 1;
+}

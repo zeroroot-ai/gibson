@@ -20,6 +20,15 @@ var ErrBlocked = errors.New("metatool: the tool is blocked by mission policy")
 // ErrRunInactive is returned when the mission run may not call tools.
 var ErrRunInactive = errors.New("metatool: the mission run is not active")
 
+// ErrLoopGrantDenied is returned when a bank member calls a tool that its loop
+// grant does not cover: no grant exists, the grant has not the class of the
+// connector, or the tool is not a connector tool (gibson#1612).
+var ErrLoopGrantDenied = errors.New("metatool: the loop grant of the member does not cover the tool")
+
+// ErrLoopGrantUnavailable is returned when the loop grant of a member could not
+// be read. The call is refused, because an unread grant is not an empty one.
+var ErrLoopGrantUnavailable = errors.New("metatool: the loop grant of the member could not be read")
+
 // ErrAuditUnavailable is returned when the record of a call could not be
 // written. The call does not happen.
 var ErrAuditUnavailable = errors.New("metatool: the audit record could not be written")
@@ -97,7 +106,26 @@ type CallRecord struct {
 	// ErrCode is the typed reason of a call that did not succeed. It is empty
 	// for a call that succeeded.
 	ErrCode ErrCode
+	// MemberID, LoopGrantID and Grantor are set for the call of a bank member.
+	// They name the member, the loop grant that the check read, and the admin
+	// who gave that grant (gibson#1612). A refusal holds them when a grant
+	// exists. They are empty for any other caller.
+	MemberID    string
+	LoopGrantID string
+	Grantor     string
 }
+
+// LoopAllow names the loop grant behind the decision of a LoopCheck.
+type LoopAllow struct {
+	GrantID string
+	Grantor string
+}
+
+// LoopCheck decides whether the loop grant of a bank member covers a connector.
+// It returns the grant that it read, also when it refuses, so the record of the
+// refusal names the grant. A refusal wraps ErrLoopGrantDenied. The check reads
+// the tool class of the connector from the catalog manifest at call time.
+type LoopCheck func(ctx context.Context, connector string) (LoopAllow, error)
 
 // ErrCode is the typed reason of a call that did not succeed. An agent and the
 // incident report tell the kinds apart by the code and never by the words of
@@ -127,7 +155,7 @@ func CodeOf(err error) ErrCode {
 	switch {
 	case err == nil:
 		return ""
-	case errors.Is(err, ErrUnauthorized):
+	case errors.Is(err, ErrUnauthorized), errors.Is(err, ErrLoopGrantDenied):
 		return ErrCodeNotAuthorized
 	case errors.Is(err, ErrApprovalPending):
 		return ErrCodePendingAuthorization
@@ -172,6 +200,12 @@ type Call struct {
 	Recorder FlightRecorder
 	// Observer writes the audit records of the call. It is required.
 	Observer CallObserver
+	// Loop is set only for the call of a bank member. The check sits beside
+	// can_execute and does not replace it: the tenant switch of a connector
+	// still stops the member. A call with no Loop is the call of a mission run.
+	Loop LoopCheck
+	// MemberID names the member behind a call with a Loop.
+	MemberID string
 	// Daemon is true only for a call that the daemon makes on its own
 	// governed path (CallConnectorForTenant). A tool with the role "daemon"
 	// runs only then. No agent request sets it.
@@ -243,6 +277,23 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 		return nil, derr
 	}
 	rec.Connector, rec.Tool = tid.Connector, tid.Tool
+	if c.Loop != nil {
+		rec.MemberID = c.MemberID
+		// A loop grant covers connector tools. A skill or a native tool is
+		// refused, and the refusal is recorded.
+		var allow LoopAllow
+		var lerr error
+		if tid.Source != toolid.SourceMCP {
+			lerr = fmt.Errorf("%w: only a connector tool is covered", ErrLoopGrantDenied)
+		} else {
+			allow, lerr = c.Loop(ctx, tid.Connector)
+		}
+		rec.LoopGrantID, rec.Grantor = allow.GrantID, allow.Grantor
+		if lerr != nil {
+			finish(nil, lerr)
+			return nil, lerr
+		}
+	}
 	if tid.Source == toolid.SourceSkill {
 		// A load of an Agent Skill reads the tenant database. It is no connector
 		// call, so it has no connector audit record. The flight recorder

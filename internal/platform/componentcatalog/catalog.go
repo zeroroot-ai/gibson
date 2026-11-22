@@ -249,6 +249,19 @@ type AgentSpec struct {
 	// credential into. A tenant without that provider is refused at dispatch,
 	// never launched with an empty key.
 	Credentials []CredentialRequirement `yaml:"credentials"`
+	// LoopGrant names what the always-on members of this agent need from a
+	// tenant loop grant (gibson#1612). A member has no mission turn, so a
+	// tenant admin gives it a loop grant. The grant of a tool class covers
+	// every connector of that class that the tenant has enabled.
+	LoopGrant LoopGrantSpec `yaml:"loopGrant"`
+}
+
+// LoopGrantSpec states the loop grant that an agent needs.
+type LoopGrantSpec struct {
+	// Classes are the tool classes of the connectors that a member of the
+	// agent calls. Each class is one of ConnectorClasses. A tenant admin may
+	// grant the member these classes and no others.
+	Classes []string `yaml:"classes"`
 }
 
 // DispatchModeSandboxed is the AgentSpec.DispatchMode value that forces a
@@ -347,6 +360,9 @@ func (m *Manifest) validate() error {
 		if err := validateCredentialRequirements(m.ID, s.Credentials); err != nil {
 			return err
 		}
+		if err := validateLoopGrant(m.ID, s.LoopGrant, s.MemberCommand); err != nil {
+			return err
+		}
 		if s.MinContextWindow < 0 {
 			return fmt.Errorf("%s: minContextWindow %d must not be negative", m.ID, s.MinContextWindow)
 		}
@@ -405,6 +421,27 @@ func validateEgressAllow(id string, allow []string) error {
 		if connectorv1alpha1.IsProxyHost(host) {
 			return fmt.Errorf("%s: egressAllow names the connector proxy %q; only the daemon calls a connector", id, entry)
 		}
+	}
+	return nil
+}
+
+// validateLoopGrant refuses a loop grant that names a class outside
+// ConnectorClasses, a class twice, or any class on an agent that has no member
+// command. Only a member holds a loop grant, so the field of any other agent
+// would do nothing.
+func validateLoopGrant(id string, g LoopGrantSpec, memberCommand string) error {
+	if len(g.Classes) > 0 && memberCommand == "" {
+		return fmt.Errorf("%s: loopGrant is used only by a member, so declaring it with no memberCommand would do nothing", id)
+	}
+	seen := map[string]bool{}
+	for _, c := range g.Classes {
+		if !slices.Contains(ConnectorClasses, c) {
+			return fmt.Errorf("%s: loopGrant class %q must be one of %s", id, c, strings.Join(ConnectorClasses, ", "))
+		}
+		if seen[c] {
+			return fmt.Errorf("%s: loopGrant class %q is listed twice", id, c)
+		}
+		seen[c] = true
 	}
 	return nil
 }
@@ -908,6 +945,9 @@ type AgentEntry struct {
 	// reads it to route a launched-on-dispatch platform agent to the sandbox
 	// regardless of registry trust (ADR-0116).
 	DispatchMode string
+	// LoopGrantClasses are the tool classes that a member of the agent needs
+	// in its loop grant (gibson#1612). Empty means it needs none.
+	LoopGrantClasses []string
 }
 
 func (m Manifest) toAgentEntry() AgentEntry {
@@ -929,6 +969,7 @@ func (m Manifest) toAgentEntry() AgentEntry {
 		MemberCommand:    strings.Fields(s.MemberCommand),
 		MaxJobsInFlight:  s.MaxJobsInFlight,
 		Resources:        s.Resources,
+		LoopGrantClasses: s.LoopGrant.Classes,
 	}
 }
 

@@ -82,11 +82,90 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INTERNAL, "meta-tools are not wired on this daemon"), nil
 	}
 
+	// A bank member has no mission run and no run authz state. Its loop grant
+	// is its authority (gibson#1612).
+	member, isMember, merr := s.memberOfCall(ctx)
+	if merr != nil {
+		s.logger.ErrorContext(ctx, "meta-tool: the calling member could not be resolved", "err", merr)
+		// gibson:no-tool-executed — an unresolved caller is refused, not read as no member.
+		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the calling member could not be resolved"), nil
+	}
+	if isMember {
+		return s.serveMemberMetaTool(ctx, req, member)
+	}
+
 	h, err := s.getHarness(ctx, req.GetContext())
 	if err != nil {
 		return nil, err
 	}
 	return s.serveMetaTool(ctx, req, h)
+}
+
+// metaHandler builds the handler of the two meta-tools over the catalog of the
+// daemon. A mission run and a bank member use the same one.
+func (s *HarnessCallbackService) metaHandler(req *harnesspb.CallToolProtoRequest) *metatool.Handler {
+	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
+	handler := metatool.NewHandler(
+		catalog.NewEngine(s.toolLister(component.NewCatalogToolLister(s.componentRegistry, s.connectors)), authorizer),
+		authorizer,
+		s.connectors,
+	)
+	handler.WithApprovalGate(s.toolApproval).WithGrantLookup(s.connectorGrants)
+	if store := s.agentSkillStore(); store != nil {
+		handler.WithSkills(store, s.skillLoadHook(req.GetContext()))
+	}
+	return handler
+}
+
+// memberCaller is the caller of a member for the can_execute check. The member
+// has no person behind it, so the subject is the member set of the tenant, as it
+// is for the daemon (TenantGrantSubject). The enable posture of the tenant
+// grants can_execute on a connector to that set, so the tenant switch of a
+// connector stops the member. The loop grant is a second check beside it.
+func memberCaller(m memberCall) catalog.Caller {
+	return catalog.Caller{Subject: TenantGrantSubject(m.tenant), Tenant: m.tenant, Mission: m.bankID}
+}
+
+// serveMemberMetaTool serves a meta-tool for a bank member. search_tools lists
+// only the connector tools whose class the loop grant holds. invoke_tool runs
+// the one connector call path with the loop check in front of can_execute. A
+// member with no loop grant gets a refusal, and a refused invoke is recorded.
+func (s *HarnessCallbackService) serveMemberMetaTool(ctx context.Context, req *harnesspb.CallToolProtoRequest, m memberCall) (*harnesspb.CallToolProtoResponse, error) {
+	handler := s.metaHandler(req)
+	caller := memberCaller(m)
+	switch req.GetName() {
+	case metatool.SearchToolsName:
+		g, err := s.loopGrant(ctx, m)
+		if err != nil {
+			// gibson:no-tool-executed — search_tools never invokes a tool.
+			return s.memberGrantRefusal(ctx, err), nil
+		}
+		return s.metaSearch(ctx, handler, caller, memberHidden(g), req.GetInputJson())
+	case metatool.InvokeToolName:
+		return s.metaInvoke(ctx, req.GetContext(), handler, nil, caller, metatool.MissionPolicy{}, req.GetInputJson(), &m)
+	default:
+		// gibson:no-tool-executed — not one of the two known meta-tools.
+		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown meta-tool: "+req.GetName()), nil
+	}
+}
+
+// memberGrantRefusal maps a failed read of the loop grant to the reply.
+func (s *HarnessCallbackService) memberGrantRefusal(ctx context.Context, err error) *harnesspb.CallToolProtoResponse {
+	if errors.Is(err, ErrNoLoopGrant) {
+		// gibson:no-tool-executed — no loop grant, so nothing ran.
+		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "this member holds no loop grant")
+	}
+	s.logger.ErrorContext(ctx, "meta-tool: the loop grant could not be read", "err", err)
+	// gibson:no-tool-executed — the grant is unread, so nothing ran.
+	return metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the loop grant could not be read")
+}
+
+// memberHidden hides each tool that the loop grant does not cover. A skill and
+// a native tool are hidden, because a loop grant covers connector tools only.
+func memberHidden(g *LoopGrant) func(toolid.ID) bool {
+	return func(id toolid.ID) bool {
+		return id.Source != toolid.SourceMCP || !g.covers(connectorToolClass(id.Connector))
+	}
 }
 
 // CallMetaTool serves a meta-tool for an agent in pull mode, which reaches the
@@ -139,16 +218,7 @@ func (s *HarnessCallbackService) serveMetaTool(ctx context.Context, req *harness
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the mission policy could not be loaded"), nil
 	}
 
-	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
-	handler := metatool.NewHandler(
-		catalog.NewEngine(s.toolLister(component.NewCatalogToolLister(s.componentRegistry, s.connectors)), authorizer),
-		authorizer,
-		s.connectors,
-	)
-	handler.WithApprovalGate(s.toolApproval).WithGrantLookup(s.connectorGrants)
-	if store := s.agentSkillStore(); store != nil {
-		handler.WithSkills(store, s.skillLoadHook(req.GetContext()))
-	}
+	handler := s.metaHandler(req)
 	caller := catalogCaller(ctx, state)
 
 	switch req.GetName() {
@@ -159,7 +229,7 @@ func (s *HarnessCallbackService) serveMetaTool(ctx context.Context, req *harness
 		}
 		return s.metaSearch(ctx, handler, caller, hideBlockedSkills(policy.Blocked), req.GetInputJson())
 	case metatool.InvokeToolName:
-		return s.metaInvoke(ctx, req.GetContext(), handler, h, caller, policy, req.GetInputJson())
+		return s.metaInvoke(ctx, req.GetContext(), handler, h, caller, policy, req.GetInputJson(), nil)
 	default:
 		// gibson:no-tool-executed — not one of the two known meta-tools.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown meta-tool: "+req.GetName()), nil
@@ -215,7 +285,7 @@ func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Han
 	return marshalMetaResult(s, out)
 }
 
-func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *harnesspb.ContextInfo, h *metatool.Handler, harness AgentHarness, caller catalog.Caller, policy metatool.MissionPolicy, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
+func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *harnesspb.ContextInfo, h *metatool.Handler, harness AgentHarness, caller catalog.Caller, policy metatool.MissionPolicy, inputJSON []byte, member *memberCall) (*harnesspb.CallToolProtoResponse, error) {
 	var in struct {
 		ID   string         `json:"id"`
 		Args map[string]any `json:"args"`
@@ -248,7 +318,7 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 
 	// The one connector call: mission policy, can_execute, the intent record,
 	// the dispatch, and the flight recorder and audit records of the result.
-	result, err := h.Call(ctx, metatool.Call{
+	call := metatool.Call{
 		Caller:    caller,
 		ID:        in.ID,
 		Args:      in.Args,
@@ -265,7 +335,15 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 			return callID
 		},
 		Observer: &harnessCallObserver{s: s},
-	})
+	}
+	if member != nil {
+		// The call of a bank member: the loop grant is checked first, and the
+		// record names the member.
+		call.Loop = s.loopCheck(*member)
+		call.MemberID = member.memberID
+		call.RunID = member.runID
+	}
+	result, err := h.Call(ctx, call)
 	switch {
 	case err == nil:
 		resp, merr := marshalMetaResult(s, struct {
@@ -290,6 +368,13 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 	case errors.Is(err, metatool.ErrBlocked):
 		// gibson:no-tool-executed — denied before dispatch.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, err.Error()), nil
+	case errors.Is(err, metatool.ErrLoopGrantDenied):
+		// gibson:no-tool-executed — the loop grant of the member does not cover the call.
+		return withToolCallID(metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, err.Error()), callID), nil
+	case errors.Is(err, metatool.ErrLoopGrantUnavailable):
+		s.logger.ErrorContext(ctx, "meta-tool invoke refused: the loop grant could not be read", "id", in.ID, "tenant", caller.Tenant, "err", err)
+		// gibson:no-tool-executed — an unread grant is not an empty one.
+		return withToolCallID(metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the loop grant could not be read"), callID), nil
 	case errors.Is(err, metatool.ErrRunInactive):
 		// gibson:no-tool-executed — denied before dispatch.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "mission run is not active"), nil

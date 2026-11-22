@@ -1899,6 +1899,27 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.LoopGrantService/GrantLoop":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.LoopGrantService/ListLoopGrants":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.LoopGrantService/RevokeLoop":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.MembershipService/AcceptInvitation":
     unauthenticated: true
   "/gibson.tenant.v1.MembershipService/AddTeamMember":

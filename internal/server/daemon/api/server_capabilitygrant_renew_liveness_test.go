@@ -456,3 +456,71 @@ func TestRenewCapabilityGrant_KeepsTheInitiator(t *testing.T) {
 		t.Fatalf("renewed grant initiator = %q, want user:alice", got)
 	}
 }
+
+type memberRPCStub struct {
+	rpcs []string
+	err  error
+}
+
+func (m memberRPCStub) MemberGrantRPCs(context.Context, sdkcg.Claims) ([]string, error) {
+	return m.rpcs, m.err
+}
+
+// renewedRPCs reads the allowed_rpcs claim of a minted token.
+func renewedRPCs(t *testing.T, token string) string {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("token has %d parts", len(parts))
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	return string(raw)
+}
+
+// The renewal of the base grant of a live member takes its RPCs from the loop
+// grant that holds now (gibson#1612).
+func TestRenewCapabilityGrant_MemberRenewalTakesTheRPCsOfTheLoopGrant(t *testing.T) {
+	const call = "/gibson.harness.v1.HarnessCallbackService/CallToolProto"
+	s := newRenewServer(t, liveLookup{live: map[string]bool{}})
+	s.WithLiveMemberLookup(memberLookup{live: map[string]bool{"acme/m1/run-1": true}})
+	s.WithMemberGrantRPCs(memberRPCStub{rpcs: []string{call}})
+
+	resp, err := s.RenewCapabilityGrant(renewCtx(), renewRequest())
+	if err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	payload := renewedRPCs(t, resp.GetCapabilityGrant())
+	if !strings.Contains(payload, call) {
+		t.Errorf("the renewed grant must hold the granted call, payload = %s", payload)
+	}
+	if strings.Contains(payload, "HarnessCallbackService/Observe") {
+		t.Errorf("the renewed grant must drop the RPCs that the source did not return, payload = %s", payload)
+	}
+}
+
+// A renewal that cannot read the loop grant fails. It does not keep stale RPCs.
+func TestRenewCapabilityGrant_MemberRenewalFailsWhenTheSourceFails(t *testing.T) {
+	s := newRenewServer(t, liveLookup{live: map[string]bool{}})
+	s.WithLiveMemberLookup(memberLookup{live: map[string]bool{"acme/m1/run-1": true}})
+	s.WithMemberGrantRPCs(memberRPCStub{err: context.DeadlineExceeded})
+	_, err := s.RenewCapabilityGrant(renewCtx(), renewRequest())
+	if got := status.Code(err); got != codes.Unavailable {
+		t.Fatalf("code = %s (%v), want Unavailable", got, err)
+	}
+}
+
+// A grant that is not the base grant of a member keeps its own RPCs.
+func TestRenewCapabilityGrant_NonMemberRenewalIgnoresTheSource(t *testing.T) {
+	s := newRenewServer(t, liveLookup{live: map[string]bool{"m1": true}})
+	s.WithMemberGrantRPCs(memberRPCStub{rpcs: []string{"/x/Y"}})
+	resp, err := s.RenewCapabilityGrant(renewCtx(), renewRequest())
+	if err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	if payload := renewedRPCs(t, resp.GetCapabilityGrant()); strings.Contains(payload, "/x/Y") {
+		t.Errorf("a mission grant must not take member RPCs, payload = %s", payload)
+	}
+}

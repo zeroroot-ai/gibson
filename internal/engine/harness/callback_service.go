@@ -217,6 +217,11 @@ type HarnessCallbackService struct {
 	// mission run on its verified context.
 	members MemberLookup
 
+	// loopGrants reads the loop grant of the agent of a bank member
+	// (gibson#1612). Nil means no member holds a grant, so every tool call of a
+	// member is refused.
+	loopGrants LoopGrantSource
+
 	// tracerProvider for creating real spans from proxy span data
 	tracerProvider *sdktrace.TracerProvider
 

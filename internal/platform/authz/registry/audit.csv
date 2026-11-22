@@ -292,6 +292,9 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.InboundMissionService/RevokeInboundCaller,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/inbound_mission.proto,rule
 /gibson.tenant.v1.InboundMissionService/UnpublishInboundMission,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/inbound_mission.proto,rule
 /gibson.tenant.v1.IncidentReportService/GetIncidentReport,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/incident_report.proto,rule
+/gibson.tenant.v1.LoopGrantService/GrantLoop,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/loop_grant.proto,rule
+/gibson.tenant.v1.LoopGrantService/ListLoopGrants,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/loop_grant.proto,rule
+/gibson.tenant.v1.LoopGrantService/RevokeLoop,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/loop_grant.proto,rule
 /gibson.tenant.v1.MembershipService/AcceptInvitation,,,,,gibson/tenant/v1/membership.proto,unauthenticated
 /gibson.tenant.v1.MembershipService/AddTeamMember,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/CancelInvitation,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule

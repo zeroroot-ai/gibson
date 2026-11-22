@@ -671,6 +671,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithAgentSkillStore(d.agentSkillStore),
 		harness.WithOutsideAgentStore(d.outsideAgentStore),
 		harness.WithMemberLookup(&lazyMemberLookup{daemon: d}),
+		harness.WithLoopGrants(&lazyLoopGrants{daemon: d}),
 		harness.WithTurnGrantMinter(&lazyTurnGrantMinter{daemon: d}),
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),
 		harness.WithMemberControl(d.memberControl),

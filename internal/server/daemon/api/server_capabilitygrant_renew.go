@@ -121,6 +121,20 @@ func (s *DaemonServer) WithLiveMemberLookup(l LiveMemberLookup) *DaemonServer {
 	return s
 }
 
+// MemberGrantRPCSource returns the allowed_rpcs that the base grant of a live
+// bank member holds now: the base surface plus the harness calls of the loop
+// grant of its agent in its tenant.
+type MemberGrantRPCSource interface {
+	MemberGrantRPCs(ctx context.Context, claims sdkcg.Claims) ([]string, error)
+}
+
+// WithMemberGrantRPCs wires the source that derives the allowed_rpcs of a
+// member grant at renewal.
+func (s *DaemonServer) WithMemberGrantRPCs(src MemberGrantRPCSource) *DaemonServer {
+	s.memberRPCs = src
+	return s
+}
+
 // RenewalForkGuard refuses the renewal of the grant of a forked source outside
 // the source sandbox (D74, D80). The renewal mints a grant with a new id, so a
 // fork or a restored sandbox must not get one from the grant of its source.
@@ -231,6 +245,18 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 		return nil, err //nolint:wrapcheck // a gRPC status
 	}
 
+	// The base grant of a member takes its RPCs from the loop grant that holds
+	// now. A grant that was given or removed since the last mint then changes
+	// at this renewal. Any other grant carries its RPCs over unchanged.
+	allowed := claims.AllowedRPCs
+	if s.memberRPCs != nil && s.isLiveMember(ctx, claims) {
+		derived, derr := s.memberRPCs.MemberGrantRPCs(ctx, claims)
+		if derr != nil {
+			return nil, status.Errorf(codes.Unavailable, "renewal of a member grant: %s", derr)
+		}
+		allowed = derived
+	}
+
 	// Mint the renewal. allowed_rpcs and tenant carry over verbatim;
 	// JTI/IAT/EXP are fresh. RecipientClass is recovered from the
 	// CG-JWT subject, which uses the "component:<kind>:<name>" shape
@@ -246,7 +272,7 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 		TaskID:         claims.TaskID,
 		MissionRunID:   claims.MissionRunID,                  // the renewal keeps the run of the grant
 		Initiator:      capabilitygrant.InitiatorOf(cgToken), // and the initiator of the grant
-		AllowedRPCs:    claims.AllowedRPCs,
+		AllowedRPCs:    allowed,
 		RecipientClass: recipientClassFromSubject(claims.Subject),
 	})
 	if err != nil {
