@@ -166,8 +166,7 @@ func TestSaveUserLayout_RoundTrip(t *testing.T) {
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
 	layout := &tenantv1.UserLayoutPreferences{
-		Cols:      8,
-		RowHeight: 100,
+		Cols: 8,
 		Widgets: []*tenantv1.WidgetConfig{
 			{Id: "w1", Type: "kpi-summary", Position: &tenantv1.WidgetPosition{X: 0, Y: 0, W: 8, H: 2}, Visible: true},
 		},
@@ -180,7 +179,7 @@ func TestSaveUserLayout_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, getResp.GetIsDefault())
 	assert.Equal(t, int32(8), getResp.GetLayout().GetCols())
-	assert.Equal(t, int32(100), getResp.GetLayout().GetRowHeight())
+	assert.Len(t, getResp.GetLayout().GetWidgets(), 1)
 }
 
 func TestSaveUserLayout_CrossTenantIsolation(t *testing.T) {
@@ -188,9 +187,8 @@ func TestSaveUserLayout_CrossTenantIsolation(t *testing.T) {
 
 	ctxA := tenantAndSubjectCtx("tenant-a", "user-1")
 	layout := &tenantv1.UserLayoutPreferences{
-		Cols:      4,
-		RowHeight: 50,
-		Widgets:   []*tenantv1.WidgetConfig{{Id: "w1", Type: "kpi-summary", Position: &tenantv1.WidgetPosition{X: 0, Y: 0, W: 4, H: 2}, Visible: true}},
+		Cols:    4,
+		Widgets: []*tenantv1.WidgetConfig{{Id: "w1", Type: "kpi-summary", Position: &tenantv1.WidgetPosition{X: 0, Y: 0, W: 4, H: 2}, Visible: true}},
 	}
 	_, err := srv.SaveUserLayout(ctxA, &tenantv1.SaveUserLayoutRequest{Layout: layout})
 	require.NoError(t, err)
