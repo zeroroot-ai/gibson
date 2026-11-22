@@ -203,3 +203,119 @@ func TestMergeSlotExpirySystem_KeepsTheSlotOfAMergedFix(t *testing.T) {
 		t.Fatalf("a merged fix with no health result lost its slot: %+v", evs)
 	}
 }
+
+// fixPair puts two fixes of one Application in the queue. Each fix mission was
+// originated by the mission of its own fix agent run (gibson#1609).
+func fixPair(t *testing.T) *World {
+	t.Helper()
+	w := NewWorld("t1")
+	for _, n := range []string{"1", "2"} {
+		Reduce(w, MissionStarted{ID: "run-" + n})
+		Reduce(w, MissionStarted{ID: "fix-" + n})
+		Reduce(w, MissionOriginated{MissionID: "fix-" + n, ParentMissionID: "run-" + n})
+		Reduce(w, FindingRaised{ID: "f" + n, At: at(0)})
+		Reduce(w, FindingStatusChanged{ID: "f" + n, Status: FindingStatusFixing, MergeRequest: "mr-" + n, MissionID: "fix-" + n, At: at(0)})
+	}
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "shop", At: at(2), MissionID: "fix-2"})
+	return w
+}
+
+func reduceAll(w *World, evs []Event) {
+	for _, ev := range evs {
+		Reduce(w, ev)
+	}
+}
+
+// A slot that was granted after the fix agent stopped waiting must not block
+// the Application. The slot is abandoned at once, and the other fix of the
+// Application gets its slot (gibson#1609).
+func TestMergeSlotExpirySystem_AnEndedAgentRunFreesTheSlotForTheNextFix(t *testing.T) {
+	w := fixPair(t)
+	reduceAll(w, MergeGateSystem(w)) // mr-1 is granted
+	if !w.MayMerge("mr-1", "fix-1") {
+		t.Fatal("mr-1 must hold the slot while its agent run waits")
+	}
+	if len(MergeGateSystem(w)) != 0 {
+		t.Fatal("mr-2 was granted while mr-1 holds the slot")
+	}
+
+	// The agent run of mr-1 stops waiting and its mission ends.
+	Reduce(w, MissionDone{ID: "run-1", Outcome: MissionCompleted})
+	evs := MergeSlotExpirySystem(w)
+	if len(evs) != 1 {
+		t.Fatalf("expiry events = %+v, want one for mr-1", evs)
+	}
+	got := evs[0].(MergeSlotExpired)
+	if got.MergeRequest != "mr-1" || !got.Abandoned {
+		t.Fatalf("event = %+v, want mr-1 abandoned", got)
+	}
+	reduceAll(w, evs)
+
+	if w.MayMerge("mr-1", "fix-1") {
+		t.Fatal("an abandoned slot let a call merge")
+	}
+	next := grants(w)
+	if len(next) != 1 || next[0].MergeRequest != "mr-2" {
+		t.Fatalf("grants = %+v, want the other fix, mr-2", next)
+	}
+	Reduce(w, next[0])
+	if !w.MayMerge("mr-2", "fix-2") {
+		t.Fatal("the other fix did not get its slot")
+	}
+
+	// The slot stays in the queue, so the fix loop does not ask for a new slot
+	// for the same merge request, and the System is quiescent.
+	var abandoned bool
+	for _, s := range w.MergeSlots() {
+		if s.MergeRequest == "mr-1" {
+			abandoned = s.Abandoned
+		}
+	}
+	if !abandoned {
+		t.Fatal("the abandoned slot left the queue, so the fix loop would ask again")
+	}
+	if len(MergeSlotExpirySystem(w)) != 0 {
+		t.Fatal("not quiescent")
+	}
+}
+
+// An agent run that still waits, an unknown mission and a merged fix each keep
+// the slot.
+func TestMergeSlotExpirySystem_KeepsTheSlotWhileTheAgentRunLives(t *testing.T) {
+	w := fixPair(t)
+	reduceAll(w, MergeGateSystem(w))
+	if evs := MergeSlotExpirySystem(w); len(evs) != 0 {
+		t.Fatalf("a live agent run lost its slot: %+v", evs)
+	}
+
+	// A mission that the World does not know has not ended.
+	unknown := NewWorld("t1")
+	Reduce(unknown, FindingRaised{ID: "f1", At: at(0)})
+	Reduce(unknown, FindingStatusChanged{ID: "f1", Status: FindingStatusFixing, MergeRequest: "mr-1", MissionID: "ghost", At: at(0)})
+	Reduce(unknown, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "ghost"})
+	reduceAll(unknown, MergeGateSystem(unknown))
+	if evs := MergeSlotExpirySystem(unknown); len(evs) != 0 {
+		t.Fatalf("an unknown mission lost its slot: %+v", evs)
+	}
+
+	// A merged fix keeps its slot until its health signal answers, even when
+	// its agent run is over.
+	Reduce(w, MergeRequestObserved{Key: "mr-1", State: MergeRequestMerged, At: at(3)})
+	Reduce(w, MissionDone{ID: "run-1", Outcome: MissionCompleted})
+	if evs := MergeSlotExpirySystem(w); len(evs) != 0 {
+		t.Fatalf("a merged fix lost its slot when its agent run ended: %+v", evs)
+	}
+}
+
+// A queued slot that was not granted yet is abandoned too, so the gate does not
+// grant it to nobody.
+func TestMergeGate_NeverGrantsAnAbandonedSlot(t *testing.T) {
+	w := fixPair(t)
+	Reduce(w, MissionDone{ID: "run-1", Outcome: MissionFailed})
+	reduceAll(w, MergeSlotExpirySystem(w))
+	got := grants(w)
+	if len(got) != 1 || got[0].MergeRequest != "mr-2" {
+		t.Fatalf("grants = %+v, want only mr-2", got)
+	}
+}
