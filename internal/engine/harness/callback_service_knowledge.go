@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -150,6 +151,8 @@ func agentFindingToProto(f *agent.Finding) *typespb.Finding {
 		Confidence:  f.Confidence,
 		Severity:    agentSeverityToProto(f.Severity),
 		Remediation: f.Remediation,
+		AgentName:   f.AgentName,
+		Tags:        slices.Clone(f.Tags),
 	}
 	if f.TargetID != nil {
 		pf.TargetId = f.TargetID.String()

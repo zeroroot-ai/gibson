@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -2296,6 +2297,11 @@ func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 		// (gibson#1574). A second submit replaces it with what that submit
 		// holds, so a second submit with no remediation clears it.
 		Remediation: pf.Remediation,
+		// The agent name and the tags are part of what the agent authors.
+		// Without them an incident release cannot tell which agent found the
+		// flaw (incident-agent#8).
+		AgentName: pf.GetAgentName(),
+		Tags:      slices.Clone(pf.GetTags()),
 	}
 
 	// Identity is assigned by the daemon and never read from the payload
