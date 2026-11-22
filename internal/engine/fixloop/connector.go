@@ -125,7 +125,19 @@ func (r *ConnectorReader) MergeRequest(ctx context.Context, tenant, missionID, k
 	f := MergeFact{
 		State: str(m, "state"), PipelineGreen: boolean(m, "pipeline_green"), Reason: str(m, "reason"), At: when(m, "at"),
 		CreatedAt: when(m, "created_at"), SourceBranch: str(m, "source_branch"),
-		SourceBranchReason: str(m, "source_branch_reason"),
+		SourceBranchReason:    str(m, "source_branch_reason"),
+		HeadSHA:               str(m, "head_sha"),
+		ChangedFilesTruncated: boolean(m, "changed_files_truncated"),
+		ChangedFilesError:     str(m, "changed_files_error"),
+	}
+	if list, ok := m["changed_files"].([]any); ok {
+		for _, item := range list {
+			if fm, ok := item.(map[string]any); ok {
+				f.ChangedFiles = append(f.ChangedFiles, ChangedFile{
+					Path: str(fm, "path"), Change: str(fm, "change"), PreviousPath: str(fm, "previous_path"), BlobSHA: str(fm, "blob_sha"),
+				})
+			}
+		}
 	}
 	switch f.State {
 	case MROpen, MRMerged, MRClosed, MRRefused:

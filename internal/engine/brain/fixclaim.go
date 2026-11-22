@@ -85,6 +85,32 @@ type FixLinkRefused struct {
 // Kind identifies the finding.fix_link_refused brain event.
 func (FixLinkRefused) Kind() string { return "finding.fix_link_refused" }
 
+// FixHeadRecorded records the head commit of a merge request and the files that
+// it changes, as the daemon read them on the Git host when it linked the merge
+// request to the Finding. The values come from the host and never from an agent.
+// Files is the JSON list of the changed files.
+type FixHeadRecorded struct {
+	ID           string
+	MergeRequest string
+	HeadSHA      string
+	Files        string
+	MissionID    string
+	At           time.Time
+}
+
+// Kind identifies the finding.fix_head_recorded brain event.
+func (FixHeadRecorded) Kind() string { return "finding.fix_head_recorded" }
+
+// applyFixHeadRecorded keeps the head on the Finding whose current merge
+// request is the one that the event names.
+func applyFixHeadRecorded(w *World, e FixHeadRecorded) {
+	forFinding(w, e.ID, func(f *Finding) {
+		if f.MergeRequest == e.MergeRequest || f.MergeRequest == "" {
+			f.FixHeadSHA, f.FixFiles = e.HeadSHA, e.Files
+		}
+	})
+}
+
 // FixClaimOf returns the claim that holds the Finding, or "".
 func (w *World) FixClaimOf(id string) string {
 	var out string

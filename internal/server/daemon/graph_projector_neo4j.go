@@ -368,6 +368,7 @@ MERGE (f:Finding {brain_id: $id})
       f.vulnerability_id = $vulnerability_id,
       f.priority = $priority, f.priority_rule = $priority_rule, f.priority_reason = $priority_reason,
       f.merge_request = $merge_request,
+      f.fix_head_sha = $fix_head_sha, f.fix_files = $fix_files,
       f.submitted_by = $submitted_by, f.agent_name = $agent_name, f.enrolled_by = $enrolled_by,
       f.updated_at = timestamp()
 WITH f
@@ -524,6 +525,7 @@ var findingReservedProps = map[string]struct{}{
 	"title": {}, "description": {}, "severity": {}, "address": {}, "status": {},
 	"vulnerability_id": {}, "priority": {}, "priority_rule": {}, "priority_reason": {},
 	"merge_request": {}, "submitted_by": {}, "agent_name": {}, "enrolled_by": {},
+	"fix_head_sha": {}, "fix_files": {},
 	"created_at": {}, "verified_at": {}, "verified_status": {}, "id": {},
 }
 
@@ -968,6 +970,10 @@ func findingUpsertParams(f brain.FindingSnapshot) map[string]any {
 		// The read of a finding follows FIXED_BY to the node with this key, so
 		// an older fix of a reopened finding never answers (gibson#1454).
 		"merge_request": f.MergeRequest,
+		// The head commit and the changed files of that merge request, as the
+		// daemon read them on the Git host (gibson#1579). The files are JSON.
+		"fix_head_sha": f.FixHeadSHA,
+		"fix_files":    f.FixFiles,
 		// The verified submitter (gibson#208): who raised the finding, under
 		// which registered name, and who enrolled that agent.
 		"submitted_by": f.SubmittedBy,

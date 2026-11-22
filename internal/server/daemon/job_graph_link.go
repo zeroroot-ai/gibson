@@ -5,9 +5,11 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -97,8 +99,10 @@ func (l *jobGraphLink) JobClosed(ctx context.Context, c jobnode.ClosedJob) {
 		l.logger.Warn("a fix job closed with a merge request and holds no finding",
 			"job_id", c.JobID, "merge_request", mrKey, "claim", claim)
 	}
+	var fact fixloop.MergeFact
 	if len(held) > 0 {
-		if reason := l.vet(ctx, c, mrKey, held, known); reason != "" {
+		var reason string
+		if reason, fact = l.vet(ctx, c, mrKey, held, known); reason != "" {
 			l.refuse(c, mrKey, claim, held, reason, now)
 			return
 		}
@@ -113,6 +117,64 @@ func (l *jobGraphLink) JobClosed(ctx context.Context, c jobnode.ClosedJob) {
 	for _, ev := range events {
 		l.submit(c.TenantID, ev)
 	}
+	// The head and the files come from the read of the host that passed the
+	// checks above, never from the deliverable of the agent (gibson#1579).
+	for _, ev := range l.headEvents(c, mrKey, held, fact, now) {
+		l.submit(c.TenantID, ev)
+	}
+}
+
+// fixFileJSON is the shape of one file in FixHeadRecorded.Files.
+type fixFileJSON struct {
+	Path         string `json:"path"`
+	Change       string `json:"change"`
+	PreviousPath string `json:"previous_path,omitempty"`
+	BlobSHA      string `json:"blob_sha,omitempty"`
+}
+
+// maxFixFiles is the largest list that the harness read returns (the SDK allows
+// 100 files).
+const maxFixFiles = 100
+
+var headSHARe = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// headEvents builds the events that record the head commit and the changed files
+// of the merge request. It builds none when the host gave no valid head or no
+// complete list: the fields stay empty, and the log says why.
+func (l *jobGraphLink) headEvents(c jobnode.ClosedJob, mrKey string, held []string, fact fixloop.MergeFact, now time.Time) []brain.Event {
+	if len(held) == 0 {
+		return nil
+	}
+	switch {
+	case !headSHARe.MatchString(fact.HeadSHA):
+		l.logger.Warn("the host gave no valid head commit for the merge request of a fix job, so the fix has no head",
+			"job_id", c.JobID, "merge_request", mrKey)
+		return nil
+	case fact.ChangedFilesError != "":
+		l.logger.Warn("the host gave no list of the files of the merge request of a fix job",
+			"job_id", c.JobID, "merge_request", mrKey, "error", fact.ChangedFilesError)
+		return nil
+	case fact.ChangedFilesTruncated || len(fact.ChangedFiles) == 0 || len(fact.ChangedFiles) > maxFixFiles:
+		l.logger.Warn("the list of the files of the merge request of a fix job is not complete or is over the limit",
+			"job_id", c.JobID, "merge_request", mrKey, "files", len(fact.ChangedFiles), "truncated", fact.ChangedFilesTruncated)
+		return nil
+	}
+	files := make([]fixFileJSON, 0, len(fact.ChangedFiles))
+	for _, f := range fact.ChangedFiles {
+		files = append(files, fixFileJSON{Path: f.Path, Change: f.Change, PreviousPath: f.PreviousPath, BlobSHA: f.BlobSHA})
+	}
+	enc, err := json.Marshal(files)
+	if err != nil {
+		l.logger.Warn("the files of a fix could not be encoded", "job_id", c.JobID, "error", err)
+		return nil
+	}
+	out := make([]brain.Event, 0, len(held))
+	for _, id := range held {
+		out = append(out, brain.FixHeadRecorded{
+			ID: id, MergeRequest: mrKey, HeadSHA: fact.HeadSHA, Files: string(enc), MissionID: c.MissionRunID, At: now,
+		})
+	}
+	return out
 }
 
 // deliveredMergeRequest returns the key, the URL and the ref of the first merge
@@ -153,13 +215,13 @@ func onlyHeld(known map[string]findingRef, held []string) map[string]findingRef 
 
 // vet reads the merge request on the Git host and returns why the link is
 // refused, or "" when the merge request is the work of this job.
-func (l *jobGraphLink) vet(ctx context.Context, c jobnode.ClosedJob, mrKey string, held []string, known map[string]findingRef) string {
+func (l *jobGraphLink) vet(ctx context.Context, c jobnode.ClosedJob, mrKey string, held []string, known map[string]findingRef) (string, fixloop.MergeFact) {
 	if l.mergeRequests == nil {
-		return "the daemon has no reader of the Git host, so it cannot check the merge request"
+		return "the daemon has no reader of the Git host, so it cannot check the merge request", fixloop.MergeFact{}
 	}
 	fact, err := l.readMergeRequest(ctx, c, mrKey)
 	if err != nil {
-		return "the daemon could not read the merge request on the Git host: " + err.Error()
+		return "the daemon could not read the merge request on the Git host: " + err.Error(), fixloop.MergeFact{}
 	}
 	var claimedAt time.Time
 	for _, id := range held {
@@ -167,7 +229,7 @@ func (l *jobGraphLink) vet(ctx context.Context, c jobnode.ClosedJob, mrKey strin
 			claimedAt = t
 		}
 	}
-	return mergeRequestRefusal(fact, jobnode.JobBranch(c.JobID), claimedAt)
+	return mergeRequestRefusal(fact, jobnode.JobBranch(c.JobID), claimedAt), fact
 }
 
 // mergeReadWaits are the waits between the reads of the merge request on the

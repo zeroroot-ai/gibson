@@ -148,6 +148,13 @@ type FixFacts struct {
 	// delivers must be newer than it (review B1).
 	FixClaim     string
 	FixClaimedAt time.Time
+	// FixHeadSHA is the head commit of the merge request of the current fix, and
+	// FixFiles is the JSON list of the files that it changes (path, change,
+	// previous_path, blob_sha). The daemon reads both from the Git host when it
+	// links the merge request. An agent never sets them (gibson#1579). Empty
+	// means no fix has a merge request with a known head.
+	FixHeadSHA string
+	FixFiles   string
 	// VerifiedAt is the time of the change to `verified`. A bounded reader
 	// of the history reads it to leave out an old fix (review M6).
 	VerifiedAt time.Time
@@ -472,5 +479,6 @@ func resetFix(f *Finding) {
 	f.FixMissionID = ""
 	f.RevertRequestedAt, f.RevertMergeRequest = time.Time{}, ""
 	f.FixClaim, f.FixClaimedAt = "", time.Time{}
+	f.FixHeadSHA, f.FixFiles = "", ""
 	f.VerifiedAt = time.Time{}
 }
