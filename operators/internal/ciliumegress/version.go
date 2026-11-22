@@ -120,7 +120,7 @@ func ImageVersion(image string) (string, error) {
 // DaemonSet template and the image of the cilium-agent container of each running
 // pod, so a node that still runs an old agent after a rollout is found. It fails
 // closed: a DaemonSet that the operator cannot read, a missing agent container
-// and an image with no tag all refuse.
+// and a template or pod spec image with no tag all refuse.
 func RequireFixedVersion(ctx context.Context, r client.Reader, ref DaemonSetRef) error {
 	var ds appsv1.DaemonSet
 	key := client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}
@@ -147,14 +147,42 @@ func RequireFixedVersion(ctx context.Context, r client.Reader, ref DaemonSetRef)
 		return fmt.Errorf("%w: list the agent pods in %s: %w", ErrCiliumVersion, ref.Namespace, err)
 	}
 	for i := range pods.Items {
-		pod := &pods.Items[i]
-		for _, st := range pod.Status.ContainerStatuses {
-			if st.Name != agentContainer {
-				continue
-			}
-			if err := checkImage(st.Image); err != nil {
-				return fmt.Errorf("agent pod %s/%s: %w", pod.Namespace, pod.Name, err)
-			}
+		if err := checkPod(&pods.Items[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkPod checks the cilium-agent container of one running agent pod. The pod
+// spec keeps the image that the DaemonSet wrote when it made the pod, with its
+// tag, so an old pod after a rollout still shows its old version. The status
+// image is checked too when it has a tag. On containerd an image pinned by tag
+// and digest often shows only the digest in the status, and that is no refusal.
+func checkPod(pod *corev1.Pod) error {
+	found := false
+	for _, c := range pod.Spec.Containers {
+		if c.Name != agentContainer {
+			continue
+		}
+		found = true
+		if err := checkImage(c.Image); err != nil {
+			return fmt.Errorf("agent pod %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
+	}
+	if !found {
+		return fmt.Errorf("%w: the agent pod %s/%s has no container %q",
+			ErrCiliumVersion, pod.Namespace, pod.Name, agentContainer)
+	}
+	for _, st := range pod.Status.ContainerStatuses {
+		if st.Name != agentContainer {
+			continue
+		}
+		if _, err := ImageVersion(st.Image); err != nil {
+			continue
+		}
+		if err := checkImage(st.Image); err != nil {
+			return fmt.Errorf("agent pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	}
 	return nil

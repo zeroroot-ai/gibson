@@ -144,12 +144,51 @@ func twoContainerDaemonSet(agentImage string) *appsv1.DaemonSet {
 }
 
 func agentPod(name, image string) *corev1.Pod {
+	return agentPodWithStatus(name, image, image)
+}
+
+// agentPodWithStatus makes an agent pod whose spec and status hold different
+// images. On containerd the status of an image pinned by tag and digest often
+// holds only the digest.
+func agentPodWithStatus(name, specImage, statusImage string) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Namespace: DefaultDaemonSetNamespace, Name: name, Labels: map[string]string{"k8s-app": "cilium"}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{
+			{Name: "sidecar", Image: "busybox:1.36"},
+			{Name: "cilium-agent", Image: specImage},
+		}},
 		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
 			{Name: "sidecar", Image: "busybox:1.36"},
-			{Name: "cilium-agent", Image: image},
+			{Name: "cilium-agent", Image: statusImage},
 		}},
+	}
+}
+
+// The Cilium chart pins the agent by tag and digest. The status image then
+// often holds only the digest. The start must not refuse that pod, and the tag
+// in the pod spec still decides.
+func TestRequireFixedVersion_ReadsTheTagFromThePodSpec(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	ref := DaemonSetFromEnv(func(string) string { return "" })
+	run := func(objs ...client.Object) error {
+		return RequireFixedVersion(context.Background(), fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build(), ref)
+	}
+	pinned := "quay.io/cilium/cilium:v1.20.2@sha256:" + strings.Repeat("a", 64)
+	digestOnly := "quay.io/cilium/cilium@sha256:" + strings.Repeat("a", 64)
+	if err := run(twoContainerDaemonSet(pinned), agentPodWithStatus("a", pinned, digestOnly)); err != nil {
+		t.Fatalf("a status image with only a digest refused the start: %v", err)
+	}
+	old := "quay.io/cilium/cilium:v1.15.9@sha256:" + strings.Repeat("b", 64)
+	err := run(twoContainerDaemonSet(pinned), agentPodWithStatus("old", old, digestOnly))
+	if !errors.Is(err, ErrCiliumVersion) || !strings.Contains(err.Error(), "old") {
+		t.Fatalf("a pod spec with an old tag: err = %v, want a refusal that names the pod", err)
+	}
+	noTag := agentPodWithStatus("bare", digestOnly, digestOnly)
+	if err := run(twoContainerDaemonSet(pinned), noTag); !errors.Is(err, ErrCiliumVersion) {
+		t.Fatalf("a pod spec with no tag: err = %v, want a refusal", err)
 	}
 }
 
