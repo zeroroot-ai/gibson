@@ -21,43 +21,9 @@
 # Delete each line when its consumer merges. Each line holds until the date
 # in its reason (review m24). On that date, build the consumer or delete the
 # field (ADR-0094 rule 5).
-gibson.daemon.discovery.v1.CatalogItem.tool_class | #1497 | hold until 2027-01-31: the connector pages of the dashboard read the tool class and the tenant OAuth client; not merged yet
 gibson.tenant.v1.CatalogEntry.endpoint_patterns | #1497 | hold until 2027-01-31: the connector pages of the dashboard read the tool class and the tenant OAuth client; not merged yet
 gibson.tenant.v1.CatalogEntry.oauth_client | #1497 | hold until 2027-01-31: the connector pages of the dashboard read the tool class and the tenant OAuth client; not merged yet
-gibson.tenant.v1.CatalogEntry.tool_class | #1497 | hold until 2027-01-31: the connector pages of the dashboard read the tool class and the tenant OAuth client; not merged yet
-gibson.tenant.v1.Connector.tool_class | #1497 | hold until 2027-01-31: the connector pages of the dashboard read the tool class and the tenant OAuth client; not merged yet
 gibson.tenant.v1.ControlCountermeasure.mapped_control_ids | #1483 | hold until 2027-01-31: the compliance page of the dashboard shows the D3FEND countermeasure next to the control; not built yet
-gibson.tenant.v1.GetIncidentReportResponse.incident_key | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
-gibson.tenant.v1.GetIncidentReportResponse.timeline_total | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
-gibson.tenant.v1.IncidentAction.tool_id | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
-gibson.tenant.v1.IncidentCause.finding_key | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
-gibson.tenant.v1.IncidentFix.finding_key | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
-gibson.tenant.v1.IncidentFix.merge_request_key | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
-gibson.tenant.v1.IncidentFix.verified_by | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
-gibson.tenant.v1.IncidentGrant.granted_by | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
-gibson.tenant.v1.IncidentReached.alert_key | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
-gibson.tenant.v1.ReplayFrame.replay_seq | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
-gibson.tenant.v1.ReplayFrame.timeline_seq | #1471 | hold until 2027-01-31: the incident report page of the dashboard reads it; the epic plans that page and it is not built yet
 gibson.world.v1.ActionGroup.audit_record_ids | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.ActionGroup.grant_object | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.ActionGroup.grantor | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.ActionGroup.grant_relation | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.GetExposureResponse.agent_seconds | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.GetExposureResponse.total_seconds | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.GetExposureResponse.wait_seconds | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.GetExposureTrendResponse.median_agent_seconds | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.GetExposureTrendResponse.median_seconds | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.GetExposureTrendResponse.median_wait_seconds | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.GetExposureTrendResponse.period_seconds | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.GetExposureTrendResponse.previous_count | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.GetExposureTrendResponse.previous_median_seconds | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.GetRevertRateResponse.period_seconds | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
 gibson.world.v1.OpenFindingView.check_kind | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.OpenFindingView.merge_request | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.OpenFindingView.merge_request_url | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.OpenFindingView.priority_rule | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
 gibson.world.v1.OpenFindingView.target_belief | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.RevertPeriod.reverted | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.TimelineEvent.merge_request | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.TimelineEvent.replay_seq | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
-gibson.world.v1.WaitingItem.waited_seconds | #1497 | hold until 2027-01-31: the blue team console reads it on the dashboard branch epic/blue-team-console, which is not merged yet
