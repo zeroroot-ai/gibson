@@ -199,7 +199,10 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	},
 
 	// --- Taxonomy / validation ---
-	harnesspb.HarnessCallbackService_GetTaxonomySchema_FullMethodName:    {agentSurface: true, reason: reasonAgentCallbackSurface},
+	harnesspb.HarnessCallbackService_GetTaxonomySchema_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
+	// The countermeasures of one technique, from the catalog that is the same for
+	// every tenant (gibson#1487). Read-only.
+	harnesspb.HarnessCallbackService_GetCountermeasures_FullMethodName:   {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_GenerateNodeID_FullMethodName:       {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_ValidateFinding_FullMethodName:      {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_ValidateGraphNode_FullMethodName:    {agentSurface: true, reason: reasonAgentCallbackSurface},
@@ -274,6 +277,12 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	// handler landed in gibson#1377 (worldview.go), projecting a mission-Scope-
 	// limited, handle-named slice. It is part of the in-mission agent surface.
 	harnesspb.HarnessCallbackService_WorldView_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
+
+	// Read markers (gibson#1569). An agent that reads a Connector in a loop
+	// records how far it read. Both calls key the marker by the tenant and the
+	// authenticated identity of the caller, never by a field of ContextInfo.
+	harnesspb.HarnessCallbackService_WriteReadMarker_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
+	harnesspb.HarnessCallbackService_LastReadMarker_FullMethodName:  {agentSurface: true, reason: reasonAgentCallbackSurface},
 
 	// Knowledge reads (sdk#496/#498, zerocool-plugins#33). The in-mission agent
 	// surface for reading what earlier work established: the tenant knowledge

@@ -19,9 +19,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.component.v1.ComponentService/DisablePlugin,can_configure,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/EnablePlugin,can_configure,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/EnrollComponent,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/FindSimilarAttacks,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/FindSimilarFindings,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/GetAttackChains,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/GetCredential,can_resolve,secret,tenant_and_field('Name'),COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/GetFindings,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/GetMissionResults,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
@@ -162,10 +160,9 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/CreateMission,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/DeleteSessionContext,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/DevboxExec,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
-/gibson.harness.v1.HarnessCallbackService/FindSimilarAttacks,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/FindSimilarFindings,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/GenerateNodeID,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
-/gibson.harness.v1.HarnessCallbackService/GetAttackChains,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
+/gibson.harness.v1.HarnessCallbackService/GetCountermeasures,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/GetCredential,can_resolve,secret,tenant_and_field('Name'),COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/GetFindings,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/GetMissionResults,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
@@ -176,6 +173,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/GetRunFindings,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/GetSessionContext,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
+/gibson.harness.v1.HarnessCallbackService/LastReadMarker,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/ListMissions,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/ListPlugins,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/ListTools,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
@@ -215,6 +213,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/WorkspaceReadFile,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/WorkspaceWriteFile,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/WorldView,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
+/gibson.harness.v1.HarnessCallbackService/WriteReadMarker,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.identity.v1.IdentityService/WhoAmI,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/identity/v1/identity.proto,rule
 /gibson.job.v1.JobService/CloseJob,can_close,job,from_field('JobId'),USER|SERVICE,gibson/job/v1/job.proto,rule
 /gibson.job.v1.JobService/GetJob,can_read,job,from_field('JobId'),USER|SERVICE,gibson/job/v1/job.proto,rule

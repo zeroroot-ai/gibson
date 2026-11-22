@@ -667,6 +667,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithJobSurface(&lazyJobSurface{daemon: d}),
 		harness.WithJobDriver(&lazyJobDriver{daemon: d}),
 		harness.WithConnectors(d.connectorMCPClient()),
+		harness.WithEnabledConnectors(&lazyEnabledConnectors{daemon: d}),
 		harness.WithMissionBlockedTools(d.storedBlockedTools),
 		harness.WithAgentSkillStore(d.agentSkillStore),
 		harness.WithOutsideAgentStore(d.outsideAgentStore),
@@ -1194,7 +1195,9 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.brainExecutor.models = d.modelClient
 		// A job node's jobs live in the tenant's data plane, which is built
 		// later in Start, so the store is read per dispatch (gibson#1713).
-		d.brainExecutor.jobClosed = newJobGraphLink(d.brainRegistry, connectors, d.logger.WithComponent("job-graph-link").Slog())
+		// A close whose merge request could not be read stays pending. The loop
+		// of the link reads it again, also after a restart (gibson#1581).
+		d.wireJobClosed(ctx, connectors, d.logger.WithComponent("job-graph-link").Slog())
 		d.brainExecutor.jobFindings = openFindingsResolver(d.brainRegistry)
 		d.brainExecutor.jobClaims = newFixClaims(d.brainRegistry)
 		d.brainExecutor.jobs = func() (job.Store, error) {
@@ -1564,6 +1567,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// never became part of the Timeline.
 		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
 		d.callback.SetSkillLoadSink(ingestSkillLoad(d.brainRegistry))
+		d.callback.SetReadMarkerStore(harness.NewBrainReadMarkerStore(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")
 
 		// Wire PlaceBet's belief substrate (ADR-0122, ADR-0129,

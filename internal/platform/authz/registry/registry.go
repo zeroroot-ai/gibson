@@ -218,25 +218,7 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.component.v1.ComponentService/FindSimilarAttacks": {
-		Service:           "gibson.component.v1.ComponentService",
-		Relation:          "can_execute",
-		ObjectType:        "component",
-		ObjectDeriver:     "system_tenant",
-		AllowedIdentities: IdentityComponent,
-		Unauthenticated:   false,
-		Self:              false,
-	},
 	"/gibson.component.v1.ComponentService/FindSimilarFindings": {
-		Service:           "gibson.component.v1.ComponentService",
-		Relation:          "can_execute",
-		ObjectType:        "component",
-		ObjectDeriver:     "system_tenant",
-		AllowedIdentities: IdentityComponent,
-		Unauthenticated:   false,
-		Self:              false,
-	},
-	"/gibson.component.v1.ComponentService/GetAttackChains": {
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -1505,15 +1487,6 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.harness.v1.HarnessCallbackService/FindSimilarAttacks": {
-		Service:           "gibson.harness.v1.HarnessCallbackService",
-		Relation:          "can_use",
-		ObjectType:        "component",
-		ObjectDeriver:     "system_tenant",
-		AllowedIdentities: IdentityComponent,
-		Unauthenticated:   false,
-		Self:              false,
-	},
 	"/gibson.harness.v1.HarnessCallbackService/FindSimilarFindings": {
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
@@ -1532,7 +1505,7 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.harness.v1.HarnessCallbackService/GetAttackChains": {
+	"/gibson.harness.v1.HarnessCallbackService/GetCountermeasures": {
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1623,6 +1596,15 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema": {
+		Service:           "gibson.harness.v1.HarnessCallbackService",
+		Relation:          "can_use",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.harness.v1.HarnessCallbackService/LastReadMarker": {
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1974,6 +1956,15 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WorldView": {
+		Service:           "gibson.harness.v1.HarnessCallbackService",
+		Relation:          "can_use",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.harness.v1.HarnessCallbackService/WriteReadMarker": {
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",

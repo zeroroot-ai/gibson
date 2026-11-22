@@ -234,6 +234,11 @@ type AgentSpec struct {
 	// The resolver therefore refuses the dispatch instead (gibson#1692).
 	MinContextWindow int `yaml:"minContextWindow"`
 
+	// Tasks are the task ids that this agent serves. A mission node that names
+	// the agent must name one of them. Empty means the agent declares none, and
+	// the catalog does not check the task of a node.
+	Tasks []string `yaml:"tasks"`
+
 	// Env is the static environment every launch of this agent carries: the
 	// platform's knowledge of the sandbox the image runs in, which the image
 	// cannot know for itself. setec runs a sandbox with a read-only root
@@ -921,6 +926,9 @@ type AgentEntry struct {
 	MinContextWindow int
 	// BudgetLimit is the agent's budget ceiling.
 	BudgetLimit int
+	// Tasks are the task ids that the agent serves (AgentSpec.Tasks). Empty
+	// means the manifest declares none.
+	Tasks []string
 	// EgressAllow is the agent's egress ceiling (ADR-0116).
 	EgressAllow []string
 	// Env is the static environment every launch carries (AgentSpec.Env).
@@ -962,6 +970,7 @@ func (m Manifest) toAgentEntry() AgentEntry {
 		MinContextWindow: s.MinContextWindow,
 		Env:              s.Env,
 		BudgetLimit:      s.BudgetLimit,
+		Tasks:            s.Tasks,
 		EgressAllow:      m.EgressAllow,
 		DispatchMode:     s.DispatchMode,
 		Credentials:      s.Credentials,

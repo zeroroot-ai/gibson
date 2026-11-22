@@ -90,6 +90,11 @@ func TestSearchTools_FiltersByCanInvokeAndMaps(t *testing.T) {
 	if c.GetId() != "mcp:gitlab:create_issue" || c.GetDescription() != "open a gitlab issue" {
 		t.Fatalf("candidate = %+v, want mcp:gitlab:create_issue / open a gitlab issue", c)
 	}
+	// The typed result carries the tool class of the connector (ADR-0177), as the
+	// result of the search_tools meta tool does.
+	if c.GetToolClass() != "git-host" {
+		t.Fatalf("tool class = %q, want git-host", c.GetToolClass())
+	}
 	if authzer.lastUser != "user:alice" {
 		t.Fatalf("caller subject = %q, want user:alice", authzer.lastUser)
 	}
