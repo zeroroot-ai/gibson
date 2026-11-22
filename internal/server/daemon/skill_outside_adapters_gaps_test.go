@@ -14,8 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
@@ -150,4 +152,16 @@ func TestSeedSharedAgentSkillGate_FailuresAreReported(t *testing.T) {
 	err := seedSharedAgentSkillGate(context.Background(), &failingGateFGA{}, bad, discardLog())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "shared Agent Skill gate")
+}
+
+// stubSkillStore is an Agent Skill store that the test never calls.
+type stubSkillStore struct{ agentskillstore.Store }
+
+// The files of a skill-script call read the store through a provider that
+// answers nil, and not a typed nil, until the store is built.
+func TestSkillFileStore_IsNilUntilTheStoreIsBuilt(t *testing.T) {
+	d := &daemonImpl{}
+	assert.Equal(t, harness.SkillFileStore(nil), d.skillFileStore(), "no store built: the provider must answer a nil interface")
+	d.agentSkills = stubSkillStore{}
+	assert.NotNil(t, d.skillFileStore(), "a built store must be served")
 }
