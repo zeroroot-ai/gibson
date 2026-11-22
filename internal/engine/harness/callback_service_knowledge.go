@@ -292,9 +292,10 @@ func applicationFindingsToProto(raw []byte) ([]*harnesspb.ApplicationFinding, er
 			PriorityRule:    f.PriorityRule,
 			PriorityReason:  f.PriorityReason,
 
-			// The fix agent reads these. A block reason stops a second try of
-			// the same fix, and the merge request links to the current fix
-			// (gibson#1579).
+			// The fix agent reads these. The block reason is a record of why a
+			// pass gave up. The agent checks the finding again in each pass,
+			// because no actor clears the reason. The merge request links to
+			// the current fix (gibson#1579).
 			FixBlockedReason: f.FixBlockedReason,
 			MergeRequest:     f.MergeRequest,
 			MergeRequestUrl:  f.MergeRequestURL,

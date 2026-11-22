@@ -85,8 +85,9 @@ type ApplicationFinding struct {
 	PriorityReason string `json:"priority_reason,omitempty"`
 	// FixBlockedReason is why the fix agent did not fix this Finding, as the
 	// agent wrote it back on the Finding (the node property
-	// fix_blocked_reason). The next pass reads it and does not try the same
-	// Finding again. Empty means that no pass gave up on it.
+	// fix_blocked_reason). It is a record for a person. The agent checks the
+	// Finding again in each pass, because no actor clears the reason. Empty
+	// means that no pass gave up on it.
 	FixBlockedReason string `json:"fix_blocked_reason,omitempty"`
 	// MergeRequest and MergeRequestURL name the merge request of the current
 	// fix of the Finding: the FIXED_BY edge to the node whose key the Finding
