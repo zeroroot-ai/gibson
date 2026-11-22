@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -154,7 +155,7 @@ func TestSetReadMarkerStore_WiresTheStore(t *testing.T) {
 
 // markerConnectors is the connectors of the test tenant: edr, siem and c.
 func markerConnectors() fakeConnectors {
-	var tools []catalog.ToolEntry
+	tools := make([]catalog.ToolEntry, 0, 3)
 	for _, c := range []string{"edr", "siem", "c"} {
 		tools = append(tools, catalog.ToolEntry{Source: toolid.SourceMCP, Connector: c, Tool: "list"})
 	}
@@ -198,7 +199,10 @@ type countingMarkerStore struct {
 
 func (c *countingMarkerStore) WriteReadMarker(ctx context.Context, tenant string, m brain.ReadMarker) error {
 	c.writes++
-	return c.ReadMarkerStore.WriteReadMarker(ctx, tenant, m)
+	if err := c.ReadMarkerStore.WriteReadMarker(ctx, tenant, m); err != nil {
+		return fmt.Errorf("count the write: %w", err)
+	}
+	return nil
 }
 
 // A write that holds the marker that is already there adds no Timeline event,
