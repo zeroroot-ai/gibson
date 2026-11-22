@@ -1650,6 +1650,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.harness.v1.HarnessCallbackService/GetCountermeasures": {
+    method: "/gibson.harness.v1.HarnessCallbackService/GetCountermeasures",
+    service: "gibson.harness.v1.HarnessCallbackService",
+    relation: "can_use",
+    objectType: "component",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.COMPONENT,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.harness.v1.HarnessCallbackService/GetCredential": {
     method: "/gibson.harness.v1.HarnessCallbackService/GetCredential",
     service: "gibson.harness.v1.HarnessCallbackService",
