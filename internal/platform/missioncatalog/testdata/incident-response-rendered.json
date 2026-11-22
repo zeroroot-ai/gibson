@@ -1,0 +1,262 @@
+{
+  "name": "incident-response",
+  "description": "Take one alert, find what the incident reaches, contain it inside the grant, fix its cause, release the containment after the fix is verified, and write the report.",
+  "version": "1.0.0",
+  "nodes": {
+    "cause": {
+      "id": "cause",
+      "type": "NODE_TYPE_AGENT",
+      "agentConfig": {
+        "agentName": "incident-agent",
+        "task": {
+          "id": "cause",
+          "goal": "Find the cause of the incident. Raise one finding for the cause, with evidence. Link the Incident node to the finding with CAUSED_BY. A finding has a fix, and an alert has none, so raise a finding only for the cause. Do not fix anything in this step.",
+          "context": {
+            "alert.id": {
+              "stringValue": "alert-4471"
+            },
+            "ir.task": {
+              "stringValue": "cause"
+            }
+          }
+        }
+      },
+      "dependencies": [
+        "contain",
+        "isolate"
+      ]
+    },
+    "contain": {
+      "id": "contain",
+      "type": "NODE_TYPE_AGENT",
+      "agentConfig": {
+        "agentName": "incident-agent",
+        "task": {
+          "id": "contain",
+          "goal": "Contain the identities and the hosts that the incident reaches. Use only the response actions in the context. Make each call once, with the id of one identity or one host. The daemon refuses a call that your grant does not allow. When the daemon refuses a call, or answers pending authorization, do not retry it and do not use another tool for the same effect. Record the tool id and the reason on the Incident node, as the property refused.<tool id>. Go on with the next action. Do not isolate a Kubernetes workload in this step.",
+          "context": {
+            "alert.id": {
+              "stringValue": "alert-4471"
+            },
+            "ir.task": {
+              "stringValue": "contain"
+            },
+            "response.tools.host": {
+              "stringValue": "mcp:crowdstrike:contain_host, mcp:defender-endpoint:isolate_device, mcp:sentinelone:disconnect_from_network"
+            },
+            "response.tools.identity": {
+              "stringValue": "mcp:okta:revoke_user_sessions, mcp:okta:suspend_user, mcp:entra-id:revoke_sign_in_sessions, mcp:entra-id:disable_account"
+            }
+          }
+        }
+      },
+      "dependencies": [
+        "reach"
+      ]
+    },
+    "fix": {
+      "id": "fix",
+      "type": "NODE_TYPE_JOB",
+      "jobConfig": {
+        "bankRef": "bank/blue-team",
+        "spec": {
+          "goal": "Fix the cause of the incident. Fix the finding that the Incident node names with CAUSED_BY, in the manifests of this repository. Open one merge request, name the finding in it, and merge it when the pipeline is green. After the deploy, read the health signal of the service through the connector prometheus-core. Hold the signal for the hold time of the service. When the signal fails, revert your merge and leave the finding open. Do not release any containment.",
+          "repositories": [
+            {
+              "name": "manifests",
+              "connectorRef": "connector/gitlab-core",
+              "project": "examplebank/cluster-manifests",
+              "deliverable": "DELIVERABLE_KIND_MERGE_REQUEST"
+            }
+          ],
+          "inputs": [
+            "{{findings.open}}"
+          ]
+        }
+      },
+      "dependencies": [
+        "cause"
+      ]
+    },
+    "isolate": {
+      "id": "isolate",
+      "type": "NODE_TYPE_JOB",
+      "jobConfig": {
+        "bankRef": "bank/blue-team",
+        "spec": {
+          "goal": "For each Kubernetes workload that the incident reaches, add one network policy that isolates it. Put the policy in the manifests of this repository. Open one merge request for each workload, and merge it when the pipeline is green. Do not change the cluster in any other way. Do not read the health signal of an isolated workload. When the incident reaches no Kubernetes workload, do nothing.",
+          "repositories": [
+            {
+              "name": "manifests",
+              "connectorRef": "connector/gitlab-core",
+              "project": "examplebank/cluster-manifests",
+              "deliverable": "DELIVERABLE_KIND_MERGE_REQUEST"
+            }
+          ],
+          "inputs": [
+            "{{findings.open}}"
+          ]
+        }
+      },
+      "dependencies": [
+        "reach"
+      ]
+    },
+    "reach": {
+      "id": "reach",
+      "type": "NODE_TYPE_AGENT",
+      "agentConfig": {
+        "agentName": "incident-agent",
+        "task": {
+          "id": "reach",
+          "goal": "Read the graph. List each identity, host, workload and application that the alerts of the Incident node AFFECT. Follow the edges from each of them to what they reach. Record each place with an AFFECTS edge from the alert. Do not change any target in this step.",
+          "context": {
+            "alert.id": {
+              "stringValue": "alert-4471"
+            },
+            "ir.task": {
+              "stringValue": "reach"
+            }
+          }
+        }
+      },
+      "dependencies": [
+        "triage"
+      ]
+    },
+    "release": {
+      "id": "release",
+      "type": "NODE_TYPE_AGENT",
+      "agentConfig": {
+        "agentName": "incident-agent",
+        "task": {
+          "id": "release",
+          "goal": "Read the status of the finding that the Incident node names with CAUSED_BY. When the status is verified, release each containment that you made, with the matching release action in the context. When the status is not verified, release nothing and record that the containment stays. Do not read the health signal of a contained target. Do not release a containment that you did not make.",
+          "context": {
+            "alert.id": {
+              "stringValue": "alert-4471"
+            },
+            "ir.task": {
+              "stringValue": "release"
+            },
+            "release.tools.host": {
+              "stringValue": "mcp:crowdstrike:lift_containment, mcp:defender-endpoint:release_device, mcp:sentinelone:reconnect_to_network"
+            },
+            "release.tools.identity": {
+              "stringValue": "mcp:okta:unsuspend_user, mcp:entra-id:enable_account"
+            }
+          }
+        }
+      },
+      "dependencies": [
+        "fix"
+      ]
+    },
+    "releaseWorkloads": {
+      "id": "releaseWorkloads",
+      "type": "NODE_TYPE_JOB",
+      "jobConfig": {
+        "bankRef": "bank/blue-team",
+        "spec": {
+          "goal": "Read the status of the finding that the Incident node names with CAUSED_BY. When the status is verified, remove each network policy that the isolate step added. Make the change in a second commit, as one merge request, and merge it when the pipeline is green. When the status is not verified, change nothing. Do not read the health signal of an isolated workload.",
+          "repositories": [
+            {
+              "name": "manifests",
+              "connectorRef": "connector/gitlab-core",
+              "project": "examplebank/cluster-manifests",
+              "deliverable": "DELIVERABLE_KIND_MERGE_REQUEST"
+            }
+          ],
+          "inputs": [
+            "{{findings.open}}"
+          ]
+        }
+      },
+      "dependencies": [
+        "fix"
+      ]
+    },
+    "report": {
+      "id": "report",
+      "type": "NODE_TYPE_JOIN",
+      "joinConfig": {
+        "waitFor": [
+          "release",
+          "releaseWorkloads"
+        ],
+        "strategy": "MERGE_STRATEGY_CONCAT"
+      },
+      "dependencies": [
+        "release",
+        "releaseWorkloads"
+      ]
+    },
+    "triage": {
+      "id": "triage",
+      "type": "NODE_TYPE_AGENT",
+      "agentConfig": {
+        "agentName": "incident-agent",
+        "task": {
+          "id": "triage",
+          "goal": "Read the Alert node alert-4471. Find the Incident node that the alert belongs to. When no Incident node exists, create one. Join the alert to the Incident node with PART_OF. Do not raise a finding for the alert. Do not contain anything in this step.",
+          "context": {
+            "alert.id": {
+              "stringValue": "alert-4471"
+            },
+            "ir.task": {
+              "stringValue": "triage"
+            }
+          }
+        }
+      }
+    }
+  },
+  "edges": [
+    {
+      "from": "triage",
+      "to": "reach"
+    },
+    {
+      "from": "reach",
+      "to": "contain"
+    },
+    {
+      "from": "reach",
+      "to": "isolate"
+    },
+    {
+      "from": "contain",
+      "to": "cause"
+    },
+    {
+      "from": "isolate",
+      "to": "cause"
+    },
+    {
+      "from": "cause",
+      "to": "fix"
+    },
+    {
+      "from": "fix",
+      "to": "release"
+    },
+    {
+      "from": "fix",
+      "to": "releaseWorkloads"
+    },
+    {
+      "from": "release",
+      "to": "report"
+    },
+    {
+      "from": "releaseWorkloads",
+      "to": "report"
+    }
+  ],
+  "entryPoints": [
+    "triage"
+  ],
+  "exitPoints": [
+    "report"
+  ]
+}
