@@ -39,6 +39,9 @@ type AgentToolCall struct {
 	// GrantID is the capability grant that allowed a connector call
 	// (gibson#1474). Empty means that no grant is recorded.
 	GrantID string
+	// ErrCode is the typed reason of a call that did not succeed (gibson#1575).
+	// Empty means the call succeeded, or the event came before the code.
+	ErrCode string
 	// RecordedAtUnixNano stamps when the daemon observed this call, carried on
 	// the event rather than read from time.Now() during Reduce, so a
 	// retention sweep replays deterministically (gibson#271).
@@ -67,6 +70,7 @@ type AgentToolCallObserved struct {
 	// GrantID is the capability grant that allowed the call. The incident
 	// report reads it from this event (gibson#1478).
 	GrantID            string
+	ErrCode            string
 	RecordedAtUnixNano int64
 }
 
@@ -109,6 +113,9 @@ func applyAgentToolCallObserved(w *World, e AgentToolCallObserved) {
 			if c.GrantID == "" && e.GrantID != "" {
 				c.GrantID = e.GrantID
 			}
+			if c.ErrCode == "" && e.ErrCode != "" {
+				c.ErrCode = e.ErrCode
+			}
 			if c.RecordedAtUnixNano == 0 && e.RecordedAtUnixNano != 0 {
 				c.RecordedAtUnixNano = e.RecordedAtUnixNano
 			}
@@ -126,6 +133,7 @@ func applyAgentToolCallObserved(w *World, e AgentToolCallObserved) {
 		Result:             redactForTenant(w, e.Result),
 		Err:                e.Err,
 		GrantID:            e.GrantID,
+		ErrCode:            e.ErrCode,
 		RecordedAtUnixNano: e.RecordedAtUnixNano,
 	})
 }
@@ -141,6 +149,7 @@ type AgentToolCallSnapshot struct {
 	Result             string
 	Err                string
 	GrantID            string
+	ErrCode            string
 	RecordedAtUnixNano int64
 }
 
@@ -160,6 +169,7 @@ func (w *World) AgentToolCallSnapshot() []AgentToolCallSnapshot {
 			Result:             c.Result,
 			Err:                c.Err,
 			GrantID:            c.GrantID,
+			ErrCode:            c.ErrCode,
 			RecordedAtUnixNano: c.RecordedAtUnixNano,
 		})
 	}

@@ -85,6 +85,9 @@ func TestGraphService_Integration_FindingReadsComeFromPostgres(t *testing.T) {
 		f := finding.NewEnhancedFinding(
 			agent.NewFinding("finding "+string(rune('a'+i)), "d", sev).WithCategory("injection"), m, "recon")
 		f.CreatedAt = now.Add(time.Duration(i) * time.Second)
+		// The store refuses a finding with no valid check (ADR-0178). A scan of
+		// the mission raised these.
+		f.Check = finding.ScanCheck(m)
 		require.NoError(t, store.Store(ctx, "test-graph-tenant", f))
 	}
 
