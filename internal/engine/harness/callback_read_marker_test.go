@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -225,4 +226,32 @@ func TestWriteReadMarker_AnUnchangedWriteIsANoOp(t *testing.T) {
 	got, err := svc.LastReadMarker(ctx, &harnesspb.LastReadMarkerRequest{Connector: "edr"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a", "b"}, got.GetMarker().GetResultIds())
+}
+
+// A marker over the caps is refused and writes nothing (gibson#1569).
+func TestWriteReadMarker_AnOversizeMarkerIsRefused(t *testing.T) {
+	svc := readMarkerService(t)
+	ctx := readMarkerCtx("acme", "s")
+	many := make([]string, maxReadMarkerResultIDs+1)
+	for i := range many {
+		many[i] = "r"
+	}
+	for name, req := range map[string]*harnesspb.WriteReadMarkerRequest{
+		"cursor":    {Connector: "edr", Cursor: strings.Repeat("x", maxReadMarkerCursor+1)},
+		"id count":  {Connector: "edr", ResultIds: many},
+		"id length": {Connector: "edr", ResultIds: []string{strings.Repeat("x", maxReadMarkerResultID+1)}},
+	} {
+		w, err := svc.WriteReadMarker(ctx, req)
+		require.NoError(t, err, name)
+		assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, w.GetError().GetCode(), name)
+	}
+	r, err := svc.LastReadMarker(ctx, &harnesspb.LastReadMarkerRequest{Connector: "edr"})
+	require.NoError(t, err)
+	assert.False(t, r.GetFound(), "a refused write left a marker")
+
+	ok, err := svc.WriteReadMarker(ctx, &harnesspb.WriteReadMarkerRequest{
+		Connector: "edr", Cursor: strings.Repeat("x", maxReadMarkerCursor), ResultIds: many[:maxReadMarkerResultIDs],
+	})
+	require.NoError(t, err)
+	assert.Nil(t, ok.GetError(), "a marker at the caps must pass")
 }

@@ -107,6 +107,31 @@ func readMarkerCaller(ctx context.Context) (tenant, subject string, refusal *har
 	return tenant, id.Subject, nil
 }
 
+// The size of a marker is bounded, so one agent cannot grow the Timeline or the
+// World with a large marker. The caps hold for the cursor, for the count of
+// the result ids and for the length of each id.
+const (
+	maxReadMarkerCursor    = 1024
+	maxReadMarkerResultIDs = 500
+	maxReadMarkerResultID  = 512
+)
+
+// readMarkerTooLarge returns why a request is over the caps, or "".
+func readMarkerTooLarge(req *harnesspb.WriteReadMarkerRequest) string {
+	if len(req.GetCursor()) > maxReadMarkerCursor {
+		return fmt.Sprintf("cursor is over %d bytes", maxReadMarkerCursor)
+	}
+	if len(req.GetResultIds()) > maxReadMarkerResultIDs {
+		return fmt.Sprintf("result_ids holds more than %d ids", maxReadMarkerResultIDs)
+	}
+	for _, id := range req.GetResultIds() {
+		if len(id) > maxReadMarkerResultID {
+			return fmt.Sprintf("a result id is over %d bytes", maxReadMarkerResultID)
+		}
+	}
+	return ""
+}
+
 // readMarkerWriteWait bounds the wait of a write for the fold of the marker.
 const readMarkerWriteWait = 10 * time.Second
 
@@ -126,6 +151,10 @@ func (s *HarnessCallbackService) WriteReadMarker(
 	if req.GetConnector() == "" {
 		return &harnesspb.WriteReadMarkerResponse{Error: readMarkerError(
 			commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "connector is required")}, nil
+	}
+	if why := readMarkerTooLarge(req); why != "" {
+		return &harnesspb.WriteReadMarkerResponse{Error: readMarkerError(
+			commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "the marker is too large: "+why)}, nil
 	}
 	// The connector must be one of the tenant. A marker for a name that the
 	// tenant has no connector for would grow the Timeline with no meaning.
