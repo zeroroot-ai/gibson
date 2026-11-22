@@ -4,6 +4,7 @@
 package operatorrbac
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -27,15 +28,24 @@ var operators = []string{"connector", "platform", "tenant"}
 // finds none would compare an empty set with an empty file and pass.
 const minMarkers = 5
 
-// triple is one permission: a verb on a resource of an API group.
-type triple struct{ group, resource, verb string }
+// triple is one permission: a verb on a resource of an API group. namespace is
+// empty for a cluster-wide grant, and names is the sorted, comma-joined
+// resourceNames, or empty for every object of the resource.
+type triple struct{ namespace, group, resource, names, verb string }
 
 func (t triple) String() string {
 	g := t.group
 	if g == "" {
 		g = `""`
 	}
-	return fmt.Sprintf("%s on %s/%s", t.verb, g, t.resource)
+	out := fmt.Sprintf("%s on %s/%s", t.verb, g, t.resource)
+	if t.names != "" {
+		out += " named " + t.names
+	}
+	if t.namespace != "" {
+		out += " in namespace " + t.namespace
+	}
+	return out
 }
 
 // scan reads every non-test Go file under dir. It returns the permissions of
@@ -109,7 +119,7 @@ func parseMarker(body string) ([]triple, error) {
 			return nil, fmt.Errorf("rbac marker field %q has no value", part)
 		}
 		switch key {
-		case "groups", "resources", "verbs":
+		case "groups", "resources", "verbs", "namespace", "resourceNames":
 		default:
 			return nil, fmt.Errorf("rbac marker key %q is not modelled by this guard; extend parseMarker before using it", key)
 		}
@@ -127,11 +137,21 @@ func parseMarker(body string) ([]triple, error) {
 			return nil, fmt.Errorf("rbac marker %q has no %s", body, key)
 		}
 	}
+	if len(fields["namespace"]) > 1 {
+		return nil, fmt.Errorf("rbac marker %q names more than one namespace", body)
+	}
+	namespace := ""
+	if len(fields["namespace"]) == 1 {
+		namespace = fields["namespace"][0]
+	}
+	names := append([]string(nil), fields["resourceNames"]...)
+	sort.Strings(names)
+	joined := strings.Join(names, ",")
 	var out []triple
 	for _, g := range fields["groups"] {
 		for _, r := range fields["resources"] {
 			for _, v := range fields["verbs"] {
-				out = append(out, triple{g, r, v})
+				out = append(out, triple{namespace, g, r, joined, v})
 			}
 		}
 	}
@@ -141,8 +161,8 @@ func parseMarker(body string) ([]triple, error) {
 // rolePath is the generated ClusterRole, relative to an operator's root.
 const rolePath = "config/rbac/role.yaml"
 
-// roleTriples reads the permissions of the generated ClusterRole of the
-// operator at root.
+// roleTriples reads the permissions of the generated roles of the operator at
+// root.
 func roleTriples(t *testing.T, root string) map[triple]bool {
 	t.Helper()
 	path := filepath.Join(root, rolePath)
@@ -150,36 +170,70 @@ func roleTriples(t *testing.T, root string) map[triple]bool {
 	if err != nil {
 		t.Fatalf("read %s: %v (generate it with `make -C %s manifests`)", path, err, root)
 	}
-	var role struct {
-		Kind  string `json:"kind"`
-		Rules []struct {
-			APIGroups       []string `json:"apiGroups"`
-			Resources       []string `json:"resources"`
-			Verbs           []string `json:"verbs"`
-			ResourceNames   []string `json:"resourceNames"`
-			NonResourceURLs []string `json:"nonResourceURLs"`
-		} `json:"rules"`
+	out, err := parseRoles(raw)
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
 	}
-	if err := yaml.Unmarshal(raw, &role); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
-	if role.Kind != "ClusterRole" {
-		t.Fatalf("%s: kind = %q, want ClusterRole", path, role.Kind)
-	}
+	return out
+}
+
+// parseRoles reads each document of a generated role file: a ClusterRole gives
+// cluster-wide permissions, and a Role gives permissions in its namespace.
+func parseRoles(raw []byte) (map[triple]bool, error) {
 	out := map[triple]bool{}
-	for _, rule := range role.Rules {
-		if len(rule.ResourceNames) > 0 || len(rule.NonResourceURLs) > 0 {
-			t.Fatalf("%s: a rule uses resourceNames or nonResourceURLs, which this guard does not model", path)
+	docs := 0
+	for _, doc := range strings.Split(string(raw), "\n---\n") {
+		if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(doc), "---")) == "" {
+			continue
 		}
-		for _, g := range rule.APIGroups {
-			for _, r := range rule.Resources {
-				for _, v := range rule.Verbs {
-					out[triple{g, r, v}] = true
+		var role struct {
+			Kind     string `json:"kind"`
+			Metadata struct {
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+			Rules []struct {
+				APIGroups       []string `json:"apiGroups"`
+				Resources       []string `json:"resources"`
+				Verbs           []string `json:"verbs"`
+				ResourceNames   []string `json:"resourceNames"`
+				NonResourceURLs []string `json:"nonResourceURLs"`
+			} `json:"rules"`
+		}
+		if err := yaml.Unmarshal([]byte(doc), &role); err != nil {
+			return nil, fmt.Errorf("parse: %w", err)
+		}
+		namespace := ""
+		switch role.Kind {
+		case "ClusterRole":
+		case "Role":
+			namespace = role.Metadata.Namespace
+			if namespace == "" {
+				return nil, errors.New("a Role names no namespace")
+			}
+		default:
+			return nil, fmt.Errorf("kind = %q, want ClusterRole or Role", role.Kind)
+		}
+		docs++
+		for _, rule := range role.Rules {
+			if len(rule.NonResourceURLs) > 0 {
+				return nil, errors.New("a rule uses nonResourceURLs, which this guard does not model")
+			}
+			names := append([]string(nil), rule.ResourceNames...)
+			sort.Strings(names)
+			joined := strings.Join(names, ",")
+			for _, g := range rule.APIGroups {
+				for _, r := range rule.Resources {
+					for _, v := range rule.Verbs {
+						out[triple{namespace, g, r, joined, v}] = true
+					}
 				}
 			}
 		}
 	}
-	return out
+	if docs == 0 {
+		return nil, errors.New("no role in the file")
+	}
+	return out, nil
 }
 
 func diff(a, b map[triple]bool) []string {
@@ -243,7 +297,7 @@ func TestScan_ReadsAMarkerAboveAFunction(t *testing.T) {
 	for _, group := range []string{"example.io", ""} {
 		for _, resource := range []string{"widgets", "secrets"} {
 			for _, verb := range []string{"get", "list"} {
-				if want := (triple{group, resource, verb}); !granted[want] {
+				if want := (triple{"", group, resource, "", verb}); !granted[want] {
 					t.Errorf("missing %s", want)
 				}
 			}
@@ -258,12 +312,70 @@ func TestScan_ReadsAMarkerAboveAFunction(t *testing.T) {
 // with no verbs, are errors and never a silent skip.
 func TestParseMarker_RefusesWhatItDoesNotModel(t *testing.T) {
 	for _, body := range []string{
-		"groups=example.io,resources=widgets,verbs=get,namespace=system",
+		"groups=example.io,resources=widgets,verbs=get,url=/healthz",
+		"groups=example.io,resources=widgets,verbs=get,namespace=a;b",
 		"groups=example.io,resources=widgets",
 		"groups=example.io,resources,verbs=get",
 	} {
 		if got, err := parseMarker(body); err == nil {
 			t.Errorf("parseMarker(%q) = %v, want an error", body, got)
 		}
+	}
+}
+
+// A marker with a namespace and resource names grants only that, and the role
+// file must say the same. A ClusterRole that grants get on every DaemonSet, where
+// the marker names one DaemonSet in one namespace, is a difference (gibson#1580).
+func TestRoles_AMarkerWithANamespaceAndNamesIsNotMetByAClusterRole(t *testing.T) {
+	marker, err := parseMarker("groups=apps,namespace=kube-system,resources=daemonsets,resourceNames=cilium,verbs=get")
+	if err != nil {
+		t.Fatal(err)
+	}
+	granted := map[triple]bool{}
+	for _, tr := range marker {
+		granted[tr] = true
+	}
+
+	namespaced, err := parseRoles([]byte(`kind: ClusterRole
+metadata:
+  name: manager
+rules: []
+---
+kind: Role
+metadata:
+  name: manager
+  namespace: kube-system
+rules:
+- apiGroups: [apps]
+  resources: [daemonsets]
+  resourceNames: [cilium]
+  verbs: [get]
+`))
+	if err != nil {
+		t.Fatalf("parseRoles: %v", err)
+	}
+	if d := diff(granted, namespaced); len(d) != 0 {
+		t.Errorf("a Role with the same namespace and names must meet the marker: %v", d)
+	}
+	if d := diff(namespaced, granted); len(d) != 0 {
+		t.Errorf("a Role with the same namespace and names must grant no more: %v", d)
+	}
+
+	wide, err := parseRoles([]byte(`kind: ClusterRole
+metadata:
+  name: manager
+rules:
+- apiGroups: [apps]
+  resources: [daemonsets]
+  verbs: [get]
+`))
+	if err != nil {
+		t.Fatalf("parseRoles: %v", err)
+	}
+	if d := diff(granted, wide); len(d) == 0 {
+		t.Error("a ClusterRole on every DaemonSet was accepted for a marker that names one")
+	}
+	if d := diff(wide, granted); len(d) == 0 {
+		t.Error("a ClusterRole on every DaemonSet was not reported as a grant that no marker states")
 	}
 }

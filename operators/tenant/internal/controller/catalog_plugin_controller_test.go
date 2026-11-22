@@ -71,6 +71,7 @@ func cpConfig() CatalogPluginConfig {
 		WaitForSpireImage:      "registry.example/busybox@sha256:1",
 		OperatorServiceAccount: "gibson-tenant-operator",
 		OperatorNamespace:      "gibson",
+		ClusterCIDRs:           "10.244.0.0/16,10.96.0.0/12",
 	}
 }
 
@@ -323,9 +324,10 @@ func TestCatalogPlugins_EgressIsTheHostList(t *testing.T) {
 	if !reflect.DeepEqual(egress, want) {
 		t.Errorf("egress = %v, want %v", egress, want)
 	}
-	// The private ranges are denied, as for a connector (review r3).
+	// The private ranges and the cluster ranges are denied, as for a
+	// connector (review r3, gibson#1582).
 	deny, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egressDeny")
-	wantDeny, err := ciliumegress.DenyRules(nil)
+	wantDeny, err := ciliumegress.DenyRules([]string{"10.244.0.0/16", "10.96.0.0/12"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,6 +350,18 @@ func TestCatalogPlugins_ABadHostIsRefused(t *testing.T) {
 	_ = r.converge(context.Background())
 	if cpExists(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-github"}, &appsv1.Deployment{}) {
 		t.Error("a plugin with a bad host list got a Deployment")
+	}
+}
+
+// A bad cluster range refuses the plugin policy, so no plugin runs with a
+// deny rule that lacks the cluster ranges (gibson#1582).
+func TestCatalogPlugins_ABadClusterRangeRefusesThePlugin(t *testing.T) {
+	d := &fakeCatalogPluginDaemon{desired: []provision.DesiredCatalogPlugin{cpWish(cpTenant, cpPlugin)}}
+	r, c := newCatalogPluginLoop(t, d, cpTenantObject(cpTenant))
+	r.Config.ClusterCIDRs = "10.244.0.0/16,nope"
+	_ = r.converge(context.Background())
+	if cpExists(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-github"}, &appsv1.Deployment{}) {
+		t.Error("a plugin with a bad cluster range got a Deployment")
 	}
 }
 
@@ -665,6 +679,8 @@ func TestCatalogPluginConfig_Validate(t *testing.T) {
 		func(c *CatalogPluginConfig) { c.WaitForSpireImage = "" },
 		func(c *CatalogPluginConfig) { c.OperatorServiceAccount = "" },
 		func(c *CatalogPluginConfig) { c.OperatorNamespace = "" },
+		func(c *CatalogPluginConfig) { c.ClusterCIDRs = "" },
+		func(c *CatalogPluginConfig) { c.ClusterCIDRs = "10.244.0.0/16,nope" },
 	} {
 		cfg := cpConfig()
 		clear(&cfg)
