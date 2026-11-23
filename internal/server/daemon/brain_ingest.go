@@ -414,6 +414,12 @@ func ingestScanAnchors(reg *brain.Registry, logger *slog.Logger) harness.ScanAnc
 				"mission_id", missionID, "tenant", tenant,
 				"has_application", params["application"] != "", "has_repository_url", params["repositoryUrl"] != "")
 		}
+		if ref := params["imageRef"]; ref != "" && ingest.ImageDigest(ref) == "" && logger != nil {
+			// The scan tool keys its Image node by the digest, so an image named by
+			// a tag has no Image anchor, and its findings reach no Application.
+			logger.Warn("a scan mission names an image with no digest, so the image gets no anchor",
+				"mission_id", missionID, "tenant", tenant)
+		}
 		for _, ev := range events {
 			reg.For(tenant).Submit(ev)
 		}

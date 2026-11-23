@@ -55,32 +55,44 @@ func repositoryParts(rawURL string) (host, path string) {
 	if err != nil || u.Hostname() == "" {
 		return "", ""
 	}
-	return u.Hostname(), u.Path
+	// u.Host keeps the port, so two servers of one host name stay two nodes.
+	return u.Host, u.Path
 }
 
 // RepositoryKey returns the identity of a repository: its host and its path,
-// with no scheme, no user info, no ".git" suffix and no trailing slash, in lower
-// case. GitHub and GitLab both treat the host and the path as case-insensitive,
-// so two spellings of one repository give one key. It returns "" for a value
-// that is not a URL with a host and a path.
+// with no scheme, no user info, no ".git" suffix and no trailing slash. The host
+// is in lower case, because a host name is case-insensitive. The path is kept as
+// given, because some Git hosts (Gerrit, cgit, CodeCommit) treat it as case
+// sensitive, and two repositories must not become one node. Two spellings of one
+// repository on a case-insensitive host give two keys, and each scan writes both
+// ends of its edges from the same parameters, so that is safe. It returns "" for
+// a value that is not a URL with a host and a path.
 func RepositoryKey(rawURL string) string {
 	host, path := repositoryParts(rawURL)
 	path = strings.Trim(strings.TrimSuffix(strings.TrimRight(path, "/"), ".git"), "/")
 	if host == "" || path == "" {
 		return ""
 	}
-	return strings.ToLower(host) + "/" + strings.ToLower(path)
+	return strings.ToLower(host) + "/" + path
 }
 
-// repositoryURL returns the https URL of the repository with no user info, no
-// query and no fragment. A clone URL can carry a token in its user info, and the
-// World, the Timeline and the graph must never hold it.
+// repositoryURL returns the URL of the repository with no user info, no query
+// and no fragment, built from the parsed URL so the scheme, the port and the case
+// stay. A clone URL can carry a token in its user info, and the World, the
+// Timeline and the graph must never hold it. The scp form has no URL, and it
+// stores none.
 func repositoryURL(rawURL string) string {
-	key := RepositoryKey(rawURL)
-	if key == "" {
+	raw := strings.TrimSpace(rawURL)
+	if scpForm.MatchString(raw) && !strings.Contains(raw, "://") {
 		return ""
 	}
-	return "https://" + key
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	u.User = nil
+	u.RawQuery, u.Fragment, u.RawFragment = "", "", ""
+	return u.String()
 }
 
 // ImageDigest returns the digest of an image reference that names one
@@ -104,7 +116,10 @@ func ScanAnchorEvents(params map[string]string, missionID string) []brain.Event 
 	if app == "" || repo == "" {
 		return nil
 	}
-	repoProps := map[string]string{"url": repositoryURL(params[scanParamRepositoryURL])}
+	repoProps := map[string]string{}
+	if u := repositoryURL(params[scanParamRepositoryURL]); u != "" {
+		repoProps["url"] = u
+	}
 	events := []brain.Event{
 		brain.EntityObserved{Label: labelRepository, Key: repo, MissionID: missionID, Props: repoProps},
 		brain.EntityObserved{

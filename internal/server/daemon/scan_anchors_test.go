@@ -4,7 +4,10 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,5 +53,34 @@ func TestIngestScanAnchors_LinkTheApplicationInTheTenantWorld(t *testing.T) {
 	}
 	if n := len(reg.For("acme").Entities()); n != 3 {
 		t.Errorf("entities = %d, want 3 (a call with no tenant writes nothing)", n)
+	}
+}
+
+// The sink warns, with a real logger, when a scan gets no anchor or when its
+// image has no digest. The record names the mission and the tenant. A scan with
+// full parameters logs nothing.
+func TestIngestScanAnchors_WarnsWhenAScanGetsNoAnchor(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	run := func(params map[string]string) string {
+		var buf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		ingestScanAnchors(reg, logger)(ctx, "acme", "mission-7", params)
+		return buf.String()
+	}
+	full := map[string]string{
+		"application": "portal", "repositoryUrl": "https://gitlab.com/g/p", "imageRef": "r.example/p@sha256:ab12",
+	}
+	if out := run(full); out != "" {
+		t.Errorf("full parameters logged: %s", out)
+	}
+	noRepo := map[string]string{"application": "portal", "repositoryUrl": "not a url"}
+	if out := run(noRepo); !strings.Contains(out, "gives no anchor") || !strings.Contains(out, "mission-7") || !strings.Contains(out, "acme") {
+		t.Errorf("no anchor: log = %q", out)
+	}
+	tagOnly := map[string]string{"application": "portal", "repositoryUrl": "https://gitlab.com/g/p", "imageRef": "r.example/p:1.2"}
+	if out := run(tagOnly); !strings.Contains(out, "no digest") {
+		t.Errorf("tag-only image: log = %q", out)
 	}
 }

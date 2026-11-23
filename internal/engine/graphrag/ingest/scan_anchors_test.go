@@ -82,8 +82,8 @@ func TestScanAnchorEvents_RefuseWhatTheyCannotName(t *testing.T) {
 
 func TestRepositoryKey(t *testing.T) {
 	for in, want := range map[string]string{
-		"git@gitlab.com:Group/Project.git":      "gitlab.com/group/project",
-		"https://GitHub.com/Acme/Shop":          "github.com/acme/shop",
+		"git@gitlab.com:Group/Project.git":      "gitlab.com/Group/Project",
+		"https://GitHub.com/Acme/Shop":          "github.com/Acme/Shop",
 		"https://github.com/acme/shop":          "github.com/acme/shop",
 		"https://user:pw@github.com/acme/shop/": "github.com/acme/shop",
 		"https://gitlab.com/a/b/c.git":          "gitlab.com/a/b/c",
@@ -113,16 +113,38 @@ func TestScanAnchorEvents_HoldNoUserInfo(t *testing.T) {
 		}
 	}
 	for _, e := range ScanAnchorEvents(p, "m") {
-		if eo := e.(brain.EntityObserved); eo.Label == "Repository" && eo.Props["url"] != "https://gitlab.com/examplebank/customer-portal" {
+		if eo := e.(brain.EntityObserved); eo.Label == "Repository" && eo.Props["url"] != "https://gitlab.com/examplebank/customer-portal.git" {
 			t.Errorf("url = %q", eo.Props["url"])
 		}
 	}
+	// The port and the case stay. The scp form has no URL to store.
+	p["repositoryUrl"] = "https://user:pw@Git.Example.com:8443/Team/Repo.git"
+	for _, e := range ScanAnchorEvents(p, "m") {
+		if eo := e.(brain.EntityObserved); eo.Label == "Repository" {
+			assert.Equal(t, "https://Git.Example.com:8443/Team/Repo.git", eo.Props["url"])
+			assert.Equal(t, "git.example.com:8443/Team/Repo", eo.Key)
+		}
+	}
+	p["repositoryUrl"] = "git@gitlab.com:examplebank/customer-portal.git"
+	for _, e := range ScanAnchorEvents(p, "m") {
+		if eo := e.(brain.EntityObserved); eo.Label == "Repository" {
+			_, has := eo.Props["url"]
+			assert.False(t, has, "the scp form stores no url")
+		}
+	}
+}
+
+// Two repositories whose paths differ only in case are two nodes, because a Git
+// host can treat the path as case sensitive.
+func TestRepositoryKey_KeepsTheCaseOfThePath(t *testing.T) {
+	assert.NotEqual(t, RepositoryKey("https://git.example.com/Team/Repo"), RepositoryKey("https://git.example.com/team/repo"))
+	assert.Equal(t, RepositoryKey("https://GIT.example.com/Team/Repo"), RepositoryKey("https://git.example.com/Team/Repo"))
 }
 
 // The scp form and the https form of one repository give one Repository.
 func TestScanAnchorEvents_TwoFormsOfOneRepositoryGiveOneKey(t *testing.T) {
 	a, b := scanParams(), scanParams()
-	a["repositoryUrl"] = "git@gitlab.com:Examplebank/Customer-Portal.git"
+	a["repositoryUrl"] = "git@GitLab.com:examplebank/customer-portal.git"
 	b["repositoryUrl"] = "https://gitlab.com/examplebank/customer-portal"
 	ea, eb := ScanAnchorEvents(a, "m"), ScanAnchorEvents(b, "m")
 	require.Len(t, ea, 3)
