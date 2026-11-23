@@ -261,6 +261,9 @@ func (h *inboundRPC) SendMessage(ctx context.Context, req *a2a.SendMessageReques
 	if req.Message.TaskID != "" {
 		return nil, MapError(ErrApprovalAnswer)
 	}
+	if err := CheckWebhookMessageKey(req.Message); err != nil {
+		return nil, MapError(err)
+	}
 	if err := requireGrant(ctx, h.grants, c, agent); err != nil {
 		if errors.Is(err, ErrNoGrant) {
 			// A caller with no grant gets what a caller of an agent that is not
