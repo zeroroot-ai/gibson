@@ -4,6 +4,7 @@
 package component
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/json"
@@ -11,12 +12,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -229,8 +232,9 @@ func TestConnectorMCP_ATransportFailureIsMarkedUnavailableAndAToolErrorIsNot(t *
 	}
 }
 
-// A connector that does not answer within the bound of the daemon gives ErrConnectorTimeout.
-func TestConnectorMCP_ABoundThatEndsIsMarkedTimeout(t *testing.T) {
+// A tool call that the bound of the daemon ends may have run: the outcome is unknown, and the
+// error is no TIMEOUT, because the member retries a timeout.
+func TestConnectorMCP_ABoundThatEndsDuringACallIsAnUnknownOutcome(t *testing.T) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "slow-connector", Version: "v0"}, nil)
 	mcp.AddTool(server, &mcp.Tool{Name: "slow", Description: "waits"},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ echoIn) (*mcp.CallToolResult, echoOut, error) {
@@ -248,8 +252,8 @@ func TestConnectorMCP_ABoundThatEndsIsMarkedTimeout(t *testing.T) {
 
 	_, err := c.CallConnectorTool(context.Background(), "acme", "github", "slow", map[string]any{"text": "x"})
 
-	if !errors.Is(err, metatool.ErrConnectorTimeout) {
-		t.Fatalf("err = %v, want ErrConnectorTimeout", err)
+	if !errors.Is(err, metatool.ErrConnectorOutcomeUnknown) || errors.Is(err, metatool.ErrConnectorTimeout) {
+		t.Fatalf("err = %v, want the unknown outcome and no timeout", err)
 	}
 }
 
@@ -379,5 +383,126 @@ func TestTemporaryTransport_NamesTheBrokenConnectionErrors(t *testing.T) {
 		if temporaryTransport(err) {
 			t.Errorf("%s must not be temporary", name)
 		}
+	}
+}
+
+// writerConnector serves a tool that does a write and counts it. After the tool ran, failAfter
+// breaks the answer: a 502, a 503 or a dropped connection. Every other request (the handshake)
+// passes through.
+func writerConnector(t *testing.T, failAfter func(http.ResponseWriter)) (url string, writes *int) {
+	t.Helper()
+	count := 0
+	server := mcp.NewServer(&mcp.Implementation{Name: "writer", Version: "v0"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "write", Description: "does a write"},
+		func(context.Context, *mcp.CallToolRequest, echoIn) (*mcp.CallToolResult, echoOut, error) {
+			count++
+			return nil, echoOut{Echo: "done"}, nil
+		})
+	inner := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		var msg struct {
+			Method string `json:"method"`
+		}
+		_ = json.Unmarshal(raw, &msg)
+		if r.Method != http.MethodPost || msg.Method != "tools/call" {
+			inner.ServeHTTP(w, r)
+			return
+		}
+		inner.ServeHTTP(httptest.NewRecorder(), r) // the tool runs, and its answer is thrown away
+		failAfter(w)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, &count
+}
+
+// A server that does the work and then fails the answer leaves the outcome unknown. The member
+// must not repeat the write, so the error is no UNAVAILABLE and no TIMEOUT: both are retried.
+func TestConnectorMCP_AFailureAfterTheWorkIsAnUnknownOutcome(t *testing.T) {
+	status := func(code int) func(http.ResponseWriter) {
+		return func(w http.ResponseWriter) { w.WriteHeader(code) }
+	}
+	drop := func(w http.ResponseWriter) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}
+	for name, fail := range map[string]func(http.ResponseWriter){
+		"a 502 after the work":       status(http.StatusBadGateway),
+		"a 503 after the work":       status(http.StatusServiceUnavailable),
+		"a 504 after the work":       status(http.StatusGatewayTimeout),
+		"a dropped connection":       drop,
+		"a 500 after the work":       status(http.StatusInternalServerError),
+		"a 401 after the work (odd)": status(http.StatusUnauthorized),
+	} {
+		t.Run(name, func(t *testing.T) {
+			url, writes := writerConnector(t, fail)
+			c := connectorAt(url, &http.Client{Transport: &bearerTransport{base: http.DefaultTransport}})
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+
+			_, err := c.CallConnectorTool(ctx, "acme", "github", "write", map[string]any{"text": "x"})
+
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			if *writes != 1 {
+				t.Fatalf("the tool ran %d times, want 1", *writes)
+			}
+			if errors.Is(err, metatool.ErrConnectorUnavailable) || errors.Is(err, metatool.ErrConnectorTimeout) {
+				t.Fatalf("a retried code after the work ran: %v", err)
+			}
+			if !errors.Is(err, metatool.ErrConnectorOutcomeUnknown) {
+				t.Fatalf("err = %v, want the unknown outcome", err)
+			}
+		})
+	}
+}
+
+// A call that the daemon bound ended is also an unknown outcome and no TIMEOUT: the connector
+// may have run the tool.
+func TestClassifyCall(t *testing.T) {
+	deadline, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-deadline.Done()
+	canceled, cancelNow := context.WithCancel(context.Background())
+	cancelNow()
+	rpcAnswer := &jsonrpc.Error{Code: -32602, Message: "unknown tool"}
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		err  error
+		want error // nil: the error stays unmarked
+		not  []error
+	}{
+		"a bound that ended after the request went out": {deadline, context.DeadlineExceeded,
+			metatool.ErrConnectorOutcomeUnknown, []error{metatool.ErrConnectorTimeout, metatool.ErrConnectorUnavailable}},
+		"a dial error": {context.Background(), &net.OpError{Op: "dial", Err: errors.New("refused")},
+			metatool.ErrConnectorUnavailable, []error{metatool.ErrConnectorOutcomeUnknown}},
+		"a read error": {context.Background(), &net.OpError{Op: "read", Err: errors.New("reset")},
+			metatool.ErrConnectorOutcomeUnknown, []error{metatool.ErrConnectorUnavailable}},
+		"an end of the stream": {context.Background(), io.ErrUnexpectedEOF, metatool.ErrConnectorOutcomeUnknown,
+			[]error{metatool.ErrConnectorUnavailable}},
+		"a session that ended": {context.Background(), mcp.ErrSessionMissing, metatool.ErrConnectorUnavailable, nil},
+		"a 429": {context.Background(), &temporaryStatusError{Status: 429},
+			metatool.ErrConnectorRateLimited, nil},
+		"a 502": {context.Background(), &temporaryStatusError{Status: 502}, metatool.ErrConnectorOutcomeUnknown,
+			[]error{metatool.ErrConnectorUnavailable}},
+		"an answer of the connector": {context.Background(), fmt.Errorf("call: %w", rpcAnswer), nil,
+			[]error{metatool.ErrConnectorOutcomeUnknown, metatool.ErrConnectorUnavailable}},
+		"a cancel": {canceled, context.Canceled, nil, []error{metatool.ErrConnectorOutcomeUnknown}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := classifyCall(tc.ctx, tc.err)
+			if tc.want != nil && !errors.Is(got, tc.want) {
+				t.Errorf("err = %v, want %v", got, tc.want)
+			}
+			for _, n := range tc.not {
+				if errors.Is(got, n) {
+					t.Errorf("err = %v, must not be %v", got, n)
+				}
+			}
+		})
 	}
 }

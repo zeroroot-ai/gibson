@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
@@ -208,7 +209,7 @@ func (c *ConnectorMCP) CallConnectorTool(ctx context.Context, tenant, connector,
 
 	res, err := session.CallTool(cctx, &mcp.CallToolParams{Name: tool, Arguments: args})
 	if err != nil {
-		return nil, fmt.Errorf("connector mcp: call %s on %q: %w", tool, connector, classifyTransport(cctx, err))
+		return nil, fmt.Errorf("connector mcp: call %s on %q: %w", tool, connector, classifyCall(cctx, err))
 	}
 	// A tool that reports an error returns text only: the connector sends no structured mark
 	// that says if the error is temporary, so the error stays unclassified here. The daemon
@@ -368,4 +369,59 @@ func temporaryTransport(err error) bool {
 	)
 	return errors.Is(err, mcp.ErrSessionMissing) || errors.As(err, &opErr) || errors.As(err, &status) ||
 		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET)
+}
+
+// classifyCall marks the error of a tool call that went out on an open session. After the
+// request was sent, the connector may have run the tool, so a repeat of a write could do the
+// work twice. Only two failures prove that the request did not reach the connector: a dial error
+// and a session that the connector ended. A 429 is a refusal before the tool ran, so it is rate
+// limited. A JSON-RPC error that the connector answered with is a refusal and stays unmarked.
+// Every other failure leaves the outcome unknown: the member must read the state before it
+// calls again, so it gets a code that the member does not retry. A bound that ended after the
+// request went out is no timeout of that kind, because the member retries a timeout.
+func classifyCall(ctx context.Context, err error) error {
+	var opErr *net.OpError
+	switch {
+	case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
+		return err
+	case isRateLimited(err):
+		return fmt.Errorf("%w: %w", metatool.ErrConnectorRateLimited, err)
+	case errors.Is(err, mcp.ErrSessionMissing) || (errors.As(err, &opErr) && opErr.Op == "dial"):
+		return fmt.Errorf("%w: %w", metatool.ErrConnectorUnavailable, err)
+	case answeredByConnector(err):
+		return err
+	default:
+		return fmt.Errorf("%w: %w", metatool.ErrConnectorOutcomeUnknown, err)
+	}
+}
+
+// rejectedCode is the JSON-RPC code of the rejection that the MCP client makes itself. A
+// connector can send the same code, so it never proves anything: this is only how the walk
+// below skips the client's own wrapper.
+const rejectedCode = -32005
+
+// answeredByConnector is true when the chain holds a JSON-RPC error that is not the rejection
+// of the client: the connector answered, so the call did not fail in the transport.
+func answeredByConnector(err error) bool {
+	found := false
+	var walk func(error)
+	walk = func(e error) {
+		if e == nil || found {
+			return
+		}
+		if w, ok := e.(*jsonrpc.Error); ok && w.Code != rejectedCode {
+			found = true
+			return
+		}
+		switch u := e.(type) {
+		case interface{ Unwrap() []error }:
+			for _, c := range u.Unwrap() {
+				walk(c)
+			}
+		case interface{ Unwrap() error }:
+			walk(u.Unwrap())
+		}
+	}
+	walk(err)
+	return found
 }

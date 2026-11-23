@@ -51,6 +51,11 @@ var ErrConnectorUnavailable = errors.New("metatool: the connector is not reachab
 // daemon. It says nothing about the call: the connector may or may not have done the work.
 var ErrConnectorTimeout = errors.New("metatool: the connector did not answer in time")
 
+// ErrConnectorOutcomeUnknown marks a call that the connector may have run: the request went
+// out and the answer did not come back whole. A repeat of a write could do the work twice, so
+// the member must not retry. The text tells the member what to do.
+var ErrConnectorOutcomeUnknown = errors.New("the outcome of the call is unknown: read the state before you call again")
+
 // ErrConnectorRateLimited marks a call that the connector refused with HTTP 429. A later call
 // may work after the wait that the vendor names.
 var ErrConnectorRateLimited = errors.New("metatool: the connector is rate limited")
