@@ -89,7 +89,7 @@ type ApprovalGate interface {
 	Acquire(ctx context.Context, req ApprovalRequest) (ApprovalState, string, error)
 	// MayMerge reports whether the merge request holds its merge slot in the
 	// World of the tenant.
-	MayMerge(ctx context.Context, tenant, missionID, mergeRequest string) (bool, error)
+	MayMerge(ctx context.Context, tenant, mergeRequest string) (bool, error)
 }
 
 // MergeRequestArg is the argument of a merge tool that names the merge
@@ -177,7 +177,7 @@ func (h *Handler) mergeGranted(ctx context.Context, c Call, connector, tool stri
 	if mr == "" {
 		return fmt.Errorf("%w: the call of %s:%s names no %s", ErrMergeNotGranted, connector, tool, MergeRequestArg)
 	}
-	ok, err := h.gate.MayMerge(ctx, c.Caller.Tenant, c.MissionID, mr)
+	ok, err := h.gate.MayMerge(ctx, c.Caller.Tenant, mr)
 	if err != nil {
 		return fmt.Errorf("metatool: the merge check of %s:%s failed: %w", connector, tool, err)
 	}

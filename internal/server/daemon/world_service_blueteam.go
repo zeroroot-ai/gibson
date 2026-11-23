@@ -357,7 +357,10 @@ func (s *worldServer) ListWaitingOnPerson(ctx context.Context, req *worldpb.List
 	// at the first fact of the oldest of them.
 	var fixing []brain.FindingSnapshot
 	for _, f := range findings {
-		if f.Status == brain.FindingStatusFixing {
+		// A refusal and an unreadable merge request wait on a finding that is
+		// fixing. A merged fix with no health verdict waits on a finding that is
+		// fixed.
+		if f.Status == brain.FindingStatusFixing || f.Status == brain.FindingStatusFixed {
 			fixing = append(fixing, f)
 		}
 	}
@@ -376,7 +379,7 @@ func (s *worldServer) ListWaitingOnPerson(ctx context.Context, req *worldpb.List
 	resp := &worldpb.ListWaitingOnPersonResponse{NextPageToken: next}
 	for _, it := range page {
 		resp.Items = append(resp.Items, &worldpb.WaitingItem{
-			Kind: string(it.Kind), Id: it.ID, Since: timestamppb.New(it.Since), WaitedSeconds: seconds(it.Waited),
+			Kind: string(it.Kind), Id: it.ID, Since: timestamppb.New(it.Since), WaitedSeconds: seconds(it.Waited), Reason: it.Reason,
 		})
 	}
 	return resp, nil

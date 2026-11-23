@@ -935,12 +935,16 @@ message ListWaitingOnPersonRequest {
   string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 message WaitingItem {
-  // kind is destructive_action, merge_refused, next_scan or no_health_signal.
+  // kind is destructive_action, merge_refused, next_scan, no_health_signal,
+  // merge_unreadable or no_health_verdict.
   string kind = 1;
   // id is the id of the finding, or of the hypothesis for a destructive action.
   string id = 2;
   google.protobuf.Timestamp since = 3;
   int64 waited_seconds = 4;
+  // reason says why the item waits, when the Timeline records a reason. For a
+  // merge_refused item it is what the Git host said.
+  string reason = 5;
 }
 message ListWaitingOnPersonResponse {
   repeated WaitingItem items = 1;

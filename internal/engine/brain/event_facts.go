@@ -129,6 +129,14 @@ func mergeRequestSubject(ev Event) string {
 		return e.MergeRequest
 	case *MergeSlotExpired:
 		return e.MergeRequest
+	case MergeCallAllowed:
+		return e.MergeRequest
+	case *MergeCallAllowed:
+		return e.MergeRequest
+	case FixWaiting:
+		return e.MergeRequest
+	case *FixWaiting:
+		return e.MergeRequest
 	}
 	return ""
 }
