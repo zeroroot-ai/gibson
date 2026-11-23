@@ -1442,6 +1442,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	proj.TargetID = active.mission.TargetID.String()
 	proj.TenantID = active.mission.TenantID
 	proj.CreatedBy = active.mission.CreatedBy
+	proj.Catalog = catalogOf(active.mission)
 	// Key the projected mission by the RUN id (missionID) — the same id the
 	// per-mission binding, awaitBrainMission, and the Decider lookup all use.
 	// missionDefinitionToProjected defaults ID to the mission DEFINITION id,

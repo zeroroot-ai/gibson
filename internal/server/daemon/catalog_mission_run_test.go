@@ -79,14 +79,14 @@ func TestRunCatalogMission_SuccessPathStampsTheRecordAndWritesTheAnchorsAfterThe
 	assert.Equal(t, "scan", rec.Name)
 	assert.Equal(t, mission.MissionStatusSubmitted, rec.Status)
 	assert.Equal(t, targetID, rec.TargetID)
-	assert.Equal(t, "scan", rec.Metadata[metadataCatalogMission])
+	assert.Equal(t, "scan", rec.Metadata[mission.MetadataCatalogMission])
 
 	// The World shows the mission with its creator before it runs.
 	require.Eventually(t, func() bool {
 		var seen bool
 		reg.For("acme").ReadWorld(func(w *brain.World) {
 			for _, m := range w.MissionSnapshot() {
-				seen = seen || (m.ID == id && m.Name == "scan")
+				seen = seen || (m.ID == id && m.Name == "scan" && m.Catalog == "scan")
 			}
 		})
 		return seen
@@ -102,4 +102,12 @@ func TestRunCatalogMission_SuccessPathStampsTheRecordAndWritesTheAnchorsAfterThe
 	count := 0
 	reg.For("acme").ReadWorld(func(w *brain.World) { count = len(w.MissionSnapshot()) })
 	assert.Equal(t, 1, count, "a failed start leaves no pending mission in the World")
+}
+
+// catalogOf reads the marker from the metadata of a record, and it reads nothing
+// from a record that has none.
+func TestCatalogOf(t *testing.T) {
+	assert.Equal(t, "scan", catalogOf(&mission.Mission{Metadata: map[string]any{mission.MetadataCatalogMission: "scan"}}))
+	assert.Empty(t, catalogOf(&mission.Mission{}))
+	assert.Empty(t, catalogOf(&mission.Mission{Metadata: map[string]any{mission.MetadataCatalogMission: 7}}))
 }

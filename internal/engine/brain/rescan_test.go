@@ -15,7 +15,7 @@ func scanWorld(t *testing.T, missionID, target string, status MissionStatus) *Wo
 	t.Helper()
 	w := NewWorld("t1")
 	w.clock = func() time.Time { return testScanTime }
-	Reduce(w, MissionStarted{ID: missionID, RunID: "run-" + missionID, Name: ScanMissionName, StartedAt: testScanTime, TargetID: target})
+	Reduce(w, MissionStarted{ID: missionID, RunID: "run-" + missionID, Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: target})
 	if status != MissionWorking {
 		Reduce(w, MissionDone{ID: missionID, Outcome: status})
 	}
@@ -91,7 +91,7 @@ func TestRescan_FixedAndUnseen_BecomesVerified(t *testing.T) {
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
 	// A second scan of the same target runs and does NOT re-raise f1.
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 
 	settleRescan(w)
@@ -107,7 +107,7 @@ func TestRescan_FixedAndSeenAgain_ReturnsToOpen(t *testing.T) {
 	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-2"}) // seen again
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 
@@ -126,7 +126,7 @@ func TestRescan_OpenAndUnseen_DoesNotMove(t *testing.T) {
 	raiseInto(w, "open-one", "scan-1", FindingStatusOpen)
 	raiseInto(w, "fixing-one", "scan-1", FindingStatusFixing)
 
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 
 	settleRescan(w)
@@ -146,7 +146,7 @@ func TestRescan_FailedScan_VerifiesNothing(t *testing.T) {
 	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionFailed})
 
 	evs := RescanReconciliationSystem(w)
@@ -193,7 +193,7 @@ func TestRescan_AnotherTargetsScan_DoesNotReconcile(t *testing.T) {
 	w := scanWorld(t, "scan-a", "target-a", MissionWorking)
 	raiseInto(w, "f-a", "scan-a", FindingStatusFixed)
 
-	Reduce(w, MissionStarted{ID: "scan-b", RunID: "run-scan-b", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-b"})
+	Reduce(w, MissionStarted{ID: "scan-b", RunID: "run-scan-b", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-b"})
 	Reduce(w, MissionDone{ID: "scan-b", Outcome: MissionCompleted})
 
 	settleRescan(w)
@@ -273,7 +273,7 @@ func TestRescan_ReRaiseKeepsStatusAndMovesLastScan(t *testing.T) {
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-1", Title: "original", Severity: "high"})
 	walk(w, "f1", FindingStatusFixed, "")
 
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-2", Title: "ignored", Severity: "low"})
 
 	f := findingByID(t, w, "f1")
@@ -347,7 +347,7 @@ func TestRescan_ScanWithNoTarget_ReconcilesNothing(t *testing.T) {
 	raiseInto(w, "hand-filed", "", FindingStatusFixed)
 
 	// A scan mission that never bound a target.
-	Reduce(w, MissionStarted{ID: "scan-untargeted", RunID: "run-scan-untargeted", Name: ScanMissionName, StartedAt: testScanTime, TargetID: ""})
+	Reduce(w, MissionStarted{ID: "scan-untargeted", RunID: "run-scan-untargeted", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: ""})
 	Reduce(w, MissionDone{ID: "scan-untargeted", Outcome: MissionCompleted})
 
 	for _, ev := range RescanReconciliationSystem(w) {
@@ -392,7 +392,7 @@ func TestScanReconciled_RoundTripsThroughTheTimeline(t *testing.T) {
 // intact.
 func TestRescan_ReplayAfterRestart_DoesNotReReconcile(t *testing.T) {
 	timeline := []Event{
-		MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"},
+		MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"},
 		FindingRaised{ID: "f1", MissionID: "scan-1"},
 		FindingStatusChanged{ID: "f1", Status: FindingStatusFixing},
 		FindingStatusChanged{ID: "f1", Status: FindingStatusFixed},
@@ -434,7 +434,7 @@ func fix(w *World, id string) {
 // scanRun projects one run of a recurring scan. The mission ID is the record ID
 // and is the same for every run (gibson#1217).
 func scanRun(w *World, runID string) {
-	Reduce(w, MissionProjected{ID: "scan", RunID: runID, Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+	Reduce(w, MissionProjected{ID: "scan", RunID: runID, Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 }
 
 // TestRescan_SecondRunOfOneScanRecord_FixedFindingEndsVerified is the rescan
@@ -533,9 +533,9 @@ func TestRescan_AScanThatStartedBeforeTheDeployDecidesNothing(t *testing.T) {
 	for _, seen := range []bool{false, true} {
 		w := NewWorld("t1")
 		w.clock = func() time.Time { return testScanTime } // the reconciliation runs after the deploy
-		Reduce(w, MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+		Reduce(w, MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 		raiseInto(w, "f1", "scan-1", FindingStatusFixed)
-		Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName,
+		Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, Catalog: ScanMissionName,
 			StartedAt: testDeployTime.Add(-time.Minute), TargetID: "target-a"})
 		if seen {
 			Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-2", MissionRunID: "run-scan-2"})
@@ -556,7 +556,7 @@ func TestRescan_AScanThatStartedBeforeTheDeployDecidesNothing(t *testing.T) {
 func TestRescan_AScanWithNoStartGivesNoRerun(t *testing.T) {
 	w := NewWorld("t1")
 	w.clock = func() time.Time { return testScanTime }
-	Reduce(w, MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, Catalog: ScanMissionName, TargetID: "target-a"})
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 	Reduce(w, MissionDone{ID: "scan-1", Outcome: MissionCompleted})
 	for _, ev := range RescanReconciliationSystem(w) {
@@ -576,14 +576,14 @@ func TestRescan_AVerifiedFindingSeenAgainOpens(t *testing.T) {
 	}{{testScanTime.Add(2 * time.Hour), FindingStatusOpen}, {testScanTime.Add(-time.Minute), FindingStatusVerified}} {
 		w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 		raiseInto(w, "f1", "scan-1", FindingStatusFixed)
-		Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+		Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 		Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 		settleRescan(w)
 		if got := findingByID(t, w, "f1").Status; got != FindingStatusVerified {
 			t.Fatalf("status = %q, want verified before the next scan", got)
 		}
 		w.clock = func() time.Time { return testScanTime.Add(3 * time.Hour) }
-		Reduce(w, MissionStarted{ID: "scan-3", RunID: "run-scan-3", Name: ScanMissionName, StartedAt: tc.start, TargetID: "target-a"})
+		Reduce(w, MissionStarted{ID: "scan-3", RunID: "run-scan-3", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: tc.start, TargetID: "target-a"})
 		Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-3", MissionRunID: "run-scan-3"})
 		Reduce(w, MissionDone{ID: "scan-3", Outcome: MissionCompleted})
 		settleRescan(w)
@@ -608,7 +608,7 @@ func raiseByTool(w *World, id, missionID string) {
 func TestRescan_AToolFindingIsNotVerifiedByAScansSilence(t *testing.T) {
 	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
 	raiseByTool(w, "f1", "scan-1")
-	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 	settleRescan(w)
 	if got := findingByID(t, w, "f1").Status; got != FindingStatusFixed {
@@ -626,6 +626,42 @@ func TestRescan_AToolRerunVerifiesOrReopens(t *testing.T) {
 		applyAll(w, VerificationSystem(w))
 		if got := findingByID(t, w, "f1").Status; got != want {
 			t.Errorf("rerun found=%v: status = %q, want %q", found, got, want)
+		}
+	}
+}
+
+// A mission that only has the name of the scan is not a scan. The rescan acts on
+// the mission that was launched from the catalog, so a person's own mission named
+// scan decides nothing (gibson#1469).
+func TestRescan_AMissionWithTheNameButNoCatalogMarkerIsNotAScan(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, MissionStarted{ID: "named", RunID: "r1", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+	Reduce(w, MissionDone{ID: "named", RunID: "r1", Outcome: MissionCompleted})
+	if events := RescanReconciliationSystem(w); len(events) != 0 {
+		t.Fatalf("a mission named scan with no marker reconciled: %+v", events)
+	}
+	if scope, scan := scanProvenance(w, "named"); scope != "" || scan != "" {
+		t.Errorf("provenance = %q %q, want none for a mission with no marker", scope, scan)
+	}
+
+	Reduce(w, MissionStarted{ID: "real", RunID: "r2", Name: "any name", Catalog: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+	if scope, scan := scanProvenance(w, "real"); scope != "target-a" || scan != "r2" {
+		t.Errorf("provenance = %q %q, want the scope and run of the catalog scan", scope, scan)
+	}
+}
+
+// The marker survives a snapshot and a restore.
+func TestMissionCatalogMarker_SurvivesASnapshotRestore(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, MissionCreated{ID: "pending", Name: "scan", Catalog: ScanMissionName, TenantID: "t"})
+	Reduce(w, MissionStarted{ID: "running", RunID: "r1", Name: "x", Catalog: ScanMissionName, TenantID: "t"})
+	restored, err := RestoreWorld(SnapshotWorld(w, "0"), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range restored.MissionSnapshot() {
+		if m.Catalog != ScanMissionName {
+			t.Errorf("mission %s lost its marker: %q", m.ID, m.Catalog)
 		}
 	}
 }

@@ -259,3 +259,16 @@ func Entries() ([]Entry, error) {
 	}
 	return out, nil
 }
+
+// IsCatalogName reports whether name is the name of a checked-in mission, in any
+// letter case. A mission that a caller creates by hand may not take such a name,
+// so a name never stands for the catalog mission (gibson#1469).
+func IsCatalogName(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	for _, n := range Names() {
+		if strings.EqualFold(trimmed, n) {
+			return true
+		}
+	}
+	return false
+}

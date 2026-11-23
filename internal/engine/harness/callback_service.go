@@ -23,12 +23,14 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/queue"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
@@ -2684,6 +2686,27 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 		}, nil
 	}
 
+	// The marker of a catalog launch is written here from the catalog name that the
+	// caller named, and never from the payload. A graph of the caller gets none, and
+	// it may not take the name of a checked-in mission, because a gate that is meant
+	// for a catalog mission keys on the marker and the name must never stand for it
+	// (gibson#1469).
+	catalogName := strings.TrimSpace(req.GetCatalogMission())
+	if catalogName == "" {
+		delete(metadata, mission.MetadataCatalogMission)
+		if reservedMissionName(req.Name, definitionJSON) {
+			return &harnesspb.CreateMissionResponse{
+				Error: &harnesspb.HarnessError{
+					Code: commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+					Message: "the name of the mission is the name of a checked-in mission. " +
+						"Originate that mission with catalog_mission, or choose another name",
+				},
+			}, nil
+		}
+	} else {
+		metadata[mission.MetadataCatalogMission] = catalogName
+	}
+
 	// A child that starts from the state of the caller is a fork of the
 	// caller sandbox (ADR-0169, gibson#803). Each check that needs no child
 	// runs first, so a refused fork creates no mission.
@@ -3136,4 +3159,17 @@ func callToolDiscoveryScope(ctx context.Context, info *harnesspb.ContextInfo) in
 		ec.TenantID = tenant
 	}
 	return ec
+}
+
+// reservedMissionName reports whether a graph of a caller, or the name that the
+// caller gives it, is the name of a checked-in mission.
+func reservedMissionName(name, definitionJSON string) bool {
+	if missioncatalog.IsCatalogName(name) {
+		return true
+	}
+	def, err := mission.UnmarshalDefinitionJSON([]byte(definitionJSON))
+	if err != nil {
+		return false // the creation refuses a graph that does not parse
+	}
+	return missioncatalog.IsCatalogName(def.GetName())
 }

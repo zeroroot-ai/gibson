@@ -28,7 +28,7 @@ func TestCreateMission_StampsCaller(t *testing.T) {
 	server := NewDaemonServer(daemon, nil, nil)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "123456789012345678")
 
-	resp, err := server.CreateMission(ctx, &daemonpb.CreateMissionRequest{Name: "scan", TargetId: "t1", MissionDefinitionId: "d1"})
+	resp, err := server.CreateMission(ctx, &daemonpb.CreateMissionRequest{Name: "scan-by-hand", TargetId: "t1", MissionDefinitionId: "d1"})
 	if err != nil {
 		t.Fatalf("CreateMission: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestCreateMission_RefusesWithoutIdentity(t *testing.T) {
 	}}
 	server := NewDaemonServer(daemon, nil, nil)
 
-	_, err := server.CreateMission(context.Background(), &daemonpb.CreateMissionRequest{Name: "scan", TargetId: "t1", MissionDefinitionId: "d1"})
+	_, err := server.CreateMission(context.Background(), &daemonpb.CreateMissionRequest{Name: "scan-by-hand", TargetId: "t1", MissionDefinitionId: "d1"})
 	if status_grpc.Code(err) != codes.Unauthenticated || called {
 		t.Fatalf("got err=%v called=%v, want Unauthenticated and no daemon call", err, called)
 	}

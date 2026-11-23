@@ -42,6 +42,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
 )
 
 // componentMissionManager implements component.MissionManager.
@@ -265,6 +266,13 @@ func (m *componentMissionManager) OriginateMission(ctx context.Context, req comp
 	parent, getErr := store.Get(ctx, parentID)
 	if getErr != nil {
 		return nil, status.Errorf(codes.NotFound, "parent mission %s not found: %v", parentID, getErr)
+	}
+
+	// A graph of a component may not take the name of a checked-in mission. A
+	// catalog mission starts only through the catalog (gibson#1469).
+	if def, defErr := mission.UnmarshalDefinitionJSON(req.DefinitionJSON); defErr == nil && missioncatalog.IsCatalogName(def.GetName()) {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"the name %q is the name of a checked-in mission, so a component cannot originate a graph with it", def.GetName())
 	}
 
 	targets, targetErr := parseTargetIDs(req.TargetID)

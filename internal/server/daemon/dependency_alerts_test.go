@@ -30,7 +30,7 @@ func scanWorld(t *testing.T) (*brain.Registry, *brain.Engine, context.Context) {
 	t.Cleanup(cancel)
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	eng := reg.For("acme")
-	eng.Submit(brain.MissionStarted{ID: "scan-1", RunID: "run-1", Name: brain.ScanMissionName})
+	eng.Submit(brain.MissionStarted{ID: "scan-1", RunID: "run-1", Name: brain.ScanMissionName, Catalog: brain.ScanMissionName})
 	eng.Submit(brain.MissionStarted{ID: "other-1", RunID: "run-2", Name: "something-else"})
 	waitFor(t, func() bool {
 		n := 0

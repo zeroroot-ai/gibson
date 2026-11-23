@@ -33,7 +33,7 @@ func TestCreateMission_ATenantRecordFailureIsUnavailable(t *testing.T) {
 	server := NewDaemonServer(daemon, nil, nil)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "123456789012345678")
 
-	_, err := server.CreateMission(ctx, &daemonpb.CreateMissionRequest{Name: "scan", TargetId: "t1", MissionDefinitionId: "d1"})
+	_, err := server.CreateMission(ctx, &daemonpb.CreateMissionRequest{Name: "scan-by-hand", TargetId: "t1", MissionDefinitionId: "d1"})
 	if got := status_grpc.Code(err); got != codes.Unavailable {
 		t.Fatalf("code = %v (%v), want Unavailable", got, err)
 	}

@@ -19,10 +19,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
 
-// metadataCatalogMission names the checked-in mission that a mission was started
-// from. It is the origin of a catalog launch.
-const metadataCatalogMission = "catalog_mission"
-
 // RunCatalogMission creates a mission from a checked-in catalog mission and
 // queues it (gibson#1469). It takes the path of an agent that originates the same
 // mission through the harness callback: the same render, the same mission record
@@ -55,7 +51,7 @@ func (d *daemonImpl) RunCatalogMission(ctx context.Context, req api.RunCatalogMi
 		MissionDefinitionJSON: string(body),
 		Name:                  req.Name,
 		TargetID:              targetID,
-		Metadata:              map[string]any{metadataCatalogMission: req.Name},
+		Metadata:              map[string]any{mission.MetadataCatalogMission: req.Name},
 		CreatedBy:             req.CreatedBy,
 	})
 	if err != nil {
@@ -75,6 +71,7 @@ func (d *daemonImpl) RunCatalogMission(ctx context.Context, req api.RunCatalogMi
 	// creator too, so a run that projected first loses nothing.
 	d.announceMission(tenant, &mission.Mission{
 		ID: info.ID, Name: req.Name, TargetID: targetID, TenantID: tenant.String(), CreatedBy: req.CreatedBy,
+		Metadata: map[string]any{mission.MetadataCatalogMission: req.Name},
 	})
 	// The anchors are written only after the mission started, so a mission that
 	// did not start leaves no anchor behind. The alerts node reads the anchors

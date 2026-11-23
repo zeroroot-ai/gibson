@@ -34,7 +34,7 @@ func isScanAlertsNode(bind *missionBinding, req brain.DispatchRequest, tid tooli
 	isScan := false
 	bind.eng.ReadWorld(func(w *brain.World) {
 		for _, m := range w.MissionSnapshot() {
-			if m.ID == req.MissionID && m.Name == brain.ScanMissionName {
+			if m.ID == req.MissionID && m.Catalog == brain.ScanMissionName {
 				isScan = true
 			}
 		}
