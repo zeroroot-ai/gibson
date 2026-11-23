@@ -16,12 +16,12 @@ func at(h int) time.Time { return t0.Add(time.Duration(h) * time.Hour) }
 
 func TestWaitingOnPerson_AllFourKinds(t *testing.T) {
 	findings := []brain.FindingSnapshot{
-		{ID: "refused", Status: brain.FindingStatusFixing, MergeRequest: "mr-1"},
+		{ID: "refused", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", FixFacts: brain.FixFacts{FixHeadSHA: "aaaa"}},
 		{ID: "scan", Status: brain.FindingStatusFixed,
 			FixFacts: brain.FixFacts{CheckKind: "tool", DeployedAt: at(2)}},
 		{ID: "nohealth", Status: brain.FindingStatusFixed,
 			FixFacts: brain.FixFacts{CheckKind: "scan", DeployedAt: at(1), HealthUnavailableAt: at(3)}},
-		{ID: "quiet", Status: brain.FindingStatusFixing, MergeRequest: "mr-2"},
+		{ID: "quiet", Status: brain.FindingStatusFixing, MergeRequest: "mr-2", FixFacts: brain.FixFacts{FixHeadSHA: "aaaa"}},
 	}
 	actions := []brain.DestructiveActionSnapshot{
 		{HypothesisID: "h1", RequestedAtUnixMS: at(0).UnixMilli()},
@@ -56,7 +56,7 @@ func TestWaitingOnPerson_AllFourKinds(t *testing.T) {
 }
 
 func TestWaitingOnPerson_NextReportEndsARefusal(t *testing.T) {
-	findings := []brain.FindingSnapshot{{ID: "f", Status: brain.FindingStatusFixing, MergeRequest: "mr-1"}}
+	findings := []brain.FindingSnapshot{{ID: "f", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", FixFacts: brain.FixFacts{FixHeadSHA: "aaaa"}}}
 	history := []brain.Event{
 		brain.MergeRequestObserved{Key: "mr-1", State: brain.MergeRequestRefused, At: at(1)},
 		&brain.MergeRequestObserved{Key: "mr-1", State: brain.MergeRequestMerged, At: at(2)},
@@ -76,7 +76,7 @@ func TestWaitingOnPerson_ScanAfterDeployEndsTheWait(t *testing.T) {
 
 // A refused merge names the reason that the host gave.
 func TestWaitingOnPerson_ARefusalCarriesItsReason(t *testing.T) {
-	findings := []brain.FindingSnapshot{{ID: "f", Status: brain.FindingStatusFixing, MergeRequest: "mr-1"}}
+	findings := []brain.FindingSnapshot{{ID: "f", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", FixFacts: brain.FixFacts{FixHeadSHA: "aaaa"}}}
 	history := []brain.Event{
 		brain.MergeRequestObserved{Key: "mr-1", State: brain.MergeRequestRefused, Reason: "review required", At: at(1)},
 	}
@@ -91,12 +91,12 @@ func TestWaitingOnPerson_ARefusalCarriesItsReason(t *testing.T) {
 // does not wait (gibson#1609).
 func TestWaitingOnPerson_UnreadableAndNoVerdictWaits(t *testing.T) {
 	findings := []brain.FindingSnapshot{
-		{ID: "unreadable", Status: brain.FindingStatusFixing, MergeRequest: "mr-1"},
+		{ID: "unreadable", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", FixFacts: brain.FixFacts{FixHeadSHA: "aaaa"}},
 		{ID: "noverdict", Status: brain.FindingStatusFixed, MergeRequest: "mr-2",
 			FixFacts: brain.FixFacts{CheckKind: "scan", DeployedAt: at(1)}},
 		{ID: "verdict", Status: brain.FindingStatusFixed, MergeRequest: "mr-3",
 			FixFacts: brain.FixFacts{CheckKind: "scan", DeployedAt: at(1), Health: brain.HealthHeld}},
-		{ID: "ended", Status: brain.FindingStatusFixing, MergeRequest: "mr-4"},
+		{ID: "ended", Status: brain.FindingStatusFixing, MergeRequest: "mr-4", FixFacts: brain.FixFacts{FixHeadSHA: "aaaa"}},
 	}
 	history := []brain.Event{
 		brain.FixWaiting{MergeRequest: "mr-1", WaitKind: brain.WaitMergeUnreadable, Reason: "the daemon cannot read the merge request on the Git host", Waiting: true, At: at(1)},
@@ -260,5 +260,31 @@ func TestWaitingOnPerson_VerifiedFindingWithStaleBlockShowsNoWait(t *testing.T) 
 	}, nil, nil, at(5))
 	if len(got) != 0 {
 		t.Fatalf("got %+v, want no wait", got)
+	}
+}
+
+// A linked fix with no head, whose link event is older than the history window and
+// whose claim time is zero, still shows its wait. The time falls back to the time that
+// the finding holds for its merge request, and then to now.
+func TestWaitingOnPerson_NoFixHeadFallsBackWhenTheHistoryIsGone(t *testing.T) {
+	findings := []brain.FindingSnapshot{
+		{ID: "has-link-time", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", FixFacts: brain.FixFacts{LinkedAt: at(2)}},
+		{ID: "nothing", Status: brain.FindingStatusFixing, MergeRequest: "mr-2"},
+	}
+
+	got := WaitingOnPerson(findings, nil, nil, at(5)) // no history: the link event is gone
+
+	if len(got) != 2 {
+		t.Fatalf("got %+v, want a wait for each finding", got)
+	}
+	byID := map[string]WaitItem{}
+	for _, it := range got {
+		byID[it.ID] = it
+	}
+	if it := byID["has-link-time"]; it.Kind != WaitNoFixHead || !it.Since.Equal(at(2)) {
+		t.Errorf("has-link-time = %+v, want since the time of the finding", it)
+	}
+	if it := byID["nothing"]; it.Kind != WaitNoFixHead || !it.Since.Equal(at(5)) || it.Waited != 0 {
+		t.Errorf("nothing = %+v, want since now", it)
 	}
 }

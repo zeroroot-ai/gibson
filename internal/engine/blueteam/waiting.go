@@ -120,8 +120,14 @@ func WaitingOnPerson(
 				since, reason := f.FixHeadMissingAt, f.FixHeadMissingReason
 				if reason == "" {
 					reason = "no fix head was recorded"
-					if since = linked[f.ID]; since.IsZero() {
-						since = f.FixClaimedAt
+					// The time of the link: the history, then the time that the finding
+					// holds for its merge request, then the claim, then now. A history
+					// that was trimmed and a finding from before LinkedAt must still show
+					// the wait, so the chain ends at now.
+					for _, t := range []time.Time{linked[f.ID], f.LinkedAt, f.FixClaimedAt, now} {
+						if since = t; !since.IsZero() {
+							break
+						}
 					}
 				}
 				add(WaitNoFixHead, f.ID, since, reason)

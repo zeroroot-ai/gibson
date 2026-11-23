@@ -179,6 +179,11 @@ type FixFacts struct {
 	// PlaceBlock is the wait on a person that the fix loop shows when the finding has
 	// no single Application. It is empty while the finding has one (gibson#1469).
 	PlaceBlock string
+
+	// LinkedAt is the time of the status change that set the merge request of the
+	// current fix, which is the time of the link. It is zero for a finding that was
+	// linked before this field existed.
+	LinkedAt time.Time
 	// VerifiedAt is the time of the change to `verified`. A bounded reader
 	// of the history reads it to leave out an old fix (review M6).
 	VerifiedAt time.Time
@@ -399,6 +404,7 @@ func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 				f.MergeRequest = e.MergeRequest
 				f.MergeRequestState = ""
 				f.FixMissionID = e.MissionID
+				f.LinkedAt = e.At
 			}
 			if e.Status == FindingStatusOpen {
 				resetFix(f)
@@ -533,6 +539,7 @@ func resetFix(f *Finding) {
 	f.FixLinkWait = FixLinkWait{}
 	f.FixHeadSHA, f.FixFiles = "", ""
 	f.FixHeadMissingReason, f.FixHeadMissingAt = "", time.Time{}
+	f.LinkedAt = time.Time{}
 	f.VerifiedAt = time.Time{}
 	f.PlaceBlock = ""
 }
