@@ -232,3 +232,23 @@ func TestWaitingOnPerson_NoSingleApplication(t *testing.T) {
 		t.Fatalf("got %+v, want one item for the blocked finding, since the event", got)
 	}
 }
+
+// A finding with a place block shows the wait when the history read holds no
+// event for it. The wait starts at the last known time of the finding, else now.
+func TestWaitingOnPerson_NoSingleApplicationShowsWithShortHistory(t *testing.T) {
+	findings := []brain.FindingSnapshot{
+		{ID: "known", Status: brain.FindingStatusFixing, PlaceBlock: "waiting on a person: x",
+			FixFacts: brain.FixFacts{DeployedAt: at(2)}},
+		{ID: "unknown", Status: brain.FindingStatusFixing, PlaceBlock: "waiting on a person: y"},
+	}
+	got := map[string]WaitItem{}
+	for _, it := range WaitingOnPerson(findings, nil, nil, at(5)) {
+		got[it.ID] = it
+	}
+	if k := got["known"]; k.Kind != WaitNoSingleApplication || k.Waited != 3*time.Hour {
+		t.Errorf("known = %+v, want the wait since the last known time", k)
+	}
+	if u := got["unknown"]; u.Kind != WaitNoSingleApplication || u.Waited != 0 || u.Reason != "waiting on a person: y" {
+		t.Errorf("unknown = %+v, want the wait since now", u)
+	}
+}

@@ -100,7 +100,14 @@ func WaitingOnPerson(
 	placed := placeBlockTimes(history)
 	for _, f := range findings {
 		if f.PlaceBlock != "" {
-			add(WaitNoSingleApplication, f.ID, placed[f.ID], f.PlaceBlock)
+			// A finding with a place block always shows the wait. When the history
+			// read no longer holds the event, the wait starts at the last known time
+			// of the finding, else now: short history never hides it.
+			since := placed[f.ID]
+			if since.IsZero() {
+				since = lastKnown(f, linked[f.ID], now)
+			}
+			add(WaitNoSingleApplication, f.ID, since, f.PlaceBlock)
 		}
 		switch f.Status {
 		case brain.FindingStatusFixing:
@@ -154,6 +161,23 @@ func WaitingOnPerson(
 
 func rerunAfterDeploy(f brain.FindingSnapshot) bool {
 	return !f.RerunAt.IsZero() && f.RerunAt.After(f.DeployedAt)
+}
+
+// lastKnown is the latest time that the snapshot of a finding records, else now.
+func lastKnown(f brain.FindingSnapshot, linked, now time.Time) time.Time {
+	best := time.Time{}
+	for _, t := range []time.Time{
+		f.RaisedAt, f.FirstSeenAt, f.FixClaimedAt, f.FixHeadMissingAt, f.DeployedAt,
+		f.HealthUnavailableAt, f.RerunAt, f.RevertRequestedAt, linked,
+	} {
+		if t.After(best) {
+			best = t
+		}
+	}
+	if best.IsZero() {
+		return now
+	}
+	return best
 }
 
 // placeBlockTimes returns, for each finding, the time of the event that set its
