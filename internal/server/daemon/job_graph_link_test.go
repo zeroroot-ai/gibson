@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,9 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/fixloop"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
-	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
-	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // testNow is the time that the tests pass to fixedByEvents.
@@ -901,7 +898,7 @@ func openedBy(tenant, mr, head string) mapHeads {
 }
 
 func openedByBranch(tenant, mr, head, branch string) mapHeads {
-	return mapHeads{tenant + "\x00" + mr + "\x00run-1": openedHead{sha: head, sourceBranch: branch, missionRunID: "run-1"}}
+	return mapHeads{tenant + "\x00" + mr + "\x00job-1": openedHead{sha: head, sourceBranch: branch, jobID: "job-1"}}
 }
 
 // headEventsOf closes the test job and returns the head events of the link.
@@ -967,37 +964,41 @@ func TestJobGraphLink_NoHeadFromTheOpenOfAnotherTenant(t *testing.T) {
 	}
 }
 
-// An open in another mission run has a record of its own. The link reads the record
-// of the run of the job, so the open of another run vouches for nothing.
-func TestJobGraphLink_NoHeadWhenTheOpenWasInAnotherRun(t *testing.T) {
-	o := mapHeads{"acme\x00" + testMRURL + "\x00run-other": openedHead{sha: testHeadSHA, sourceBranch: "job/job-1", missionRunID: "run-other"}}
+// An open in a turn of another job has a record of its own. The link reads the record of
+// its own job, so the open of another job vouches for nothing.
+func TestJobGraphLink_NoHeadWhenTheOpenWasInATurnOfAnotherJob(t *testing.T) {
+	o := mapHeads{"acme\x00" + testMRURL + "\x00job-other": openedHead{sha: testHeadSHA, sourceBranch: "job/job-1", jobID: "job-other"}}
 	heads, missing := headEventsOf(t, o)
-	if len(heads) != 0 || len(missing) != 1 || !strings.Contains(missing[0].Reason, "mission run of the job") {
+	if len(heads) != 0 || len(missing) != 1 || !strings.Contains(missing[0].Reason, "turn of the job") {
 		t.Errorf("heads %+v, missing %+v", heads, missing)
 	}
 	if heads, _ := headEventsOf(t, openedBy("acme", testMRURL, testHeadSHA)); len(heads) != 1 {
-		t.Errorf("the open in the run of the job must vouch: %+v", heads)
+		t.Errorf("the open in a turn of the job must vouch: %+v", heads)
 	}
 }
 
-// A closed job with no mission run is refused. No call can be bound to it.
-func TestJobGraphLink_NoHeadForAJobWithNoMissionRun(t *testing.T) {
+// A closed job with no job id is refused. No call can be bound to it.
+func TestJobGraphLink_NoHeadForAJobWithNoJobID(t *testing.T) {
 	l := &jobGraphLink{opened: openedBy("acme", testMRURL, testHeadSHA), logger: testObsLogger().Slog()}
 	closed := closedJob([]string{"f-1"}, mrDeliverable)
-	closed.MissionRunID = ""
-	if reason := l.headMismatch(closed, testMRURL, testHeadSHA); !strings.Contains(reason, "no mission run") {
-		t.Errorf("reason = %q, want a refusal that names the missing run", reason)
+	closed.JobID = ""
+	if reason := l.headMismatch(closed, testMRURL, testHeadSHA); !strings.Contains(reason, "no job id") {
+		t.Errorf("reason = %q, want a refusal that names the missing job id", reason)
 	}
-	closed.MissionRunID = "run-1"
+	closed.JobID = "job-1"
 	if reason := l.headMismatch(closed, testMRURL, testHeadSHA); reason != "" {
-		t.Errorf("reason = %q, want none for a job in the run of the open", reason)
+		t.Errorf("reason = %q, want none for the job of the open", reason)
 	}
 }
 
-func openCall(tenantRun, result string) harness.ToolCallRecord {
+// openCall is the record of an open_merge_request call in a turn of the job that the
+// verified turn grant names. memberRun is the run of the member, which is not the run
+// of the job node.
+func openCall(jobID, result string) harness.ToolCallRecord {
 	return harness.ToolCallRecord{
 		ToolName: "mcp:github-fixloop:open_merge_request", Result: result,
-		RunID: "agent-run-1", MissionID: "m-1", MissionRunID: tenantRun, RecordedAtUnixNano: testNow.UnixNano(),
+		GrantTaskID: jobID, RunID: "member-run-1", MissionID: "bank-1", MissionRunID: "member-run-1",
+		RecordedAtUnixNano: testNow.UnixNano(),
 	}
 }
 
@@ -1008,25 +1009,22 @@ func openResultJSON(branch, head string) string {
 func TestOpenedEventOf_OnlyASuccessfulOpenGivesAnEvent(t *testing.T) {
 	res := openResultJSON("job/job-1", testHeadSHA)
 	for name, call := range map[string]harness.ToolCallRecord{
-		"another tool": {ToolName: "mcp:github-fixloop:close_merge_request", Result: res},
-		"an error":     {ToolName: "mcp:github-fixloop:open_merge_request", Result: res, Err: "boom"},
-		"no mcp id":    {ToolName: "open_merge_request", Result: res},
-		"no head":      {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{"url":"u","source_branch":"b"}`},
-		"no key":       {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{"source_branch":"b","head_sha":"` + testHeadSHA + `"}`},
-		"bad result":   {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{not json`},
-		"no run":       {ToolName: "mcp:github-fixloop:open_merge_request", Result: res},
+		"another tool":  {ToolName: "mcp:github-fixloop:close_merge_request", Result: res},
+		"an error":      {ToolName: "mcp:github-fixloop:open_merge_request", Result: res, Err: "boom"},
+		"no mcp id":     {ToolName: "open_merge_request", Result: res},
+		"no head":       {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{"url":"u","source_branch":"b"}`},
+		"no key":        {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{"source_branch":"b","head_sha":"` + testHeadSHA + `"}`},
+		"bad result":    {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{not json`},
+		"no turn grant": {ToolName: "mcp:github-fixloop:open_merge_request", Result: res, MissionRunID: "member-run-1"},
 	} {
 		if ev, ok := openedEventOf(call); ok {
 			t.Errorf("%s: got %+v", name, ev)
 		}
 	}
-	ev, ok := openedEventOf(openCall("run-1", res))
-	if !ok || ev.JobID != "job-1" || ev.RunID != "agent-run-1" || ev.MissionID != "m-1" || ev.MissionRunID != "run-1" ||
+	ev, ok := openedEventOf(openCall("job-1", res))
+	if !ok || ev.JobID != "job-1" || ev.RunID != "member-run-1" || ev.MissionID != "bank-1" || ev.MissionRunID != "member-run-1" ||
 		ev.MergeRequest != "!7" || ev.URL != testMRURL || ev.HeadSHA != testHeadSHA {
 		t.Errorf("event = %+v, %v", ev, ok)
-	}
-	if ev, _ := openedEventOf(openCall("run-1", openResultJSON("feature/x", testHeadSHA))); ev.JobID != "" {
-		t.Errorf("a branch that is no job branch has no job id: %+v", ev)
 	}
 }
 
@@ -1037,17 +1035,17 @@ func TestWorldOpenedHeads_SurviveARestartAndStayInTheirTenant(t *testing.T) {
 	defer cancel()
 	factory := braintest.StoreFactory()
 	first := brain.NewRegistry(ctx, factory)
-	recordOpenedHead(ctx, first, "acme", openCall("run-1", openResultJSON("job/job-1", testHeadSHA)))
+	recordOpenedHead(ctx, first, "acme", openCall("job-1", openResultJSON("job/job-1", testHeadSHA)))
 
 	second := brain.NewRegistry(ctx, factory)
-	got, ok := worldOpenedHeads{reg: second}.OpenedHead("acme", testMRURL, "run-1")
-	if !ok || got.sha != testHeadSHA || got.sourceBranch != "job/job-1" || got.missionRunID != "run-1" {
+	got, ok := worldOpenedHeads{reg: second}.OpenedHead("acme", testMRURL, "job-1")
+	if !ok || got.sha != testHeadSHA || got.sourceBranch != "job/job-1" || got.jobID != "job-1" {
 		t.Fatalf("after the restart: %+v, %v", got, ok)
 	}
-	if _, ok := (worldOpenedHeads{reg: second}).OpenedHead("globex", testMRURL, "run-1"); ok {
+	if _, ok := (worldOpenedHeads{reg: second}).OpenedHead("globex", testMRURL, "job-1"); ok {
 		t.Error("the head of tenant acme is visible to tenant globex")
 	}
-	if _, ok := (worldOpenedHeads{}).OpenedHead("acme", testMRURL, "run-1"); ok {
+	if _, ok := (worldOpenedHeads{}).OpenedHead("acme", testMRURL, "job-1"); ok {
 		t.Error("a nil registry has no heads")
 	}
 }
@@ -1057,7 +1055,7 @@ func TestJobGraphLink_ALinkAfterARestartStillRecordsTheHead(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	factory := braintest.StoreFactory()
-	recordOpenedHead(ctx, brain.NewRegistry(ctx, factory), "acme", openCall("run-1", openResultJSON("job/job-1", testHeadSHA)))
+	recordOpenedHead(ctx, brain.NewRegistry(ctx, factory), "acme", openCall("job-1", openResultJSON("job/job-1", testHeadSHA)))
 
 	restarted := brain.NewRegistry(ctx, factory)
 	heads, missing := headEventsOf(t, worldOpenedHeads{reg: restarted})
@@ -1076,46 +1074,66 @@ func TestToolCallSink_RecordsTheOpenAndCallsTheNextSink(t *testing.T) {
 	var next int
 	sink := d.toolCallSink(func(context.Context, string, harness.ToolCallRecord) { next++ })
 
-	sink(ctx, "acme", openCall("run-1", openResultJSON("job/job-1", testHeadSHA)))
+	sink(ctx, "acme", openCall("job-1", openResultJSON("job/job-1", testHeadSHA)))
 
 	if next != 1 {
 		t.Errorf("the next sink ran %d times, want once", next)
 	}
-	if h, ok := (worldOpenedHeads{reg: reg}).OpenedHead("acme", testMRURL, "run-1"); !ok || h.sha != testHeadSHA {
+	if h, ok := (worldOpenedHeads{reg: reg}).OpenedHead("acme", testMRURL, "job-1"); !ok || h.sha != testHeadSHA {
 		t.Errorf("head = %+v, %v", h, ok)
 	}
 }
 
-// The run that a coding job's open_merge_request call carries is the run of its
-// ClosedJob. ComponentService.CallTool puts the run of the work item in the call
-// record (service_connector_call.go), and RecordToolCall passes it as MissionRunId.
-// A bank member call carries the run of its grant (memberCall.contextInfo). This test
-// runs the real callback manager, so a change that sends another run fails here and
-// does not silently block every merge.
-func TestOpenMergeRequest_TheCallCarriesTheRunOfTheClosedJob(t *testing.T) {
+// A turn of a bank member of job J opens a merge request. The turn grant carries the id
+// of the job as its task and the run of the member as its run, and the run of the member
+// is not the run of the job node. The link of job J records the head. An open in a turn
+// of another job does not bind to job J.
+func TestOpenMergeRequest_ATurnOfTheJobBindsToTheLinkOfTheJob(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	cb := harness.NewCallbackManager(harness.CallbackConfig{
-		ServiceOptions: []harness.CallbackServiceOption{harness.WithEventBus(NewEventBusAdapter(NewEventBus(slog.Default())))},
-		ListenAddress:  "127.0.0.1:0",
-	}, slog.Default())
 	d := &daemonImpl{brainRegistry: reg}
-	cb.SetToolCallSink(d.toolCallSink(ingestToolCall(reg)))
-	closed := closedJob([]string{"f-1"}, mrDeliverable) // MissionRunID "run-1"
+	sink := d.toolCallSink(ingestToolCall(reg))
+	closed := closedJob([]string{"f-1"}, mrDeliverable) // job-1, in mission run run-1
 
-	cb.RecordToolCall(auth.ContextWithTenant(ctx, auth.MustNewTenantID(closed.TenantID)),
-		metatool.CallRecord{
-			Canonical: "mcp:github-fixloop:open_merge_request", MissionID: "m-1", RunID: closed.MissionRunID, ArgsJSON: []byte(`{}`),
-		},
-		[]byte(openResultJSON(jobnode.JobBranch(closed.JobID), testHeadSHA)), "")
+	// A turn of job-2 opens the same merge request first. Its grant names job-2.
+	sink(ctx, closed.TenantID, openCall("job-2", openResultJSON(jobnode.JobBranch(closed.JobID), "4444444444444444444444444444444444444444")))
+	// A turn of job-1 opens it, with the run of the member, which is not closed.MissionRunID.
+	call := openCall(closed.JobID, openResultJSON(jobnode.JobBranch(closed.JobID), testHeadSHA))
+	if call.MissionRunID == closed.MissionRunID {
+		t.Fatal("the test needs a member run that differs from the run of the job node")
+	}
+	sink(ctx, closed.TenantID, call)
 
-	got, ok := (worldOpenedHeads{reg: reg}).OpenedHead(closed.TenantID, testMRURL, closed.MissionRunID)
-	if !ok || got.missionRunID != closed.MissionRunID {
-		t.Fatalf("the open of the job has no record in the run %q of its closed job: %+v, %v", closed.MissionRunID, got, ok)
+	got, ok := (worldOpenedHeads{reg: reg}).OpenedHead(closed.TenantID, testMRURL, closed.JobID)
+	if !ok || got.jobID != closed.JobID || got.sha != testHeadSHA {
+		t.Fatalf("the open of the turn of the job has no record for the job: %+v, %v", got, ok)
 	}
 	heads, missing := headEventsOf(t, worldOpenedHeads{reg: reg})
-	if len(heads) != 1 || len(missing) != 0 {
-		t.Errorf("the link of the closed job found no head: heads %+v, missing %+v", heads, missing)
+	if len(heads) != 1 || len(missing) != 0 || heads[0].HeadSHA != testHeadSHA {
+		t.Errorf("the link of the job found no head: heads %+v, missing %+v", heads, missing)
+	}
+
+	// The open of job-2 binds to job-2 alone.
+	if other, ok := (worldOpenedHeads{reg: reg}).OpenedHead(closed.TenantID, testMRURL, "job-2"); !ok || other.jobID != "job-2" {
+		t.Errorf("the record of job-2 = %+v, %v", other, ok)
+	}
+}
+
+// Without an open in a turn of the job, the link of the job records no head, even when
+// a turn of another job opened a merge request.
+func TestOpenMergeRequest_AnOpenFromAnotherJobDoesNotBind(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	d := &daemonImpl{brainRegistry: reg}
+	sink := d.toolCallSink(ingestToolCall(reg))
+	closed := closedJob([]string{"f-1"}, mrDeliverable)
+
+	sink(ctx, closed.TenantID, openCall("job-2", openResultJSON(jobnode.JobBranch(closed.JobID), testHeadSHA)))
+
+	heads, missing := headEventsOf(t, worldOpenedHeads{reg: reg})
+	if len(heads) != 0 || len(missing) != 1 {
+		t.Errorf("an open from job-2 bound to job-1: heads %+v, missing %+v", heads, missing)
 	}
 }

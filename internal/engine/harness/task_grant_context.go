@@ -66,3 +66,13 @@ func callerTask(ctx context.Context, info *harnesspb.ContextInfo) string {
 	}
 	return info.GetTaskId()
 }
+
+// verifiedGrantTask returns the task of the verified task grant on ctx, or an empty
+// string when the request carried none. Unlike callerTask it never reads the body of
+// the request, so the value cannot be forged.
+func verifiedGrantTask(ctx context.Context) string {
+	if claims, ok := TaskGrantClaimsFromContext(ctx); ok {
+		return claims.TaskID
+	}
+	return ""
+}

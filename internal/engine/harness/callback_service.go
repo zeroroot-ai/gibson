@@ -522,6 +522,10 @@ type ToolCallRecord struct {
 	// MissionID attributes the call to its mission's frame, mirroring
 	// the mission frame.
 	MissionID string
+	// GrantTaskID is the task of the verified task grant of the call. For a turn of a
+	// bank member it is the id of the job. It comes from the grant and never from the
+	// request body, and it is empty for a call with no task grant.
+	GrantTaskID string
 	// RunID is the mission run (or agent run) that made this call.
 	RunID string
 	// MissionRunID is the mission run that issued the call, and only that. RunID
@@ -874,6 +878,7 @@ func (s *HarnessCallbackService) captureGrantedToolCall(
 		ToolCallID:         toolCallID,
 		MissionID:          contextInfo.GetMissionId(),
 		MissionRunID:       contextInfo.GetMissionRunId(),
+		GrantTaskID:        verifiedGrantTask(ctx),
 		RunID:              runID,
 		Agent:              contextInfo.GetAgentName(),
 		ToolName:           toolName,

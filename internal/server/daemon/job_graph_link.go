@@ -271,18 +271,19 @@ func (l *jobGraphLink) headMismatch(c jobnode.ClosedJob, mrKey, hostHead string)
 	if l.opened == nil {
 		return "the daemon keeps no record of the heads that open_merge_request returned"
 	}
-	if c.MissionRunID == "" {
-		return "the closed job names no mission run, so no open_merge_request call can be bound to it"
+	if c.JobID == "" {
+		return "the closed job names no job id, so no open_merge_request call can be bound to it"
 	}
-	// The record is read for the mission run of the job. An open in another run has
-	// a record of its own and is never read here.
-	made, ok := l.opened.OpenedHead(c.TenantID, mrKey, c.MissionRunID)
+	// The record is read for the job. A turn of a bank member carries the id of the job
+	// in its verified turn grant, and the run of that turn is the run of the member and
+	// not the run of the job node. An open in a turn of another job has a record of its
+	// own and is never read here.
+	made, ok := l.opened.OpenedHead(c.TenantID, mrKey, c.JobID)
 	switch {
 	case !ok:
-		return "the daemon saw no result of open_merge_request in the mission run of the job for this merge request"
-	case made.missionRunID != c.MissionRunID:
-		return fmt.Sprintf("open_merge_request was called in mission run %q, not in the run %q of the job",
-			made.missionRunID, c.MissionRunID)
+		return "the daemon saw no result of open_merge_request in a turn of the job for this merge request"
+	case made.jobID != c.JobID:
+		return fmt.Sprintf("open_merge_request was called in a turn of job %q, not of job %q", made.jobID, c.JobID)
 	case made.sourceBranch != jobnode.JobBranch(c.JobID):
 		return fmt.Sprintf("open_merge_request opened branch %q, not the job branch %q", made.sourceBranch, jobnode.JobBranch(c.JobID))
 	case made.sha != hostHead:
