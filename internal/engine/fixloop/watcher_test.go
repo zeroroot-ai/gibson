@@ -6,6 +6,7 @@ package fixloop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -950,14 +951,15 @@ func TestStep_TheHoldIsReadOnceAtTheDeploy(t *testing.T) {
 	}
 }
 
-// A hold that cannot be read at the deploy gives the default hold and a visible
-// wait with its own reason. The health signal is still read.
-func TestStep_AHoldThatCannotBeReadAtTheDeployWaitsVisiblyAndUsesTheDefault(t *testing.T) {
+// A fix mission record that is gone gives the upper bound of the hold, never the
+// shorter default, and a visible wait with its own reason. The health signal is
+// still read.
+func TestStep_AGoneMissionRecordGivesTheUpperBoundAndAVisibleWait(t *testing.T) {
 	g, hr := holdRig(t, func(context.Context, string, string) (time.Duration, error) {
-		return 0, errors.New("no record")
+		return 0, fmt.Errorf("read mission: %w", ErrHoldNotFound)
 	})
-	if hr.hold != DefaultPolicy().HoldTime {
-		t.Errorf("hold = %v, want the default", hr.hold)
+	if hr.hold != MaxHold || hr.hold <= DefaultPolicy().HoldTime {
+		t.Errorf("hold = %v, want the upper bound %v and not the default", hr.hold, MaxHold)
 	}
 	var reason string
 	for _, sl := range g.w.MergeSlots() {
@@ -984,5 +986,41 @@ func TestHoldOf(t *testing.T) {
 	}
 	if got := HoldOf(&missionv1.MissionConstraints{HealthHold: durationpb.New(0)}); got != 0 {
 		t.Errorf("a zero hold = %v, want zero", got)
+	}
+}
+
+// An error other than not found records no deploy in this pass, and the next step
+// reads again. A transient error never shortens the hold.
+func TestStep_ATransientHoldErrorRecordsNoDeployAndTheNextStepReadsAgain(t *testing.T) {
+	fail := true
+	g, hr := holdRig(t, func(context.Context, string, string) (time.Duration, error) {
+		if fail {
+			return 0, errors.New("the data plane is down")
+		}
+		return 45 * time.Minute, nil
+	})
+	if fs := g.w.FindingSnapshot(); !fs[0].DeployedAt.IsZero() {
+		t.Fatalf("the deploy was recorded at %v while the hold could not be read", fs[0].DeployedAt)
+	}
+	if hr.mission != "" {
+		t.Error("the health signal was read with no hold")
+	}
+	for _, sl := range g.w.MergeSlots() {
+		if _, w := sl.Waits[brain.WaitHoldUnreadable]; w {
+			t.Error("a transient error must not open the hold_unreadable wait")
+		}
+	}
+
+	fail = false
+	g.tick() // records the deploy with the hold
+	g.tick() // reads the health signal
+	if hr.hold != 45*time.Minute {
+		t.Errorf("hold = %v, want the 45m that the next step read", hr.hold)
+	}
+}
+
+func TestMaxHoldIsTheProtoBound(t *testing.T) {
+	if MaxHold != 24*time.Hour {
+		t.Errorf("MaxHold = %v, want 24h, the upper bound of health_hold", MaxHold)
 	}
 }

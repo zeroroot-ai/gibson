@@ -44,9 +44,9 @@ type DeployObserved struct {
 	// the deploy, so a later read of the health signal never needs the mission
 	// record. Zero means the default hold time.
 	HoldSeconds int64
-	// HoldUnreadable is true when the daemon could not read the hold time of the
-	// fix mission at the deploy. The fix then uses the default hold time, and a
-	// wait of kind WaitHoldUnreadable says why.
+	// HoldUnreadable is true when the fix mission record is gone, so the daemon
+	// could not read the hold time at the deploy. HoldSeconds then holds the upper
+	// bound, and a wait of kind WaitHoldUnreadable says why.
 	HoldUnreadable bool
 }
 

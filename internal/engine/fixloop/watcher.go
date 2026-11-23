@@ -370,7 +370,11 @@ func (w *Watcher) stepFixedFacts(ctx context.Context, tenant, mr string, f brain
 		if !d.Deployed || d.At.IsZero() {
 			return nil, nil // merged and not deployed yet
 		}
-		return deployEvents(mr, d, f.FixMissionID, w.holdAtDeploy(ctx, tenant, f.FixMissionID)), nil
+		hold, err := w.holdAtDeploy(ctx, tenant, f.FixMissionID)
+		if err != nil {
+			return nil, err // the deploy is not recorded now, and the next step reads again
+		}
+		return deployEvents(mr, d, f.FixMissionID, hold), nil
 	case f.Health == brain.HealthFailed:
 		return w.revert(ctx, tenant, mr, f)
 	case f.Health == "":
@@ -387,7 +391,7 @@ const (
 )
 
 // holdRead is the hold time that the Watcher read from the fix mission at the
-// deploy. unreadable is true when the read failed.
+// deploy. unreadable is true when the record of the mission is gone.
 type holdRead struct {
 	hold       time.Duration
 	unreadable bool
@@ -395,19 +399,23 @@ type holdRead struct {
 
 // holdAtDeploy reads the hold time of the fix mission one time, when the Watcher
 // records the deploy. A mission that states none gives zero, and the default hold
-// time applies. A read that fails gives the default and the mark unreadable, and
-// the finding waits visibly with its own reason.
-func (w *Watcher) holdAtDeploy(ctx context.Context, tenant, missionID string) holdRead {
+// time applies. A record that is gone gives MaxHold and the mark unreadable, and the
+// finding waits visibly with its own reason. Any other error is returned, so the
+// Watcher records no deploy in this pass and reads again at the next step.
+func (w *Watcher) holdAtDeploy(ctx context.Context, tenant, missionID string) (holdRead, error) {
 	if w.hold == nil {
-		return holdRead{}
+		return holdRead{}, nil
 	}
 	hold, err := w.hold(ctx, tenant, missionID)
-	if err != nil {
-		w.logger.Warn("fix loop: the hold time of the fix mission cannot be read, so the default applies",
-			"tenant", tenant, "mission_id", missionID, "error", err)
-		return holdRead{unreadable: true}
+	switch {
+	case errors.Is(err, ErrHoldNotFound):
+		w.logger.Warn("fix loop: the fix mission record is gone, so the hold is the upper bound",
+			"tenant", tenant, "mission_id", missionID, "hold", MaxHold)
+		return holdRead{hold: MaxHold, unreadable: true}, nil
+	case err != nil:
+		return holdRead{}, fmt.Errorf("read hold time: %w", err)
 	}
-	return holdRead{hold: max(hold, 0)}
+	return holdRead{hold: min(max(hold, 0), MaxHold)}, nil
 }
 
 // deployEvents records the deploy of a merged fix. The Timeline event holds

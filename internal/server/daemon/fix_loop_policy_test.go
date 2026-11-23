@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -58,4 +59,22 @@ func TestFixHold_RefusalsAreErrorsAndNoMissionStatesNoHold(t *testing.T) {
 
 	_, err = d.fixHold(ctx, "acme", "0e4f7f5e-6f5c-4c43-9f0a-1c0b3a3f9a11")
 	require.Error(t, err, "no pool: the record of the mission cannot be read")
+}
+
+// A record that is gone gives ErrHoldNotFound, so the fix loop uses the upper bound.
+// Any other read error does not, so the fix loop reads again.
+func TestFixHold_AGoneRecordIsNotFoundAndAnyOtherErrorIsNot(t *testing.T) {
+	ctx := context.Background()
+	const missionID = "0e4f7f5e-6f5c-4c43-9f0a-1c0b3a3f9a11"
+	conn, cleanup := newMiniredisConn(t)
+	defer cleanup()
+	d := &daemonImpl{pool: dataPlane{conn: conn}}
+
+	_, err := d.fixHold(ctx, "acme", missionID)
+	require.ErrorIs(t, err, fixloop.ErrHoldNotFound, "the record is gone")
+
+	d.pool = dataPlane{err: errors.New("not provisioned")}
+	_, err = d.fixHold(ctx, "acme", missionID)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, fixloop.ErrHoldNotFound, "a pool that fails is a transient error")
 }

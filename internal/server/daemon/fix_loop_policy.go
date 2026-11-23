@@ -24,6 +24,9 @@ func (d *daemonImpl) fixHold(ctx context.Context, tenant, missionID string) (tim
 		return 0, nil
 	}
 	rec, err := d.storedMission(ctx, tenant, missionID)
+	if mission.IsNotFoundError(err) {
+		return 0, fmt.Errorf("fix hold: %w: %w", fixloop.ErrHoldNotFound, err)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("fix hold: %w", err)
 	}
