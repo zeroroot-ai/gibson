@@ -42,6 +42,8 @@ func suppliedGraph(body string) bool {
 // resolveMissionDefinitionJSON decides which graph a CreateMission call runs:
 // the caller's own, or the checked-in catalog mission it named.
 //
+// It returns the canonical catalog name of a catalog mission, and "" for a graph of the caller.
+//
 // It is a pure function of the request so the rules below are testable without
 // a harness, a parent mission, or a daemon.
 //
@@ -49,7 +51,7 @@ func suppliedGraph(body string) bool {
 // definition was authoritative in prose only — nothing could reference it, so
 // the always-on agent kept a second copy of the graph, which is the duplicate
 // ADR-0027 forbids.
-func resolveMissionDefinitionJSON(ctx context.Context, req *harnesspb.CreateMissionRequest) (string, error) {
+func resolveMissionDefinitionJSON(ctx context.Context, req *harnesspb.CreateMissionRequest) (definition, catalog string, err error) {
 	graph := string(req.GetMissionDefinitionJson())
 	name := strings.TrimSpace(req.GetCatalogMission())
 
@@ -58,19 +60,19 @@ func resolveMissionDefinitionJSON(ctx context.Context, req *harnesspb.CreateMiss
 
 	switch {
 	case hasGraph && hasCatalog:
-		return "", fmt.Errorf("%w: both were given, so it is unclear which to run", ErrMissionInputAmbiguous)
+		return "", "", fmt.Errorf("%w: both were given, so it is unclear which to run", ErrMissionInputAmbiguous)
 	case !hasGraph && !hasCatalog:
-		return "", fmt.Errorf("%w: neither was given (checked-in missions: %s)",
+		return "", "", fmt.Errorf("%w: neither was given (checked-in missions: %s)",
 			ErrMissionInputAmbiguous, strings.Join(missioncatalog.Names(), ", "))
 	case hasGraph:
 		// Parameters without a mission to apply them to are a caller error, not
 		// something to drop: silently ignoring them would run the caller's graph
 		// while they believed their parameters had bound.
 		if len(req.GetCatalogParams()) > 0 {
-			return "", fmt.Errorf("%w: catalog_params was given with a caller-supplied graph, which has no parameters to bind",
+			return "", "", fmt.Errorf("%w: catalog_params was given with a caller-supplied graph, which has no parameters to bind",
 				ErrMissionInputAmbiguous)
 		}
-		return graph, nil
+		return graph, "", nil
 	}
 
 	// Render validates the map against what THIS mission declares in its own
@@ -81,11 +83,13 @@ func resolveMissionDefinitionJSON(ctx context.Context, req *harnesspb.CreateMiss
 	// field it forgot rather than one per attempt.
 	def, err := missioncatalog.Render(ctx, name, req.GetCatalogParams())
 	if err != nil {
-		return "", fmt.Errorf("originate %q: %w", name, err)
+		return "", "", fmt.Errorf("originate %q: %w", name, err)
 	}
 	body, err := mission.MarshalDefinitionJSON(def)
 	if err != nil {
-		return "", fmt.Errorf("marshal the rendered mission %q: %w", name, err)
+		return "", "", fmt.Errorf("marshal the rendered mission %q: %w", name, err)
 	}
-	return string(body), nil
+	// The catalog name is the one that the render returns, and never the text of
+	// the caller: the marker of a mission holds what the catalog holds.
+	return string(body), def.GetName(), nil
 }

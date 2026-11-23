@@ -111,6 +111,8 @@ type MissionProjected struct {
 	// CreatedBy is who created the mission. A mission that is announced after its
 	// start would otherwise lose the creator when the run projects first.
 	CreatedBy principal.Principal
+	// Catalog: see Mission.Catalog.
+	Catalog string
 
 	// RunID names this run of the mission. The daemon mints it when the run
 	// starts. A mission ID is the stable record ID, so the RunID is what makes
@@ -161,6 +163,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 		TenantID:       e.TenantID,
 		CreatedBy:      e.CreatedBy,
 		StartedAt:      e.StartedAt,
+		Catalog:        e.Catalog,
 	})
 	projectWork(w, e)
 }
@@ -265,6 +268,9 @@ func startRun(m *Mission, e MissionProjected) {
 	}
 	if !e.CreatedBy.IsZero() {
 		m.CreatedBy = e.CreatedBy
+	}
+	if e.Catalog != "" {
+		m.Catalog = e.Catalog
 	}
 }
 

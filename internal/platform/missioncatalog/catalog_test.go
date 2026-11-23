@@ -886,3 +886,18 @@ func TestRender_ScanForgeConnectorIsAnEnum(t *testing.T) {
 		t.Fatal("a connector outside github-fixloop and gitlab-fixloop must be refused")
 	}
 }
+
+// A catalog name is reserved in any letter case and with white space around it. A
+// name that is not in the catalog, and an empty name, are free.
+func TestIsCatalogName(t *testing.T) {
+	for _, name := range Names() {
+		if !IsCatalogName(name) || !IsCatalogName(strings.ToUpper(name)) || !IsCatalogName("  "+name+"\t") {
+			t.Errorf("%q must be a reserved name", name)
+		}
+	}
+	for _, name := range []string{"", "   ", "scan-by-hand", "my-scan", "scans", "sca"} {
+		if IsCatalogName(name) {
+			t.Errorf("%q must not be a reserved name", name)
+		}
+	}
+}

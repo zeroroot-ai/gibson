@@ -397,6 +397,9 @@ func TestPublishInboundMission_Refusals(t *testing.T) {
 		}, nil, pub("recon", "def-1", goodTarget), codes.FailedPrecondition},
 		{"the definition has no node for the agent", nil, nil, pub("scanner", "def-1", goodTarget),
 			codes.InvalidArgument},
+		{"the definition has the name of a checked-in mission", func(f *inboundFixture) {
+			f.source.defs["def-1"] = InboundDefinition{ID: "def-1", Name: "scan", Hash: "h", Agents: []string{"recon"}}
+		}, nil, pub("recon", "def-1", goodTarget), codes.InvalidArgument},
 		{"the target is not of the tenant", func(f *inboundFixture) { f.source.targetErr = ErrInboundTargetNotFound }, nil,
 			pub("recon", "def-1", goodTarget), codes.NotFound},
 		{"the target read fails", func(f *inboundFixture) { f.source.targetErr = errInboundBoom }, nil,

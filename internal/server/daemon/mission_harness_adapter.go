@@ -87,6 +87,12 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 		return nil, status.Error(codes.InvalidArgument, "create mission request is required")
 	}
 
+	// The tenant comes first: the record is stamped with it, and a call with none is
+	// refused before the store is opened.
+	tenant, tenantErr := tenantFromCtx(ctx)
+	if tenantErr != nil {
+		return nil, tenantErr
+	}
 	store, storeRelease, err := a.storeForCtx(ctx)
 	if err != nil {
 		return nil, err
@@ -153,10 +159,6 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 	}
 
 	// Build the mission record directly using the store.
-	tenant, tenantErr := tenantFromCtx(ctx)
-	if tenantErr != nil {
-		return nil, tenantErr
-	}
 	m := newMissionRecord(tenant, def.GetName(), def.GetDescription(), req.TargetID, types.ID(def.GetId()), req.CreatedBy)
 	m.MissionDefinitionJSON = string(defJSON)
 	m.ParentMissionID = req.ParentMissionID

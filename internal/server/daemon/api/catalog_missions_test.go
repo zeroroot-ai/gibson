@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -391,4 +392,54 @@ func TestRunCatalogMission_ADaemonErrorIsReturned(t *testing.T) {
 // callerCtx is the context of a verified caller.
 func callerCtx() context.Context {
 	return auth.WithIdentity(context.Background(), auth.Identity{Subject: "user:alice"})
+}
+
+// A mission that a person creates by hand may not take the name of a checked-in
+// mission, and a marker in the metadata that a caller sends is removed
+// (gibson#1469).
+func TestCreateMission_ACatalogNameIsReservedAndTheMarkerIsRemoved(t *testing.T) {
+	t.Parallel()
+	var got CreateMissionData
+	daemon := &mockDaemon{createMissionFn: func(_ context.Context, req CreateMissionData) (CreateMissionResultData, error) {
+		got = req
+		return CreateMissionResultData{MissionID: "m1", Name: req.Name}, nil
+	}}
+	srv := NewDaemonServer(daemon, nil, nil)
+	ctx := callerCtx()
+
+	_, err := srv.CreateMission(ctx, &daemonpb.CreateMissionRequest{Name: "Scan", TargetId: "t", MissionDefinitionId: "d"})
+	if status_grpc.Code(err) != codes.InvalidArgument {
+		t.Errorf("a mission named like a catalog mission: err = %v, want InvalidArgument", err)
+	}
+	_, err = srv.CreateMissionDefinition(ctx, &daemonpb.CreateMissionDefinitionRequest{Definition: &missionpb.MissionDefinition{Name: "scan"}})
+	if status_grpc.Code(err) != codes.InvalidArgument {
+		t.Errorf("a definition named like a catalog mission: err = %v, want InvalidArgument", err)
+	}
+
+	_, err = srv.CreateMission(ctx, &daemonpb.CreateMissionRequest{
+		Name: "mine", TargetId: "t", MissionDefinitionId: "d",
+		Metadata: map[string]string{"catalog_mission": "scan", "owner": "alice"},
+	})
+	if err != nil {
+		t.Fatalf("CreateMission: %v", err)
+	}
+	if _, forged := got.Metadata["catalog_mission"]; forged || got.Metadata["owner"] != "alice" {
+		t.Errorf("metadata = %v, want the marker removed and the rest kept", got.Metadata)
+	}
+}
+
+// A call with no verified identity is refused before the daemon is called.
+func TestRunCatalogMission_RefusesACallerWithNoIdentity(t *testing.T) {
+	t.Parallel()
+	called := false
+	srv := NewDaemonServer(&mockDaemon{runCatalogMissionFn: func(context.Context, RunCatalogMissionData) (string, error) {
+		called = true
+		return "m", nil
+	}}, nil, nil)
+	_, err := srv.RunCatalogMission(context.Background(), &daemonpb.RunCatalogMissionRequest{
+		Name: "scan", TargetId: "t", Params: map[string]string{"imageRef": "r/i@sha256:abc"},
+	})
+	if status_grpc.Code(err) != codes.Unauthenticated || called {
+		t.Errorf("err = %v, daemon called = %v, want Unauthenticated and no call", err, called)
+	}
 }

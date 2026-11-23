@@ -72,6 +72,12 @@ type Budget struct {
 // quiescence and completes mechanically, never invoking the Decider.
 type Mission struct {
 	ID string
+	// Catalog names the checked-in mission that this mission was launched from, and
+	// it is empty for any other mission. The daemon sets it on the two launch paths
+	// of the catalog and takes it from no caller. A gate that is meant for a catalog
+	// mission (the rescan, the ingest of the dependency alerts) keys on it and never
+	// on the name, because any create path can set a name.
+	Catalog string
 	// RunID names the current run of the mission. A mission ID is the stable
 	// record ID, so it stays the same over every run. The run changes each
 	// time the mission is projected again (gibson#1217).
@@ -149,6 +155,8 @@ type MissionStarted struct {
 	// StartedAt is the start of the run. Only a snapshot restore sets it, so
 	// the restored mission keeps the start of its run.
 	StartedAt time.Time
+	// Catalog: see Mission.Catalog.
+	Catalog string
 }
 
 func (MissionStarted) Kind() string { return "mission.started" }
@@ -164,6 +172,8 @@ type MissionCreated struct {
 	TargetID    string
 	TenantID    string
 	CreatedBy   principal.Principal
+	// Catalog: see Mission.Catalog.
+	Catalog string
 }
 
 // Kind names the event in the timeline.
@@ -182,6 +192,7 @@ func applyMissionCreated(w *World, e MissionCreated) {
 		TargetID:       e.TargetID,
 		TenantID:       e.TenantID,
 		CreatedBy:      e.CreatedBy,
+		Catalog:        e.Catalog,
 	})
 }
 
@@ -250,6 +261,9 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		if !e.CreatedBy.IsZero() {
 			m.CreatedBy = e.CreatedBy
 		}
+		if e.Catalog != "" {
+			m.Catalog = e.Catalog
+		}
 		if m.StartedAt.IsZero() {
 			m.StartedAt = e.StartedAt
 		}
@@ -268,6 +282,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		TenantID:       e.TenantID,
 		CreatedBy:      e.CreatedBy,
 		StartedAt:      e.StartedAt,
+		Catalog:        e.Catalog,
 	})
 }
 
@@ -408,6 +423,8 @@ type MissionSnapshot struct {
 	CreatedBy principal.Principal
 	// Reconciled reports that this scan's rescan reconciliation has run (gibson#1686).
 	Reconciled bool
+	// Catalog: see Mission.Catalog.
+	Catalog string
 	// StartedAt is the start of the current run.
 	StartedAt time.Time
 
@@ -481,6 +498,7 @@ func (w *World) MissionSnapshot() []MissionSnapshot {
 			TenantID:         m.TenantID,
 			CreatedBy:        m.CreatedBy,
 			Reconciled:       m.Reconciled,
+			Catalog:          m.Catalog,
 			StartedAt:        m.StartedAt,
 			Progress:         progress,
 			FindingsCount:    missionFindingsCount(w, m.ID),

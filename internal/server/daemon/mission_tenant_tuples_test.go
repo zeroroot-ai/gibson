@@ -12,6 +12,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/missiontest"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
@@ -190,4 +191,15 @@ func newJSONFakeClient(t *testing.T) (*redis.Client, *missiontest.Docs) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	return rdb, missiontest.Attach(rdb)
+}
+
+// The adapter refuses a call with no tenant before it opens the store, so no record
+// is made without a tenant to stamp on it (gibson#1469).
+func TestHarnessCreate_RefusesACallWithNoTenant(t *testing.T) {
+	rdb, _ := newJSONFakeClient(t)
+	a := newMissionHarnessAdapter(testDaemon(rdb, &fakeAuthorizer{}))
+	_, err := a.CreateMission(context.Background(), &harness.MissionClientCreateRequest{MissionDefinitionJSON: `{"name":"x"}`, TargetID: types.NewID()})
+	if err == nil {
+		t.Fatal("a call with no tenant created a mission")
+	}
 }

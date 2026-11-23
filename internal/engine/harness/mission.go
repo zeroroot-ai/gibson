@@ -104,6 +104,16 @@ func (h *DefaultAgentHarness) CreateMission(ctx context.Context, wf any, targetI
 		}
 	}
 
+	// The agent never sets the marker of a catalog launch, and it may not take the
+	// name of a checked-in mission. This path has no production caller that this
+	// change can find, but an interface method cannot be proven dead by a search, so
+	// it takes the same check as the callback path (gibson#1469).
+	guarded, guardErr := guardOrigination(req.Metadata, "", req.Name, req.MissionDefinitionJSON)
+	if guardErr != nil {
+		return nil, types.WrapError(ErrHarnessInvalidConfig, "refuse the mission", guardErr)
+	}
+	req.Metadata = guarded
+
 	// Create mission via client
 	m, err := h.missionClient.CreateMission(ctx, req)
 	if err != nil {

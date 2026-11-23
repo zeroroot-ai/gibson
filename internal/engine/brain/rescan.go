@@ -62,9 +62,10 @@ import (
 // same probe of the same target after the deploy, never evidence that an agent
 // names (gibson#1491, review R3).
 
-// ScanMissionName is the name of the Scan mission definition
-// (internal/platform/missioncatalog/missions/scan.cue). A mission is a scan —
-// and so reconciles — when its Name matches.
+// ScanMissionName is the catalog name of the Scan mission
+// (internal/platform/missioncatalog/missions/scan.cue). A mission is a scan, and
+// so reconciles, when it was launched from that catalog mission (Mission.Catalog).
+// A mission that only has the name is not a scan: any create path can set a name.
 const ScanMissionName = "scan"
 
 // ScanReconciled records that a terminal scan's reconciliation has run.
@@ -119,7 +120,7 @@ func RescanReconciliationSystem(w *World) []Event {
 	missions := w.MissionSnapshot()
 	scans := make([]MissionSnapshot, 0, len(missions))
 	for _, m := range missions {
-		if m.Name != ScanMissionName || m.Reconciled {
+		if m.Catalog != ScanMissionName || m.Reconciled {
 			continue
 		}
 		if !m.Status.IsTerminal() {

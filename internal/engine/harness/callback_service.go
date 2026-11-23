@@ -2669,7 +2669,7 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 	// Which graph runs: the caller's own, or the checked-in catalog mission it
 	// named (ADR-0118). Exactly one; an unknown parameter is refused rather
 	// than dropped.
-	definitionJSON, defErr := resolveMissionDefinitionJSON(ctx, req)
+	definitionJSON, catalogName, defErr := resolveMissionDefinitionJSON(ctx, req)
 	if defErr != nil {
 		s.logger.Warn("mission origination refused",
 			"parent_mission_id", parentMissionID.String(),
@@ -2681,6 +2681,18 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: defErr.Error(),
 			},
+		}, nil
+	}
+
+	// The marker of a catalog launch is written here from the canonical catalog name
+	// that the render returned, and never from the payload or the text of the caller.
+	// A graph of the caller gets none, and it may not take the name of a checked-in
+	// mission, because a gate that is meant for a catalog mission keys on the marker
+	// and the name must never stand for it (gibson#1469).
+	metadata, markErr := guardOrigination(metadata, catalogName, req.Name, definitionJSON)
+	if markErr != nil {
+		return &harnesspb.CreateMissionResponse{ //nolint:nilerr // the refusal is the response, not a transport error
+			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, Message: markErr.Error()},
 		}, nil
 	}
 

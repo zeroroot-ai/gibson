@@ -23,6 +23,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -496,6 +497,15 @@ func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (strin
 	// definition that changed after the publication check is refused here.
 	if pinErr := checkDefinitionPin(def, req.PinnedDefinitionHash); pinErr != nil {
 		return "", pinErr
+	}
+
+	// A definition with the name of a checked-in mission never starts here. This is
+	// the sink of every start by definition: RunMission, the inbound A2A start and
+	// the run of a definition that was stored before the name was reserved. A
+	// catalog mission starts only through the catalog (gibson#1469).
+	if missioncatalog.IsCatalogName(def.GetName()) {
+		return "", grpcstatus.Errorf(grpccodes.InvalidArgument,
+			"the definition is named %q, which is the name of a checked-in mission. Run that mission with RunCatalogMission", def.GetName())
 	}
 
 	m.logger.Debug("mission definition loaded",
@@ -1437,11 +1447,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	proj.BeliefModel = beliefVersion
 	// Carry display metadata so the World is the single source of truth for
 	// mission status + identity (ADR-0163/gibson#1118).
-	proj.Name = active.mission.Name
-	proj.Description = active.mission.Description
-	proj.TargetID = active.mission.TargetID.String()
-	proj.TenantID = active.mission.TenantID
-	proj.CreatedBy = active.mission.CreatedBy
+	carryRecord(&proj, active.mission)
 	// Key the projected mission by the RUN id (missionID) — the same id the
 	// per-mission binding, awaitBrainMission, and the Decider lookup all use.
 	// missionDefinitionToProjected defaults ID to the mission DEFINITION id,
@@ -1881,4 +1887,16 @@ func (m *missionManager) resolveExtraTargets(ctx context.Context, req api.RunMis
 		ids = append(ids, extra.ID)
 	}
 	return ids, nil
+}
+
+// carryRecord copies what the record of a mission holds into the projection of its
+// run: the display metadata, the creator and the marker of a catalog launch. The
+// World then holds the same facts as the record.
+func carryRecord(proj *brain.MissionProjected, rec *mission.Mission) {
+	proj.Name = rec.Name
+	proj.Description = rec.Description
+	proj.TargetID = rec.TargetID.String()
+	proj.TenantID = rec.TenantID
+	proj.CreatedBy = rec.CreatedBy
+	proj.Catalog = catalogOf(rec)
 }

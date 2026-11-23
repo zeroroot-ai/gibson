@@ -214,7 +214,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// restored World is the single source of truth for status + identity.
 	for _, m := range data.Missions {
 		if m.Status == MissionSubmitted {
-			Reduce(w, MissionCreated{ID: m.ID, Name: m.Name, Description: m.Description, TargetID: m.TargetID, TenantID: m.TenantID, CreatedBy: m.CreatedBy})
+			Reduce(w, MissionCreated{ID: m.ID, Name: m.Name, Description: m.Description, TargetID: m.TargetID, TenantID: m.TenantID, CreatedBy: m.CreatedBy, Catalog: m.Catalog})
 			continue
 		}
 		startEv := MissionStarted{
@@ -228,6 +228,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			TenantID:    m.TenantID,
 			CreatedBy:   m.CreatedBy,
 			StartedAt:   m.StartedAt,
+			Catalog:     m.Catalog,
 		}
 		Reduce(w, startEv)
 		// The spend of the run is part of the folded state. A replay of the

@@ -146,3 +146,32 @@ func TestMissionProjected_CarriesTheCreator(t *testing.T) {
 		t.Fatalf("snapshot = %+v, want one mission with the creator", snap)
 	}
 }
+
+// A pending mission that starts takes the creator and the catalog marker that the
+// start carries, and a pending mission that is projected takes them too. Neither
+// start changes a field that it leaves empty (gibson#1469).
+func TestMissionStart_TakesTheCreatorAndTheCatalogMarker(t *testing.T) {
+	creator := testCreator
+
+	started := NewWorld("t")
+	Reduce(started, MissionCreated{ID: "m1", Name: "scan", TenantID: "t"})
+	Reduce(started, MissionStarted{ID: "m1", RunID: "r1", CreatedBy: creator, Catalog: ScanMissionName})
+	if s := started.MissionSnapshot(); len(s) != 1 || s[0].CreatedBy != creator || s[0].Catalog != ScanMissionName {
+		t.Fatalf("after the start: %+v", s)
+	}
+
+	projected := NewWorld("t")
+	Reduce(projected, MissionCreated{ID: "m2", Name: "scan", TenantID: "t"})
+	Reduce(projected, MissionProjected{ID: "m2", RunID: "r1", CreatedBy: creator, Catalog: ScanMissionName, TenantID: "t"})
+	if s := projected.MissionSnapshot(); len(s) != 1 || s[0].CreatedBy != creator || s[0].Catalog != ScanMissionName {
+		t.Fatalf("after the projection: %+v", s)
+	}
+
+	// A start that carries neither leaves what creation recorded.
+	kept := NewWorld("t")
+	Reduce(kept, MissionCreated{ID: "m3", Name: "x", TenantID: "t", CreatedBy: creator, Catalog: ScanMissionName})
+	Reduce(kept, MissionStarted{ID: "m3", RunID: "r1"})
+	if s := kept.MissionSnapshot(); len(s) != 1 || s[0].CreatedBy != creator || s[0].Catalog != ScanMissionName {
+		t.Fatalf("a start with neither changed the mission: %+v", s)
+	}
+}

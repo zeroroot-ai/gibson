@@ -39,6 +39,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/manifest"
+	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/onboarding"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
@@ -2180,6 +2181,10 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 	if req.MissionDefinitionId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission_definition_id is required")
 	}
+	if missioncatalog.IsCatalogName(req.Name) {
+		return nil, status_grpc.Errorf(codes.InvalidArgument,
+			"the name %q is the name of a checked-in mission. Run that mission with RunCatalogMission, or choose another name", req.Name)
+	}
 
 	creator, err := callerPrincipal(ctx)
 	if err != nil {
@@ -2192,7 +2197,7 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 		MissionDefinitionID: req.MissionDefinitionId,
 		Variables:           req.Variables,
 		MemoryContinuity:    req.MemoryContinuity,
-		Metadata:            req.Metadata,
+		Metadata:            withoutCatalogMarker(req.Metadata),
 		CreatedBy:           creator,
 	}
 
@@ -2266,6 +2271,10 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 	// The envelope's required fields the runtime needs immediately.
 	if def.GetName() == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition name is required")
+	}
+	if missioncatalog.IsCatalogName(def.GetName()) {
+		return nil, status_grpc.Errorf(codes.InvalidArgument,
+			"the name %q is the name of a checked-in mission. Run that mission with RunCatalogMission, or choose another name", def.GetName())
 	}
 
 	// Topology, from the same analyser the mission view uses (gibson#547).
@@ -2533,4 +2542,21 @@ func callerPrincipal(ctx context.Context) (principal.Principal, error) {
 		return principal.Principal{}, status_grpc.Error(codes.Unauthenticated, "no caller identity in context")
 	}
 	return principal.FromIdentity(id), nil
+}
+
+// withoutCatalogMarker returns the metadata that a caller sent without the key
+// that marks a catalog launch. Only the launch paths of the catalog set that key
+// (mission.MetadataCatalogMission), so a caller cannot make its own mission pass
+// a gate that is meant for a catalog mission.
+func withoutCatalogMarker(in map[string]string) map[string]string {
+	if _, ok := in[enginemission.MetadataCatalogMission]; !ok {
+		return in
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		if k != enginemission.MetadataCatalogMission {
+			out[k] = v
+		}
+	}
+	return out
 }

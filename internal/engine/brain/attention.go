@@ -329,7 +329,7 @@ func scanProvenance(w *World, missionID string) (scope, scan string) {
 		return "", ""
 	}
 	for _, m := range w.MissionSnapshot() {
-		if m.ID == missionID && m.Name == ScanMissionName && m.RunID != "" {
+		if m.ID == missionID && m.Catalog == ScanMissionName && m.RunID != "" {
 			return m.TargetID, m.RunID
 		}
 	}

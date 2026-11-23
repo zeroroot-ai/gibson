@@ -47,6 +47,15 @@ func (d *daemonImpl) announceMission(tenant auth.TenantID, m *mission.Mission) {
 			TargetID:    m.TargetID.String(),
 			TenantID:    m.TenantID,
 			CreatedBy:   m.CreatedBy,
+			Catalog:     catalogOf(m),
 		})
 	}
+}
+
+// catalogOf returns the catalog mission that a mission record was launched from,
+// or "". The marker is in the metadata of the record, and only the launch paths of
+// the catalog write it.
+func catalogOf(m *mission.Mission) string {
+	name, _ := m.Metadata[mission.MetadataCatalogMission].(string)
+	return name
 }

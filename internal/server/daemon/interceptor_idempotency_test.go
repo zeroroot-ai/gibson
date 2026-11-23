@@ -26,6 +26,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -505,4 +506,58 @@ func TestIdempotency_AMethodWithNoFingerprintReplaysOnTheKey(t *testing.T) {
 		require.NoError(t, err)
 	}
 	assert.Equal(t, 1, calls)
+}
+
+// A store that answers the first read with a miss and the second with the outcome
+// of a concurrent call: the path of a caller that lost the race to plant the
+// pending sentinel.
+type racedStore struct {
+	idempotency.Store
+	gets   int
+	second *idempotency.CachedResponse
+}
+
+func (r *racedStore) Get(context.Context, string, string, string) (*idempotency.CachedResponse, bool, error) {
+	r.gets++
+	if r.gets == 1 {
+		return nil, false, nil
+	}
+	return r.second, true, nil
+}
+
+func (r *racedStore) MarkPending(context.Context, string, string, string, time.Duration) (bool, error) {
+	return false, nil
+}
+
+// A caller that lost the race still gets the check of the fingerprint: the outcome
+// of the other call belongs to another request, so the reuse of the key is refused,
+// and the same request gets the outcome (gibson#1469).
+func TestIdempotency_ALostRaceStillChecksTheFingerprint(t *testing.T) {
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	info := &grpc.UnaryServerInfo{FullMethod: daemonpb.DaemonService_RunCatalogMission_FullMethodName}
+	req := &daemonpb.RunCatalogMissionRequest{Name: "scan", Params: map[string]string{"application": "a"}, TargetId: "t", IdempotencyKey: "k"}
+	packed, err := anypb.New(&daemonpb.RunCatalogMissionResponse{MissionId: "m-other"})
+	require.NoError(t, err)
+	handler := func(context.Context, any) (any, error) {
+		t.Fatal("the handler ran for a lost race")
+		return nil, nil
+	}
+
+	other := &racedStore{second: &idempotency.CachedResponse{Response: packed, RequestHash: "a-different-request"}}
+	_, err = idempotencyUnaryInterceptor(other, time.Minute, slog.New(slog.DiscardHandler))(ctx, req, info, handler)
+	assert.Equal(t, grpccodes.InvalidArgument, grpcstatus.Code(err), "a key of another request is refused")
+
+	same := &racedStore{second: &idempotency.CachedResponse{Response: packed, RequestHash: requestFingerprint(req)}}
+	resp, err := idempotencyUnaryInterceptor(same, time.Minute, slog.New(slog.DiscardHandler))(ctx, req, info, handler)
+	require.NoError(t, err)
+	assert.Equal(t, "m-other", resp.(*daemonpb.RunCatalogMissionResponse).GetMissionId())
+}
+
+// A request that is not a proto message has no fingerprint, so nothing is bound.
+func TestRequestFingerprint_NoFingerprintForAnythingButAProto(t *testing.T) {
+	assert.Empty(t, requestFingerprint("not a message"))
+	a := requestFingerprint(&daemonpb.RunCatalogMissionRequest{Name: "scan", IdempotencyKey: "one"})
+	b := requestFingerprint(&daemonpb.RunCatalogMissionRequest{Name: "scan", IdempotencyKey: "two"})
+	assert.Equal(t, a, b, "the key is not part of the fingerprint")
+	assert.NotEqual(t, a, requestFingerprint(&daemonpb.RunCatalogMissionRequest{Name: "fix"}))
 }

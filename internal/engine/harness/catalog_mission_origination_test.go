@@ -65,7 +65,7 @@ func TestResolveMissionDefinitionJSON_CatalogMissionRendersTheCheckedInGraph(t *
 	}
 	for _, mission := range names {
 		params := catalogParams(t, mission)
-		body, err := resolveMissionDefinitionJSON(context.Background(), catalogReq(mission, params))
+		body, _, err := resolveMissionDefinitionJSON(context.Background(), catalogReq(mission, params))
 		if err != nil {
 			t.Fatalf("resolveMissionDefinitionJSON(%s): %v", mission, err)
 		}
@@ -97,7 +97,7 @@ func TestResolveMissionDefinitionJSON_UnknownParameterIsRefusedNotDropped(t *tes
 	params := catalogParams(t, names[0])
 	params["host"] = "evil.example.com"
 
-	_, err := resolveMissionDefinitionJSON(context.Background(), catalogReq(names[0], params))
+	_, _, err := resolveMissionDefinitionJSON(context.Background(), catalogReq(names[0], params))
 	if err == nil {
 		t.Fatal("an unknown parameter must be refused; dropping it would let a caller believe host: bound")
 	}
@@ -131,7 +131,7 @@ func TestResolveMissionDefinitionJSON_AllMissingParametersReportedTogether(t *te
 		delete(params, name)
 	}
 
-	_, err := resolveMissionDefinitionJSON(context.Background(), catalogReq(names[0], params))
+	_, _, err := resolveMissionDefinitionJSON(context.Background(), catalogReq(names[0], params))
 	if err == nil {
 		t.Fatal("a missing parameter must fail the render")
 	}
@@ -150,7 +150,7 @@ func TestResolveMissionDefinitionJSON_BothOrNeitherIsRefused(t *testing.T) {
 		MissionDefinitionJson: []byte(`{"name":"hand-written"}`),
 		CatalogMission:        "scan",
 	}
-	if _, err := resolveMissionDefinitionJSON(context.Background(), both); !errors.Is(err, ErrMissionInputAmbiguous) {
+	if _, _, err := resolveMissionDefinitionJSON(context.Background(), both); !errors.Is(err, ErrMissionInputAmbiguous) {
 		t.Fatalf("both inputs: error = %v; want ErrMissionInputAmbiguous", err)
 	}
 
@@ -168,7 +168,7 @@ func TestResolveMissionDefinitionJSON_BothOrNeitherIsRefused(t *testing.T) {
 
 func resolveMissionDefinitionJSON2(t *testing.T, req *harnesspb.CreateMissionRequest) error {
 	t.Helper()
-	_, err := resolveMissionDefinitionJSON(context.Background(), req)
+	_, _, err := resolveMissionDefinitionJSON(context.Background(), req)
 	return err
 }
 
@@ -185,13 +185,13 @@ func TestResolveMissionDefinitionJSON_NullBodyIsAbsenceNotAGraph(t *testing.T) {
 	req := catalogReq(names[0], catalogParams(t, names[0]))
 	req.MissionDefinitionJson = []byte("null")
 
-	if _, err := resolveMissionDefinitionJSON(context.Background(), req); err != nil {
+	if _, _, err := resolveMissionDefinitionJSON(context.Background(), req); err != nil {
 		t.Fatalf("a null body alongside a catalog mission must be treated as absence, got %v", err)
 	}
 
 	// But `null` with nothing else named is still "neither", not a runnable graph.
 	only := &harnesspb.CreateMissionRequest{MissionDefinitionJson: []byte("null")}
-	if _, err := resolveMissionDefinitionJSON(context.Background(), only); !errors.Is(err, ErrMissionInputAmbiguous) {
+	if _, _, err := resolveMissionDefinitionJSON(context.Background(), only); !errors.Is(err, ErrMissionInputAmbiguous) {
 		t.Fatalf("a null body alone: error = %v; want ErrMissionInputAmbiguous", err)
 	}
 }
@@ -205,7 +205,7 @@ func TestResolveMissionDefinitionJSON_ParamsWithAGraphIsRefused(t *testing.T) {
 		MissionDefinitionJson: []byte(`{"name":"hand-written"}`),
 		CatalogParams:         map[string]string{"application": "app"},
 	}
-	if _, err := resolveMissionDefinitionJSON(context.Background(), req); !errors.Is(err, ErrMissionInputAmbiguous) {
+	if _, _, err := resolveMissionDefinitionJSON(context.Background(), req); !errors.Is(err, ErrMissionInputAmbiguous) {
 		t.Fatalf("error = %v; want ErrMissionInputAmbiguous", err)
 	}
 }
@@ -216,7 +216,7 @@ func TestResolveMissionDefinitionJSON_SuppliedGraphPassesThrough(t *testing.T) {
 	t.Parallel()
 
 	const graph = `{"name":"hand-written","nodes":{}}`
-	body, err := resolveMissionDefinitionJSON(context.Background(),
+	body, _, err := resolveMissionDefinitionJSON(context.Background(),
 		&harnesspb.CreateMissionRequest{MissionDefinitionJson: []byte(graph)})
 	if err != nil {
 		t.Fatalf("resolveMissionDefinitionJSON: %v", err)
@@ -231,7 +231,7 @@ func TestResolveMissionDefinitionJSON_SuppliedGraphPassesThrough(t *testing.T) {
 func TestResolveMissionDefinitionJSON_UnknownMissionNameIsRefused(t *testing.T) {
 	t.Parallel()
 
-	_, err := resolveMissionDefinitionJSON(context.Background(), catalogReq("no-such-mission", catalogParams(t, missioncatalog.Names()[0])))
+	_, _, err := resolveMissionDefinitionJSON(context.Background(), catalogReq("no-such-mission", catalogParams(t, missioncatalog.Names()[0])))
 	if err == nil {
 		t.Fatal("an unknown mission name must be refused")
 	}

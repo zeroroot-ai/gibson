@@ -79,14 +79,14 @@ func TestRunCatalogMission_SuccessPathStampsTheRecordAndWritesTheAnchorsAfterThe
 	assert.Equal(t, "scan", rec.Name)
 	assert.Equal(t, mission.MissionStatusSubmitted, rec.Status)
 	assert.Equal(t, targetID, rec.TargetID)
-	assert.Equal(t, "scan", rec.Metadata[metadataCatalogMission])
+	assert.Equal(t, "scan", rec.Metadata[mission.MetadataCatalogMission])
 
 	// The World shows the mission with its creator before it runs.
 	require.Eventually(t, func() bool {
 		var seen bool
 		reg.For("acme").ReadWorld(func(w *brain.World) {
 			for _, m := range w.MissionSnapshot() {
-				seen = seen || (m.ID == id && m.Name == "scan")
+				seen = seen || (m.ID == id && m.Name == "scan" && m.Catalog == "scan")
 			}
 		})
 		return seen
@@ -102,4 +102,54 @@ func TestRunCatalogMission_SuccessPathStampsTheRecordAndWritesTheAnchorsAfterThe
 	count := 0
 	reg.For("acme").ReadWorld(func(w *brain.World) { count = len(w.MissionSnapshot()) })
 	assert.Equal(t, 1, count, "a failed start leaves no pending mission in the World")
+}
+
+// catalogOf reads the marker from the metadata of a record, and it reads nothing
+// from a record that has none.
+func TestCatalogOf(t *testing.T) {
+	assert.Equal(t, "scan", catalogOf(&mission.Mission{Metadata: map[string]any{mission.MetadataCatalogMission: "scan"}}))
+	assert.Empty(t, catalogOf(&mission.Mission{}))
+	assert.Empty(t, catalogOf(&mission.Mission{Metadata: map[string]any{mission.MetadataCatalogMission: 7}}))
+	// Task data of an outside caller (the inbound A2A start) is kept under one key,
+	// so a catalog marker inside it is data and never the marker of the mission.
+	forged := map[string]any{MetadataTaskData: map[string]any{mission.MetadataCatalogMission: "scan"}}
+	assert.Empty(t, catalogOf(&mission.Mission{Metadata: forged}))
+}
+
+// A mission that cannot be created is returned as an error, and nothing starts or
+// anchors. Here the daemon has no mission store.
+func TestRunCatalogMission_ACreateFailureStartsNothing(t *testing.T) {
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	started := false
+	d := &daemonImpl{startMission: func(context.Context, string) error { started = true; return nil }}
+	d.scanAnchors = func(context.Context, string, string, map[string]string) { started = true }
+	_, err := d.RunCatalogMission(ctx, api.RunCatalogMissionData{
+		Name: "scan", TargetID: types.NewID().String(),
+		Params: map[string]string{"repositoryUrl": "https://github.com/acme/shop", "application": "acme/shop", "forgeConnector": "github-fixloop"},
+	})
+	require.Error(t, err)
+	assert.False(t, started, "a mission that was not created is not started and not anchored")
+}
+
+// The projection of a run carries what the record holds: the display metadata, the
+// creator and the marker of a catalog launch.
+func TestCarryRecord(t *testing.T) {
+	creator := principal.FromIdentity(auth.Identity{Subject: "user:alice"})
+	target := types.NewID()
+	rec := &mission.Mission{
+		Name: "scan", Description: "d", TargetID: target, TenantID: "acme", CreatedBy: creator,
+		Metadata: map[string]any{mission.MetadataCatalogMission: "scan"},
+	}
+	var proj brain.MissionProjected
+	carryRecord(&proj, rec)
+	assert.Equal(t, "scan", proj.Name)
+	assert.Equal(t, "d", proj.Description)
+	assert.Equal(t, target.String(), proj.TargetID)
+	assert.Equal(t, "acme", proj.TenantID)
+	assert.Equal(t, creator, proj.CreatedBy)
+	assert.Equal(t, "scan", proj.Catalog)
+
+	var other brain.MissionProjected
+	carryRecord(&other, &mission.Mission{Name: "mine"})
+	assert.Empty(t, other.Catalog, "a mission that is not a catalog launch has no marker")
 }

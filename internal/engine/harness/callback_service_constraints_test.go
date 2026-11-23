@@ -78,7 +78,7 @@ func TestCreateMission_CanonicalConstraintsReachTheMission(t *testing.T) {
 // A request with no constraints leaves the constraints of the definition.
 func TestCreateMission_NoRequestedConstraintsKeepsTheDefinition(t *testing.T) {
 	req := originRequest()
-	req.MissionDefinitionJson = []byte(`{"name":"scan","constraints":{"max_tokens":"77"}}`)
+	req.MissionDefinitionJson = []byte(`{"name":"my-graph","constraints":{"max_tokens":"77"}}`)
 
 	got := storedConstraints(t, req)
 	assert.EqualValues(t, 77, got.GetMaxTokens())

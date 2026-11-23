@@ -128,7 +128,7 @@ func (s *inboundMissionSource) Definition(ctx context.Context, definitionID stri
 		// A sub-node with no ID is a fault of the definition, not of the daemon.
 		return api.InboundDefinition{}, fmt.Errorf("%w: %w", api.ErrInboundDefinitionInvalid, err)
 	}
-	out := api.InboundDefinition{ID: def.GetId(), Hash: hash}
+	out := api.InboundDefinition{ID: def.GetId(), Name: def.GetName(), Hash: hash}
 	names := map[string]struct{}{}
 	for _, node := range flat {
 		if node.GetType() == missionpb.NodeType_NODE_TYPE_FOR_EACH {

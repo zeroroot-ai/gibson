@@ -140,7 +140,7 @@ func TestCanceled_ASnapshotRoundTrips(t *testing.T) {
 // it reconciled without closing a finding.
 func TestCanceled_RescanTreatsItAsEnded(t *testing.T) {
 	w := NewWorld("t")
-	Reduce(w, MissionStarted{ID: "m1", RunID: "r1", Name: ScanMissionName})
+	Reduce(w, MissionStarted{ID: "m1", RunID: "r1", Name: ScanMissionName, Catalog: ScanMissionName})
 	Reduce(w, MissionDone{ID: "m1", RunID: "r1", Outcome: MissionCanceled})
 	events := RescanReconciliationSystem(w)
 	if len(events) != 1 {
