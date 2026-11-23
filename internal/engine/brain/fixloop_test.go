@@ -306,3 +306,17 @@ func TestRescanFound_StillReopensAFixedFindingWhoseHealthHeld(t *testing.T) {
 		t.Errorf("status = %q, want open", got)
 	}
 }
+
+// The finding holds the time of the link, and a new fix forgets it.
+func TestFindingStatusChanged_RecordsTheTimeOfTheLink(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, FindingRaised{ID: "f1", CheckKind: "scan", CheckRef: "ref", At: at(0)})
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixing, MergeRequest: "mr-1", MissionID: "m1", At: at(3)})
+	if got := findingByID(t, w, "f1").LinkedAt; !got.Equal(at(3)) {
+		t.Errorf("LinkedAt = %v, want %v", got, at(3))
+	}
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusOpen, At: at(4)})
+	if got := findingByID(t, w, "f1").LinkedAt; !got.IsZero() {
+		t.Errorf("LinkedAt = %v, want zero after the fix was forgotten", got)
+	}
+}
