@@ -34,10 +34,10 @@ func trivyShape(digest, pkgID string) *graphragpb.DiscoveryResult {
 	}
 }
 
-// A Finding whose parent is a Package affects that Package. The key is the key of
-// the Package node, so the projector writes AFFECTS to the node that the scan
-// wrote (gibson#1469).
-func TestDiscoveryEvents_AFindingOfAPackageAffectsThePackage(t *testing.T) {
+// A Finding whose parent is a Package is placed at the Image of its discovery,
+// and the Package is data. A Package is shared by many images, so it is never
+// the place (gibson#1469).
+func TestDiscoveryEvents_AFindingIsPlacedAtItsImageAndNamesItsPackage(t *testing.T) {
 	const pkg = "pkg:apk/alpine/libx@1.0"
 	events, _ := discoveryEvents(ExecContext{MissionID: "m1"}, trivyShape("sha256:aa", pkg))
 	w := brain.NewWorld("acme")
@@ -46,20 +46,20 @@ func TestDiscoveryEvents_AFindingOfAPackageAffectsThePackage(t *testing.T) {
 	}
 	findings := w.FindingSnapshot()
 	require.Len(t, findings, 1)
-	assert.Equal(t, pkg, findings[0].AffectsPackage)
+	assert.Equal(t, []brain.FindingPlace{{Label: "Image", Key: "sha256:aa"}}, findings[0].Places)
+	assert.Equal(t, []string{pkg}, findings[0].Packages)
 
-	var packageKey string
+	keys := map[string]string{}
 	for _, e := range w.EntitySnapshot() {
-		if e.Label == "Package" {
-			packageKey = e.Key
-		}
+		keys[e.Label] = e.Key
 	}
-	assert.Equal(t, packageKey, findings[0].AffectsPackage, "the Finding and the Package node meet on one key")
+	assert.Equal(t, keys["Image"], findings[0].Places[0].Key, "the place meets the Image node on one key")
+	assert.Equal(t, keys["Package"], findings[0].Packages[0], "the Finding meets the Package node on one key")
 }
 
-// A Finding with a parent that is no Package gets no Package edge, and a Finding
-// with no parent gets none.
-func TestDiscoveryEvents_AFindingOfNoPackageAffectsNoPackage(t *testing.T) {
+// A Finding with a parent that is no Package, and a Finding with no parent, get
+// no place and no Package.
+func TestDiscoveryEvents_AFindingOfNoPackageHasNoPlace(t *testing.T) {
 	d := trivyShape("sha256:aa", "pkg:apk/alpine/libx@1.0")
 	d.Findings[0].ParentId = proto.String("some-host-id")
 	d2 := trivyShape("sha256:aa", "pkg:apk/alpine/libx@1.0")
@@ -68,8 +68,27 @@ func TestDiscoveryEvents_AFindingOfNoPackageAffectsNoPackage(t *testing.T) {
 		events, _ := discoveryEvents(ExecContext{MissionID: "m1"}, disc)
 		for _, e := range events {
 			if f, ok := e.(brain.FindingRaised); ok {
-				assert.Empty(t, f.AffectsPackage)
+				assert.Empty(t, f.Places)
+				assert.Empty(t, f.Packages)
 			}
 		}
 	}
+}
+
+// A re-raise of a known Finding from another place adds that place. The place that
+// the Finding had stays, and a place is added once.
+func TestFindingRaised_AReRaiseAddsThePlace(t *testing.T) {
+	w := brain.NewWorld("acme")
+	raise := func(image string) {
+		brain.Reduce(w, brain.FindingRaised{
+			ID: "f1", Title: "t", Status: brain.FindingStatusOpen,
+			Places: []brain.FindingPlace{{Label: "Image", Key: image}}, Packages: []string{"pkg:x"},
+		})
+	}
+	raise("sha256:aa")
+	raise("sha256:bb")
+	raise("sha256:bb")
+	f := w.FindingSnapshot()[0]
+	assert.Equal(t, []brain.FindingPlace{{Label: "Image", Key: "sha256:aa"}, {Label: "Image", Key: "sha256:bb"}}, f.Places)
+	assert.Equal(t, []string{"pkg:x"}, f.Packages)
 }

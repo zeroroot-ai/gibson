@@ -316,7 +316,8 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Severity:        f.Severity,
 			Status:          f.Status,
 			VulnerabilityID: f.VulnerabilityID,
-			AffectsPackage:  f.AffectsPackage,
+			Places:          f.Places,
+			Packages:        f.Packages,
 		})
 		// FindingRaised carries only some of the fields. The rest come back
 		// from the snapshot, or a restore would lose the scan provenance, the

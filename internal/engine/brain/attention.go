@@ -5,6 +5,7 @@ package brain
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -56,11 +57,14 @@ type Finding struct {
 	// one Vulnerability node per id per tenant.
 	VulnerabilityID string
 
-	// AffectsPackage is the key of the Package node that this Finding is an
-	// occurrence in (gibson#1469). The projector writes (Finding)-[:AFFECTS]->
-	// (Package), the edge that FindingPlaces follows to the Application. Empty
-	// when the Finding names no Package.
-	AffectsPackage string
+	// Places are the nodes where a scan saw this Finding: the Image of a scan of
+	// an image, the Repository of a scan of its alerts (gibson#1469). The
+	// projector writes (Finding)-[:AFFECTS]->(place), the edge that FindingPlaces
+	// walks to the Application. A Package is shared by many images, so it is
+	// never a place. Packages are the Packages that hold the weakness, as data:
+	// (Finding)-[:IN_PACKAGE]->(Package). FindingPlaces does not walk it.
+	Places   []FindingPlace
+	Packages []string
 
 	// ScanScope and LastScan are the Finding's rescan provenance (gibson#1686):
 	// which recurring scan is RESPONSIBLE for it, and when that scan last saw it.
@@ -227,10 +231,10 @@ type FindingRaised struct {
 
 	// VulnerabilityID is the shared identity of the weakness, when known.
 	VulnerabilityID string
-	// AffectsPackage is the key of the Package node that the Finding is an
-	// occurrence in, when the reporter names one (a scan of an image or of a
-	// dependency alert). The key is the one of the Package entity.
-	AffectsPackage string
+	// Places and Packages are the places where the scan saw the Finding and the
+	// Packages that hold the weakness. See Finding.Places.
+	Places   []FindingPlace
+	Packages []string
 
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208): the FGA principal that submitted the finding, the name the
@@ -269,6 +273,10 @@ func applyFindingRaised(w *World, e FindingRaised) {
 		if f.RaisedAt.IsZero() {
 			f.RaisedAt = e.At
 		}
+		// A re-raise from another place adds that place. The edges of the
+		// places that the Finding already has stay (gibson#1469).
+		f.Places = mergePlaces(f.Places, e.Places)
+		f.Packages = mergeStrings(f.Packages, e.Packages)
 		if scan != "" {
 			f.LastScan = scan
 			if f.ScanScope == "" {
@@ -285,8 +293,8 @@ func applyFindingRaised(w *World, e FindingRaised) {
 	w.findings.NewEntity(&Finding{
 		ID: e.ID, Title: e.Title, Description: e.Description, ScopeID: e.ScopeID,
 		Address: e.Address, Severity: e.Severity, Status: status, VulnerabilityID: e.VulnerabilityID,
-		AffectsPackage: e.AffectsPackage,
-		ScanScope:      scope, LastScan: scan,
+		Places: mergePlaces(nil, e.Places), Packages: mergeStrings(nil, e.Packages),
+		ScanScope: scope, LastScan: scan,
 		FixFacts: FixFacts{
 			CheckKind: e.CheckKind, CheckRef: e.CheckRef,
 			RaisedAt: e.At, FirstSeenAt: firstSeen(e),
@@ -402,8 +410,9 @@ type FindingSnapshot struct {
 	Severity        string
 	Status          string
 	VulnerabilityID string
-	// AffectsPackage is the key of the Package that the Finding affects.
-	AffectsPackage string
+	// Places and Packages: see Finding.Places.
+	Places   []FindingPlace
+	Packages []string
 	// ScanScope and LastScan are the rescan provenance (gibson#1686): the
 	// recurring scan responsible for this Finding, and the scan that last saw it.
 	ScanScope string
@@ -478,8 +487,8 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 		out = append(out, FindingSnapshot{
 			ID: f.ID, Title: f.Title, Description: f.Description, ScopeID: f.ScopeID,
 			Address: f.Address, Severity: f.Severity, Status: f.Status, VulnerabilityID: f.VulnerabilityID,
-			AffectsPackage: f.AffectsPackage,
-			ScanScope:      f.ScanScope, LastScan: f.LastScan,
+			Places: append([]FindingPlace(nil), f.Places...), Packages: append([]string(nil), f.Packages...),
+			ScanScope: f.ScanScope, LastScan: f.LastScan,
 			MergeRequest: f.MergeRequest, MergeRequestState: f.MergeRequestState,
 			Priority: f.Priority, PriorityRule: f.PriorityRule, PriorityReason: f.PriorityReason,
 			FixFacts:     f.FixFacts,
@@ -509,4 +518,35 @@ func resetFix(f *Finding) {
 	f.FixHeadSHA, f.FixFiles = "", ""
 	f.FixHeadMissingReason, f.FixHeadMissingAt = "", time.Time{}
 	f.VerifiedAt = time.Time{}
+}
+
+// FindingPlace is a node where a scan saw a Finding: an Image or a Repository,
+// by the key of the node.
+type FindingPlace struct {
+	Label string
+	Key   string
+}
+
+// mergePlaces adds each place of add that base does not hold, in order.
+func mergePlaces(base, add []FindingPlace) []FindingPlace {
+	out := append([]FindingPlace(nil), base...)
+	for _, p := range add {
+		if p.Key == "" || slices.Contains(out, p) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// mergeStrings adds each value of add that base does not hold, in order.
+func mergeStrings(base, add []string) []string {
+	out := append([]string(nil), base...)
+	for _, v := range add {
+		if v == "" || slices.Contains(out, v) {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
 }

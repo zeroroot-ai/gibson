@@ -151,6 +151,7 @@ var coreRelationshipTypes = []string{
 	"HAS_DEPLOYMENT", // Application -> Deployment
 	"HAS_REPOSITORY", // Application -> Repository
 	"INSTANCE_OF",    // Finding -> Vulnerability
+	"IN_PACKAGE",     // Finding -> Package: the Package that holds the weakness, as data, never a place
 	"MERGED_INTO",    // MergeRequest -> Repository
 	"RUNS",           // Deployment -> Image
 	"TOUCHES",        // Finding -> Control
