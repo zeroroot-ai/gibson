@@ -5,10 +5,14 @@ package component
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"syscall"
 	"testing"
 	"time"
 
@@ -255,5 +259,90 @@ func TestClassifyTransport_ACanceledCallStaysAsItIs(t *testing.T) {
 	err := classifyTransport(ctx, context.Canceled)
 	if errors.Is(err, metatool.ErrConnectorUnavailable) || errors.Is(err, metatool.ErrConnectorTimeout) {
 		t.Fatalf("err = %v, want the cancellation unmarked", err)
+	}
+}
+
+// connectorAt returns a client of the connector "github" that talks to url over client.
+func connectorAt(url string, client *http.Client) *ConnectorMCP {
+	c := NewConnectorMCP(client, slog.Default())
+	c.connectors = func() []string { return []string{"github"} }
+	c.proxyURL = func(string, string) string { return url }
+	return c
+}
+
+// TestConnectorMCP_OnlyTemporaryFailuresAreUnavailable: UNAVAILABLE is an allow-list. A 429, a
+// 502, 503 or 504 and a connection that breaks are temporary. A 401, a 403 with no JSON-RPC
+// body, a refusal of the certificate, a failure of the token and a JSON-RPC error body are
+// refusals: a later call gives the same answer, so they stay unmarked.
+func TestConnectorMCP_OnlyTemporaryFailuresAreUnavailable(t *testing.T) {
+	status := func(code int, body string) *httptest.Server {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(body))
+		}))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+	rpcBody := `{"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"no access"}}`
+	plain := func(code int, body string) *ConnectorMCP {
+		return connectorAt(status(code, body).URL, http.DefaultClient)
+	}
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(tlsSrv.Close)
+
+	cases := map[string]struct {
+		c           *ConnectorMCP
+		unavailable bool
+	}{
+		"429":                       {plain(http.StatusTooManyRequests, ""), true},
+		"502":                       {plain(http.StatusBadGateway, ""), true},
+		"503":                       {plain(http.StatusServiceUnavailable, ""), true},
+		"504":                       {plain(http.StatusGatewayTimeout, ""), true},
+		"a connection that breaks":  {connectorAt("http://127.0.0.1:1/mcp", http.DefaultClient), true},
+		"401":                       {plain(http.StatusUnauthorized, "denied"), false},
+		"403 with no JSON-RPC body": {plain(http.StatusForbidden, "forbidden"), false},
+		"403 with a JSON-RPC body":  {plain(http.StatusForbidden, rpcBody), false},
+		"a refused certificate":     {connectorAt(tlsSrv.URL, http.DefaultClient), false},
+		"a failure of the token": {connectorAt("http://connector.invalid/mcp", &http.Client{
+			Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("the token endpoint refused the client")
+			}),
+		}), false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			args := map[string]any{"text": "x"}
+			_, err := tc.c.CallConnectorTool(context.Background(), "acme", "github", "echo", args)
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			if got := errors.Is(err, metatool.ErrConnectorUnavailable); got != tc.unavailable {
+				t.Fatalf("unavailable = %v, want %v (%v)", got, tc.unavailable, err)
+			}
+			if errors.Is(err, metatool.ErrConnectorTimeout) {
+				t.Fatalf("a failure with no bound that ended is no timeout: %v", err)
+			}
+		})
+	}
+}
+
+// The allow-list names the errors of a connection that breaks and of a session that ended.
+func TestTemporaryTransport_NamesTheBrokenConnectionErrors(t *testing.T) {
+	for name, err := range map[string]error{
+		"an end of the stream":       fmt.Errorf("read: %w", io.ErrUnexpectedEOF),
+		"a reset of the connection":  fmt.Errorf("read: %w", syscall.ECONNRESET),
+		"a session the server ended": fmt.Errorf("call: %w", mcp.ErrSessionMissing),
+	} {
+		if !temporaryTransport(err) {
+			t.Errorf("%s must be temporary", name)
+		}
+	}
+	for name, err := range map[string]error{
+		"a plain error": errors.New("boom"),
+		"a certificate": x509.UnknownAuthorityError{},
+	} {
+		if temporaryTransport(err) {
+			t.Errorf("%s must not be temporary", name)
+		}
 	}
 }

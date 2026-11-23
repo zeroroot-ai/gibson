@@ -5,13 +5,18 @@ package component
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -204,12 +209,6 @@ func (c *ConnectorMCP) CallConnectorTool(ctx context.Context, tenant, connector,
 
 	res, err := session.CallTool(cctx, &mcp.CallToolParams{Name: tool, Arguments: args})
 	if err != nil {
-		var rpcErr *jsonrpc.Error
-		if errors.As(err, &rpcErr) {
-			// The connector answered with a protocol error, for example an unknown tool or
-			// arguments that its schema refuses. It is a refusal and no transport failure.
-			return nil, fmt.Errorf("connector mcp: call %s on %q: %w", tool, connector, err)
-		}
 		return nil, fmt.Errorf("connector mcp: call %s on %q: %w", tool, connector, classifyTransport(cctx, err))
 	}
 	// A tool that reports an error returns text only: the connector sends no structured mark
@@ -294,8 +293,9 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // classifyTransport marks an error of the connection to a connector by its type. A bound that
-// ended gives metatool.ErrConnectorTimeout. A call that the caller canceled stays as it is. Any
-// other failure of the transport gives metatool.ErrConnectorUnavailable. The error keeps its
+// ended gives metatool.ErrConnectorTimeout. A call that the caller canceled stays as it is. An
+// error that the allow-list of temporaryTransport names gives metatool.ErrConnectorUnavailable.
+// Every other error stays unmarked, so the member reads it as a refusal. The error keeps its
 // cause.
 func classifyTransport(ctx context.Context, err error) error {
 	switch {
@@ -303,7 +303,72 @@ func classifyTransport(ctx context.Context, err error) error {
 		return fmt.Errorf("%w: %w", metatool.ErrConnectorTimeout, err)
 	case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
 		return err
-	default:
+	case temporaryTransport(err):
 		return fmt.Errorf("%w: %w", metatool.ErrConnectorUnavailable, err)
+	default:
+		return err
+	}
+}
+
+// rejectedCode is the JSON-RPC code of jsonrpc2.ErrRejected, which the MCP client wraps around
+// a failure that left the session usable: a request that did not reach the server, a 429, 502,
+// 503 or 504, or a refusal that the server sent as a JSON-RPC body. The package is internal to
+// the MCP module, so the code stands for it. WireError matches by code.
+const rejectedCode = -32005
+
+// temporaryTransport is the allow-list of the errors that a later call may not repeat:
+//   - the session that the connector ended (mcp.ErrSessionMissing)
+//   - a failure to dial or a failure of the network (*net.OpError)
+//   - an end of the stream or a reset of the connection
+//   - a rejection of the transport with no other cause, which the client makes for 429, 502, 503
+//     and 504.
+//
+// Every other error is no member of the list. A 401, a 403, a refusal of the certificate, a
+// failure of the token and an error that the connector sent as a JSON-RPC body are refusals:
+// a later call gives the same answer.
+func temporaryTransport(err error) bool {
+	var (
+		unknownAuthority x509.UnknownAuthorityError
+		invalidCert      x509.CertificateInvalidError
+		hostname         x509.HostnameError
+		verification     *tls.CertificateVerificationError
+	)
+	if errors.As(err, &unknownAuthority) || errors.As(err, &invalidCert) ||
+		errors.As(err, &hostname) || errors.As(err, &verification) {
+		return false
+	}
+	onlyRejected, serverError := true, false
+	leaves(err, func(leaf error) {
+		var w *jsonrpc.Error
+		switch {
+		case !errors.As(leaf, &w):
+			onlyRejected = false
+		case w.Code != rejectedCode:
+			serverError = true // the connector answered with its own JSON-RPC error
+		}
+	})
+	if serverError {
+		return false
+	}
+	var opErr *net.OpError
+	return errors.Is(err, mcp.ErrSessionMissing) || errors.As(err, &opErr) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) || onlyRejected
+}
+
+// leaves calls visit for each error at the end of the wrap chains of err.
+func leaves(err error, visit func(error)) {
+	switch e := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, c := range e.Unwrap() {
+			leaves(c, visit)
+		}
+	case interface{ Unwrap() error }:
+		if c := e.Unwrap(); c != nil {
+			leaves(c, visit)
+			return
+		}
+		visit(err)
+	default:
+		visit(err)
 	}
 }
