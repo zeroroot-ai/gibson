@@ -645,3 +645,49 @@ func TestWebhookMessageKey(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckWebhookMessageKey(t *testing.T) {
+	long := "webhook:okta:" + strings.Repeat("a", MaxMessageKeyBytes)
+	tests := []struct {
+		name    string
+		msg     *a2a.Message
+		wantErr bool
+	}{
+		{"nil", nil, false},
+		{"no webhook key", &a2a.Message{ID: "msg-1"}, false},
+		{"a good id", &a2a.Message{ID: "webhook:okta:e1"}, false},
+		{"a NUL byte in the id", &a2a.Message{ID: "webhook:okta:e\x001"}, true},
+		{"a NUL byte in the metadata id", &a2a.Message{ID: "x", Metadata: map[string]any{"webhook_id": "e\x001", "webhook_source": "okta"}}, true},
+		{"a NUL byte in the source", &a2a.Message{ID: "x", Metadata: map[string]any{"webhook_id": "e1", "webhook_source": "ok\x00ta"}}, true},
+		{"over the bound", &a2a.Message{ID: long}, true},
+		{"over the bound in the metadata", &a2a.Message{ID: "x", Metadata: map[string]any{"webhook_id": long, "webhook_source": "okta"}}, true},
+		{"at the bound", &a2a.Message{ID: "webhook:" + strings.Repeat("a", MaxMessageKeyBytes-len("webhook:"))}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := CheckWebhookMessageKey(tt.msg)
+			if tt.wantErr != (err != nil) || (err != nil && !errors.Is(err, a2a.ErrInvalidParams)) {
+				t.Errorf("err = %v, want an invalid params error: %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// A message id that Postgres cannot store is an invalid params error at the handler,
+// and it starts nothing.
+func TestInboundRPC_AMessageIdThatPostgresCannotStoreIsInvalidParams(t *testing.T) {
+	trusted := map[string]string{"x-gibson-tenant": "acme", "x-gibson-subject": "agent_principal:9"}
+	for name, id := range map[string]string{
+		"a NUL byte":     `webhook:okta:e\u00001`,
+		"over the bound": "webhook:okta:" + strings.Repeat("a", MaxMessageKeyBytes),
+	} {
+		t.Run(name, func(t *testing.T) {
+			starts := &fakeStarts{}
+			body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"` + id +
+				`","role":"ROLE_USER","parts":[{"text":"note"}]}}}`
+			rec := rpcCall(NewInboundHandler(starts, &recordingCards{}, allowGrants), "/a2a/inbound/recon", body, trusted)
+			assert.Equal(t, codeInvalidParams, rpcErrorCode(t, rec.Body.String()))
+			assert.Empty(t, starts.got, "no mission started")
+		})
+	}
+}

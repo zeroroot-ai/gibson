@@ -165,3 +165,23 @@ func WebhookMessageKey(m *a2a.Message) string {
 	source, _ := m.Metadata["webhook_source"].(string)
 	return webhookKeyPrefix + source + ":" + id
 }
+
+// MaxMessageKeyBytes is the longest key of a webhook message that the daemon accepts.
+// The daemon keeps the key, with the agent, in an indexed text column of Postgres, and
+// a btree key over about 2700 bytes fails. This bound is far under it.
+const MaxMessageKeyBytes = 1024
+
+// CheckWebhookMessageKey refuses a message whose webhook key holds a NUL byte, which a
+// Postgres text column refuses, or is longer than MaxMessageKeyBytes. The refusal is an
+// invalid params error, so the claim of the key never fails on it. A message with no
+// webhook key passes.
+func CheckWebhookMessageKey(m *a2a.Message) error {
+	key := WebhookMessageKey(m)
+	switch {
+	case strings.IndexByte(key, 0) >= 0:
+		return fmt.Errorf("%w: the message id or the webhook id holds a NUL byte", a2a.ErrInvalidParams)
+	case len(key) > MaxMessageKeyBytes:
+		return fmt.Errorf("%w: the message id or the webhook id is longer than %d bytes", a2a.ErrInvalidParams, MaxMessageKeyBytes)
+	}
+	return nil
+}
