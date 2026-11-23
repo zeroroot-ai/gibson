@@ -78,3 +78,39 @@ func TestFixHold_AGoneRecordIsNotFoundAndAnyOtherErrorIsNot(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, fixloop.ErrHoldNotFound, "a pool that fails is a transient error")
 }
+
+// A mission id that is not valid, a pool that is not configured and a definition that
+// does not parse can never be read. Each gives ErrHoldNotFound, so the fix loop uses
+// the 24 hour bound and shows the hold_unreadable wait. A transient error does not.
+func TestFixHold_PermanentErrorsGiveErrHoldNotFound(t *testing.T) {
+	ctx := context.Background()
+	const missionID = "0e4f7f5e-6f5c-4c43-9f0a-1c0b3a3f9a11"
+
+	_, err := (&daemonImpl{}).fixHold(ctx, "acme", missionID)
+	require.ErrorIs(t, err, fixloop.ErrHoldNotFound, "a pool that is not configured")
+
+	conn, cleanup := newMiniredisConn(t)
+	defer cleanup()
+	_, err = (&daemonImpl{pool: dataPlane{conn: conn}}).fixHold(ctx, "acme", "not-a-mission-id")
+	require.ErrorIs(t, err, fixloop.ErrHoldNotFound, "a mission id that is not valid")
+
+	_, err = holdOfRead(&mission.Mission{MissionDefinitionJSON: `{not json`}, nil)
+	require.ErrorIs(t, err, fixloop.ErrHoldNotFound, "a definition that does not parse")
+
+	_, err = (&daemonImpl{pool: dataPlane{err: errors.New("redis down")}}).fixHold(ctx, "acme", missionID)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, fixloop.ErrHoldNotFound, "a pool that fails now may work at the next step")
+}
+
+func TestHoldOfRead(t *testing.T) {
+	got, err := holdOfRead(recordWith(t, &missionv1.MissionConstraints{HealthHold: durationpb.New(time.Hour)}), nil)
+	require.NoError(t, err)
+	assert.Equal(t, time.Hour, got, "a record that states a hold gives it")
+
+	_, err = holdOfRead(nil, mission.NewNotFoundError("m1"))
+	require.ErrorIs(t, err, fixloop.ErrHoldNotFound, "a gone record")
+
+	_, err = holdOfRead(nil, errors.New("redis down"))
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, fixloop.ErrHoldNotFound, "a transient error is returned as it is")
+}

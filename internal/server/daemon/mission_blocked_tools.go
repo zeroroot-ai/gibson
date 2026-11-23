@@ -26,10 +26,15 @@ func (d *daemonImpl) storedBlockedTools(ctx context.Context, tenant, missionID s
 	return blockedToolsOf(rec)
 }
 
+// errPermanentMissionRead marks a failure to read a mission that a retry never
+// fixes: a mission id that is not valid, a pool that is not configured, and a stored
+// definition that does not parse. A failure with no mark may be transient.
+var errPermanentMissionRead = errors.New("the mission record can never be read")
+
 // storedMission reads the record of a mission from the data plane of the tenant.
 func (d *daemonImpl) storedMission(ctx context.Context, tenant, missionID string) (*mission.Mission, error) {
 	if d.pool == nil {
-		return nil, errors.New("the data plane pool is not configured")
+		return nil, fmt.Errorf("%w: the data plane pool is not configured", errPermanentMissionRead)
 	}
 	tid, err := auth.NewTenantID(tenant)
 	if err != nil {
@@ -37,7 +42,7 @@ func (d *daemonImpl) storedMission(ctx context.Context, tenant, missionID string
 	}
 	id, err := types.ParseID(missionID)
 	if err != nil {
-		return nil, fmt.Errorf("mission id %q: %w", missionID, err)
+		return nil, fmt.Errorf("%w: mission id %q: %w", errPermanentMissionRead, missionID, err)
 	}
 	conn, err := d.pool.For(ctx, tid)
 	if err != nil {
