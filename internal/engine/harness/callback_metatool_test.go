@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"testing"
@@ -797,5 +798,55 @@ func TestQueryPlugin_ReadsTheStoredDenyList(t *testing.T) {
 	svc.missionBlockedTools = nil
 	if got := query().GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
 		t.Fatalf("no source: code = %v, want UNAVAILABLE", got)
+	}
+}
+
+// errConnectors is a connector client whose call fails with a fixed error.
+type errConnectors struct{ err error }
+
+func (e errConnectors) CallConnectorTool(context.Context, string, string, string, map[string]any) (any, error) {
+	return nil, e.err
+}
+
+// A connector failure that the daemon can tell from its type gets a code that tells the member
+// what to do. A call that did not reach the connector is UNAVAILABLE, a bound that ended is
+// TIMEOUT, and any other error keeps INVALID_ARGUMENT, because a refusal is no temporary failure.
+// The daemon never reads the words of the message to decide.
+func TestMetaInvoke_ConnectorFailuresGetTheCodeOfTheirKind(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		want commonpb.ErrorCode
+	}{
+		"a connector that is not reachable": {
+			fmt.Errorf("connect: %w", fmt.Errorf("%w: connection refused", metatool.ErrConnectorUnavailable)),
+			commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+		},
+		"a connector that did not answer in time": {
+			fmt.Errorf("call: %w", fmt.Errorf("%w: %w", metatool.ErrConnectorTimeout, context.DeadlineExceeded)),
+			commonpb.ErrorCode_ERROR_CODE_TIMEOUT,
+		},
+		"a connector that rate limits": {
+			fmt.Errorf("call: %w: %w", metatool.ErrConnectorRateLimited, errors.New("429")),
+			commonpb.ErrorCode_ERROR_CODE_RESOURCE_EXHAUSTED,
+		},
+		"a tool that reports an error (no structured mark)": {
+			errors.New("reported an error: the branch x stays, call the tool again"),
+			commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+		},
+		"a refusal of the vendor": {errors.New("vendor said no"), commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, errConnectors{err: c.err})
+			resp, err := newSvc(t).metaInvoke(testCtxWithTenant(), &harnesspb.ContextInfo{MissionId: "m1"}, h, nil,
+				catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
+				[]byte(`{"id":"mcp:gitlab:create_issue","args":{}}`), nil)
+			if err != nil {
+				t.Fatalf("metaInvoke: %v", err)
+			}
+			if got := resp.GetError().GetCode(); got != c.want {
+				t.Fatalf("code = %v, want %v (%v)", got, c.want, resp.GetError())
+			}
+		})
 	}
 }

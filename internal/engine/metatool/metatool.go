@@ -42,6 +42,24 @@ const (
 // record of the call.
 var ErrNativeID = errors.New("metatool: a native tool id goes to the tool call handler")
 
+// ErrConnectorUnavailable marks a call that did not reach the connector, or that lost its
+// connection to it. The call may succeed later, so the caller may retry. It is set from the
+// type of the failure and never from the words of a message.
+var ErrConnectorUnavailable = errors.New("metatool: the connector is not reachable")
+
+// ErrConnectorTimeout marks a call to a connector that did not answer within the bound of the
+// daemon. It says nothing about the call: the connector may or may not have done the work.
+var ErrConnectorTimeout = errors.New("metatool: the connector did not answer in time")
+
+// ErrConnectorOutcomeUnknown marks a call that the connector may have run: the request went
+// out and the answer did not come back whole. A repeat of a write could do the work twice, so
+// the member must not retry. The text tells the member what to do.
+var ErrConnectorOutcomeUnknown = errors.New("the outcome of the call is unknown: read the state before you call again")
+
+// ErrConnectorRateLimited marks a call that the connector refused with HTTP 429. A later call
+// may work after the wait that the vendor names.
+var ErrConnectorRateLimited = errors.New("metatool: the connector is rate limited")
+
 // ErrUnauthorized is returned by Invoke when the caller may not invoke the
 // requested tool. Callers map it to a permission-denied result.
 var ErrUnauthorized = errors.New("metatool: not authorized to invoke tool")
