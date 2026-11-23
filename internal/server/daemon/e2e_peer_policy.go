@@ -180,7 +180,6 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.world.v1.WorldService/ListOpenFindings":    true,
 			"/gibson.world.v1.WorldService/GetExposure":         true,
 			"/gibson.world.v1.WorldService/GetRevertRate":       true,
-			"/gibson.world.v1.WorldService/ListWaitingOnPerson": true,
 			// The A2A inbound exit test (tests/e2e/a2a_inbound_test.go, epic
 			// gibson#1367). The runner publishes a mission definition for inbound
 			// calls as the tenant admin, grants and revokes a caller identity, and

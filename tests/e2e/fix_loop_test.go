@@ -197,16 +197,16 @@ func TestFixLoop(t *testing.T) {
 	membership := tenantv1.NewMembershipServiceClient(clients.Conn())
 
 	var mrNumber int
-	t.Run("the mock forge answers over TLS and holds the flawed repository", func(t *testing.T) {
+	require.True(t, t.Run("the mock forge answers over TLS and holds the flawed repository", func(t *testing.T) {
 		mrNumber = forge.seedFlawedRepository(t)
 		state := forge.call(t, http.MethodGet, "/_mock/repos/"+fixLoopApp, nil)
 		require.NotEmpty(t, state, "the mock holds the repository")
-	})
+	}))
 
 	gitCA, metricsCA := fixLoopSecrets(ctx, t, secrets, ca)
 	mockURL := forge.url
 
-	t.Run("both connectors run with the CA bundle of the tenant", func(t *testing.T) {
+	require.True(t, t.Run("both connectors run with the CA bundle of the tenant", func(t *testing.T) {
 		enable := func(id string, vars map[string]string) {
 			_, eerr := connectors.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{CatalogId: id, Variables: vars})
 			require.NoError(t, eerr, "EnableConnector(%s)", id)
@@ -234,7 +234,7 @@ func TestFixLoop(t *testing.T) {
 			ready := phases[fixLoopGitConnector] == "Ready" && phases[fixLoopMetricsConnector] == "Ready"
 			return ready, fmt.Sprint(phases)
 		})
-	})
+	}))
 
 	targetID, err := helpers.RegisterTestTarget(ctx, clients.Daemon, toolTargetName, toolTargetURL)
 	require.NoError(t, err, "register the synthetic target")
@@ -268,7 +268,7 @@ func TestFixLoop(t *testing.T) {
 		return out, nil
 	}
 
-	t.Run("a governed call of the git host reaches the mock over TLS", func(t *testing.T) {
+	require.True(t, t.Run("a governed call of the git host reaches the mock over TLS", func(t *testing.T) {
 		key := fmt.Sprintf("%s#%d", fixLoopApp, mrNumber)
 		var got map[string]any
 		helpers.Eventually(t, 3*time.Minute, "merge_request_state answers", func() (bool, string) {
@@ -281,9 +281,9 @@ func TestFixLoop(t *testing.T) {
 		})
 		require.Equal(t, "open", got["state"], "the pull request that the mock holds is open: %v", got)
 		require.Equal(t, true, got["pipeline_green"], "the default check of the mock passed: %v", got)
-	})
+	}))
 
-	t.Run("the health signal of the tenant reads the metrics of the mock", func(t *testing.T) {
+	require.True(t, t.Run("the health signal of the tenant reads the metrics of the mock", func(t *testing.T) {
 		forge.setHealth(t, 1)
 		var got map[string]any
 		helpers.Eventually(t, 3*time.Minute, "health_signal answers", func() (bool, string) {
@@ -297,13 +297,15 @@ func TestFixLoop(t *testing.T) {
 			return true, ""
 		})
 		require.Equal(t, true, got["known"], "the tenant stated a query for %s: %v", fixLoopApp, got)
-	})
+	}))
+
+	// The held mission ends here. Its watch stops at 14 minutes, and the cases take
+	// longer, so the mission must end before them.
+	work.Complete()
+	require.Equal(t, "mission_completed", run.Wait(t, fixLoopCallTimeout).EventType, "the mission must complete")
 
 	runFixLoopCases(t, &fixLoopWorld{
 		ctx: ctx, clients: clients, forge: forge, daemon: clients.Daemon,
 		world: worldpb.NewWorldServiceClient(clients.Conn()), targetID: targetID, bankName: "fix-loop-bank",
 	})
-
-	work.Complete()
-	require.Equal(t, "mission_completed", run.Wait(t, fixLoopCallTimeout).EventType, "the mission must complete")
 }
