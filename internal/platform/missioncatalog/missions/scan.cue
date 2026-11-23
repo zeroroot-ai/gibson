@@ -19,7 +19,9 @@
 //                  image branch.
 //   commit         the exact commit the pipeline built. It starts the source
 //                  branch, which also needs application, repositoryUrl and ref.
-//   runtime        "true" starts the runtime branch. The branch reads
+//   (runtime)      The runtime branch has no parameter. It runs whenever the
+//                  image branch or the source branch runs, as it always did.
+//                  A scan with only the alerts branch skips it. The branch reads
 //                  `{{target.domain}}` and never a parameter.
 //   forgeConnector the connector of the Git host, by catalog id: github-fixloop
 //                  or gitlab-fixloop. It starts the alerts branch, which also
@@ -51,7 +53,6 @@ _params: {
 	pipelineId?:    string
 	pipelineUrl?:   string
 	imageRef?:      string
-	runtime?:       "true"
 	// forgeConnector is an enum, so a caller cannot name another connector for
 	// the node that the daemon ingests.
 	forgeConnector?: "github-fixloop" | "gitlab-fixloop"
@@ -70,7 +71,8 @@ if _params.imageRef != _|_ {
 if _params.commit != _|_ {
 	_has: source: true
 }
-if _params.runtime != _|_ {
+// The runtime branch runs with the image branch or the source branch.
+if _has.image || _has.source {
 	_has: runtime: true
 }
 if _params.forgeConnector != _|_ {
@@ -90,7 +92,7 @@ _exitIDs: list.Concat([_imageIDs, _sourceIDs, _runtimeIDs, _alertsIDs])
 
 // A scan with no branch is refused. The targetRef of the mission is not concrete
 // unless one branch runs, so the render fails. A scan needs one of imageRef,
-// commit, runtime or forgeConnector.
+// commit or forgeConnector.
 _guard: string
 if len(_exitIDs) > 0 {
 	_guard: ""

@@ -47,8 +47,6 @@ var paramsByMission = map[string]map[string]string{
 		"pipelineId":    "8891",
 		"pipelineUrl":   "https://gitlab.com/examplebank/customer-portal/-/pipelines/8891",
 		"imageRef":      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
-		// The runtime branch reads the target of the mission.
-		"runtime": "true",
 		// The dependency alerts of the Git host, read through its connector.
 		"forgeConnector": "gitlab-fixloop",
 	},
@@ -176,6 +174,37 @@ func TestRender_ScanWithNoBranchIsRefused(t *testing.T) {
 	}
 }
 
+// The seven old parameters render the branches that they rendered on main: image,
+// source, runtime and the join. A caller that does not know the alerts branch
+// keeps what it gets.
+func TestRender_TheSevenOldParametersRenderTheOldBranches(t *testing.T) {
+	in := map[string]string{}
+	for k, v := range paramsFor(t, "scan") {
+		if k != "forgeConnector" {
+			in[k] = v
+		}
+	}
+	def, err := Render(context.Background(), "scan", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for id := range def.GetNodes() {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	want := []string{"image", "ports", "report", "services", "source", "tls", "web"}
+	if !slices.Equal(ids, want) {
+		t.Errorf("nodes = %v, want %v", ids, want)
+	}
+	if join := def.GetNodes()["report"].GetJoinConfig().GetWaitFor(); !slices.Equal(join, []string{"image", "source", "tls"}) {
+		t.Errorf("the join waits for %v, want image, source and tls", join)
+	}
+	if !slices.Equal(def.GetEntryPoints(), []string{"image", "source", "ports"}) {
+		t.Errorf("entry points = %v", def.GetEntryPoints())
+	}
+}
+
 // Each branch runs only when its own parameters are present.
 func TestRender_ScanRunsOnlyTheBranchesThatHaveParameters(t *testing.T) {
 	nodesOf := func(in map[string]string) []string {
@@ -197,15 +226,11 @@ func TestRender_ScanRunsOnlyTheBranchesThatHaveParameters(t *testing.T) {
 	if !slices.Equal(got, []string{"alerts", "report"}) {
 		t.Errorf("only the Git host: nodes = %v, want alerts and report", got)
 	}
-	// A scan with an image only: the image branch.
+	// A scan with an image only: the image branch, and the runtime branch with it,
+	// as before.
 	got = nodesOf(map[string]string{"imageRef": "registry.example.com/shop@sha256:abc"})
-	if !slices.Equal(got, []string{"image", "report"}) {
-		t.Errorf("only an image: nodes = %v, want image and report", got)
-	}
-	// The runtime branch alone: the four stages and the join.
-	got = nodesOf(map[string]string{"runtime": "true"})
-	if !slices.Equal(got, []string{"ports", "report", "services", "tls", "web"}) {
-		t.Errorf("only runtime: nodes = %v", got)
+	if !slices.Equal(got, []string{"image", "ports", "report", "services", "tls", "web"}) {
+		t.Errorf("only an image: nodes = %v, want image, the runtime nodes and report", got)
 	}
 	// The source branch needs its own parameters: a commit with no repository fails.
 	if _, err := Render(context.Background(), "scan", map[string]string{"commit": "0123456789abcdef0123456789abcdef01234567"}); err == nil {

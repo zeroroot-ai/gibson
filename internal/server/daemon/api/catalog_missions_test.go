@@ -119,9 +119,6 @@ func TestRenderCatalogMission_RendersWhatTheListingDeclared(t *testing.T) {
 		params := make(map[string]string, len(m.GetDeclaredParams()))
 		for _, name := range m.GetDeclaredParams() {
 			params[name] = "v-" + name
-			if name == "runtime" {
-				params[name] = "true" // an enum
-			}
 			if name == "forgeConnector" && m.GetName() == "scan" {
 				params[name] = "github-fixloop" // an enum
 			}

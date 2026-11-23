@@ -31,8 +31,7 @@
         "pipelineId",
         "pipelineUrl",
         "ref",
-        "repositoryUrl",
-        "runtime"
+        "repositoryUrl"
       ],
       "optional": [
         "application",
@@ -42,8 +41,7 @@
         "pipelineId",
         "pipelineUrl",
         "ref",
-        "repositoryUrl",
-        "runtime"
+        "repositoryUrl"
       ]
     }
   }

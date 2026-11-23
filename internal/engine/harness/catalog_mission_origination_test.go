@@ -45,9 +45,6 @@ func catalogParams(t *testing.T, mission string) map[string]string {
 		if name == "forgeConnector" {
 			out[name] = "github-fixloop" // an enum: the connectors that the scan ingests
 		}
-		if name == "runtime" {
-			out[name] = "true" // an enum
-		}
 	}
 	return out
 }
@@ -80,11 +77,6 @@ func TestResolveMissionDefinitionJSON_CatalogMissionRendersTheCheckedInGraph(t *
 		// either a substitution that did not happen or a parameter the mission
 		// declares and never uses; both are worth a failure.
 		for name, value := range params {
-			if name == "runtime" {
-				// The flag turns the runtime branch on and is no value in the graph. The
-				// scan test of the catalog checks that the branch exists.
-				continue
-			}
 			if !strings.Contains(body, value) {
 				t.Errorf("%s: the rendered graph does not carry the %q parameter: %s",
 					mission, name, truncate(body))

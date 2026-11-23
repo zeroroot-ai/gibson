@@ -184,8 +184,5 @@ func placeholderValue(name string) string {
 	if name == "forgeConnector" {
 		return "github-fixloop"
 	}
-	if name == "runtime" {
-		return "true"
-	}
 	return "v-" + name
 }
