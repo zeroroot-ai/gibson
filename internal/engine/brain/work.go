@@ -67,6 +67,11 @@ type WorkItem struct {
 	MaxRetries int // CUE RetryPolicy.max_retries; the retry System re-dispatches on failure up to this
 	Attempts   int // dispatch attempts so far (count-based, deterministic for replay)
 
+	// ApprovalID is the approval request that a TOOL node waits on while it is
+	// input_required (gibson#1469). The daemon reads it after a restart to attach
+	// the node to its request again. Empty for any other item.
+	ApprovalID string
+
 	// DependentsRunOnFailure means a terminal failure of this item satisfies the
 	// items that depend on it, rather than stranding them. See
 	// MissionProjected.WorkNode for why it lives on the dependency and which
@@ -202,6 +207,9 @@ type WorkCompleted struct {
 	// failed when Err is not empty, done when it is empty. For canceled and
 	// input_required, Err holds the status message of the Task.
 	State WorkState `json:",omitempty"`
+	// ApprovalID is the approval request that an input_required TOOL node waits
+	// on. It is set with State input_required and no other state.
+	ApprovalID string `json:",omitempty"`
 	// Snapshot is the id of the sandbox snapshot that the node left in the
 	// sandbox checkpoint mode (ADR-0170). Empty when it left none.
 	Snapshot string `json:",omitempty"`
@@ -320,7 +328,7 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 	if e.State == WorkInputRequired {
 		// The work waits for input. It is not finished, so it gets no
 		// completion order and keeps its attempt count.
-		wi.State, wi.Err = WorkInputRequired, e.Err
+		wi.State, wi.Err, wi.ApprovalID = WorkInputRequired, e.Err, e.ApprovalID
 		return
 	}
 	w.nextCompletedSeq++
@@ -349,6 +357,8 @@ type WorkSnapshot struct {
 	State      WorkState
 	Result     string
 	Err        string
+	// ApprovalID mirrors WorkItem.ApprovalID.
+	ApprovalID string
 	MaxRetries int
 	Attempts   int
 	Timeout    time.Duration
@@ -405,6 +415,7 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 			State:                  wi.State,
 			Result:                 wi.Result,
 			Err:                    wi.Err,
+			ApprovalID:             wi.ApprovalID,
 			MaxRetries:             wi.MaxRetries,
 			Attempts:               wi.Attempts,
 			Timeout:                wi.Timeout,

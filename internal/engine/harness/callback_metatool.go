@@ -478,17 +478,27 @@ func (s *HarnessCallbackService) storedBlockedTools(ctx context.Context, context
 // path that has no harness of its own, such as ComponentService.CallTool. A run
 // of another tenant is refused.
 func (s *HarnessCallbackService) MissionPolicyForRun(ctx context.Context, tenant, runID string) (metatool.MissionPolicy, error) {
+	state, err := s.runStateFor(ctx, tenant, runID)
+	if err != nil {
+		return metatool.MissionPolicy{}, err
+	}
+	return s.policyFromState(ctx, state)
+}
+
+// runStateFor reads the authz state of a run and checks that the run belongs to
+// the tenant. It is the one tenant check of a run (ADR-0027).
+func (s *HarnessCallbackService) runStateFor(ctx context.Context, tenant, runID string) (*RunAuthzState, error) {
 	if s.authzStore == nil {
-		return metatool.MissionPolicy{}, errors.New("the run authz store is not wired")
+		return nil, errors.New("the run authz store is not wired")
 	}
 	state, err := s.authzStore.Get(ctx, runID)
 	if err != nil {
-		return metatool.MissionPolicy{}, fmt.Errorf("read the authz state of run %q: %w", runID, err)
+		return nil, fmt.Errorf("read the authz state of run %q: %w", runID, err)
 	}
 	if state.TenantID != tenant {
-		return metatool.MissionPolicy{}, fmt.Errorf("run %q does not belong to the tenant", runID)
+		return nil, fmt.Errorf("run %q does not belong to the tenant", runID)
 	}
-	return s.policyFromState(ctx, state)
+	return state, nil
 }
 
 // RecordToolCall writes the flight recorder record of a tool call that has no
@@ -542,15 +552,9 @@ func (s *HarnessCallbackService) CallConnectorForMission(
 	if runID == "" {
 		return nil, errors.New("a connector call of a mission node needs the run of the mission")
 	}
-	if s.authzStore == nil {
-		return nil, errors.New("the run authz store is not wired")
-	}
-	state, err := s.authzStore.Get(ctx, runID)
+	state, err := s.runStateFor(ctx, tenant, runID)
 	if err != nil {
-		return nil, fmt.Errorf("read the authz state of run %q: %w", runID, err)
-	}
-	if state.TenantID != tenant {
-		return nil, fmt.Errorf("run %q does not belong to the tenant", runID)
+		return nil, err
 	}
 	if state.MissionID != missionID {
 		return nil, fmt.Errorf("run %q does not belong to the mission of the node", runID)

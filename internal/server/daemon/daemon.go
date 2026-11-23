@@ -1204,12 +1204,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.brainExecutor.models = d.modelClient
 		// A TOOL node that names mcp:<connector>:<tool> takes the governed path of
 		// a connector call (gibson#1469). The callback manager is built later.
-		d.brainExecutor.connectors = func() missionConnectorCaller {
-			if d.callback == nil {
-				return nil
-			}
-			return d.callback
-		}
+		d.brainExecutor.connectors = d.callback
 		// A job node's jobs live in the tenant's data plane, which is built
 		// later in Start, so the store is read per dispatch (gibson#1713).
 		// A close whose merge request could not be read stays pending. The loop

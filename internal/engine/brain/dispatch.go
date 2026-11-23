@@ -141,6 +141,21 @@ func ResumeFailInFlight(w *World) []Event {
 	return out
 }
 
+// AwaitingApproval returns the TOOL nodes that wait on an approval request, with
+// their request ids. It is the peer of ResumeFailInFlight for a node that is not
+// running but input_required (gibson#1469): after a restart the daemon attaches
+// each of them to its request again, or fails it with a reason when the request
+// is gone. The World rebuilt from the Timeline holds both the node and the id.
+func AwaitingApproval(w *World) []WorkSnapshot {
+	var out []WorkSnapshot
+	for _, wi := range w.WorkSnapshot() {
+		if wi.State == WorkInputRequired && wi.Kind == "tool" && wi.ApprovalID != "" {
+			out = append(out, wi)
+		}
+	}
+	return out
+}
+
 // RetrySystem re-arms failed scripted work for another attempt, up to the node's
 // CUE RetryPolicy.max_retries (count-based, deterministic — backoff delay is a
 // dispatch-layer concern, not part of the replayable core). It must run before

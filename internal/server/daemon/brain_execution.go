@@ -136,10 +136,9 @@ type brainExecutor struct {
 	jobFindings jobnode.FindingsResolver
 	// jobClaims holds the findings of a fix job while it runs (gibson#1454).
 	jobClaims jobnode.FixClaims
-	// connectors makes the connector call of a TOOL node (gibson#1469). It is
-	// read per dispatch, because the daemon builds the callback manager after
-	// the executor. nil means a tool node cannot name a connector tool.
-	connectors func() missionConnectorCaller
+	// connectors makes the connector call of a TOOL node (gibson#1469). The daemon
+	// sets it when it builds the executor, and it fails to start without it.
+	connectors missionConnectorCaller
 	// approvalPoll is how long a TOOL node waits between two asks for an
 	// approval. Zero means approvalPollInterval. A test sets it.
 	approvalPoll time.Duration
@@ -165,6 +164,9 @@ func (b *brainExecutor) register(missionID string, bind *missionBinding) {
 	b.mu.Lock()
 	b.bindings[missionID] = bind
 	b.mu.Unlock()
+	// A TOOL node that waited on an approval before a restart is attached to its
+	// request again (gibson#1469).
+	b.reattachApprovals(bind, missionID)
 }
 
 // unregister removes the binding bind of a mission. It removes the entry only
@@ -822,21 +824,23 @@ type missionConnectorCaller interface {
 	CallConnectorForMission(ctx context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any) (any, error)
 }
 
-// approvalPollInterval is how long a TOOL node waits before it asks again for
-// the approval of a marked tool.
-const approvalPollInterval = 5 * time.Second
+// approvalPollInterval is how often a waiting TOOL node reads the decision of its
+// approval request in the World. The read changes nothing and writes no record.
+const approvalPollInterval = time.Second
 
 // dispatchConnectorTool runs a TOOL node that names a connector tool. The input
 // of the node is the JSON object of the arguments. The result is the JSON of the
 // tool result, which is the output of the node.
 //
-// A tool with an approval mark waits for a person. The node then moves to
-// input_required and shows the reason, and the same call is made again until the
-// approval is decided: the gate answers the same arguments with the state of the
-// request, as it does for an agent. A denial fails the node. A mission that is
-// canceled ends the wait.
+// A tool with an approval mark waits for a person. The call answers with the id
+// of the approval request. The node records that id on its work item and moves to
+// input_required once. It does not call again until the request is decided, and
+// then it calls once: one intent record and one result record for each decision,
+// never one for each poll. A denial fails the node. The wait ends with the
+// mission, or with the bound that the node declares (the approval queue gives a
+// request no expiry of its own).
 func (b *brainExecutor) dispatchConnectorTool(bind *missionBinding, req brain.DispatchRequest, tid toolid.ID) (string, error) {
-	if b.connectors == nil || b.connectors() == nil {
+	if b.connectors == nil {
 		return "", fmt.Errorf("tool %q: this daemon has no connector caller", tid.Canonical())
 	}
 	args := map[string]any{}
@@ -845,40 +849,144 @@ func (b *brainExecutor) dispatchConnectorTool(bind *missionBinding, req brain.Di
 			return "", fmt.Errorf("tool %q: the input of the node is not a JSON object: %w", tid.Canonical(), err)
 		}
 	}
+	res, err := b.callConnectorNode(bind, req.MissionID, req.WorkID, tid, args)
+	var pending *metatool.PendingApproval
+	if errors.As(err, &pending) {
+		if bind.eng != nil {
+			bind.eng.Submit(brain.WorkCompleted{
+				ID: req.WorkID, RunID: req.RunID, State: brain.WorkInputRequired, ApprovalID: pending.ID,
+				Err: fmt.Sprintf("waiting for the approval of %s: request %s", tid.Canonical(), pending.ID),
+			})
+		}
+		if werr := b.waitForApproval(bind, pending.ID, req.Timeout); werr != nil {
+			return "", fmt.Errorf("tool %q: %w", tid.Canonical(), werr)
+		}
+		res, err = b.callConnectorNode(bind, req.MissionID, req.WorkID, tid, args)
+	}
+	if err != nil {
+		return "", fmt.Errorf("tool %q: %w", tid.Canonical(), err)
+	}
+	return b.nodeResult(bind, req.MissionID, tid, res)
+}
+
+// callConnectorNode makes one governed call of a TOOL node.
+func (b *brainExecutor) callConnectorNode(
+	bind *missionBinding, missionID, workID string, tid toolid.ID, args map[string]any,
+) (any, error) {
+	res, err := b.connectors.CallConnectorForMission(bind.ctx, bind.tenant, missionID, bind.runID, workID,
+		tid.Connector, tid.Tool, args)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // the caller names the tool and wraps it
+	}
+	return res, nil
+}
+
+// nodeResult turns the result of a call into the output of the node. A call that
+// returns nothing is not a result: the node must not succeed with "null".
+func (b *brainExecutor) nodeResult(_ *missionBinding, _ string, tid toolid.ID, res any) (string, error) {
+	if res == nil {
+		return "", fmt.Errorf("tool %q: the connector returned no result", tid.Canonical())
+	}
+	out, err := json.Marshal(res)
+	if err != nil {
+		return "", fmt.Errorf("tool %q: encode the result: %w", tid.Canonical(), err)
+	}
+	return string(out), nil
+}
+
+// waitForApproval returns when the approval request is decided. It reads the
+// request in the World and writes nothing. It returns an error when the request
+// is gone, when the bound passes (zero means no bound), and when the mission ends.
+func (b *brainExecutor) waitForApproval(bind *missionBinding, approvalID string, bound time.Duration) error {
+	if bind.eng == nil {
+		return errors.New("the mission has no World to read the approval from")
+	}
 	poll := b.approvalPoll
 	if poll <= 0 {
 		poll = approvalPollInterval
 	}
-	reported := false
+	var deadline <-chan time.Time
+	if bound > 0 {
+		timer := time.NewTimer(bound)
+		defer timer.Stop()
+		deadline = timer.C
+	}
 	for {
-		res, err := b.connectors().CallConnectorForMission(bind.ctx, bind.tenant, req.MissionID, bind.runID, req.WorkID,
-			tid.Connector, tid.Tool, args)
-		if err == nil {
-			if res == nil {
-				// A call that returns nothing is not a result. The node must not
-				// succeed with "null".
-				return "", fmt.Errorf("tool %q: the connector returned no result", tid.Canonical())
+		decided, found := false, false
+		bind.eng.ReadWorld(func(w *brain.World) {
+			for _, a := range w.DestructiveActionSnapshot() {
+				if a.HypothesisID == approvalID {
+					found, decided = true, a.Decided
+				}
 			}
-			out, merr := json.Marshal(res)
-			if merr != nil {
-				return "", fmt.Errorf("tool %q: encode the result: %w", tid.Canonical(), merr)
-			}
-			return string(out), nil
-		}
-		if !errors.Is(err, metatool.ErrApprovalPending) {
-			return "", fmt.Errorf("tool %q: %w", tid.Canonical(), err)
-		}
-		if !reported && bind.eng != nil {
-			reported = true
-			bind.eng.Submit(brain.WorkCompleted{
-				ID: req.WorkID, RunID: req.RunID, State: brain.WorkInputRequired,
-				Err: fmt.Sprintf("waiting for the approval of %s: %v", tid.Canonical(), err),
-			})
+		})
+		switch {
+		case !found:
+			return fmt.Errorf("the approval request %s is gone", approvalID)
+		case decided:
+			return nil
 		}
 		select {
 		case <-bind.ctx.Done():
-			return "", fmt.Errorf("tool %q: the wait for the approval ended: %w", tid.Canonical(), bind.ctx.Err())
+			return fmt.Errorf("the wait for the approval ended: %w", bind.ctx.Err())
+		case <-deadline:
+			return fmt.Errorf("the approval %s was not decided within the bound of the node (%s)", approvalID, bound)
 		case <-time.After(poll):
 		}
 	}
+}
+
+// reattachApprovals attaches each TOOL node of the mission that waits on an
+// approval request to that request again, after a restart of the daemon
+// (gibson#1469). A node whose request is gone fails with that reason, and the
+// others wait and call once. The node is input_required in the World that the
+// restart rebuilt, and the id of its request is on its work item.
+func (b *brainExecutor) reattachApprovals(bind *missionBinding, missionID string) {
+	// A binding with no World (a test of the executor alone) has no node to attach.
+	if bind.eng != nil && b.connectors != nil {
+		var waiting []brain.WorkSnapshot
+		bind.eng.ReadWorld(func(w *brain.World) {
+			for _, wi := range brain.AwaitingApproval(w) {
+				if wi.MissionID == missionID {
+					waiting = append(waiting, wi)
+				}
+			}
+		})
+		for _, wi := range waiting {
+			go b.resumeApprovalNode(bind, wi)
+		}
+	}
+}
+
+func (b *brainExecutor) resumeApprovalNode(bind *missionBinding, wi brain.WorkSnapshot) {
+	fail := func(err error) {
+		bind.eng.Submit(brain.WorkCompleted{ID: wi.ID, RunID: wi.RunID, Err: err.Error()})
+	}
+	tid, err := toolid.Parse(wi.Target)
+	if err != nil {
+		fail(fmt.Errorf("tool %q: %w", wi.Target, err))
+		return
+	}
+	args := map[string]any{}
+	if in := strings.TrimSpace(wi.Input); in != "" && in != "null" {
+		if uerr := json.Unmarshal([]byte(in), &args); uerr != nil {
+			fail(fmt.Errorf("tool %q: the input of the node is not a JSON object: %w", tid.Canonical(), uerr))
+			return
+		}
+	}
+	if werr := b.waitForApproval(bind, wi.ApprovalID, wi.Timeout); werr != nil {
+		fail(fmt.Errorf("tool %q: %w", tid.Canonical(), werr))
+		return
+	}
+	res, cerr := b.callConnectorNode(bind, wi.MissionID, wi.ID, tid, args)
+	if cerr != nil {
+		fail(fmt.Errorf("tool %q: %w", tid.Canonical(), cerr))
+		return
+	}
+	out, rerr := b.nodeResult(bind, wi.MissionID, tid, res)
+	if rerr != nil {
+		fail(rerr)
+		return
+	}
+	bind.eng.Submit(brain.WorkCompleted{ID: wi.ID, RunID: wi.RunID, Result: out})
 }

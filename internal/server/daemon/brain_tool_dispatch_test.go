@@ -322,7 +322,7 @@ func TestDispatchTool_AConnectorToolTakesTheGovernedPath(t *testing.T) {
 	h := &toolHarness{output: `{"never":"used"}`}
 	conn := &fakeMissionConnector{result: map[string]any{"alerts": []any{}}}
 	b := newBrainExecutor(nil, slog.Default())
-	b.connectors = func() missionConnectorCaller { return conn }
+	b.connectors = conn
 	bind := &missionBinding{ctx: context.Background(), harness: h, tenant: "acme", runID: "run-9"}
 
 	out, err := b.dispatchTool(bind, brain.DispatchRequest{
@@ -366,45 +366,180 @@ func TestDispatchTool_AConnectorToolTakesTheGovernedPath(t *testing.T) {
 func TestDispatchTool_ANilConnectorResultFailsTheNode(t *testing.T) {
 	conn := &fakeMissionConnector{}
 	b := newBrainExecutor(nil, slog.Default())
-	b.connectors = func() missionConnectorCaller { return conn }
+	b.connectors = conn
 	bind := &missionBinding{ctx: context.Background(), tenant: "acme", runID: "run-9"}
 	if out, err := b.dispatchTool(bind, brain.DispatchRequest{Target: "mcp:github-fixloop:read_file"}); err == nil {
 		t.Fatalf("a nil result must fail the node, got %q", out)
 	}
 }
 
-// A tool with an approval mark waits for a person: the node moves to
-// input_required with the reason, the same call is made again, and an approval
-// resumes it. A denial fails the node.
-func TestDispatchTool_AMarkedToolWaitsForTheApprovalAndResumes(t *testing.T) {
-	pending := fmt.Errorf("%w: request r1", metatool.ErrApprovalPending)
-	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
-	conn := &fakeMissionConnector{errs: []error{pending, pending}, result: map[string]any{"ok": true}}
-	b := newBrainExecutor(nil, slog.Default())
-	b.connectors = func() missionConnectorCaller { return conn }
-	b.approvalPoll = time.Millisecond
-	bind := &missionBinding{ctx: context.Background(), tenant: "acme", runID: "run-9", eng: eng}
-	out, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w1", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"})
-	if err != nil {
-		t.Fatalf("an approval must resume the node: %v", err)
+// requestApproval puts an approval request of a tool call in the World, as the
+// approval queue does when a marked tool is called.
+func requestApproval(t *testing.T, eng *brain.Engine, id string) {
+	t.Helper()
+	if err := eng.SubmitAndWait(context.Background(), brain.DestructiveActionRequested{
+		HypothesisID: id, Tenant: "acme", MissionID: "m1", ActionKind: brain.ActionKindToolCall,
+		Connector: "crowdstrike-response", Tool: "isolate_x", ArgsHash: "h",
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if out != `{"ok":true}` || conn.calls != 3 {
-		t.Errorf("out = %q after %d calls", out, conn.calls)
-	}
+}
 
-	denied := &fakeMissionConnector{errs: []error{pending, fmt.Errorf("%w: request r1", metatool.ErrApprovalDenied)}}
-	b.connectors = func() missionConnectorCaller { return denied }
-	if _, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w2", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"}); !errors.Is(err, metatool.ErrApprovalDenied) {
+func decideApproval(t *testing.T, eng *brain.Engine, id string, approved bool) {
+	t.Helper()
+	if err := eng.SubmitAndWait(context.Background(), brain.DestructiveActionDecided{HypothesisID: id, Approved: approved, UserID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A tool with an approval mark waits for a person. The node records the request
+// id on its work item and moves to input_required once. It calls Handler.Call
+// again only after the request is decided, so a decision costs one intent record
+// and one result record and a poll costs none. A denial fails the node.
+func TestDispatchTool_AMarkedToolWaitsForTheDecisionAndCallsOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-1")
+	conn := &fakeMissionConnector{errs: []error{&metatool.PendingApproval{ID: "req-1"}}, result: map[string]any{"ok": true}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = conn
+	b.approvalPoll = time.Millisecond
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+
+	type outcome struct {
+		out string
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		out, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w1", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"})
+		done <- outcome{out, err}
+	}()
+	// While the request is open, the node does not call again, however long it waits.
+	time.Sleep(60 * time.Millisecond)
+	if conn.calls != 1 {
+		t.Fatalf("the node called %d times while the request was open, want 1", conn.calls)
+	}
+	select {
+	case o := <-done:
+		t.Fatalf("the node ended before the decision: %+v", o)
+	default:
+	}
+	decideApproval(t, eng, "req-1", true)
+	select {
+	case o := <-done:
+		if o.err != nil || o.out != `{"ok":true}` {
+			t.Fatalf("out = %q, err = %v", o.out, o.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the node did not resume after the decision")
+	}
+	if conn.calls != 2 {
+		t.Errorf("calls = %d, want the first call and one call after the decision", conn.calls)
+	}
+}
+
+// A denial reaches the node through the second call, which the gate answers with
+// the denial. The node fails with it.
+func TestDispatchTool_ADeniedApprovalFailsTheNode(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-2")
+	decideApproval(t, eng, "req-2", false)
+	conn := &fakeMissionConnector{errs: []error{
+		&metatool.PendingApproval{ID: "req-2"}, fmt.Errorf("%w: request req-2", metatool.ErrApprovalDenied),
+	}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = conn
+	b.approvalPoll = time.Millisecond
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+	_, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w2", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"})
+	if !errors.Is(err, metatool.ErrApprovalDenied) {
 		t.Fatalf("a denial must fail the node, got %v", err)
 	}
+}
 
-	// A canceled mission ends the wait.
+// The wait ends with the bound of the node, with the end of the mission, and with
+// a request that is gone.
+func TestDispatchTool_TheApprovalWaitIsBounded(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	forever := &fakeMissionConnector{err: pending}
-	b.connectors = func() missionConnectorCaller { return forever }
-	if _, err := b.dispatchTool(&missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng},
-		brain.DispatchRequest{WorkID: "w3", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"}); err == nil {
-		t.Fatal("a canceled mission must end the wait")
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-3")
+	pending := &fakeMissionConnector{err: &metatool.PendingApproval{ID: "req-3"}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = pending
+	b.approvalPoll = time.Millisecond
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w3", MissionID: "m1", Timeout: 30 * time.Millisecond, Target: "mcp:crowdstrike-response:isolate_x"}); err == nil ||
+		!strings.Contains(err.Error(), "bound of the node") {
+		t.Errorf("the bound of the node must end the wait, got %v", err)
+	}
+	gone := &fakeMissionConnector{err: &metatool.PendingApproval{ID: "req-missing"}}
+	b.connectors = gone
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w4", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"}); err == nil ||
+		!strings.Contains(err.Error(), "gone") {
+		t.Errorf("a request that is gone must fail the node, got %v", err)
+	}
+	canceled, stop := context.WithCancel(ctx)
+	stop()
+	b.connectors = pending
+	if _, err := b.dispatchTool(&missionBinding{ctx: canceled, tenant: "acme", runID: "run-9", eng: eng},
+		brain.DispatchRequest{WorkID: "w5", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"}); err == nil {
+		t.Error("a canceled mission must end the wait")
+	}
+}
+
+// After a restart the World holds the node as input_required with the id of its
+// request. The executor attaches it again, waits for the decision and calls once.
+// A node whose request is gone fails with that reason.
+func TestReattachApprovals_AttachesEachWaitingNodeAfterARestart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-4")
+	for _, wi := range []struct{ id, approval string }{{"w-live", "req-4"}, {"w-gone", "req-lost"}} {
+		eng.Submit(brain.WorkDispatched{ID: wi.id, MissionID: "m1", RunID: "run-1", ItemKind: "tool", Target: "mcp:crowdstrike-response:isolate_x", Input: `{"host":"h"}`})
+		eng.Submit(brain.WorkCompleted{ID: wi.id, RunID: "run-1", State: brain.WorkInputRequired, ApprovalID: wi.approval, Err: "waiting"})
+	}
+	waitFor(t, func() bool {
+		n := 0
+		eng.ReadWorld(func(w *brain.World) { n = len(brain.AwaitingApproval(w)) })
+		return n == 2
+	})
+
+	conn := &fakeMissionConnector{result: map[string]any{"ok": true}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = conn
+	b.approvalPoll = time.Millisecond
+	b.register("m1", &missionBinding{ctx: ctx, tenant: "acme", runID: "run-2", eng: eng})
+	decideApproval(t, eng, "req-4", true)
+
+	state := func(id string) (brain.WorkState, string) {
+		var st brain.WorkState
+		var msg string
+		eng.ReadWorld(func(w *brain.World) {
+			for _, wi := range w.WorkSnapshot() {
+				if wi.ID == id {
+					st, msg = wi.State, wi.Err
+				}
+			}
+		})
+		return st, msg
+	}
+	waitFor(t, func() bool { st, _ := state("w-live"); return st == brain.WorkDone })
+	waitFor(t, func() bool { st, _ := state("w-gone"); return st == brain.WorkFailed })
+	if _, msg := state("w-gone"); !strings.Contains(msg, "gone") {
+		t.Errorf("the node with no request failed with %q, want the reason", msg)
+	}
+	if conn.calls != 1 {
+		t.Errorf("calls = %d, want one call, for the node whose request was decided", conn.calls)
 	}
 }
