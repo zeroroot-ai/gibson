@@ -15,6 +15,9 @@ import (
 	"testing"
 
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+	"google.golang.org/grpc/codes"
+	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/cueruntime"
 	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
@@ -322,4 +325,70 @@ func TestRenderCatalogMission_AgreesWithTheAgentPath(t *testing.T) {
 	if resp.GetMission().GetName() != want.GetName() {
 		t.Errorf("names differ: %q vs %q", resp.GetMission().GetName(), want.GetName())
 	}
+}
+
+// A person runs a catalog mission by name. The handler refuses what the render
+// refuses, before any mission exists, and it passes the name, the params and the
+// target to the daemon.
+func TestRunCatalogMission_RendersThenStartsTheMission(t *testing.T) {
+	t.Parallel()
+
+	var got RunCatalogMissionData
+	called := 0
+	daemon := &mockDaemon{runCatalogMissionFn: func(_ context.Context, req RunCatalogMissionData) (string, error) {
+		called++
+		got = req
+		return "mission-7", nil
+	}}
+	srv := NewDaemonServer(daemon, nil, nil)
+	params := map[string]string{"repositoryUrl": "https://github.com/acme/shop", "application": "acme/shop", "forgeConnector": "github-fixloop"}
+
+	resp, err := srv.RunCatalogMission(callerCtx(), &daemonpb.RunCatalogMissionRequest{
+		Name: "scan", Params: params, TargetId: "target-1",
+	})
+	if err != nil {
+		t.Fatalf("RunCatalogMission: %v", err)
+	}
+	if resp.GetMissionId() != "mission-7" || called != 1 {
+		t.Errorf("mission id = %q, calls = %d", resp.GetMissionId(), called)
+	}
+	if got.Name != "scan" || got.TargetID != "target-1" || got.Params["application"] != "acme/shop" {
+		t.Errorf("the daemon got %+v", got)
+	}
+
+	for name, req := range map[string]*daemonpb.RunCatalogMissionRequest{
+		"no name":         {Params: params, TargetId: "target-1"},
+		"unknown mission": {Name: "nothing", Params: params, TargetId: "target-1"},
+		"no target":       {Name: "scan", Params: params},
+		"unknown param":   {Name: "scan", Params: map[string]string{"host": "evil.example.com", "forgeConnector": "github-fixloop"}, TargetId: "target-1"},
+		"no branch":       {Name: "scan", Params: map[string]string{"application": "acme/shop"}, TargetId: "target-1"},
+	} {
+		before := called
+		if _, rerr := srv.RunCatalogMission(callerCtx(), req); status_grpc.Code(rerr) != codes.InvalidArgument {
+			t.Errorf("%s: err = %v, want InvalidArgument", name, rerr)
+		}
+		if called != before {
+			t.Errorf("%s: the daemon was called for a refused request", name)
+		}
+	}
+}
+
+// An error of the daemon reaches the caller, and no mission id comes with it.
+func TestRunCatalogMission_ADaemonErrorIsReturned(t *testing.T) {
+	t.Parallel()
+	daemon := &mockDaemon{runCatalogMissionFn: func(context.Context, RunCatalogMissionData) (string, error) {
+		return "", status_grpc.Error(codes.NotFound, "target not found")
+	}}
+	srv := NewDaemonServer(daemon, nil, nil)
+	resp, err := srv.RunCatalogMission(callerCtx(), &daemonpb.RunCatalogMissionRequest{
+		Name: "scan", TargetId: "t", Params: map[string]string{"imageRef": "r/i@sha256:abc"},
+	})
+	if status_grpc.Code(err) != codes.NotFound || resp != nil {
+		t.Errorf("resp = %v, err = %v, want NotFound", resp, err)
+	}
+}
+
+// callerCtx is the context of a verified caller.
+func callerCtx() context.Context {
+	return auth.WithIdentity(context.Background(), auth.Identity{Subject: "user:alice"})
 }

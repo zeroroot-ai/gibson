@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/infra/idempotency"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc"
 	grpccodes "google.golang.org/grpc/codes"
@@ -444,3 +445,64 @@ var _ = func() string { return extractIdempotencyKey(nil) }
 // Compile-time guard: protoreflect import is referenced (a stray
 // unused-import would block the build).
 var _ protoreflect.Message
+
+// The key of RunCatalogMission is bound to its first request. The same request
+// gets the first answer and starts one mission. A request that reuses the key with
+// another name or other params is refused, and it starts none (gibson#1469).
+func TestIdempotency_RunCatalogMissionKeyIsBoundToItsRequest(t *testing.T) {
+	store, _ := newTestStoreT(t)
+	itc := idempotencyUnaryInterceptor(store, time.Minute, slog.New(slog.DiscardHandler))
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	info := &grpc.UnaryServerInfo{FullMethod: daemonpb.DaemonService_RunCatalogMission_FullMethodName}
+	var started atomic.Int32
+	handler := func(context.Context, any) (any, error) {
+		return &daemonpb.RunCatalogMissionResponse{MissionId: "m-" + string(rune('0'+started.Add(1)))}, nil
+	}
+	req := func(name, application string) *daemonpb.RunCatalogMissionRequest {
+		return &daemonpb.RunCatalogMissionRequest{
+			Name: name, Params: map[string]string{"application": application}, TargetId: "t", IdempotencyKey: "key-1",
+		}
+	}
+
+	first, err := itc(ctx, req("scan", "acme/shop"), info, handler)
+	require.NoError(t, err)
+	again, err := itc(ctx, req("scan", "acme/shop"), info, handler)
+	require.NoError(t, err)
+	assert.Equal(t, first.(*daemonpb.RunCatalogMissionResponse).GetMissionId(), again.(*daemonpb.RunCatalogMissionResponse).GetMissionId())
+	assert.EqualValues(t, 1, started.Load(), "the same request starts one mission")
+
+	for name, r := range map[string]*daemonpb.RunCatalogMissionRequest{
+		"another params": req("scan", "acme/other"),
+		"another name":   req("fix", "acme/shop"),
+	} {
+		_, rerr := itc(ctx, r, info, handler)
+		assert.Equal(t, grpccodes.InvalidArgument, grpcstatus.Code(rerr), name)
+	}
+	assert.EqualValues(t, 1, started.Load(), "a refused reuse starts no mission")
+
+	// Another tenant has its own key space.
+	other := auth.ContextWithTenantString(context.Background(), "globex")
+	_, err = itc(other, req("scan", "acme/other"), info, handler)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, started.Load())
+}
+
+// A method that did not opt in keeps its old rule: the key alone decides.
+func TestIdempotency_AMethodWithNoFingerprintReplaysOnTheKey(t *testing.T) {
+	store, _ := newTestStoreT(t)
+	itc := idempotencyUnaryInterceptor(store, time.Minute, slog.New(slog.DiscardHandler))
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	info := &grpc.UnaryServerInfo{FullMethod: "/gibson.daemon.v1.DaemonService/RenderOther"}
+	calls := 0
+	handler := func(context.Context, any) (any, error) {
+		calls++
+		return &daemonpb.RunCatalogMissionResponse{MissionId: "x"}, nil
+	}
+	for _, app := range []string{"a", "b"} {
+		_, err := itc(ctx, &daemonpb.RunCatalogMissionRequest{
+			Name: "scan", Params: map[string]string{"application": app}, IdempotencyKey: "k",
+		}, info, handler)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 1, calls)
+}

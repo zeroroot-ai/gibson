@@ -4,6 +4,7 @@
 package brain
 
 import (
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"time"
 
 	"github.com/mlange-42/ark/ecs"
@@ -107,6 +108,9 @@ type MissionProjected struct {
 	Description string
 	TargetID    string
 	TenantID    string
+	// CreatedBy is who created the mission. A mission that is announced after its
+	// start would otherwise lose the creator when the run projects first.
+	CreatedBy principal.Principal
 
 	// RunID names this run of the mission. The daemon mints it when the run
 	// starts. A mission ID is the stable record ID, so the RunID is what makes
@@ -155,6 +159,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 		Description:    e.Description,
 		TargetID:       e.TargetID,
 		TenantID:       e.TenantID,
+		CreatedBy:      e.CreatedBy,
 		StartedAt:      e.StartedAt,
 	})
 	projectWork(w, e)
@@ -257,6 +262,9 @@ func startRun(m *Mission, e MissionProjected) {
 	}
 	if e.TenantID != "" {
 		m.TenantID = e.TenantID
+	}
+	if !e.CreatedBy.IsZero() {
+		m.CreatedBy = e.CreatedBy
 	}
 }
 

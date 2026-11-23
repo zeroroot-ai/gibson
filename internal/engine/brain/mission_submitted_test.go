@@ -133,3 +133,16 @@ func TestMissionCreated_InMissionSlice(t *testing.T) {
 		t.Fatalf("first event = %#v, want m1's MissionCreated", got[0])
 	}
 }
+
+// A run that projects before the mission is announced keeps the creator: the
+// projection carries it, and the later announcement changes nothing.
+func TestMissionProjected_CarriesTheCreator(t *testing.T) {
+	w := NewWorld("t")
+	creator := testCreator
+	Reduce(w, MissionProjected{ID: "m1", RunID: "r1", Name: "x", TenantID: "t", CreatedBy: creator})
+	Reduce(w, MissionCreated{ID: "m1", Name: "x", TenantID: "t", CreatedBy: creator})
+	snap := w.MissionSnapshot()
+	if len(snap) != 1 || snap[0].CreatedBy != creator {
+		t.Fatalf("snapshot = %+v, want one mission with the creator", snap)
+	}
+}

@@ -133,18 +133,15 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 	}
 
 	// Build the mission record directly using the store.
-	m := &mission.Mission{
-		ID:                    types.NewID(),
-		Name:                  def.GetName(),
-		Description:           def.GetDescription(),
-		Status:                mission.MissionStatusSubmitted,
-		TargetID:              req.TargetID,
-		MissionDefinitionID:   types.ID(def.GetId()),
-		MissionDefinitionJSON: string(defJSON),
-		ParentMissionID:       req.ParentMissionID,
-		Depth:                 depth,
-		Metadata:              req.Metadata,
+	tenant, tenantErr := tenantFromCtx(ctx)
+	if tenantErr != nil {
+		return nil, tenantErr
 	}
+	m := newMissionRecord(tenant, def.GetName(), def.GetDescription(), req.TargetID, types.ID(def.GetId()), req.CreatedBy)
+	m.MissionDefinitionJSON = string(defJSON)
+	m.ParentMissionID = req.ParentMissionID
+	m.Depth = depth
+	m.Metadata = req.Metadata
 
 	if saveErr := store.Save(ctx, m); saveErr != nil {
 		return nil, status.Errorf(codes.Internal, "failed to save mission: %v", saveErr)

@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
 // MissionClientIface is the minimal interface from the mission package that the
@@ -64,6 +65,9 @@ type MissionClientCreateRequest struct {
 	ParentMissionID       *types.ID
 	ParentDepth           int
 	Metadata              map[string]any
+	// CreatedBy is the principal that started the mission. The zero value means
+	// nobody: an agent that originates a child mission sets none.
+	CreatedBy principal.Principal
 }
 
 // MissionClientInfo is the create-response from the mission package.

@@ -43,6 +43,11 @@ import (
 type CachedResponse struct {
 	Response      *anypb.Any
 	TerminalError *TerminalError
+	// RequestHash is the fingerprint of the request that made this outcome. It is
+	// set only for a method that opts in to the check, and it is empty for an
+	// older entry. A request that reuses the key with another fingerprint is
+	// refused.
+	RequestHash string
 }
 
 // TerminalError is the cacheable form of a permanent gRPC failure. We

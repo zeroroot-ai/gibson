@@ -36,6 +36,7 @@ type envelope struct {
 	Response string `json:"response,omitempty"`
 	ErrCode  int32  `json:"errCode,omitempty"`
 	ErrMsg   string `json:"errMsg,omitempty"`
+	ReqHash  string `json:"reqHash,omitempty"`
 }
 
 const (
@@ -53,7 +54,7 @@ func encodeEntry(c *CachedResponse) ([]byte, error) {
 	if c.Response != nil && c.TerminalError != nil {
 		return nil, fmt.Errorf("encodeEntry: both Response and TerminalError are set; expected exactly one")
 	}
-	env := envelope{}
+	env := envelope{ReqHash: c.RequestHash}
 	if c.Response != nil {
 		raw, err := protojson.Marshal(c.Response)
 		if err != nil {
@@ -83,13 +84,14 @@ func decodeEntry(raw []byte) (*CachedResponse, error) {
 		if err := protojson.Unmarshal([]byte(env.Response), any); err != nil {
 			return nil, fmt.Errorf("decodeEntry: protojson.Unmarshal(Any): %w", err)
 		}
-		return &CachedResponse{Response: any}, nil
+		return &CachedResponse{Response: any, RequestHash: env.ReqHash}, nil
 	case kindError:
 		return &CachedResponse{
 			TerminalError: &TerminalError{
 				Code:    env.ErrCode,
 				Message: env.ErrMsg,
 			},
+			RequestHash: env.ReqHash,
 		}, nil
 	default:
 		return nil, fmt.Errorf("decodeEntry: unknown kind %q", env.Kind)

@@ -507,6 +507,11 @@ type DaemonInterface interface {
 	// flows brain → lifecycle projector → EventBus/Redis).
 	RunMission(ctx context.Context, req RunMissionData) (string, error)
 
+	// RunCatalogMission creates a mission from a checked-in catalog mission and
+	// queues it, with the same effects as an agent that originates it through the
+	// harness callback (ADR-0118, gibson#1469). It returns the id of the mission.
+	RunCatalogMission(ctx context.Context, req RunCatalogMissionData) (string, error)
+
 	// StopMission stops a running mission
 	StopMission(ctx context.Context, missionID string, force bool) error
 
@@ -649,6 +654,20 @@ type MissionData struct {
 // RunMissionData is the request to start one mission by reference. The gRPC
 // RunMission handler and the inbound A2A entry point both build it, and both
 // start the mission with StartMission.
+// RunCatalogMissionData is the input of DaemonInterface.RunCatalogMission.
+type RunCatalogMissionData struct {
+	// Name is the catalog name of the mission.
+	Name string
+	// Params are the parameters that the mission declares.
+	Params map[string]string
+	// TargetID is a registered target of the tenant. The mission binds its runtime
+	// branch to it.
+	TargetID string
+	// CreatedBy is the caller, stamped by the RPC handler from the identity of the
+	// request.
+	CreatedBy principal.Principal
+}
+
 type RunMissionData struct {
 	// MissionDefinitionID names a registered mission definition.
 	MissionDefinitionID string
