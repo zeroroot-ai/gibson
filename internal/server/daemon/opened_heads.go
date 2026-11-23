@@ -6,47 +6,60 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
-	"sync"
+	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
+	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 )
 
 // openMergeRequestTool is the tool that a coding job calls to open its merge
-// request. The tool result passes the tool gate of the daemon, so the daemon
-// sees the head commit that the tool made.
+// request. The tool result passes the tool gate of the daemon, so the daemon sees
+// the head commit that the tool made.
 const openMergeRequestTool = ":open_merge_request"
 
-// openedHeadLimit bounds the heads that the daemon keeps. The oldest head goes
-// first. A head that is gone gives a fix with no head, and the agent then makes
-// no merge call.
-const openedHeadLimit = 4096
+// openedRecordTimeout bounds the wait for the fold of the record of an open.
+const openedRecordTimeout = 10 * time.Second
 
-// openedHead is the head commit that open_merge_request returned.
+// openedHead is the head commit that open_merge_request returned, and who asked.
 type openedHead struct {
 	sha          string
 	sourceBranch string
+	// missionRunID is the mission run of the call. It is empty for an agent that
+	// runs outside a mission run.
+	missionRunID string
 }
 
 // openedHeadReader returns the head that open_merge_request returned for a merge
 // request of a tenant.
 type openedHeadReader interface {
-	// OpenedHead returns the head and the source branch that the tool result
-	// named for the merge request key. ok is false when the daemon saw no result.
+	// OpenedHead returns the head that the tool result named for the merge request
+	// key. ok is false when the Timeline of the tenant holds no result.
 	OpenedHead(tenant, mergeRequest string) (openedHead, bool)
 }
 
-// openedHeads remembers the head of each merge request that a tool call opened,
-// by tenant and merge request. A head of one tenant is never read for another.
-type openedHeads struct {
-	mu    sync.Mutex
-	heads map[string]openedHead
-	order []string
+// worldOpenedHeads reads the heads from the World of the tenant. The Timeline is
+// the store, so a restart, a link that waits across a restart, and a second
+// replica read the same heads. Each tenant has its own World, so a tenant cannot
+// evict the heads of another.
+type worldOpenedHeads struct{ reg *brain.Registry }
+
+var _ openedHeadReader = worldOpenedHeads{}
+
+func (w worldOpenedHeads) OpenedHead(tenant, mergeRequest string) (openedHead, bool) {
+	if w.reg == nil {
+		return openedHead{}, false
+	}
+	var rec brain.OpenedMergeRequest
+	var ok bool
+	w.reg.For(tenant).ReadWorld(func(world *brain.World) { rec, ok = world.OpenedMergeRequest(mergeRequest) })
+	if !ok {
+		return openedHead{}, false
+	}
+	return openedHead{sha: rec.HeadSHA, sourceBranch: rec.SourceBranch, missionRunID: rec.MissionRunID}, true
 }
-
-var _ openedHeadReader = (*openedHeads)(nil)
-
-func newOpenedHeads() *openedHeads { return &openedHeads{heads: map[string]openedHead{}} }
 
 // openResult is the part of the result of open_merge_request that the daemon reads.
 type openResult struct {
@@ -56,57 +69,51 @@ type openResult struct {
 	HeadSHA      string `json:"head_sha"`
 }
 
-// Record keeps the head of a successful open_merge_request call. Any other call
-// is ignored. The head is kept under the reference and under the URL of the
-// merge request, because the deliverable of a job names either.
-func (o *openedHeads) Record(tenant string, call harness.ToolCallRecord) {
-	if tenant == "" || call.Err != "" || !strings.HasPrefix(call.ToolName, "mcp:") ||
-		!strings.HasSuffix(call.ToolName, openMergeRequestTool) {
-		return
+// openedEventOf returns the Timeline event for a successful open_merge_request
+// call. ok is false for any other call, for a call that failed, and for a result
+// that holds no head or no branch.
+func openedEventOf(call harness.ToolCallRecord) (brain.MergeRequestOpened, bool) {
+	if call.Err != "" || !strings.HasPrefix(call.ToolName, "mcp:") || !strings.HasSuffix(call.ToolName, openMergeRequestTool) {
+		return brain.MergeRequestOpened{}, false
 	}
 	var res openResult
-	if json.Unmarshal([]byte(call.Result), &res) != nil || res.HeadSHA == "" || res.SourceBranch == "" {
+	if json.Unmarshal([]byte(call.Result), &res) != nil || res.HeadSHA == "" || res.SourceBranch == "" ||
+		(res.MergeRequest == "" && res.URL == "") {
+		return brain.MergeRequestOpened{}, false
+	}
+	jobID, _ := strings.CutPrefix(res.SourceBranch, jobnode.JobBranch(""))
+	if jobID == res.SourceBranch {
+		jobID = "" // the branch is no job branch
+	}
+	return brain.MergeRequestOpened{
+		MergeRequest: res.MergeRequest, URL: res.URL, JobID: jobID, SourceBranch: res.SourceBranch, HeadSHA: res.HeadSHA,
+		RunID: call.RunID, MissionID: call.MissionID, MissionRunID: call.MissionRunID,
+		At: time.Unix(0, call.RecordedAtUnixNano).UTC(),
+	}, true
+}
+
+// recordOpenedHead submits the event of a successful open_merge_request call to the
+// World of the tenant, and it waits for the fold, so the link of the closed job
+// finds the head. A failure is logged. The tool call still succeeded, and the link
+// then records no head and says why.
+func recordOpenedHead(ctx context.Context, reg *brain.Registry, tenant string, call harness.ToolCallRecord) {
+	ev, ok := openedEventOf(call)
+	if !ok || reg == nil || tenant == "" {
 		return
 	}
-	h := openedHead{sha: res.HeadSHA, sourceBranch: res.SourceBranch}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	for _, key := range []string{res.MergeRequest, res.URL} {
-		if key == "" {
-			continue
-		}
-		k := tenant + "\x00" + key
-		if _, ok := o.heads[k]; !ok {
-			o.order = append(o.order, k)
-		}
-		o.heads[k] = h
-	}
-	for len(o.order) > openedHeadLimit {
-		delete(o.heads, o.order[0])
-		o.order = o.order[1:]
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openedRecordTimeout)
+	defer cancel()
+	if err := reg.For(tenant).SubmitAndWait(wctx, ev); err != nil {
+		slog.ErrorContext(ctx, "the head of an opened merge request is not in the World, so its fix gets no head",
+			"tenant", tenant, "merge_request", ev.MergeRequest, "error", err)
 	}
 }
 
-// OpenedHead implements openedHeadReader.
-func (o *openedHeads) OpenedHead(tenant, mergeRequest string) (openedHead, bool) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	h, ok := o.heads[tenant+"\x00"+mergeRequest]
-	return h, ok
-}
-
-// openedHeadStore returns the one store of the heads of this daemon.
-func (d *daemonImpl) openedHeadStore() *openedHeads {
-	d.openedHeadsOnce.Do(func() { d.openedHeads = newOpenedHeads() })
-	return d.openedHeads
-}
-
-// toolCallSink adds the record of the heads to the sink of tool calls. The first
-// sink records the call on the World, and the heads are read from the same call.
+// toolCallSink adds the record of the opened merge requests to the sink of tool
+// calls.
 func (d *daemonImpl) toolCallSink(next harness.ToolCallSink) harness.ToolCallSink {
-	heads := d.openedHeadStore()
 	return func(ctx context.Context, tenant string, call harness.ToolCallRecord) {
-		heads.Record(tenant, call)
+		recordOpenedHead(ctx, d.brainRegistry, tenant, call)
 		next(ctx, tenant, call)
 	}
 }

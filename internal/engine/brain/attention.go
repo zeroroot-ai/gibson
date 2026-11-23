@@ -162,6 +162,10 @@ type FixFacts struct {
 	// means no fix has a merge request with a known head.
 	FixHeadSHA string
 	FixFiles   string
+	// FixHeadMissingReason and FixHeadMissingAt say why the link recorded no head
+	// for the current fix, and when. They are empty while the fix has a head.
+	FixHeadMissingReason string
+	FixHeadMissingAt     time.Time
 	// VerifiedAt is the time of the change to `verified`. A bounded reader
 	// of the history reads it to leave out an old fix (review M6).
 	VerifiedAt time.Time
@@ -489,5 +493,6 @@ func resetFix(f *Finding) {
 	f.FixClaim, f.FixClaimedAt = "", time.Time{}
 	f.FixLinkWait = FixLinkWait{}
 	f.FixHeadSHA, f.FixFiles = "", ""
+	f.FixHeadMissingReason, f.FixHeadMissingAt = "", time.Time{}
 	f.VerifiedAt = time.Time{}
 }

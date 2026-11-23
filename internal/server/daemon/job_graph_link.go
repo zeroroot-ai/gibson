@@ -209,32 +209,26 @@ var headSHARe = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // headEvents builds the events that record the head commit and the changed files
 // of the merge request. It builds none when the host gave no valid head or no
-// complete list: the fields stay empty, and the log says why. It also builds none
-// when the head of the host is not the commit that the fix job made. The tool
-// open_merge_request returned that commit to the tool gate, and the job branch
-// can hold another commit at the time of the link.
+// complete list. It also builds none when the head of the host is not the commit
+// that the fix job made: the tool open_merge_request returned that commit to the
+// tool gate, and the job branch can hold another commit at the time of the link.
+// In each such case the fix has no head, the log says why, and each finding that
+// the job holds gets a FixHeadMissing event with the reason, so the finding waits
+// visibly.
 func (l *jobGraphLink) headEvents(c jobnode.ClosedJob, mrKey string, held []string, fact fixloop.MergeFact, now time.Time) []brain.Event {
 	if len(held) == 0 {
 		return nil
 	}
-	switch {
-	case !headSHARe.MatchString(fact.HeadSHA):
-		l.logger.Warn("the host gave no valid head commit for the merge request of a fix job, so the fix has no head",
-			"job_id", c.JobID, "merge_request", mrKey)
-		return nil
-	case fact.ChangedFilesError != "":
-		l.logger.Warn("the host gave no list of the files of the merge request of a fix job",
-			"job_id", c.JobID, "merge_request", mrKey, "error", fact.ChangedFilesError)
-		return nil
-	case fact.ChangedFilesTruncated || len(fact.ChangedFiles) == 0 || len(fact.ChangedFiles) > maxFixFiles:
-		l.logger.Warn("the list of the files of the merge request of a fix job is not complete or is over the limit",
-			"job_id", c.JobID, "merge_request", mrKey, "files", len(fact.ChangedFiles), "truncated", fact.ChangedFilesTruncated)
-		return nil
-	}
-	if reason := l.headMismatch(c, mrKey, fact.HeadSHA); reason != "" {
-		l.logger.Warn("the head of the merge request of a fix job is not the commit that the job made, so the fix has no head",
+	if reason := l.noHeadReason(c, mrKey, fact); reason != "" {
+		l.logger.Warn("a fix job has no fix head, so the fix agent makes no merge call",
 			"job_id", c.JobID, "merge_request", mrKey, "reason", reason)
-		return nil
+		out := make([]brain.Event, 0, len(held))
+		for _, id := range held {
+			out = append(out, brain.FixHeadMissing{
+				ID: id, MergeRequest: mrKey, Reason: reason, MissionID: c.MissionRunID, At: now,
+			})
+		}
+		return out
 	}
 	files := make([]fixFileJSON, 0, len(fact.ChangedFiles))
 	for _, f := range fact.ChangedFiles {
@@ -254,6 +248,21 @@ func (l *jobGraphLink) headEvents(c jobnode.ClosedJob, mrKey string, held []stri
 	return out
 }
 
+// noHeadReason returns why the fix has no head, or "" when the host gave a valid
+// head and a complete list of files and the head is the commit that the job made.
+func (l *jobGraphLink) noHeadReason(c jobnode.ClosedJob, mrKey string, fact fixloop.MergeFact) string {
+	switch {
+	case !headSHARe.MatchString(fact.HeadSHA):
+		return "the host gave no valid head commit for the merge request"
+	case fact.ChangedFilesError != "":
+		return "the host gave no list of the files of the merge request: " + fact.ChangedFilesError
+	case fact.ChangedFilesTruncated || len(fact.ChangedFiles) == 0 || len(fact.ChangedFiles) > maxFixFiles:
+		return fmt.Sprintf("the list of the files of the merge request is not complete or is over the limit (%d files)",
+			len(fact.ChangedFiles))
+	}
+	return l.headMismatch(c, mrKey, fact.HeadSHA)
+}
+
 // headMismatch returns why the head of the host is not the commit that the fix
 // job made, or "" when it is. The commit that the job made is the head that
 // open_merge_request returned for the merge request of this tenant, on the job
@@ -266,6 +275,9 @@ func (l *jobGraphLink) headMismatch(c jobnode.ClosedJob, mrKey, hostHead string)
 	switch {
 	case !ok:
 		return "the daemon saw no result of open_merge_request for this merge request"
+	case made.missionRunID != "" && c.MissionRunID != "" && made.missionRunID != c.MissionRunID:
+		return fmt.Sprintf("open_merge_request was called in mission run %q, not in the run %q of the job",
+			made.missionRunID, c.MissionRunID)
 	case made.sourceBranch != jobnode.JobBranch(c.JobID):
 		return fmt.Sprintf("open_merge_request opened branch %q, not the job branch %q", made.sourceBranch, jobnode.JobBranch(c.JobID))
 	case made.sha != hostHead:
@@ -683,7 +695,7 @@ func (l *jobGraphLink) Adopt(tenant string, findings []brain.FindingSnapshot) {
 // wireFixLink builds the link of closed fix jobs, rebuilds the pending links of
 // each tenant when its engine starts, and starts the loop that reads them again.
 func (d *daemonImpl) wireJobClosed(ctx context.Context, mrs mergeRequestReader, logger *slog.Logger) {
-	d.brainExecutor.jobClosed = wireFixLink(ctx, d.brainRegistry, mrs, d.openedHeadStore(), logger)
+	d.brainExecutor.jobClosed = wireFixLink(ctx, d.brainRegistry, mrs, worldOpenedHeads{reg: d.brainRegistry}, logger)
 }
 
 // wireFixLink is the link that wireJobClosed installs.

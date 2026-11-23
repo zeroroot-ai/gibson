@@ -21,6 +21,10 @@ const (
 	// WaitMergeRefused is a finding in `fixing` whose merge the branch
 	// protection refused.
 	WaitMergeRefused WaitKind = "merge_refused"
+	// WaitNoFixHead is a finding in `fixing` whose link recorded no head for the
+	// fix. The fix agent makes no merge call without a head, so a person looks at
+	// the merge request. The reason says why the daemon recorded none.
+	WaitNoFixHead WaitKind = "no_fix_head"
 	// WaitNextScan is a `fixed` finding that waits on the next scan of a tool
 	// of the buyer.
 	WaitNextScan WaitKind = "next_scan"
@@ -89,6 +93,9 @@ func WaitingOnPerson(
 		case brain.FindingStatusFixing:
 			r := refusals[f.MergeRequest]
 			add(WaitMergeRefused, f.ID, r.at, r.reason)
+			if f.FixHeadSHA == "" {
+				add(WaitNoFixHead, f.ID, f.FixHeadMissingAt, f.FixHeadMissingReason)
+			}
 			u := waits[waitKey{f.MergeRequest, brain.WaitMergeUnreadable}]
 			add(WaitMergeUnreadable, f.ID, u.at, u.reason)
 		case brain.FindingStatusFixed:

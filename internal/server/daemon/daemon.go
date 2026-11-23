@@ -471,10 +471,6 @@ type daemonImpl struct {
 	// inboundMissions is the store of the mission definitions published for inbound
 	// A2A calls. registerInboundMission sets it.
 	inboundMissions inboundmissionstore.Store
-	// openedHeads holds the head commit that each open_merge_request call returned.
-	// The tool-call sink fills it, and the link of closed fix jobs reads it.
-	openedHeads     *openedHeads
-	openedHeadsOnce sync.Once
 	// sharedAgentSkills is the operator source of Agent Skills. registerAgentSkill
 	// sets it.
 	sharedAgentSkills *SharedAgentSkills
