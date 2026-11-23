@@ -1376,7 +1376,7 @@ func TestSubscribeInput_GhostInputsGetNoGrantAndAreNotSent(t *testing.T) {
 	in := func(id, jobID string, kind job.InputKind) *job.Input {
 		return &job.Input{ID: id, JobID: jobID, Kind: kind, Message: id, SentAt: time.Now(), Sender: alice}
 	}
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		jobs.pending = append(jobs.pending, in(fmt.Sprintf("ghost-%d", i), "released", job.InputTurn))
 	}
 	jobs.pending = append(jobs.pending,
@@ -1395,8 +1395,9 @@ func TestSubscribeInput_GhostInputsGetNoGrantAndAreNotSent(t *testing.T) {
 		t.Fatalf("SubscribeInput: %v", err)
 	}
 
-	var ids []string
-	for _, w := range stream.snapshot() {
+	sent := stream.snapshot()
+	ids := make([]string, 0, len(sent))
+	for _, w := range sent {
 		ids = append(ids, w.GetId())
 	}
 	if len(ids) != 2 || ids[0] != "closed-wrap" || ids[1] != "live-1" {
@@ -1484,7 +1485,7 @@ func (w *windowedInbox) PendingInputs(_ context.Context, _, _ string, limit int3
 	defer w.mu.Unlock()
 	out := append([]*job.Input(nil), w.inbox...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].SentAt.Before(out[j].SentAt) })
-	if int32(len(out)) > limit {
+	if limit >= 0 && len(out) > int(limit) {
 		out = out[:limit]
 	}
 	return out, nil
@@ -1508,7 +1509,7 @@ func TestSubscribeInput_AFullReadDoesNotMakeTheDeliveredInputGoTwice(t *testing.
 	go func() {
 		time.Sleep(1 * time.Second) // poll 1 has delivered x
 		older := make([]*job.Input, 0, int(memberInboxBatch)+1)
-		for i := 0; i < int(memberInboxBatch); i++ {
+		for i := range int(memberInboxBatch) {
 			older = append(older, &job.Input{
 				ID: fmt.Sprintf("old-%d", i), JobID: "job-old", Kind: job.InputTurn, Message: "old",
 				SentAt: now.Add(-time.Hour + time.Duration(i)*time.Second), Sender: alice,
