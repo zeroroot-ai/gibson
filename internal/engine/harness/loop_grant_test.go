@@ -502,8 +502,23 @@ func TestMemberSubmitFinding_AGrantedMemberStoresAFindingAsTheMember(t *testing.
 	assert.Equal(t, "member:member-1", (*raised)[0].SubmittedBy)
 	assert.Equal(t, "intake-agent", (*raised)[0].AgentName, "the name of the payload must not win")
 	text := f.auditText()
-	assert.Contains(t, text, memberFindingAuditAction)
+	assert.Contains(t, text, memberFindingAuditAction+" success")
 	assert.Contains(t, text, `"loop_grant_id":"lg-1"`)
+}
+
+// The audit record shows an agent identity and not a person.
+func TestMemberSubmitFinding_TheAuditActorIsNotAPerson(t *testing.T) {
+	f := newLoopFixture(t, map[string]*LoopGrant{loopTenantA + "/member-1": findingGrant()})
+	f.withFindings()
+	resp, err := f.svc.SubmitFinding(loopMemberCtx(t, loopTenantA, "intake-agent", "bank-1", "member-1", "run-1"), submitReq())
+	require.NoError(t, err)
+	require.Nil(t, resp.GetError())
+	events := f.durable.Events()
+	require.NotEmpty(t, events)
+	for _, e := range events {
+		assert.Equal(t, "member:member-1", e.ActorID)
+		assert.NotEqual(t, "user", e.ActorType, "a member is not a person")
+	}
 }
 
 // A member with no grant, a grant with no finding right, and a grant of another
@@ -573,6 +588,11 @@ func TestMemberSubmitFinding_RefusalsAndOutages(t *testing.T) {
 	resp, err = f.svc.SubmitFinding(ctx, submitReq())
 	require.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, resp.GetError().GetCode(), "finding store down")
+	// A failed store gets a failure record and no success record.
+	text := f.auditText()
+	assert.Contains(t, text, memberFindingAuditAction+" failure")
+	assert.Contains(t, text, "store_failed")
+	assert.NotContains(t, text, memberFindingAuditAction+" success")
 
 	f = newLoopFixture(t, grants)
 	f.withFindings()

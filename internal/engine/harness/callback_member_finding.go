@@ -62,7 +62,7 @@ func (s *HarnessCallbackService) auditMemberFinding(ctx context.Context, m membe
 	if err != nil {
 		return err //nolint:wrapcheck // the caller reports a fixed message
 	}
-	actx := auth.WithIdentity(ctx, auth.Identity{Subject: memberPrincipal(m), Tenant: tid, CredentialType: auth.CredentialOIDCUser})
+	actx := auth.WithIdentity(ctx, auth.Identity{Subject: memberPrincipal(m), Tenant: tid, CredentialType: auth.CredentialCapabilityGrant})
 	details := map[string]any{"member_id": m.memberID, "agent": m.agent}
 	if g != nil {
 		details["loop_grant_id"] = g.ID
@@ -121,20 +121,30 @@ func (s *HarnessCallbackService) submitMemberFinding(ctx context.Context, req *h
 	}
 	finding.Evidence = append(recorded, finding.Evidence...)
 
-	// No finding is stored without its record.
-	if err := s.auditMemberFinding(ctx, m, g, "success", finding.ID.String(), ""); err != nil {
-		s.logger.ErrorContext(ctx, "member finding refused: the audit record could not be written", "err", err)
+	// The audit log must be wired before the store write, so the record of the
+	// result can be written after it.
+	if s.connectorAudit == nil {
+		s.logger.ErrorContext(ctx, "member finding refused: the audit log is not wired")
 		return findingErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the audit record of the finding could not be written"), nil
 	}
 	// A member has no mission. The finding has none, and a rerun of the check is
 	// its check.
 	var noMission types.ID
 	if err := s.memberFindings.Store(ctx, m.tenant, noMission, finding); err != nil {
+		// A failed store gets a failure record, with the reason class and no text
+		// of the error, which can hold what the database said.
+		if aerr := s.auditMemberFinding(ctx, m, g, "failure", finding.ID.String(), "store_failed"); aerr != nil {
+			s.logger.ErrorContext(ctx, "member finding: the failure record was not written", "err", aerr)
+		}
 		if errors.Is(err, emitbounds.ErrLimitExceeded) || evidenceRejected(err) {
 			return findingErr(commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		s.logger.ErrorContext(ctx, "member finding could not be stored", "err", err)
 		return findingErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the finding could not be stored. Try again"), nil
+	}
+	// The record of the result comes after the store write succeeded.
+	if err := s.auditMemberFinding(ctx, m, g, "success", finding.ID.String(), ""); err != nil {
+		s.logger.ErrorContext(ctx, "member finding stored but its audit record was not written", "finding_id", finding.ID.String(), "err", err)
 	}
 	if s.memberFindingSink != nil {
 		check := SubmittedFindingCheck(finding, noMission)
