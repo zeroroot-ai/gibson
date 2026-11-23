@@ -81,3 +81,21 @@ func TestFindingStoreDocument_KeepsTheAgentNameAndTheTags(t *testing.T) {
 	assert.Equal(t, "incident-agent", got.AgentName)
 	assert.Equal(t, []string{"release:1.4", "pci"}, got.Tags)
 }
+
+// The read path returns the stored agent name and the tags, and it applies the
+// filter.
+func TestMatchingFindings_ReturnTheStoredAgentNameAndTags(t *testing.T) {
+	high := agent.NewFinding("a", "d", agent.SeverityHigh)
+	high.Tags = []string{"pci"}
+	low := agent.NewFinding("b", "d", agent.SeverityLow)
+	stored := []finding.EnhancedFinding{
+		finding.NewEnhancedFinding(high, types.NewID(), "incident-agent"),
+		finding.NewEnhancedFinding(low, types.NewID(), "other-agent"),
+	}
+	sev := agent.SeverityHigh
+	got := matchingFindings(stored, FindingFilter{Severity: &sev})
+	require.Len(t, got, 1)
+	assert.Equal(t, "incident-agent", got[0].AgentName)
+	assert.Equal(t, []string{"pci"}, got[0].Tags)
+	assert.Len(t, matchingFindings(stored, FindingFilter{}), 2)
+}

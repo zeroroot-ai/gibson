@@ -65,6 +65,12 @@ func (s *PostgresFindingStore) Get(
 	if err != nil {
 		return nil, fmt.Errorf("list findings of mission %s: %w", missionID, err)
 	}
+	return matchingFindings(stored, filter), nil
+}
+
+// matchingFindings returns the base findings of the stored findings that match
+// the filter, each with its stored agent name.
+func matchingFindings(stored []finding.EnhancedFinding, filter FindingFilter) []agent.Finding {
 	out := make([]agent.Finding, 0, len(stored))
 	for _, f := range stored {
 		base := findingFromStore(f)
@@ -72,7 +78,7 @@ func (s *PostgresFindingStore) Get(
 			out = append(out, base)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // evidenceRejected reports that the store refused the evidence of a finding
