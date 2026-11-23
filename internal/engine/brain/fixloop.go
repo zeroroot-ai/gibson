@@ -273,6 +273,13 @@ func VerificationSystem(w *World) []Event {
 			continue // the evidence is not newer than the deploy
 		}
 		if f.RerunFound {
+			// A failed health signal with a revert that is not merged keeps the finding
+			// `fixed` and the merge slot held. FixReverted opens the finding when the
+			// revert merges. A reopen now would clear the merge request, free the slot, and
+			// let the next fix of the Application merge onto the broken service.
+			if f.Health == HealthFailed {
+				continue
+			}
 			out = append(out, FindingStatusChanged{ID: f.ID, Status: FindingStatusOpen, At: now})
 			continue
 		}

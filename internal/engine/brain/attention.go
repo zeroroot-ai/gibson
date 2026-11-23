@@ -363,6 +363,15 @@ func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 				q.Close()
 				return
 			}
+			// A `fixed` finding whose health signal failed waits for its revert. A move to
+			// `open` would clear the merge request and free the merge slot before the
+			// revert merges, so the move is refused. FixReverted opens the finding.
+			if e.Status == FindingStatusOpen && f.Status == FindingStatusFixed && f.Health == HealthFailed {
+				f.RefusedMoves++
+				f.LastRefusedMove = f.Status + " -> " + e.Status + " (the revert is not merged)"
+				q.Close()
+				return
+			}
 			f.Status = e.Status
 			if e.MergeRequest != "" {
 				f.MergeRequest = e.MergeRequest
