@@ -11,6 +11,7 @@
 package cabundle
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -26,35 +27,55 @@ const Key = "ca.crt"
 // base_url. An outside agent record keeps it in a column.
 const Field = "ca_bundle_secret"
 
-// Check reports an error when pemData is not a bundle of certificates. It
-// refuses a block of another type, so a private key in the secret is never
-// copied to the gateway. The error never holds the content.
+// Check reports an error when pemData is not a bundle of CA certificates. It
+// is Normalize, and it drops the result. The error never holds the content.
 func Check(pemData []byte) error {
+	_, err := Normalize(pemData)
+	return err
+}
+
+// Normalize returns the CA certificates of pemData as new PEM, and nothing else.
+//
+// The input must hold CERTIFICATE blocks and white space only. pem.Decode skips
+// text before and between blocks, so a secret such as "token\n-----BEGIN ..."
+// would pass a plain decode and its text would reach the pod. Normalize refuses
+// any other byte outside the blocks, refuses a block of another type, and
+// refuses a certificate that is not a CA (BasicConstraints CA true). The output
+// is built from the parsed certificates, so it holds no header and no text that
+// the input had. The error never holds the content.
+func Normalize(pemData []byte) ([]byte, error) {
 	rest := pemData
-	certs := 0
+	var out []byte
 	for {
-		var block *pem.Block
-		block, rest = pem.Decode(rest)
-		if block == nil {
+		idx := bytes.Index(rest, []byte("-----BEGIN "))
+		if idx < 0 {
+			if len(bytes.TrimSpace(rest)) > 0 {
+				return nil, errors.New("the bundle holds text that is not PEM outside the certificates")
+			}
 			break
 		}
+		if len(bytes.TrimSpace(rest[:idx])) > 0 {
+			return nil, errors.New("the bundle holds text that is not PEM outside the certificates")
+		}
+		block, after := pem.Decode(rest[idx:])
+		if block == nil {
+			return nil, errors.New("the bundle holds a PEM block that does not decode")
+		}
 		if block.Type != "CERTIFICATE" {
-			return fmt.Errorf("the bundle holds a %q block, and only CERTIFICATE blocks are allowed", block.Type)
+			return nil, fmt.Errorf("the bundle holds a %q block, and only CERTIFICATE blocks are allowed", block.Type)
 		}
-		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
-			return fmt.Errorf("a certificate of the bundle does not parse: %w", err)
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, errors.New("a certificate of the bundle does not parse")
 		}
-		certs++
-	}
-	if certs == 0 {
-		return errors.New("the bundle holds no PEM certificate")
-	}
-	if len(rest) > 0 {
-		for _, b := range rest {
-			if b != ' ' && b != '\n' && b != '\r' && b != '\t' {
-				return errors.New("the bundle holds text that is not PEM after the last certificate")
-			}
+		if !cert.IsCA || !cert.BasicConstraintsValid {
+			return nil, errors.New("a certificate of the bundle is not a CA certificate")
 		}
+		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})...)
+		rest = after
 	}
-	return nil
+	if len(out) == 0 {
+		return nil, errors.New("the bundle holds no PEM certificate")
+	}
+	return out, nil
 }

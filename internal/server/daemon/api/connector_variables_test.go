@@ -135,15 +135,16 @@ func TestDesiredConnector_CABundleReachesTheOperator(t *testing.T) {
 }
 
 // The operator asks for the CA bundle with the key "ca.crt". The daemon reads
-// the secret under the stored name that SetSecret gives a credential, and it
-// refuses a secret that holds anything but certificates (gibson#1517).
+// the secret under the name as given, the way it reads the credentials of the
+// same connector, and it returns the certificates only (gibson#1517).
 func TestGetConnectorCredential_ReadsTheCABundleOfTheTenant(t *testing.T) {
 	bundle := testCABundle(t)
 	srv := credServer(&fakeCredStore{data: map[string][]byte{
-		"cred:github-fixloop-ca-mock":  bundle,
-		"cred:github-fixloop-ca-key":   []byte("-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"),
-		"github-fixloop-token":         []byte("tok"),
-		"github-fixloop-ca-not-stored": bundle, // no prefix: not a credential of the tenant
+		"github-fixloop-ca-mock":          bundle,
+		"github-fixloop-ca-key":           []byte("-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"),
+		"github-fixloop-ca-token":         append([]byte("ghp_secrettoken\n"), bundle...),
+		"github-fixloop-token":            []byte("tok"),
+		"cred:github-fixloop-ca-prefixed": bundle, // a different rule: not read
 	}})
 	get := func(name string) (*daemonoperatorv1.GetConnectorCredentialResponse, error) {
 		return srv.GetConnectorCredential(peerCtx(t, testConnectorOperatorSVID), &daemonoperatorv1.GetConnectorCredentialRequest{
@@ -160,10 +161,38 @@ func TestGetConnectorCredential_ReadsTheCABundleOfTheTenant(t *testing.T) {
 	assert.Equal(t, bundle, resp.GetData()["ca.crt"])
 	assert.Equal(t, "tok", string(resp.GetData()["GITHUB_TOKEN"]))
 
-	_, err = get("github-fixloop-ca-key")
-	require.Error(t, err, "a secret that holds a private key is not a CA bundle")
-	assert.NotContains(t, err.Error(), "AAAA", "the error never holds the content")
+	for _, name := range []string{"github-fixloop-ca-key", "github-fixloop-ca-token", "github-fixloop-ca-prefixed"} {
+		_, err = get(name)
+		require.Error(t, err, name)
+		assert.NotContains(t, err.Error(), "AAAA")
+		assert.NotContains(t, err.Error(), "ghp_secrettoken", "the error never holds the content")
+	}
+}
 
-	_, err = get("github-fixloop-ca-not-stored")
-	require.Error(t, err)
+// EnableConnector reads the bundle at once. A missing secret, a secret that is
+// not a CA bundle and a daemon with no secret store are refused (gibson#1517).
+func TestEnableConnector_ChecksTheCABundleAtEnableTime(t *testing.T) {
+	bundle := testCABundle(t)
+	store := &fakeCredStore{data: map[string][]byte{
+		"github-fixloop-ca-ok":  bundle,
+		"github-fixloop-ca-bad": append([]byte("ghp_secrettoken\n"), bundle...),
+	}}
+	enable := func(svc *ConnectorService, name string) error {
+		_, err := svc.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{
+			CatalogId: "github-fixloop", Variables: map[string]string{"ca_bundle": name},
+		})
+		return err
+	}
+
+	s, rows := newConnectorService(t)
+	s.WithSecretStore(store)
+	assert.Equal(t, codes.InvalidArgument, grpcCode(enable(s, "github-fixloop-ca-missing")))
+	assert.Equal(t, codes.InvalidArgument, grpcCode(enable(s, "github-fixloop-ca-bad")))
+	assert.Equal(t, codes.InvalidArgument, grpcCode(enable(s, "github-fixloop-token")), "outside the prefix")
+	assert.Empty(t, rows.rows, "a refused request leaves no row")
+	require.NoError(t, enable(s, "github-fixloop-ca-ok"))
+	require.Len(t, rows.rows, 1)
+
+	noStore, _ := newConnectorService(t)
+	assert.Equal(t, codes.FailedPrecondition, grpcCode(enable(noStore, "github-fixloop-ca-ok")))
 }

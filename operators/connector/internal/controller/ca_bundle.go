@@ -5,11 +5,14 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
@@ -54,6 +57,12 @@ const (
 
 	// sslCertFileEnv is the variable that the TLS stack of the server reads.
 	sslCertFileEnv = "SSL_CERT_FILE"
+
+	// caBundleHashAnnotation is the annotation of the pod template that holds
+	// the hash of the bundle. The server reads the file at start, so a new
+	// bundle must roll the pod. A new hash changes the template, and the
+	// ToolHive operator rolls the StatefulSet.
+	caBundleHashAnnotation = "gibson.zeroroot.ai/ca-bundle-sha256"
 )
 
 // ErrCABundle is the error of a CA bundle that the operator refuses.
@@ -102,27 +111,41 @@ func checkCAPEM(data []byte) error {
 }
 
 // caBundleState reads the CA Secret of a connector. ready is false while the
-// daemon loop has not written it yet.
+// daemon loop has not written it yet. sum is the hash of the bundle, empty when
+// the connector has none.
 func (r *ConnectorInstanceReconciler) caBundleState(
 	ctx context.Context, ci *connectorv1alpha1.ConnectorInstance,
-) (ready bool, err error) {
+) (sum string, ready bool, err error) {
 	if ci.Spec.CABundleSecret == "" {
-		return true, nil
+		return "", true, nil
 	}
 	if ci.Spec.Shape != connectorv1alpha1.ConnectorShapeHosted {
-		return false, fmt.Errorf("%w: only a Hosted connector takes a CA bundle", ErrCABundle)
+		return "", false, fmt.Errorf("%w: only a Hosted connector takes a CA bundle", ErrCABundle)
 	}
 	var sec corev1.Secret
 	if gerr := r.Get(ctx, client.ObjectKey{Namespace: ci.Namespace, Name: caSecretName(ci.Name)}, &sec); gerr != nil {
 		if apierrors.IsNotFound(gerr) {
-			return false, nil
+			return "", false, nil
 		}
-		return false, fmt.Errorf("read the CA Secret of %s/%s: %w", ci.Namespace, ci.Name, gerr)
+		return "", false, fmt.Errorf("read the CA Secret of %s/%s: %w", ci.Namespace, ci.Name, gerr)
 	}
 	if cerr := checkCABundleSecret(&sec, ci); cerr != nil {
-		return false, cerr
+		return "", false, cerr
 	}
-	return true, nil
+	h := sha256.Sum256(sec.Data[caBundleKey])
+	return hex.EncodeToString(h[:]), true, nil
+}
+
+// stampCABundle puts the hash of the bundle on the pod template of the MCPServer.
+func stampCABundle(th *unstructured.Unstructured, sum string) error {
+	if sum == "" {
+		return nil
+	}
+	if err := unstructured.SetNestedField(th.Object, sum,
+		"spec", "podTemplateSpec", "metadata", "annotations", caBundleHashAnnotation); err != nil {
+		return fmt.Errorf("stamp the CA bundle hash: %w", err)
+	}
+	return nil
 }
 
 // withCABundle adds the CA volume, the mount and SSL_CERT_FILE to the MCP

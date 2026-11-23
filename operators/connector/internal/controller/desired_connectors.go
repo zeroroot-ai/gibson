@@ -347,6 +347,11 @@ func pullSecretName(connector string) string { return connector + "-connector-pu
 func (r *DesiredConnectorsRunnable) syncCredential(
 	ctx context.Context, tenant string, ci *connectorv1alpha1.ConnectorInstance,
 ) error {
+	if ci.Spec.CABundleSecret == "" {
+		if err := r.dropCASecret(ctx, ci); err != nil {
+			return err
+		}
+	}
 	if !needsCredential(ci) {
 		return nil
 	}
@@ -529,6 +534,12 @@ func (r *DesiredConnectorsRunnable) syncCASecret(
 	if getErr != nil && !apierrors.IsNotFound(getErr) {
 		return fmt.Errorf("read Secret %s/%s: %w", ci.Namespace, name, getErr)
 	}
+	// A Secret with this name that the instance does not own is not taken over:
+	// it is not ours to replace (gibson#1517).
+	if getErr == nil && !ownedByInstance(&live, ci) {
+		return fmt.Errorf("%w: Secret %s/%s exists and the ConnectorInstance does not own it",
+			ErrCABundle, ci.Namespace, name)
+	}
 	if getErr == nil && reflect.DeepEqual(live.Data, map[string][]byte{caBundleKey: bundle}) &&
 		reflect.DeepEqual(live.OwnerReferences, []metav1.OwnerReference{owner}) {
 		return nil
@@ -548,6 +559,34 @@ func (r *DesiredConnectorsRunnable) syncCASecret(
 		return nil
 	}); err != nil {
 		return fmt.Errorf("the audited write of Secret %s/%s: %w", ci.Namespace, name, err)
+	}
+	return nil
+}
+
+// dropCASecret deletes the CA Secret of a connector that has no bundle any more,
+// so the old bundle does not stay in the namespace. It deletes only a Secret
+// that the instance owns.
+func (r *DesiredConnectorsRunnable) dropCASecret(ctx context.Context, ci *connectorv1alpha1.ConnectorInstance) error {
+	var live corev1.Secret
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: ci.Namespace, Name: caSecretName(ci.Name)}, &live)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read Secret %s/%s: %w", ci.Namespace, live.Name, err)
+	}
+	if !ownedByInstance(&live, ci) {
+		return nil
+	}
+	ev := audit.ObjectEvent(audit.ActionConnectorCredentialWithdraw, ci,
+		map[string]string{"connector": ci.Name, "secret": live.Name})
+	if err := r.Audit.Change(ctx, ev, func() error {
+		if derr := r.Client.Delete(ctx, &live); derr != nil && !apierrors.IsNotFound(derr) {
+			return fmt.Errorf("delete Secret %s/%s: %w", ci.Namespace, live.Name, derr)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("the audited delete of Secret %s/%s: %w", ci.Namespace, live.Name, err)
 	}
 	return nil
 }

@@ -334,3 +334,11 @@ func TestVariables_TheLoaderRefusesABadCABundleDeclaration(t *testing.T) {
 		})
 	}
 }
+
+// A Remote connector takes no variable, so it takes no CA bundle.
+func TestVariables_ARemoteConnectorTakesNoCABundle(t *testing.T) {
+	_, err := loadOne(t, responseConnector+"  variables:\n    - name: ca_bundle\n      kind: ca_bundle\n")
+	if err == nil || !strings.Contains(err.Error(), "need a Hosted connector") {
+		t.Fatalf("want a refusal, got %v", err)
+	}
+}

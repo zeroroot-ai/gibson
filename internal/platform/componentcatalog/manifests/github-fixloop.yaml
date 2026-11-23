@@ -38,9 +38,9 @@ spec:
       patterns:
         - https://api.github.com
       installPatterns: true
-    # A server behind a private CA, such as a GitHub Enterprise Server, needs
+    # A server behind a private CA needs
     # the CA certificates in the pod. The tenant names a secret of its own
-    # store that holds a PEM bundle. The name starts with github-fixloop-ca-. The
+    # store that holds a PEM bundle, stored with no category. The name starts with github-fixloop-ca-. The
     # value is optional (gibson#1517).
     - name: ca_bundle
       kind: ca_bundle

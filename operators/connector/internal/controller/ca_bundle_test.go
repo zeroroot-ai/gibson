@@ -239,8 +239,8 @@ func TestCheckCAPEM(t *testing.T) {
 	}
 }
 
-func caWish(tenant string) *daemonoperatorv1.DesiredConnector { //nolint:gosec // G101: the name of a secret, no value
-	return &daemonoperatorv1.DesiredConnector{
+func caWish(tenant string) *daemonoperatorv1.DesiredConnector {
+	return &daemonoperatorv1.DesiredConnector{ //nolint:gosec // G101: the name of a secret, no value
 		TenantId: tenant, ConnectorId: "github-fixloop", Shape: "Hosted", Image: "registry.example/x@sha256:ab",
 		Transport: "streamable-http", Auth: "none", CaBundleSecret: "github-fixloop-ca-mock",
 	}
@@ -319,5 +319,116 @@ func TestCABundle_SyncRefusesAnotherTenantNamespace(t *testing.T) {
 	sec := &corev1.Secret{}
 	if gerr := c.Get(context.Background(), client.ObjectKey{Namespace: "tenant-rival", Name: "github-fixloop-connector-ca"}, sec); !apierrors.IsNotFound(gerr) {
 		t.Errorf("a Secret was written to the namespace of the other tenant (err = %v)", gerr)
+	}
+}
+
+func podAnnotation(t *testing.T, th *unstructured.Unstructured) string {
+	t.Helper()
+	v, _, _ := unstructured.NestedString(th.Object, "spec", "podTemplateSpec", "metadata", "annotations", caBundleHashAnnotation)
+	return v
+}
+
+// A new bundle changes the hash on the pod template, so the pod rolls and reads
+// the new file. The same bundle gives the same hash, and a connector with no
+// bundle has no annotation.
+func TestCABundle_AnewBundleRollsThePod(t *testing.T) {
+	ci := caInstance("tenant-acme")
+	sec := caSecret(t, ci, "tenant-acme", true)
+	r := newReconciler(t, ci, sec)
+	get := func() string {
+		if _, err := reconcileOnce(t, r, ci); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		th := newToolHive(kindMCPServer)
+		if err := r.Get(context.Background(), client.ObjectKeyFromObject(ci), th); err != nil {
+			t.Fatal(err)
+		}
+		return podAnnotation(t, th)
+	}
+	first := get()
+	if len(first) != 64 {
+		t.Fatalf("hash = %q, want a sha256", first)
+	}
+	if again := get(); again != first {
+		t.Errorf("the same bundle changed the hash: %q vs %q", first, again)
+	}
+	var live corev1.Secret
+	if err := r.Get(context.Background(), client.ObjectKeyFromObject(sec), &live); err != nil {
+		t.Fatal(err)
+	}
+	other := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: testCertDER(t)})
+	live.Data[caBundleKey] = other
+	if err := r.Update(context.Background(), &live); err != nil {
+		t.Fatal(err)
+	}
+	if rolled := get(); rolled == first {
+		t.Error("a new bundle did not change the hash on the pod template")
+	}
+
+	plain := hostedInstance("plain", "tenant-acme")
+	r2 := newReconciler(t, plain)
+	if _, err := reconcileOnce(t, r2, plain); err != nil {
+		t.Fatal(err)
+	}
+	th := newToolHive(kindMCPServer)
+	if err := r2.Get(context.Background(), client.ObjectKeyFromObject(plain), th); err != nil {
+		t.Fatal(err)
+	}
+	if podAnnotation(t, th) != "" {
+		t.Error("a connector with no bundle has the annotation")
+	}
+}
+
+// A Secret with the name of the CA Secret that the instance does not own is not
+// taken over: it keeps its data and its owners, and the loop reports the error.
+func TestCABundle_LoopDoesNotTakeOverASecret(t *testing.T) {
+	foreign := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "github-fixloop-connector-ca", Namespace: "tenant-acme",
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "v1", Kind: "ConfigMap", Name: "someone", UID: "u-1"}},
+		},
+		Data: map[string][]byte{"ca.crt": []byte("theirs")},
+	}
+	d := &fakeDesiredDaemon{
+		desired: []*daemonoperatorv1.DesiredConnector{caWish("acme")},
+		cred:    &daemonoperatorv1.GetConnectorCredentialResponse{Data: map[string][]byte{caBundleKey: caPEM(t)}},
+	}
+	r, c := desiredLoop(t, d, foreign)
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	var got corev1.Secret
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(foreign), &got); err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Data["ca.crt"]) != "theirs" || got.OwnerReferences[0].Name != "someone" {
+		t.Errorf("the Secret was taken over: %v %v", got.Data, got.OwnerReferences)
+	}
+	if rep := d.lastReport(t); !strings.Contains(rep.GetLastError(), "does not own") {
+		t.Errorf("report = %v", rep)
+	}
+}
+
+// The old CA Secret goes when the tenant clears the bundle.
+func TestCABundle_ClearingTheVariableDeletesTheSecret(t *testing.T) {
+	d := &fakeDesiredDaemon{
+		desired: []*daemonoperatorv1.DesiredConnector{caWish("acme")},
+		cred:    &daemonoperatorv1.GetConnectorCredentialResponse{Data: map[string][]byte{caBundleKey: caPEM(t)}},
+	}
+	r, c := desiredLoop(t, d)
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	key := client.ObjectKey{Namespace: "tenant-acme", Name: "github-fixloop-connector-ca"}
+	var sec corev1.Secret
+	if err := c.Get(context.Background(), key, &sec); err != nil {
+		t.Fatalf("no CA Secret: %v", err)
+	}
+	d.desired[0].CaBundleSecret = ""
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(context.Background(), key, &sec); !apierrors.IsNotFound(err) {
+		t.Errorf("the CA Secret is still there (err = %v)", err)
 	}
 }

@@ -202,11 +202,15 @@ variables:
     kind: ca_bundle       # no env, no patterns and no default
 ```
 
-The tenant stores a PEM bundle as a secret of its own. The name of the secret starts with `<connector id>-ca-`. The tenant gives the name in the `ca_bundle` key of the `EnableConnector` variables. The value is optional.
+The tenant stores a PEM bundle as a secret of its own with `SetSecret` and no category. This is the way a tenant stores the credentials of the same connector, so the daemon reads both under the name as given. A secret with the category `cred` is a different key and is not read. The name of the secret starts with `<connector id>-ca-`. The tenant gives the name in the `ca_bundle` key of the `EnableConnector` variables. The value is optional.
 
 - The daemon hands the name to the connector operator. The prefix rule keeps a tenant from naming another secret, such as a vendor token.
 - The operator writes a Secret from the bundle in the namespace of the tenant only. The Secret belongs to the `ConnectorInstance`.
 - The operator mounts that Secret into the pod of this connector only, and sets `SSL_CERT_FILE` to the mounted file. A pod of another connector has no mount and no variable.
-- The operator refuses a bundle that holds anything but CA certificates, and a Secret that the `ConnectorInstance` does not own.
+- `EnableConnector` reads the secret at once and refuses a missing secret or one that is not a CA bundle.
+- The daemon returns the CA certificates only, as new PEM. It refuses any text outside the certificates, a block that is not a certificate, and a certificate that is not a CA.
+- The operator refuses a Secret that the `ConnectorInstance` does not own, and it never takes one over.
+- A new bundle changes the hash annotation of the pod template, so the pod rolls and reads the new file.
+- When the tenant clears the variable, the operator deletes the CA Secret.
 - The server reads `SSL_CERT_FILE` in addition to the system roots when the image has a system root directory. If the image has none, put the public roots in the bundle too.
 - A connector with no bundle is unchanged.

@@ -28,8 +28,11 @@ func (d *daemonImpl) registerConnector(ctx context.Context, srv *grpc.Server) {
 		d.logger.Warn(ctx, "ConnectorService: no authorizer; not registering")
 		return
 	}
-	tenantv1.RegisterConnectorServiceServer(srv,
-		api.NewConnectorService(tenantconnector.NewStore(d.platformDB), d.authorizer))
+	svc := api.NewConnectorService(tenantconnector.NewStore(d.platformDB), d.authorizer)
+	if d.secretsService != nil {
+		svc.WithSecretStore(d.secretsService)
+	}
+	tenantv1.RegisterConnectorServiceServer(srv, svc)
 	d.logger.Info(ctx, "ConnectorService registered (ADR-0114)")
 }
 

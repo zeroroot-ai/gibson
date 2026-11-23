@@ -235,7 +235,7 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// The CA bundle of the connector (gibson#1517). The daemon loop writes the
 	// Secret. The pod waits for it, and a Secret that this ConnectorInstance
 	// does not own is refused.
-	caReady, caErr := r.caBundleState(ctx, &ci)
+	caSum, caReady, caErr := r.caBundleState(ctx, &ci)
 	if caErr != nil {
 		return failed("CABundle", caErr)
 	}
@@ -253,6 +253,9 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	th, err := r.desiredToolHive(&ci)
 	if err != nil {
 		return failed("InvalidSpec", err)
+	}
+	if err := stampCABundle(th, caSum); err != nil {
+		return failed("CABundle", err)
 	}
 	if err := controllerutil.SetControllerReference(&ci, th, r.Scheme); err != nil {
 		return failed("OwnerRef", err)

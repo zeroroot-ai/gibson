@@ -144,9 +144,11 @@ func (r connectorCredentialReader) read(
 		if ref.GetTargetEnv() == cabundle.Key {
 			// The CA bundle of the connector (gibson#1517). The key "ca.crt"
 			// is no environment variable name, so no credential uses it. The
-			// bundle is read and checked the way the bundle of a provider is,
-			// so a secret that holds a key is refused here.
-			value, err = readCABundleSecret(tctx, r.secrets, ref.GetKey())
+			// bundle is checked and re-encoded (cabundle.Normalize), so a secret
+			// that holds a key or any text outside the certificates is refused.
+			// The bundle is stored the way the credentials of the same
+			// connector are: under the name as given, with no category prefix.
+			value, err = readCABundleAt(tctx, r.secrets, ref.GetKey(), ref.GetKey())
 			if err != nil {
 				return nil, false, fmt.Errorf("connector %q: %w", connector, err)
 			}

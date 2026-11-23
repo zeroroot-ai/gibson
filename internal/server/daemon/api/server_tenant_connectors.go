@@ -200,12 +200,9 @@ func (s *DaemonServer) desiredConnector(
 			env[k] = v
 		}
 		egress = append(append([]string{}, egress...), vars.EgressAllow...)
-		// The CA bundle that the tenant named is checked again with the same
-		// rules (gibson#1517).
-		var cerr error
-		if caBundle, cerr = entry.CABundleSecret(r.Variables); cerr != nil {
-			return nil, fmt.Errorf("connector %s of tenant %s: %w", r.ConnectorID, r.TenantID, cerr)
-		}
+		// ResolveVariables checked the name of the CA bundle with the rules of the
+		// entry, so this read cannot fail (gibson#1517).
+		caBundle, _ = entry.CABundleSecret(r.Variables)
 	}
 	d := &daemonoperatorv1.DesiredConnector{
 		TenantId:    r.TenantID,
