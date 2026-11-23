@@ -299,6 +299,7 @@ func DependencyAlertEvents(result any, repoKey, project, missionID, runID string
 		}
 		k.alerts = append(k.alerts, a)
 		k.groups = append(k.groups, packageGroups(a)...)
+		k.groups = append(k.groups, packageGroup("*", a))
 		if strings.EqualFold(a.State, "open") {
 			for _, g := range packageGroups(a) {
 				openByPackage[g] = true
@@ -387,9 +388,12 @@ func anyOpen(open map[string]bool, groups []string) bool {
 	return false
 }
 
-// packageGroup is the key of an advisory on a package, in any manifest.
+// packageGroup is the key of an advisory on a package, in any manifest and in any
+// ecosystem. The ecosystem is not part of it: a manifest type that the daemon does
+// not know gives an empty ecosystem, and such an open alert must still block.
+// The advisory "*" stands for every advisory of the package.
 func packageGroup(advisory string, a dependencyAlert) string {
-	raw, _ := json.Marshal([]string{advisory, a.Ecosystem, a.groupPackage})
+	raw, _ := json.Marshal([]string{advisory, a.groupPackage})
 	return string(raw)
 }
 
@@ -400,6 +404,11 @@ func packageGroups(a dependencyAlert) []string {
 	var out []string
 	for _, id := range a.AdvisoryIDs {
 		out = append(out, packageGroup(id, a))
+	}
+	if len(out) == 0 {
+		// No valid advisory id: the alert blocks every fixed alert of the package
+		// (fail safe).
+		out = append(out, packageGroup("*", a))
 	}
 	return out
 }

@@ -403,3 +403,36 @@ func TestDependencyAlertEvents_GroupsOnEveryAdvisoryIdAndKeepsTheRawName(t *test
 		assert.NotContains(t, e.Key, long, "the raw name never reaches the graph")
 	}
 }
+
+// An open alert with an empty ecosystem, in a manifest type that the daemon does
+// not know, blocks the verify of a fixed alert of the same advisory and package.
+func TestDependencyAlertEvents_OpenAlertWithNoEcosystemBlocksTheVerify(t *testing.T) {
+	fixed := inManifest(alert("dependabot:1", "fixed", "v1.2.3", ghsaX), "package-lock.json")
+	fixed["ecosystem"] = "npm"
+	open := inManifest(alert("dependabot:2", "open", "v1.2.0", ghsaX), "weird/manifest.lock")
+	open["ecosystem"] = ""
+	_, reruns, _ := kinds(run(t, complete(fixed, open), "m1").Events)
+	for _, r := range reruns {
+		assert.True(t, r.Found, "an open alert with no ecosystem blocks the verify")
+	}
+}
+
+// An open alert whose advisory ids all fail their check blocks every fixed alert
+// of the same package name.
+func TestDependencyAlertEvents_OpenAlertWithNoValidAdvisoryBlocksThePackage(t *testing.T) {
+	fixed := alert("dependabot:1", "fixed", "v1.2.3", ghsaX)
+	open := inManifest(alert("dependabot:2", "open", "v1.2.0", "not-an-advisory"), "other/go.mod")
+	_, reruns, _ := kinds(run(t, complete(fixed, open), "m1").Events)
+	for _, r := range reruns {
+		assert.True(t, r.Found, "an open alert with no valid advisory blocks the package")
+	}
+	// Another package stays free to verify.
+	other := alert("dependabot:3", "fixed", "v1.2.3", ghsaX)
+	other["package"] = "github.com/acme/other"
+	other["purl"] = "pkg:golang/github.com/acme/other@v1.2.3"
+	_, reruns, _ = kinds(run(t, complete(other, open), "m2").Events)
+	require.NotEmpty(t, reruns)
+	for _, r := range reruns {
+		assert.False(t, r.Found, "a fixed alert of another package may verify")
+	}
+}
