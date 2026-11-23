@@ -108,6 +108,12 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.secrets.v1.SecretsService/DeleteSecret":                      true,
 			"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls":        true,
 			"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding": true,
+			// The fix loop exit test (gibson#1469, tests/e2e/fix_loop_test.go):
+			// the tenant enables the connector of its Git host and the connector
+			// of its metrics, reads their state, and disables them.
+			"/gibson.tenant.v1.ConnectorService/EnableConnector":  true,
+			"/gibson.tenant.v1.ConnectorService/ListConnectors":   true,
+			"/gibson.tenant.v1.ConnectorService/DisableConnector": true,
 			// The belief training exit test (gibson#616,
 			// tests/e2e/belief_training_test.go): label an item of the review
 			// queue so the tenant has a training row, then read the pinned
@@ -167,6 +173,13 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.tenant.v1.TenantService/ExportFindings":             true,
 			"/gibson.world.v1.WorldService/GetTimeline":                  true,
 			"/gibson.world.v1.WorldService/GetLlmCall":                   true,
+			// The fix loop exit test (tests/e2e/fix_loop_cases_test.go): launch the
+			// real catalog scan and the fix agent, and read the outcome through the
+			// daemon only.
+			"/gibson.daemon.v1.DaemonService/RunCatalogMission": true,
+			"/gibson.world.v1.WorldService/ListOpenFindings":    true,
+			"/gibson.world.v1.WorldService/GetExposure":         true,
+			"/gibson.world.v1.WorldService/GetRevertRate":       true,
 			// The A2A inbound exit test (tests/e2e/a2a_inbound_test.go, epic
 			// gibson#1367). The runner publishes a mission definition for inbound
 			// calls as the tenant admin, grants and revokes a caller identity, and
