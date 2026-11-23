@@ -463,7 +463,10 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Tool:              a.Tool,
 			ArgsHash:          a.ArgsHash,
 		})
-		if a.Decided {
+		switch {
+		case a.Withdrawn:
+			Reduce(w, DestructiveActionWithdrawn{HypothesisID: a.HypothesisID, Reason: a.WithdrawnReason, AtUnixMS: a.WithdrawnAtMS})
+		case a.Decided:
 			Reduce(w, DestructiveActionDecided{
 				HypothesisID:    a.HypothesisID,
 				Approved:        a.Approved,

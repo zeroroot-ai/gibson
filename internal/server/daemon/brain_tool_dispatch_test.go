@@ -481,10 +481,35 @@ func TestDispatchTool_TheApprovalWaitIsBounded(t *testing.T) {
 		!strings.Contains(err.Error(), "bound of the node") {
 		t.Errorf("the bound of the node must end the wait, got %v", err)
 	}
+	// The request shows as withdrawn, and a verdict after that changes nothing.
+	var withdrawn, decided bool
+	var reason string
+	eng.ReadWorld(func(w *brain.World) {
+		for _, a := range w.DestructiveActionSnapshot() {
+			if a.HypothesisID == "req-3" {
+				withdrawn, decided, reason = a.Withdrawn, a.Decided, a.WithdrawnReason
+			}
+		}
+	})
+	if !withdrawn || !decided || !strings.Contains(reason, "bound of the node") {
+		t.Errorf("the request after the timeout: withdrawn=%v decided=%v reason=%q", withdrawn, decided, reason)
+	}
+	if err := eng.DestructiveAuthorizationQueue().Decide("req-3", "u1", true); err == nil {
+		t.Error("a person approved a request whose node is gone")
+	}
+	eng.Submit(brain.DestructiveActionDecided{HypothesisID: "req-3", Approved: true, UserID: "u1"})
+	time.Sleep(50 * time.Millisecond)
+	eng.ReadWorld(func(w *brain.World) {
+		for _, a := range w.DestructiveActionSnapshot() {
+			if a.HypothesisID == "req-3" && (a.Approved || a.UserID != "") {
+				t.Errorf("an approval after the withdrawal changed the request: %+v", a)
+			}
+		}
+	})
 	gone := &fakeMissionConnector{err: &metatool.PendingApproval{ID: "req-missing"}}
 	b.connectors = gone
 	if _, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w4", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"}); err == nil ||
-		!strings.Contains(err.Error(), "gone") {
+		!strings.Contains(err.Error(), "the request is gone") {
 		t.Errorf("a request that is gone must fail the node, got %v", err)
 	}
 	canceled, stop := context.WithCancel(ctx)
@@ -496,50 +521,33 @@ func TestDispatchTool_TheApprovalWaitIsBounded(t *testing.T) {
 	}
 }
 
-// After a restart the World holds the node as input_required with the id of its
-// request. The executor attaches it again, waits for the decision and calls once.
-// A node whose request is gone fails with that reason.
-func TestReattachApprovals_AttachesEachWaitingNodeAfterARestart(t *testing.T) {
+// A node that declares no timeout waits at most maxApprovalWait. Then it fails
+// and its request is withdrawn.
+func TestDispatchTool_ANodeWithNoTimeoutWaitsAtMostTheCap(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	eng := reg.For("acme")
-	requestApproval(t, eng, "req-4")
-	for _, wi := range []struct{ id, approval string }{{"w-live", "req-4"}, {"w-gone", "req-lost"}} {
-		eng.Submit(brain.WorkDispatched{ID: wi.id, MissionID: "m1", RunID: "run-1", ItemKind: "tool", Target: "mcp:crowdstrike-response:isolate_x", Input: `{"host":"h"}`})
-		eng.Submit(brain.WorkCompleted{ID: wi.id, RunID: "run-1", State: brain.WorkInputRequired, ApprovalID: wi.approval, Err: "waiting"})
-	}
-	waitFor(t, func() bool {
-		n := 0
-		eng.ReadWorld(func(w *brain.World) { n = len(brain.AwaitingApproval(w)) })
-		return n == 2
-	})
-
-	conn := &fakeMissionConnector{result: map[string]any{"ok": true}}
+	requestApproval(t, eng, "req-7")
 	b := newBrainExecutor(nil, slog.Default())
-	b.connectors = conn
+	b.connectors = &fakeMissionConnector{err: &metatool.PendingApproval{ID: "req-7"}}
 	b.approvalPoll = time.Millisecond
-	b.register("m1", &missionBinding{ctx: ctx, tenant: "acme", runID: "run-2", eng: eng})
-	decideApproval(t, eng, "req-4", true)
-
-	state := func(id string) (brain.WorkState, string) {
-		var st brain.WorkState
-		var msg string
-		eng.ReadWorld(func(w *brain.World) {
-			for _, wi := range w.WorkSnapshot() {
-				if wi.ID == id {
-					st, msg = wi.State, wi.Err
-				}
-			}
-		})
-		return st, msg
+	b.approvalMaxWait = 30 * time.Millisecond
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+	if maxApprovalWait != 24*time.Hour {
+		t.Fatalf("maxApprovalWait = %v, want 24h", maxApprovalWait)
 	}
-	waitFor(t, func() bool { st, _ := state("w-live"); return st == brain.WorkDone })
-	waitFor(t, func() bool { st, _ := state("w-gone"); return st == brain.WorkFailed })
-	if _, msg := state("w-gone"); !strings.Contains(msg, "gone") {
-		t.Errorf("the node with no request failed with %q, want the reason", msg)
+	_, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w7", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"})
+	if err == nil || !strings.Contains(err.Error(), "bound of the node") {
+		t.Fatalf("the cap must end the wait, got %v", err)
 	}
-	if conn.calls != 1 {
-		t.Errorf("calls = %d, want one call, for the node whose request was decided", conn.calls)
+	var withdrawn bool
+	eng.ReadWorld(func(w *brain.World) {
+		for _, a := range w.DestructiveActionSnapshot() {
+			withdrawn = withdrawn || (a.HypothesisID == "req-7" && a.Withdrawn)
+		}
+	})
+	if !withdrawn {
+		t.Error("the request of a node that stopped waiting is not withdrawn")
 	}
 }

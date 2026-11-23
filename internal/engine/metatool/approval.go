@@ -84,6 +84,10 @@ const (
 type ApprovalRequest struct {
 	Tenant    string
 	MissionID string
+	// RunID and WorkID name the run and the node of the call. The approval key
+	// holds them, so two nodes never share one approval.
+	RunID  string
+	WorkID string
 	// Agent is the identity of the caller (Caller.Subject). The approval key
 	// holds it (review m16).
 	Agent     string
@@ -168,6 +172,8 @@ func (h *Handler) gateCall(ctx context.Context, c Call, connector, tool string) 
 	state, id, err := h.gate.Acquire(ctx, ApprovalRequest{
 		Tenant:      c.Caller.Tenant,
 		MissionID:   c.MissionID,
+		RunID:       c.RunID,
+		WorkID:      c.WorkID,
 		Agent:       c.Caller.Subject,
 		Connector:   connector,
 		Tool:        tool,

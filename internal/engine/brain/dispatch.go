@@ -143,15 +143,34 @@ func ResumeFailInFlight(w *World) []Event {
 
 // AwaitingApproval returns the TOOL nodes that wait on an approval request, with
 // their request ids. It is the peer of ResumeFailInFlight for a node that is not
-// running but input_required (gibson#1469): after a restart the daemon attaches
-// each of them to its request again, or fails it with a reason when the request
-// is gone. The World rebuilt from the Timeline holds both the node and the id.
+// running but input_required (gibson#1469).
 func AwaitingApproval(w *World) []WorkSnapshot {
 	var out []WorkSnapshot
 	for _, wi := range w.WorkSnapshot() {
 		if wi.State == WorkInputRequired && wi.Kind == "tool" && wi.ApprovalID != "" {
 			out = append(out, wi)
 		}
+	}
+	return out
+}
+
+// RestartApprovalReason is the reason that a TOOL node fails with when the daemon
+// restarts while the node waits for an approval.
+const RestartApprovalReason = "the daemon restarted while the node waited for approval"
+
+// ResumeFailAwaitingApproval returns, for each TOOL node that waits on an approval
+// request in a World that a restart rebuilt, the withdrawal of its request and the
+// failure of the node. No run continues across a restart, so no node is live to
+// call the tool after an approval. A person must not approve a request whose node
+// is gone, and the node must not wait for ever. Call once on resume, after
+// rebuilding the World from the Timeline, like ResumeFailInFlight.
+func ResumeFailAwaitingApproval(w *World, now time.Time) []Event {
+	var out []Event
+	for _, wi := range AwaitingApproval(w) {
+		out = append(out,
+			DestructiveActionWithdrawn{HypothesisID: wi.ApprovalID, Reason: RestartApprovalReason, AtUnixMS: now.UnixMilli()},
+			WorkCompleted{ID: wi.ID, RunID: wi.RunID, Err: RestartApprovalReason},
+		)
 	}
 	return out
 }

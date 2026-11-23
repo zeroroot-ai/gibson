@@ -109,6 +109,13 @@ type DestructiveAction struct {
 	// Consumed is set once the approved call was released. One approval
 	// releases one call.
 	Consumed bool
+	// Withdrawn is set when the node that asked for the approval stopped waiting
+	// (its timeout, the end of the mission, a cancel), so a person cannot approve a
+	// request whose node is gone (gibson#1469). A withdrawn request is decided and
+	// not approved, and a later verdict changes nothing.
+	Withdrawn       bool
+	WithdrawnReason string
+	WithdrawnAtMS   int64
 
 	// Decided, Approved, UserID, DecidedAtUnixMS are set only once a
 	// DestructiveActionDecided event folds (terminal: the first decision
@@ -320,6 +327,9 @@ type DestructiveActionSnapshot struct {
 	Tool              string        `json:",omitempty"`
 	ArgsHash          string        `json:",omitempty"`
 	Consumed          bool          `json:",omitempty"`
+	Withdrawn         bool          `json:",omitempty"`
+	WithdrawnReason   string        `json:",omitempty"`
+	WithdrawnAtMS     int64         `json:",omitempty"`
 }
 
 // DestructiveActionSnapshot returns destructive actions in deterministic
@@ -351,6 +361,7 @@ func (w *World) DestructiveActionSnapshot() []DestructiveActionSnapshot {
 			Tool:              a.Tool,
 			ArgsHash:          a.ArgsHash,
 			Consumed:          a.Consumed,
+			Withdrawn:         a.Withdrawn, WithdrawnReason: a.WithdrawnReason, WithdrawnAtMS: a.WithdrawnAtMS,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].HypothesisID < out[j].HypothesisID })
@@ -605,13 +616,13 @@ const ActionKindToolCall = "tool_call"
 const toolCallIDPrefix = "tool-call:"
 
 // ToolCallKey derives the key of a tool call. The key covers the tenant, the
-// mission, the connector, the tool and the hash of the arguments, so an
+// mission, the run, the work item (the node), the agent, the connector, the tool and the hash of the arguments, so an
 // approval of one call does not cover another target, another tool or another
 // mission. Each part has a length prefix, so two different calls cannot form the
 // same input.
-func ToolCallKey(tenant, missionID, agent, connector, tool, argsHash string) string {
+func ToolCallKey(tenant, missionID, runID, workID, agent, connector, tool, argsHash string) string {
 	h := sha256.New()
-	for _, part := range []string{tenant, missionID, agent, connector, tool, argsHash} {
+	for _, part := range []string{tenant, missionID, runID, workID, agent, connector, tool, argsHash} {
 		_, _ = fmt.Fprintf(h, "%d:%s|", len(part), part) // a hash never fails a write
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -621,6 +632,10 @@ func ToolCallKey(tenant, missionID, agent, connector, tool, argsHash string) str
 // person.
 type ToolCallRequest struct {
 	MissionID string
+	// RunID and WorkID name the run and the node of the call. Two nodes never
+	// share one approval, and one approval releases one call (gibson#1469).
+	RunID  string
+	WorkID string
 	// Agent is the identity of the caller. An approval covers the call of one
 	// agent, so another agent of the mission cannot spend it (review m16).
 	Agent     string
@@ -668,7 +683,7 @@ func (q *DestructiveAuthorizationQueue) AuthorizeToolCall(
 	if req.Connector == "" || req.Tool == "" || req.ArgsHash == "" {
 		return 0, "", errors.New("brain: a tool call request needs a connector, a tool and an argument hash")
 	}
-	key := ToolCallKey(tenant, req.MissionID, req.Agent, req.Connector, req.Tool, req.ArgsHash)
+	key := ToolCallKey(tenant, req.MissionID, req.RunID, req.WorkID, req.Agent, req.Connector, req.Tool, req.ArgsHash)
 
 	q.toolMu.Lock()
 	defer q.toolMu.Unlock()
@@ -685,6 +700,10 @@ func (q *DestructiveAuthorizationQueue) AuthorizeToolCall(
 
 	for _, a := range mine {
 		switch {
+		case a.Withdrawn:
+			// The node that asked stopped waiting. The request is dead, and a new
+			// call of the same arguments starts a new request (gibson#1469).
+			continue
 		case !a.Decided:
 			return ToolCallPending, a.HypothesisID, nil
 		case !a.Approved:
@@ -735,4 +754,57 @@ func toolCallSeq(id string) int {
 		return 0
 	}
 	return n
+}
+
+// DestructiveActionWithdrawn records that the requester stopped waiting for an
+// approval (gibson#1469). It folds like a decision that is not an approval: the
+// request is decided, it is not approved, and it leaves the queue of the people
+// who approve. The first decision wins, so a withdrawal of a request that a person
+// decided changes nothing, and a verdict that comes after a withdrawal changes
+// nothing.
+type DestructiveActionWithdrawn struct {
+	HypothesisID string
+	Reason       string
+	AtUnixMS     int64
+}
+
+// Kind identifies the destructive_action.withdrawn brain event.
+func (DestructiveActionWithdrawn) Kind() string { return "destructive_action.withdrawn" }
+
+func applyDestructiveActionWithdrawn(w *World, e DestructiveActionWithdrawn) {
+	if e.HypothesisID == "" {
+		return
+	}
+	q := ecs.NewFilter1[DestructiveAction](w.ecs).Query()
+	for q.Next() {
+		a := q.Get()
+		if a.HypothesisID != e.HypothesisID {
+			continue
+		}
+		if a.Decided {
+			q.Close()
+			return
+		}
+		a.Decided, a.Approved = true, false
+		a.Withdrawn, a.WithdrawnReason, a.WithdrawnAtMS = true, e.Reason, e.AtUnixMS
+		a.DecidedAtUnixMS = e.AtUnixMS
+		missionID := a.MissionID
+		q.Close()
+		reconcileInputRequired(w, missionID)
+		return
+	}
+}
+
+// Withdraw withdraws the approval request of a node that stopped waiting. It is
+// idempotent: a request that is decided already is left as it is.
+func (q *DestructiveAuthorizationQueue) Withdraw(ctx context.Context, hypothesisID, reason string) error {
+	if hypothesisID == "" {
+		return errors.New("brain: withdraw requires a request id")
+	}
+	if err := q.engine.SubmitAndWait(ctx, DestructiveActionWithdrawn{
+		HypothesisID: hypothesisID, Reason: reason, AtUnixMS: q.now().UnixMilli(),
+	}); err != nil {
+		return fmt.Errorf("brain: withdraw the approval request %q: %w", hypothesisID, err)
+	}
+	return nil
 }
