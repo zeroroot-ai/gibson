@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -266,6 +267,11 @@ type HarnessCallbackService struct {
 	// skillLoadSink receives each successful load of an Agent Skill. nil means
 	// the load is not recorded on the Timeline.
 	skillLoadSink SkillLoadSink
+
+	// scanAnchorSink receives the parameters of each scan mission that an agent
+	// originates by name, so the daemon can anchor its findings to the
+	// Application (gibson#1469). nil means no anchor is written.
+	scanAnchorSink ScanAnchorSink
 
 	// readMarkers backs WriteReadMarker and LastReadMarker (gibson#1569).
 	// nil means this daemon keeps no read markers.
@@ -2712,6 +2718,13 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 				"mission_id", missionInfo.ID, "parent_mission_id", parentMissionID.String(), "error", ferr)
 			return nil, ferr
 		}
+	}
+
+	// A scan mission names its Application, its repository and its image. The
+	// scan tools know none of them, so the daemon writes the links that
+	// FindingPlaces needs from the parameters of the mission.
+	if s.scanAnchorSink != nil && strings.TrimSpace(req.GetCatalogMission()) == scanMissionName {
+		s.scanAnchorSink(ctx, parentMission.TenantID, missionInfo.ID.String(), req.GetCatalogParams())
 	}
 
 	s.logger.Info("mission originated from inside its parent",

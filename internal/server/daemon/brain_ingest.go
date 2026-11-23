@@ -397,6 +397,35 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 	}
 }
 
+// ingestScanAnchors returns the sink of the scan anchors (gibson#1469): for each
+// scan mission that an agent originates by name, it submits the Application,
+// Repository and Image entities of the mission parameters to the World of the
+// tenant of the parent mission. The events carry the scan mission id and name no
+// other tenant.
+func ingestScanAnchors(reg *brain.Registry, logger *slog.Logger) harness.ScanAnchorSink {
+	return func(_ context.Context, tenant, missionID string, params map[string]string) {
+		if reg == nil || tenant == "" {
+			return
+		}
+		events := ingest.ScanAnchorEvents(params, missionID)
+		if len(events) == 0 && logger != nil {
+			// The scan runs, and its findings have no Application. Say so.
+			logger.Warn("a scan mission names an application or a repository that gives no anchor",
+				"mission_id", missionID, "tenant", tenant,
+				"has_application", params["application"] != "", "has_repository_url", params["repositoryUrl"] != "")
+		}
+		if ref := params["imageRef"]; ref != "" && ingest.ImageDigest(ref) == "" && logger != nil {
+			// The scan tool keys its Image node by the digest, so an image named by
+			// a tag has no Image anchor, and its findings reach no Application.
+			logger.Warn("a scan mission names an image with no digest, so the image gets no anchor",
+				"mission_id", missionID, "tenant", tenant)
+		}
+		for _, ev := range events {
+			reg.For(tenant).Submit(ev)
+		}
+	}
+}
+
 // ingestSkillLoad returns the sink of the loads of Agent Skills (epic
 // gibson#1364): it folds each successful load into the Timeline of the tenant
 // of the call as one AgentSkillLoaded event, with the agent, the mission and
