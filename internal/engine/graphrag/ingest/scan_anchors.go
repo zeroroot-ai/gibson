@@ -5,6 +5,7 @@ package ingest
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -40,19 +41,46 @@ const (
 	edgeBuiltFrom    = "BUILT_FROM"
 )
 
-// RepositoryKey returns the identity of a repository: its host and its path,
-// with no scheme, no user info, no ".git" suffix and no trailing slash. It
-// returns "" for a value that is not a URL with a host and a path.
-func RepositoryKey(rawURL string) string {
-	u, err := url.Parse(strings.TrimSpace(rawURL))
+// scpForm matches the scp-like form of a git remote, user@host:path.
+var scpForm = regexp.MustCompile(`^[A-Za-z0-9._-]+@([A-Za-z0-9.-]+):(.+)$`)
+
+// repositoryParts returns the host and the path of a repository URL, from the
+// https form or the scp-like form. It returns empty strings for any other value.
+func repositoryParts(rawURL string) (host, path string) {
+	raw := strings.TrimSpace(rawURL)
+	if m := scpForm.FindStringSubmatch(raw); m != nil && !strings.Contains(raw, "://") {
+		return m[1], m[2]
+	}
+	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" {
+		return "", ""
+	}
+	return u.Hostname(), u.Path
+}
+
+// RepositoryKey returns the identity of a repository: its host and its path,
+// with no scheme, no user info, no ".git" suffix and no trailing slash, in lower
+// case. GitHub and GitLab both treat the host and the path as case-insensitive,
+// so two spellings of one repository give one key. It returns "" for a value
+// that is not a URL with a host and a path.
+func RepositoryKey(rawURL string) string {
+	host, path := repositoryParts(rawURL)
+	path = strings.Trim(strings.TrimSuffix(strings.TrimRight(path, "/"), ".git"), "/")
+	if host == "" || path == "" {
 		return ""
 	}
-	path := strings.Trim(strings.TrimSuffix(strings.TrimRight(u.Path, "/"), ".git"), "/")
-	if path == "" {
+	return strings.ToLower(host) + "/" + strings.ToLower(path)
+}
+
+// repositoryURL returns the https URL of the repository with no user info, no
+// query and no fragment. A clone URL can carry a token in its user info, and the
+// World, the Timeline and the graph must never hold it.
+func repositoryURL(rawURL string) string {
+	key := RepositoryKey(rawURL)
+	if key == "" {
 		return ""
 	}
-	return strings.ToLower(u.Hostname()) + "/" + path
+	return "https://" + key
 }
 
 // ImageDigest returns the digest of an image reference that names one
@@ -76,7 +104,7 @@ func ScanAnchorEvents(params map[string]string, missionID string) []brain.Event 
 	if app == "" || repo == "" {
 		return nil
 	}
-	repoProps := map[string]string{"url": strings.TrimSpace(params[scanParamRepositoryURL])}
+	repoProps := map[string]string{"url": repositoryURL(params[scanParamRepositoryURL])}
 	events := []brain.Event{
 		brain.EntityObserved{Label: labelRepository, Key: repo, MissionID: missionID, Props: repoProps},
 		brain.EntityObserved{

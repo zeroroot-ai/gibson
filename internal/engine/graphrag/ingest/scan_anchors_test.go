@@ -4,6 +4,7 @@
 package ingest
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
 func scanParams() map[string]string {
@@ -80,6 +82,8 @@ func TestScanAnchorEvents_RefuseWhatTheyCannotName(t *testing.T) {
 
 func TestRepositoryKey(t *testing.T) {
 	for in, want := range map[string]string{
+		"git@gitlab.com:Group/Project.git":      "gitlab.com/group/project",
+		"https://GitHub.com/Acme/Shop":          "github.com/acme/shop",
 		"https://github.com/acme/shop":          "github.com/acme/shop",
 		"https://user:pw@github.com/acme/shop/": "github.com/acme/shop",
 		"https://gitlab.com/a/b/c.git":          "gitlab.com/a/b/c",
@@ -88,4 +92,65 @@ func TestRepositoryKey(t *testing.T) {
 	} {
 		assert.Equal(t, want, RepositoryKey(in), in)
 	}
+}
+
+// A clone URL can carry a token in its user info. The Repository node holds the
+// URL, and the World, the Timeline and the graph must hold none of it.
+func TestScanAnchorEvents_HoldNoUserInfo(t *testing.T) {
+	p := scanParams()
+	p["repositoryUrl"] = "https://gitlab-ci-token:glpat-SECRET@gitlab.com/examplebank/customer-portal.git?private_token=SECRET#frag"
+	for _, e := range ScanAnchorEvents(p, "m") {
+		eo := e.(brain.EntityObserved)
+		blob := eo.Label + eo.Key
+		for k, v := range eo.Props {
+			blob += k + v
+		}
+		for _, edge := range eo.Edges {
+			blob += edge.TargetKey
+		}
+		if strings.Contains(blob, "SECRET") || strings.Contains(blob, "gitlab-ci-token") {
+			t.Errorf("%s holds the user info: %q", eo.Label, blob)
+		}
+	}
+	for _, e := range ScanAnchorEvents(p, "m") {
+		if eo := e.(brain.EntityObserved); eo.Label == "Repository" && eo.Props["url"] != "https://gitlab.com/examplebank/customer-portal" {
+			t.Errorf("url = %q", eo.Props["url"])
+		}
+	}
+}
+
+// The scp form and the https form of one repository give one Repository.
+func TestScanAnchorEvents_TwoFormsOfOneRepositoryGiveOneKey(t *testing.T) {
+	a, b := scanParams(), scanParams()
+	a["repositoryUrl"] = "git@gitlab.com:Examplebank/Customer-Portal.git"
+	b["repositoryUrl"] = "https://gitlab.com/examplebank/customer-portal"
+	ea, eb := ScanAnchorEvents(a, "m"), ScanAnchorEvents(b, "m")
+	require.Len(t, ea, 3)
+	assert.Equal(t, ea[0].(brain.EntityObserved).Key, eb[0].(brain.EntityObserved).Key)
+}
+
+// The Image node of a scan is keyed by the digest, and the scan tool reports it
+// as the CustomNode Image with the id property "digest" (gibson-executor
+// parsers/trivy, imageDigest). The key of the anchor must equal the key that the
+// discovery ingest gives that node, or the anchor links a node that no scan
+// writes.
+func TestScanAnchorEvents_ImageKeyEqualsTheKeyOfTheScanToolNode(t *testing.T) {
+	const digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	disc := &graphragpb.DiscoveryResult{CustomNodes: []*graphragpb.CustomNode{{
+		NodeType: "Image", IdProperties: map[string]string{"digest": digest},
+		Properties: map[string]string{"name": "registry.example.com/portal:1.2.3"},
+	}}}
+	scanEvents, _ := entityObservedEvents(ExecContext{MissionID: "m"}, disc)
+	require.Len(t, scanEvents, 1)
+	scanKey := scanEvents[0].(brain.EntityObserved).Key
+
+	p := scanParams()
+	p["imageRef"] = "registry.example.com/portal@" + digest
+	var anchorKey string
+	for _, e := range ScanAnchorEvents(p, "m") {
+		if eo := e.(brain.EntityObserved); eo.Label == "Image" {
+			anchorKey = eo.Key
+		}
+	}
+	assert.Equal(t, scanKey, anchorKey)
 }

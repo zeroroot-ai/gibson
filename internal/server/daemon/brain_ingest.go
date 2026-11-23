@@ -402,12 +402,19 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 // Repository and Image entities of the mission parameters to the World of the
 // tenant of the parent mission. The events carry the scan mission id and name no
 // other tenant.
-func ingestScanAnchors(reg *brain.Registry) harness.ScanAnchorSink {
+func ingestScanAnchors(reg *brain.Registry, logger *slog.Logger) harness.ScanAnchorSink {
 	return func(_ context.Context, tenant, missionID string, params map[string]string) {
 		if reg == nil || tenant == "" {
 			return
 		}
-		for _, ev := range ingest.ScanAnchorEvents(params, missionID) {
+		events := ingest.ScanAnchorEvents(params, missionID)
+		if len(events) == 0 && logger != nil {
+			// The scan runs, and its findings have no Application. Say so.
+			logger.Warn("a scan mission names an application or a repository that gives no anchor",
+				"mission_id", missionID, "tenant", tenant,
+				"has_application", params["application"] != "", "has_repository_url", params["repositoryUrl"] != "")
+		}
+		for _, ev := range events {
 			reg.For(tenant).Submit(ev)
 		}
 	}

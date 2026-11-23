@@ -19,12 +19,12 @@ func TestIngestScanAnchors_LinkTheApplicationInTheTenantWorld(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	ingestScanAnchors(reg)(ctx, "acme", "mission-1", map[string]string{
+	ingestScanAnchors(reg, nil)(ctx, "acme", "mission-1", map[string]string{
 		"application": "customer-portal", "repositoryUrl": "https://gitlab.com/examplebank/customer-portal",
 		"commit": "abc", "ref": "main", "imageRef": "registry.example.com/portal@sha256:ab12",
 	})
-	ingestScanAnchors(nil)(ctx, "acme", "m", nil)
-	ingestScanAnchors(reg)(ctx, "", "m", map[string]string{"application": "x", "repositoryUrl": "https://h.example/a/b"})
+	ingestScanAnchors(nil, nil)(ctx, "acme", "m", nil)
+	ingestScanAnchors(reg, nil)(ctx, "", "m", map[string]string{"application": "x", "repositoryUrl": "https://h.example/a/b"})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
