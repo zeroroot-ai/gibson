@@ -47,6 +47,8 @@ var paramsByMission = map[string]map[string]string{
 		"pipelineId":    "8891",
 		"pipelineUrl":   "https://gitlab.com/examplebank/customer-portal/-/pipelines/8891",
 		"imageRef":      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
+		// The runtime branch reads the target of the mission.
+		"runtime": "true",
 		// The dependency alerts of the Git host, read through its connector.
 		"forgeConnector": "gitlab-fixloop",
 	},
@@ -160,15 +162,54 @@ func TestSource_UnknownMissionNamesWhatExists(t *testing.T) {
 	}
 }
 
-func TestRender_MissingParametersAreAllReportedAtOnce(t *testing.T) {
-	_, err := Render(context.Background(), "scan", map[string]string{"application": "customer-portal"})
-	if err == nil {
-		t.Fatal("an incomplete render was accepted; an empty commit would scan HEAD")
-	}
-	for _, want := range []string{"commit", "imageRef", "repositoryUrl", "ref", "pipelineId", "pipelineUrl"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error omits %q, so a caller fixes one field per render: %v", want, err)
+// A scan with no branch parameter is refused at launch. application alone starts
+// no branch.
+func TestRender_ScanWithNoBranchIsRefused(t *testing.T) {
+	for name, in := range map[string]map[string]string{
+		"nothing":          nil,
+		"only application": {"application": "customer-portal"},
+		"no branch param":  {"application": "customer-portal", "repositoryUrl": "https://github.com/acme/shop", "ref": "main"},
+	} {
+		if _, err := Render(context.Background(), "scan", in); err == nil {
+			t.Errorf("%s: a scan with no branch was accepted", name)
 		}
+	}
+}
+
+// Each branch runs only when its own parameters are present.
+func TestRender_ScanRunsOnlyTheBranchesThatHaveParameters(t *testing.T) {
+	nodesOf := func(in map[string]string) []string {
+		def, err := Render(context.Background(), "scan", in)
+		if err != nil {
+			t.Fatalf("Render(%v): %v", in, err)
+		}
+		var ids []string
+		for id := range def.GetNodes() {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		return ids
+	}
+	// A buyer with only a Git host connector: the alerts node and the join.
+	got := nodesOf(map[string]string{
+		"repositoryUrl": "https://github.com/acme/shop", "application": "acme/shop", "forgeConnector": "github-fixloop",
+	})
+	if !slices.Equal(got, []string{"alerts", "report"}) {
+		t.Errorf("only the Git host: nodes = %v, want alerts and report", got)
+	}
+	// A scan with an image only: the image branch.
+	got = nodesOf(map[string]string{"imageRef": "registry.example.com/shop@sha256:abc"})
+	if !slices.Equal(got, []string{"image", "report"}) {
+		t.Errorf("only an image: nodes = %v, want image and report", got)
+	}
+	// The runtime branch alone: the four stages and the join.
+	got = nodesOf(map[string]string{"runtime": "true"})
+	if !slices.Equal(got, []string{"ports", "report", "services", "tls", "web"}) {
+		t.Errorf("only runtime: nodes = %v", got)
+	}
+	// The source branch needs its own parameters: a commit with no repository fails.
+	if _, err := Render(context.Background(), "scan", map[string]string{"commit": "0123456789abcdef0123456789abcdef01234567"}); err == nil {
+		t.Error("a source branch with no application was accepted")
 	}
 }
 
@@ -731,8 +772,8 @@ func TestEntries_IsEveryMissionInOrder(t *testing.T) {
 	}
 }
 
-// The alerts node is optional (gibson#1469). Without forgeConnector the scan has
-// no alerts node, and the launch with the seven other parameters works as before.
+// The alerts node runs only with forgeConnector (gibson#1469). Without it the
+// scan has no alerts node, and the join waits for the other branches only.
 func TestRender_ScanAlertsNodeIsOptional(t *testing.T) {
 	with := paramsFor(t, "scan")
 	without := map[string]string{}
@@ -744,7 +785,7 @@ func TestRender_ScanAlertsNodeIsOptional(t *testing.T) {
 
 	def, err := Render(context.Background(), "scan", without)
 	if err != nil {
-		t.Fatalf("a scan with seven parameters must render: %v", err)
+		t.Fatalf("a scan with no forgeConnector must render: %v", err)
 	}
 	if _, ok := def.GetNodes()["alerts"]; ok {
 		t.Error("a scan with no forgeConnector has an alerts node")

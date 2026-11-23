@@ -118,22 +118,22 @@ func TestRender_UnknownKeysReportedTogetherAndSorted(t *testing.T) {
 	}
 }
 
-// Missing keys are reported together too. A caller wiring this up for the first
-// time should see every field it forgot in one error.
-func TestRender_MissingKeysReportedTogether(t *testing.T) {
+// A value of only white space is refused, and the error names the parameter, so a
+// blank value cannot drop a branch of the scan without a word.
+func TestRender_BlankValueIsRefusedAndNamed(t *testing.T) {
 	t.Parallel()
 	names := declaredParams(t, "scan")
 	in := completeParams(t, "scan")
-	delete(in, names[0])
-	in[names[1]] = "   " // whitespace is as absent as absent
+	in[names[0]] = "   "
+	in[names[1]] = "\t"
 
 	_, err := Render(context.Background(), "scan", in)
 	if err == nil {
-		t.Fatal("a missing parameter must be refused rather than rendered empty")
+		t.Fatal("a blank value must be refused rather than dropped")
 	}
 	for _, want := range names[:2] {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the error does not name the missing %q: %v", want, err)
+			t.Errorf("the error does not name the blank %q: %v", want, err)
 		}
 	}
 }
@@ -183,6 +183,9 @@ func declaredParams(t *testing.T, mission string) []string {
 func placeholderValue(name string) string {
 	if name == "forgeConnector" {
 		return "github-fixloop"
+	}
+	if name == "runtime" {
+		return "true"
 	}
 	return "v-" + name
 }

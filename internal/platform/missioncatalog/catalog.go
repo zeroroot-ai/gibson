@@ -74,6 +74,20 @@ func checkParams(mission string, declared, optional []string, in map[string]stri
 			mission, strings.Join(unknown, ", "), namesOrNone(declared))
 	}
 
+	// A value of only white space is no value. A caller that leaves a parameter out
+	// sends nothing or an empty string, so a blank value is a mistake that would
+	// otherwise drop a branch of the mission without a word.
+	var blank []string
+	for k, v := range in {
+		if v != "" && strings.TrimSpace(v) == "" {
+			blank = append(blank, k)
+		}
+	}
+	if len(blank) > 0 {
+		sort.Strings(blank)
+		return fmt.Errorf("missioncatalog: mission %q: the value of %s is blank", mission, strings.Join(blank, ", "))
+	}
+
 	isOptional := make(map[string]bool, len(optional))
 	for _, n := range optional {
 		isOptional[n] = true

@@ -1,6 +1,6 @@
 {
   "name": "scan",
-  "description": "Scan one Application from four sides: its image, its source, what it is actually running, and the dependency alerts of its Git host.",
+  "description": "Scan one Application from up to four sides: its image, its source, what it is actually running, and the dependency alerts of its Git host.",
   "version": "1.0.0",
   "nodes": {
     "alerts": {

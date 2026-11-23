@@ -31,10 +31,19 @@
         "pipelineId",
         "pipelineUrl",
         "ref",
-        "repositoryUrl"
+        "repositoryUrl",
+        "runtime"
       ],
       "optional": [
-        "forgeConnector"
+        "application",
+        "commit",
+        "forgeConnector",
+        "imageRef",
+        "pipelineId",
+        "pipelineUrl",
+        "ref",
+        "repositoryUrl",
+        "runtime"
       ]
     }
   }
