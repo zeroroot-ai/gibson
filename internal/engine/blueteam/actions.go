@@ -94,16 +94,17 @@ type changeKey struct{ action, actor, target, object, relation string }
 // grantEvents indexes the grant changes of the execute relation by agent
 // principal and by object. It uses only records with an allow decision. The grant
 // admin writes the allow record before the FGA write, and a failed write adds a
-// deny record and leaves the allow. So an allow record that a later deny record
-// follows, for the same action, actor, target, object and relation, is a change
-// that did not take effect, and it is dropped.
+// deny record and leaves the allow. So each deny record cancels the latest earlier
+// allow record for the same action, actor, target, object and relation. It cancels
+// one allow only, so an older change that took effect stays.
 func grantEvents(changes []audit.PgEntry) map[string]map[string][]grantEvent {
 	type parsed struct {
-		entry audit.PgEntry
-		key   changeKey
+		entry     audit.PgEntry
+		key       changeKey
+		cancelled bool
 	}
-	var allowed []parsed
-	failedAt := map[changeKey][]time.Time{}
+	var allowed []*parsed
+	var denied []parsed
 	for _, c := range changes {
 		if c.Action != grantAdded && c.Action != grantRemoved {
 			continue
@@ -112,17 +113,34 @@ func grantEvents(changes []audit.PgEntry) map[string]map[string][]grantEvent {
 		if json.Unmarshal(c.Metadata, &md) != nil || md.Relation != executeTupleRelation {
 			continue
 		}
-		k := changeKey{c.Action, c.ActorID, c.TargetID, md.Object, md.Relation}
+		p := parsed{entry: c, key: changeKey{c.Action, c.ActorID, c.TargetID, md.Object, md.Relation}}
 		switch c.Decision {
 		case decisionAllow:
-			allowed = append(allowed, parsed{c, k})
+			allowed = append(allowed, &p)
 		case decisionDeny:
-			failedAt[k] = append(failedAt[k], c.CreatedAt)
+			denied = append(denied, p)
+		}
+	}
+	// Each deny, oldest first, cancels the latest allow of its key that is not later
+	// than the deny and that no earlier deny cancelled.
+	sort.SliceStable(denied, func(i, j int) bool { return denied[i].entry.CreatedAt.Before(denied[j].entry.CreatedAt) })
+	for _, d := range denied {
+		var latest *parsed
+		for _, a := range allowed {
+			if a.cancelled || a.key != d.key || a.entry.CreatedAt.After(d.entry.CreatedAt) {
+				continue
+			}
+			if latest == nil || !a.entry.CreatedAt.Before(latest.entry.CreatedAt) {
+				latest = a
+			}
+		}
+		if latest != nil {
+			latest.cancelled = true
 		}
 	}
 	byAgent := map[string]map[string][]grantEvent{} // principal -> object -> events
 	for _, p := range allowed {
-		if failedAfter(failedAt[p.key], p.entry.CreatedAt) {
+		if p.cancelled {
 			continue
 		}
 		c := p.entry
@@ -133,16 +151,6 @@ func grantEvents(changes []audit.PgEntry) map[string]map[string][]grantEvent {
 			grantEvent{at: c.CreatedAt, added: c.Action == grantAdded, grantor: c.ActorID})
 	}
 	return byAgent
-}
-
-// failedAfter reports whether a deny record is at or after the time of an allow record.
-func failedAfter(denies []time.Time, allowAt time.Time) bool {
-	for _, d := range denies {
-		if !d.Before(allowAt) {
-			return true
-		}
-	}
-	return false
 }
 
 // callKey returns the group of one call record and its tool. ok is false for

@@ -5,15 +5,15 @@ package incidentreport
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
-	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/server/admin"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 type fakeSource struct {
@@ -67,11 +67,14 @@ func (f fakeChanges) GrantChanges(_ context.Context, tenant, principal string, u
 	return out, nil
 }
 
+// change builds the audit record from the output of the grant admin writer, so a
+// change in the writer fails the tests of the read.
 func change(action, actor, principal, object string, at int64) audit.PgEntry {
-	rel, _ := authz.GrantTupleRelation("can_execute") // the relation that the grant admin writes
-	md, _ := json.Marshal(map[string]string{"object": object, "relation": rel})
+	tuples := admin.GrantTuples(principal, []*tenantv1.GrantTuple{{Object: object, Relation: "can_execute"}})
+	e := admin.GrantAuditEvents(actor, "acme", principal, action, "allow", tuples)[0]
 	return audit.PgEntry{
-		Action: action, ActorID: actor, TargetID: principal, Decision: "allow", Metadata: md, CreatedAt: time.Unix(at, 0),
+		Action: e.Action, ActorID: e.ActorID, TargetID: e.TargetID, Decision: e.Decision, Metadata: e.Metadata,
+		CreatedAt: time.Unix(at, 0),
 	}
 }
 

@@ -10,25 +10,31 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/server/admin"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
-// change builds the audit record that the grant admin writes for a change that
-// took effect: the tuple relation is direct_execute (the grant admin writes the
-// tuple relation of the action can_execute) and the decision is allow.
-func change(action, actor, agent, connector string, when time.Time) audit.PgEntry {
-	rel, _ := authz.GrantTupleRelation("can_execute")
-	md, _ := json.Marshal(map[string]string{"object": authz.ConnectorComponentObject(connector), "relation": rel})
+// grantRecord builds the audit record of a grant change from the output of the grant
+// admin writer, with the decision that the test names. A change in the relation, the
+// decision or the keys of the writer fails these tests.
+func grantRecord(action, decision, actor, agent, connector string, when time.Time) audit.PgEntry {
+	tuples := admin.GrantTuples(agent, []*tenantv1.GrantTuple{{Object: authz.ConnectorComponentObject(connector), Relation: "can_execute"}})
+	e := admin.GrantAuditEvents(actor, "acme", agent, action, decision, tuples)[0]
 	return audit.PgEntry{
-		Action: action, ActorID: actor, TargetType: "agent_grant", TargetID: agent, Decision: "allow",
-		Metadata: md, CreatedAt: when,
+		TenantID: e.TenantID, ActorID: e.ActorID, ActorType: e.ActorType, Action: e.Action, TargetType: e.TargetType,
+		TargetID: e.TargetID, Decision: e.Decision, Metadata: e.Metadata, CreatedAt: when,
 	}
 }
 
-// failedChange is the record of a change that failed after its record was written.
+// change is the record of a change that took effect (decision allow).
+func change(action, actor, agent, connector string, when time.Time) audit.PgEntry {
+	return grantRecord(action, "allow", actor, agent, connector, when)
+}
+
+// failedChange is the record that the writer adds when the FGA write failed after the
+// allow record (decision deny).
 func failedChange(action, actor, agent, connector string, when time.Time) audit.PgEntry {
-	e := change(action, actor, agent, connector, when)
-	e.Decision = "deny"
-	return e
+	return grantRecord(action, "deny", actor, agent, connector, when)
 }
 
 func call(agent, connector, tool, result, errClass string, when time.Time) audit.PgEntry {
@@ -239,5 +245,39 @@ func TestGrantorOf_ADenyThatFollowsAnAllowOfTheSameChangeDropsTheAllow(t *testin
 	}
 	if got, _, ok := GrantorOf(retried, "p1", obj, t0.Add(2*time.Hour)); !ok || got != "admin-1" {
 		t.Errorf("GrantorOf = %q, %v, want admin-1: the retry took effect", got, ok)
+	}
+}
+
+// Each deny cancels only the latest earlier allow of its key. A add that took effect, a
+// remove, and a re-add that failed: the first add stays cancelled by nobody, and the
+// remove ends it, so no grant is in force. A failed re-add must not drop the first add.
+func TestGrantorOf_ADenyCancelsOnlyTheLatestEarlierAllow(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	obj := authz.ConnectorComponentObject("okta-response")
+	changes := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0),                  // t1: took effect
+		change("agent_grant_removed", "admin-1", "p1", "okta-response", t0.Add(time.Hour)), // t2: took effect
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(2*time.Hour)), // t3: the write failed
+		failedChange("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(2*time.Hour+time.Second)),
+	}
+	// After t3 the last change that took effect is the remove, so no grant is in force.
+	if got, _, ok := GrantorOf(changes, "p1", obj, t0.Add(3*time.Hour)); ok {
+		t.Errorf("GrantorOf = %q, want no grantor: the remove at t2 ended the grant", got)
+	}
+	// Between t1 and t2 the first add is in force. The failed re-add must not have dropped it.
+	if got, _, ok := GrantorOf(changes, "p1", obj, t0.Add(30*time.Minute)); !ok || got != "admin-1" {
+		t.Errorf("GrantorOf = %q, %v, want admin-1: the first add took effect", got, ok)
+	}
+
+	// Two failed re-adds cancel two allows, and the older add stays.
+	twice := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0),
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(time.Hour)),
+		failedChange("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(time.Hour+time.Second)),
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(2*time.Hour)),
+		failedChange("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(2*time.Hour+time.Second)),
+	}
+	if got, at, ok := GrantorOf(twice, "p1", obj, t0.Add(3*time.Hour)); !ok || got != "admin-1" || !at.Equal(t0) {
+		t.Errorf("GrantorOf = %q at %v, %v, want admin-1 at t0: only the first add took effect", got, at, ok)
 	}
 }
