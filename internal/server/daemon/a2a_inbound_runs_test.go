@@ -1399,11 +1399,11 @@ func TestInboundRuns_AKeyThatCannotBeConfirmedIsKept(t *testing.T) {
 }
 
 // blockingStarter waits for the context, as a start that hangs.
-type blockingStarter struct{ recordingStarter }
+type blockingStarter struct{}
 
 func (b *blockingStarter) StartMission(ctx context.Context, _ api.RunMissionData) (string, error) {
 	<-ctx.Done()
-	return "", ctx.Err()
+	return "", fmt.Errorf("the start was cut: %w", ctx.Err())
 }
 
 // A start that outlasts its bound ends before the lease of the claim ends. The
