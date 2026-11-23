@@ -270,6 +270,8 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 			return nil, fmt.Errorf("record the message id for agent %s: %w", req.Agent, cerr)
 		}
 		switch claim {
+		case inboundmissionstore.ClaimNew:
+			// The caller may start the mission.
 		case inboundmissionstore.ClaimDuplicate:
 			return a2aserver.RejectedTask("duplicate"), nil
 		case inboundmissionstore.ClaimInFlight:
