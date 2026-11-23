@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -364,6 +365,13 @@ func TestRenewCapabilityGrant_RefusesAGrantWithNoRun(t *testing.T) {
 type memberLookup struct {
 	live map[string]bool
 	err  error
+	// turn is the set of live turn grants, keyed by "tenant/bank/run/job".
+	turn    map[string]bool
+	turnErr error
+}
+
+func (l memberLookup) IsMemberTurnGrantLive(_ context.Context, c sdkcg.Claims) (bool, error) {
+	return l.turn[c.Tenant.String()+"/"+c.MissionID+"/"+c.MissionRunID+"/"+c.TaskID], l.turnErr
 }
 
 func (l memberLookup) IsMemberBaseGrantLive(_ context.Context, c sdkcg.Claims) (bool, error) {
@@ -549,6 +557,10 @@ func (f flippingLookup) IsMemberBaseGrantLive(context.Context, sdkcg.Claims) (bo
 	return *f.calls == 1, nil
 }
 
+func (f flippingLookup) IsMemberTurnGrantLive(context.Context, sdkcg.Claims) (bool, error) {
+	return false, nil
+}
+
 func TestRenewCapabilityGrant_ReadsTheMemberLivenessOnce(t *testing.T) {
 	calls := 0
 	s := newRenewServer(t, liveLookup{live: map[string]bool{}})
@@ -563,5 +575,82 @@ func TestRenewCapabilityGrant_ReadsTheMemberLivenessOnce(t *testing.T) {
 	}
 	if payload := renewedRPCs(t, resp.GetCapabilityGrant()); !strings.Contains(payload, "/x/Y") {
 		t.Errorf("the renewed grant must take the RPCs of the member source, payload = %s", payload)
+	}
+}
+
+// The turn grant of a member for a job: the sender is the subject, the job is the task, the
+// bank is the mission, and the run is the run of the member.
+func turnGrantClaims() sdkcg.Claims {
+	return sdkcg.Claims{
+		Subject: "user:alice", MissionID: "m1", TaskID: "job-1", MissionRunID: "run-1",
+		AllowedRPCs: []string{"/gibson.harness.v1.HarnessCallbackService/CallToolProto"}, Tenant: mustTenant("acme"),
+	}
+}
+
+func turnRenewRequest() *daemonpb.RenewCapabilityGrantRequest {
+	return &daemonpb.RenewCapabilityGrantRequest{AgentId: "user:alice", MissionId: "m1", TaskId: "job-1"}
+}
+
+func newTurnRenewServer(t *testing.T, lookup memberLookup) *DaemonServer {
+	t.Helper()
+	s := newRenewServer(t, liveLookup{live: map[string]bool{}})
+	s.WithCGRenewal(s.cgMinter, stubVerifier{claims: turnGrantClaims()})
+	s.WithLiveMemberLookup(lookup)
+	return s
+}
+
+// A member renews its turn grant while it holds the job, before a long turn or the wrap-up runs
+// out. The renewal keeps the job as the task, the run and the RPCs of the grant.
+func TestRenewCapabilityGrant_RenewsTheTurnGrantOfAMemberForAJobItHolds(t *testing.T) {
+	s := newTurnRenewServer(t, memberLookup{turn: map[string]bool{"acme/m1/run-1/job-1": true}})
+
+	resp, err := s.RenewCapabilityGrant(renewCtx(), turnRenewRequest())
+
+	if err != nil {
+		t.Fatalf("the turn grant of a member for its job must renew: %v", err)
+	}
+	parts := strings.Split(resp.GetCapabilityGrant(), ".")
+	if len(parts) != 3 {
+		t.Fatalf("want a compact JWT, got %d parts", len(parts))
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["task_id"] != "job-1" {
+		t.Errorf("task_id = %v, want the job: the renewal must keep GrantTaskID", payload["task_id"])
+	}
+	if payload["mrid"] != "run-1" || payload["sub"] != "user:alice" {
+		t.Errorf("payload = %v, want the run and the sender of the grant kept", payload)
+	}
+	if !strings.Contains(string(raw), "CallToolProto") {
+		t.Errorf("the RPCs of the grant were not carried over: %s", raw)
+	}
+}
+
+// A turn grant does not renew for a job that the member does not hold, for a closed job with
+// nothing left to do, or when the lookup cannot answer.
+func TestRenewCapabilityGrant_RefusesATurnGrantTheLookupDoesNotVouchFor(t *testing.T) {
+	cases := map[string]struct {
+		lookup memberLookup
+		code   codes.Code
+	}{
+		"a job that the member does not hold":    {memberLookup{turn: map[string]bool{"acme/m1/run-1/job-2": true}}, codes.FailedPrecondition},
+		"a member of another tenant":             {memberLookup{turn: map[string]bool{"globex/m1/run-1/job-1": true}}, codes.FailedPrecondition},
+		"a job that is closed with nothing left": {memberLookup{turn: map[string]bool{}}, codes.FailedPrecondition},
+		"a lookup that cannot answer":            {memberLookup{turnErr: errors.New("postgres is down")}, codes.Unavailable},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := newTurnRenewServer(t, c.lookup)
+			_, err := s.RenewCapabilityGrant(renewCtx(), turnRenewRequest())
+			if got := status.Code(err); got != c.code {
+				t.Fatalf("code = %s (%v), want %s", got, err, c.code)
+			}
+		})
 	}
 }

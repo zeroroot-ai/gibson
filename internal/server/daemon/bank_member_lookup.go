@@ -55,6 +55,7 @@ func memberBaseGrantSubject(agentName string) string { return "component:agent:"
 // so its liveness is its row in the bank store.
 type bankMemberLiveness struct {
 	banks func() (bank.Store, error)
+	jobs  func() (job.Store, error)
 }
 
 var _ api.LiveMemberLookup = (*bankMemberLiveness)(nil)
@@ -63,12 +64,77 @@ var _ api.LiveMemberLookup = (*bankMemberLiveness)(nil)
 // built after the renewal is wired, so a store captured at wiring time would
 // capture nothing. While the pool is down no grant is live.
 func newBankMemberLiveness(d *daemonImpl) *bankMemberLiveness {
-	return &bankMemberLiveness{banks: func() (bank.Store, error) {
-		if d.pool == nil {
-			return nil, errUnavailable("the data-plane pool is not up, so this daemon serves no banks")
+	return &bankMemberLiveness{
+		banks: func() (bank.Store, error) {
+			if d.pool == nil {
+				return nil, errUnavailable("the data-plane pool is not up, so this daemon serves no banks")
+			}
+			return bank.NewPostgresStore(d.pool), nil
+		},
+		jobs: func() (job.Store, error) {
+			if d.pool == nil {
+				return nil, errUnavailable("the data-plane pool is not up, so this daemon serves no jobs")
+			}
+			return job.NewPostgresStore(d.pool), nil
+		},
+	}
+}
+
+// pendingTurnInputs bounds the read of the inputs that a member has not finished, when
+// the lookup decides if a closed job still needs its grant.
+const pendingTurnInputs = 100
+
+// IsMemberTurnGrantLive is true only for the turn grant of a live member for a job that
+// the member holds. The grant must name the bank of the member as its mission and the
+// run of the member as its run, and its task must be a job of that bank that the member
+// holds. The member must not be dead. The job must not be closed, unless the member has
+// an input of that job that it has not finished: the wrap-up that follows the close. A
+// grant that names a job of another member, a closed job with nothing left to do, or
+// the base grant of the member (its task is the member, not a job) is not live. A
+// store error is an error, never an answer.
+func (l *bankMemberLiveness) IsMemberTurnGrantLive(ctx context.Context, claims sdkcg.Claims) (bool, error) {
+	banks, err := l.banks()
+	if err != nil {
+		return false, err
+	}
+	tenantID := claims.Tenant.String()
+	m, err := banks.MemberByRun(ctx, tenantID, claims.MissionRunID)
+	if errors.Is(err, bank.ErrNotFound) {
+		return false, nil // the run backs no member
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the member of run %s: %w", claims.MissionRunID, err)
+	}
+	if m.State == bank.MemberDead || m.BankID != claims.MissionID || claims.TaskID == "" || claims.TaskID == m.ID {
+		return false, nil
+	}
+	jobs, err := l.jobs()
+	if err != nil {
+		return false, err
+	}
+	j, err := jobs.Get(ctx, tenantID, claims.TaskID)
+	if errors.Is(err, job.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the job %s: %w", claims.TaskID, err)
+	}
+	if j.BankID != m.BankID || j.MemberID != m.ID {
+		return false, nil // the member does not hold the job
+	}
+	if j.State != job.StateClosed {
+		return true, nil
+	}
+	pending, err := jobs.PendingInputs(ctx, tenantID, m.ID, pendingTurnInputs)
+	if err != nil {
+		return false, fmt.Errorf("read the inputs of member %s: %w", m.ID, err)
+	}
+	for _, in := range pending {
+		if in.JobID == j.ID {
+			return true, nil // the wrap-up of a closed job
 		}
-		return bank.NewPostgresStore(d.pool), nil
-	}}
+	}
+	return false, nil
 }
 
 // IsMemberBaseGrantLive is true only for the base grant of a member that is not

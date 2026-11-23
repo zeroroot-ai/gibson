@@ -265,3 +265,97 @@ func TestBankMemberLiveness(t *testing.T) {
 		t.Errorf("a daemon with no pool gave live = %v, err = %v, want not live and an error", got, err)
 	}
 }
+
+// pendingJobStore is a job store whose member has inputs that it has not finished.
+type pendingJobStore struct {
+	*fakeJobStore
+	pending []*job.Input
+	err     error
+}
+
+func (p pendingJobStore) PendingInputs(context.Context, string, string, int32) ([]*job.Input, error) {
+	return p.pending, p.err
+}
+
+// TestBankMemberLiveness_TurnGrant: the turn grant of a member renews only while the member
+// holds the job and the job still needs the grant. A closed job keeps it only for the wrap-up
+// that the member has not finished. The base grant of the member is no turn grant.
+func TestBankMemberLiveness_TurnGrant(t *testing.T) {
+	ctx := context.Background()
+	banks := newFakeBankStore()
+	banks.banks["bank-1"] = &bank.Bank{ID: "bank-1", AgentName: "claude"}
+	banks.members["bank-1"] = []*bank.Member{
+		{ID: "m-1", BankID: "bank-1", MissionRunID: "run-1", State: bank.MemberIdle},
+		{ID: "m-2", BankID: "bank-1", MissionRunID: "run-2", State: bank.MemberDead},
+	}
+	jobs := newFakeJobStore()
+	jobs.jobs["job-working"] = &job.Job{ID: "job-working", BankID: "bank-1", MemberID: "m-1", State: job.StateWorking}
+	jobs.jobs["job-waiting"] = &job.Job{ID: "job-waiting", BankID: "bank-1", MemberID: "m-1", State: job.StateWaiting}
+	jobs.jobs["job-other"] = &job.Job{ID: "job-other", BankID: "bank-1", MemberID: "m-9", State: job.StateWorking}
+	jobs.jobs["job-closed"] = &job.Job{ID: "job-closed", BankID: "bank-1", MemberID: "m-1", State: job.StateClosed}
+	jobs.jobs["job-wrapup"] = &job.Job{ID: "job-wrapup", BankID: "bank-1", MemberID: "m-1", State: job.StateClosed}
+	jobs.jobs["job-bank2"] = &job.Job{ID: "job-bank2", BankID: "bank-2", MemberID: "m-1", State: job.StateWorking}
+	store := pendingJobStore{fakeJobStore: jobs, pending: []*job.Input{{ID: "in-1", JobID: "job-wrapup", Kind: job.InputWrapUp}}}
+	live := &bankMemberLiveness{
+		banks: func() (bank.Store, error) { return banks, nil },
+		jobs:  func() (job.Store, error) { return store, nil },
+	}
+	tenant, err := auth.NewTenantID("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := func(bankID, run, task string) sdkcg.Claims {
+		return sdkcg.Claims{Tenant: tenant, MissionID: bankID, MissionRunID: run, TaskID: task, Subject: "user:alice"}
+	}
+	for name, c := range map[string]struct {
+		claims sdkcg.Claims
+		want   bool
+	}{
+		"a job that the member is working":                       {claims("bank-1", "run-1", "job-working"), true},
+		"a job that waits for the next input":                    {claims("bank-1", "run-1", "job-waiting"), true},
+		"a closed job whose wrap-up the member has not finished": {claims("bank-1", "run-1", "job-wrapup"), true},
+		"a closed job with nothing left to do":                   {claims("bank-1", "run-1", "job-closed"), false},
+		"a job that another member holds":                        {claims("bank-1", "run-1", "job-other"), false},
+		"a job of another bank":                                  {claims("bank-1", "run-1", "job-bank2"), false},
+		"a job that does not exist":                              {claims("bank-1", "run-1", "job-9"), false},
+		"a dead member":                                          {claims("bank-1", "run-2", "job-working"), false},
+		"the run of a member of another bank":                    {claims("bank-2", "run-1", "job-working"), false},
+		"a run that backs no member":                             {claims("bank-1", "run-9", "job-working"), false},
+		"the base grant of the member (its task is the member)":  {claims("bank-1", "run-1", "m-1"), false},
+		"a grant with no task":                                   {claims("bank-1", "run-1", ""), false},
+	} {
+		got, err := live.IsMemberTurnGrantLive(ctx, c.claims)
+		if err != nil {
+			t.Errorf("%s: a clean answer carries no error: %v", name, err)
+		}
+		if got != c.want {
+			t.Errorf("%s: live = %v, want %v", name, got, c.want)
+		}
+	}
+
+	// A store that is down is an error and never an answer.
+	down := errors.New("postgres is down")
+	for name, l := range map[string]*bankMemberLiveness{
+		"the bank store": {banks: func() (bank.Store, error) { return nil, down }, jobs: live.jobs},
+		"the job store":  {banks: live.banks, jobs: func() (job.Store, error) { return nil, down }},
+		"the inputs": {banks: live.banks, jobs: func() (job.Store, error) {
+			return pendingJobStore{fakeJobStore: jobs, err: down}, nil
+		}},
+	} {
+		task := "job-working"
+		if name == "the inputs" {
+			task = "job-closed"
+		}
+		if got, err := l.IsMemberTurnGrantLive(ctx, claims("bank-1", "run-1", task)); got || err == nil {
+			t.Errorf("%s down gave live = %v, err = %v, want not live and an error", name, got, err)
+		}
+	}
+	// With a pool the lookup reads the Postgres stores.
+	pooled := newBankMemberLiveness(&daemonImpl{pool: &mockPool{conn: minimalConn()}})
+	if s, err := pooled.jobs(); err != nil || s == nil {
+		t.Errorf("a pool must give a job store: %v, %v", s, err)
+	}
+	if _, err := newBankMemberLiveness(&daemonImpl{}).jobs(); err == nil {
+		t.Error("no pool must give an error")
+	}
+}

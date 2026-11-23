@@ -79,6 +79,13 @@ type LiveMemberLookup interface {
 	// cannot read the answer. The renewal then fails: a store that is down is
 	// not a member that is gone, and it is not a member that is alive.
 	IsMemberBaseGrantLive(ctx context.Context, claims sdkcg.Claims) (bool, error)
+	// IsMemberTurnGrantLive reports whether claims are the turn grant of a live
+	// member for a job that the member holds and that still needs it: the job is not
+	// closed, or it is closed and the member has an input of it that it has not
+	// finished (the wrap-up). It returns an error when it cannot read the answer.
+	// A turn grant that fails this check does not renew, so the authority of the sender
+	// ends with the work and never outlives the job.
+	IsMemberTurnGrantLive(ctx context.Context, claims sdkcg.Claims) (bool, error)
 }
 
 // CGJWTVerifier abstracts the verification path. Implementations
@@ -244,7 +251,19 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 			return nil, status.Errorf(codes.Unavailable, "renewal refused: the liveness of the member could not be read: %s", lerr)
 		}
 	}
-	if !missionLive && !memberLive {
+	// The turn grant of a member for a job renews while the member holds the job, so a
+	// long turn and the wrap-up after it keep a grant. It is read last, because most
+	// renewals are of a base grant.
+	turnLive := false
+	if !missionLive && !memberLive && claims.MissionRunID != "" {
+		var terr error
+		turnLive, terr = s.liveMembers.IsMemberTurnGrantLive(ctx, claims)
+		if terr != nil {
+			return nil, status.Errorf(codes.Unavailable,
+				"renewal refused: the liveness of the member turn could not be read: %s", terr)
+		}
+	}
+	if !missionLive && !memberLive && !turnLive {
 		return nil, status.Error(codes.FailedPrecondition,
 			"mission run has ended; a task grant cannot be renewed past its run (re-dispatch the task)")
 	}
@@ -277,6 +296,12 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 	// check (non-plugin-secret-isolation R4) — the renewal MUST inherit
 	// the original recipient class so legitimate plugin renewals are
 	// not rejected and non-plugin renewals carry the same isolation.
+	// The turn grant of a member was minted for the recipient class "agent", and its
+	// subject is the sender, so the class cannot be read from the subject.
+	recipient := recipientClassFromSubject(claims.Subject)
+	if turnLive {
+		recipient = "agent"
+	}
 	fresh, err := s.cgMinter.Mint(capabilitygrant.MintRequest{
 		Subject:        claims.Subject,
 		CallingAgent:   caller, // the renewal keeps the calling agent of the grant
@@ -286,7 +311,7 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 		MissionRunID:   claims.MissionRunID,                  // the renewal keeps the run of the grant
 		Initiator:      capabilitygrant.InitiatorOf(cgToken), // and the initiator of the grant
 		AllowedRPCs:    allowed,
-		RecipientClass: recipientClassFromSubject(claims.Subject),
+		RecipientClass: recipient,
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "mint renewal: %s", err)

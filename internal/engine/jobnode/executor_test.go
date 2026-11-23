@@ -450,3 +450,27 @@ func TestRun_AFailedVerdictIsNotReported(t *testing.T) {
 		t.Errorf("a failed job was reported: %+v", obs.got)
 	}
 }
+
+// A job that closes as failed with a merge request still releases its claim, and it links
+// nothing. The merge request is not reported, so the finding never moves to `fixing` and no
+// merge slot is ever queued for it: the next fix job gets the finding.
+func TestRun_AFailedJobWithAMergeRequestReleasesItsClaimAndLinksNothing(t *testing.T) {
+	obs := &recordingObserver{}
+	v := &scriptedVerifier{reports: []Report{{Pass: false, Score: 0.1, Report: "the delivery was refused"}}}
+	in := input(mergeRequestJobs(), v, spec(1, "tool/verify"))
+	in.Closed = obs
+	claims := &recordingClaims{}
+	in.Claims = claims
+
+	out, err := Run(context.Background(), in)
+
+	if err != nil || out.Result.Verdict != job.VerdictFailed {
+		t.Fatalf("outcome = %+v, err = %v, want a failed verdict", out.Result, err)
+	}
+	if len(claims.released) != 1 || claims.released[0] != "run-1/fix" {
+		t.Errorf("releases = %v, want the claim of the failed job", claims.released)
+	}
+	if len(obs.got) != 0 {
+		t.Errorf("a failed job was reported, so a link and a slot could follow: %+v", obs.got)
+	}
+}

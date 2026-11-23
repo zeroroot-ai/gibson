@@ -318,3 +318,28 @@ func TestFixHeadRecorded_KeepsTheHeadAndForgetsItOnReopen(t *testing.T) {
 		t.Fatalf("a reopened finding kept the head: %q %q", f.FixHeadSHA, f.FixFiles)
 	}
 }
+
+// A finding whose fix job failed has no merge request, so it has no merge slot. The release of
+// the claim leaves it open, and the next fix job takes it. Nothing waits on a person.
+func TestFixClaim_AFailedJobLeavesNoSlotAndTheFindingOpen(t *testing.T) {
+	w := NewWorld("t1")
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	Reduce(w, FindingRaised{ID: "f1", At: at})
+	Reduce(w, FixClaimed{ID: "f1", Claim: "run-1/fix", At: at})
+
+	Reduce(w, FixClaimReleased{ID: "f1", Claim: "run-1/fix", At: at}) // the job failed and released its claim
+
+	if got := w.FixClaimOf("f1"); got != "" {
+		t.Errorf("holder = %q, want none", got)
+	}
+	if got := w.MergeSlots(); len(got) != 0 {
+		t.Errorf("slots = %+v, want none: no merge request was linked", got)
+	}
+	f := findingByID(t, w, "f1")
+	if f.Status != FindingStatusOpen || f.MergeRequest != "" {
+		t.Errorf("finding = %q with merge request %q, want open with none", f.Status, f.MergeRequest)
+	}
+	if got := MergeSlotExpirySystem(w); len(got) != 0 {
+		t.Errorf("the expiry system has nothing to free: %+v", got)
+	}
+}
