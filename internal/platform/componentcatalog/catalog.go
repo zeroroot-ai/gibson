@@ -636,8 +636,8 @@ func validateConnector(id string, s ConnectorSpec, egress []string) error {
 	default:
 		return fmt.Errorf("%s: auth %q must be none, secret, or oauth", id, s.Auth)
 	}
-	if s.ErrorClasses && !(s.Shape == connectorv1alpha1.ConnectorShapeHosted &&
-		errorClassImage.MatchString(s.Image)) {
+	if s.ErrorClasses && (s.Shape != connectorv1alpha1.ConnectorShapeHosted ||
+		!errorClassImage.MatchString(s.Image)) {
 		return fmt.Errorf("%s: errorClasses is only for a Hosted connector image that matches %s, got %q",
 			id, errorClassImage, s.Image)
 	}

@@ -571,8 +571,9 @@ func TestConnectorMCP_ATooErrorMapsByItsClass(t *testing.T) {
 				t.Errorf("the connector text is lost: %v", err)
 			}
 			for _, m := range all {
-				if got := errors.Is(err, m); got != (m == tc.want) {
-					t.Errorf("errors.Is(%v) = %v, want %v", m, got, m == tc.want)
+				want := tc.want != nil && errors.Is(m, tc.want)
+				if got := errors.Is(err, m); got != want {
+					t.Errorf("errors.Is(%v) = %v, want %v", m, got, want)
 				}
 			}
 		})
