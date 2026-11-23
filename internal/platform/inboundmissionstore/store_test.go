@@ -489,7 +489,7 @@ func TestClaimMessage(t *testing.T) {
 	ctx := context.Background()
 
 	fresh := &fakeDB{exec: okExec}
-	got, err := newStore(fresh).ClaimMessage(ctx, "acme", "recon\x00webhook:okta:e1", "m-1")
+	got, err := newStore(fresh).ClaimMessage(ctx, "acme", "5:recon:webhook:okta:e1", "m-1")
 	require.NoError(t, err)
 	assert.Equal(t, ClaimNew, got)
 	assert.Contains(t, fresh.seen[1], "INSERT INTO inbound_messages")

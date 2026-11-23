@@ -37,6 +37,13 @@ import (
 // when the lease ends cannot happen. A second call then never starts a second mission.
 const inboundStartBound = inboundmissionstore.MessageLease / 5
 
+// inboundMessageKey is the key of a message id for one agent. The agent length comes
+// first, so two pairs of agent and id never give one key. The key is valid text, because
+// Postgres refuses a NUL byte in a text column.
+func inboundMessageKey(agent, messageKey string) string {
+	return fmt.Sprintf("%d:%s:%s", len(agent), agent, messageKey)
+}
+
 // inboundTaskInputVariable is the mission variable that holds the text of an
 // inbound message. The text is the task input. The daemon never reads a target
 // from it.
@@ -281,7 +288,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	defer cancelBound()
 	msgKey := ""
 	if k := a2aserver.WebhookMessageKey(req.Message); k != "" {
-		msgKey = req.Agent + "\x00" + k
+		msgKey = inboundMessageKey(req.Agent, k)
 		claim, cerr := r.published.ClaimMessage(ctx, c.Tenant, msgKey, missionID)
 		if cerr != nil {
 			return nil, fmt.Errorf("record the message id for agent %s: %w", req.Agent, cerr)

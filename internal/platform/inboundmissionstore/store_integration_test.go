@@ -107,11 +107,11 @@ func TestClaimMessage_NewClaimThenAClaimWhileTheLeaseRuns(t *testing.T) {
 	store, _ := newStore(t)
 	ctx := context.Background()
 
-	got, err := store.ClaimMessage(ctx, "acme", "recon\x00webhook:okta:e1", "m-1")
+	got, err := store.ClaimMessage(ctx, "acme", "5:recon:webhook:okta:e1", "m-1")
 	require.NoError(t, err)
 	assert.Equal(t, inboundmissionstore.ClaimNew, got, "a new key is claimed")
 
-	got, err = store.ClaimMessage(ctx, "acme", "recon\x00webhook:okta:e1", "m-2")
+	got, err = store.ClaimMessage(ctx, "acme", "5:recon:webhook:okta:e1", "m-2")
 	require.NoError(t, err)
 	assert.Equal(t, inboundmissionstore.ClaimInFlight, got, "a second call while the lease runs waits")
 }
@@ -119,7 +119,7 @@ func TestClaimMessage_NewClaimThenAClaimWhileTheLeaseRuns(t *testing.T) {
 func TestClaimMessage_AnExpiredLeaseWithNoTaskRowIsTakenOver(t *testing.T) {
 	store, pool := newStore(t)
 	ctx := context.Background()
-	const key = "recon\x00webhook:okta:e1"
+	const key = "5:recon:webhook:okta:e1"
 	_, err := store.ClaimMessage(ctx, "acme", key, "m-1")
 	require.NoError(t, err)
 	expireLease(t, pool, key)
@@ -139,7 +139,7 @@ func TestClaimMessage_AnExpiredLeaseWithNoTaskRowIsTakenOver(t *testing.T) {
 func TestClaimMessage_AnExpiredLeaseWithATaskRowIsADuplicate(t *testing.T) {
 	store, pool := newStore(t)
 	ctx := context.Background()
-	const key = "recon\x00webhook:okta:e1"
+	const key = "5:recon:webhook:okta:e1"
 	_, err := store.ClaimMessage(ctx, "acme", key, "m-1")
 	require.NoError(t, err)
 	reserveTask(t, store, pool, "recon", "m-1") // the mission was reserved, and only its confirm failed
@@ -157,7 +157,7 @@ func TestClaimMessage_AnExpiredLeaseWithATaskRowIsADuplicate(t *testing.T) {
 func TestClaimMessage_ConfirmForgetAndTheTenantDatabase(t *testing.T) {
 	store, pool := newStore(t)
 	ctx := context.Background()
-	const key = "recon\x00webhook:okta:e1"
+	const key = "5:recon:webhook:okta:e1"
 
 	_, err := store.ClaimMessage(ctx, "acme", key, "m-1")
 	require.NoError(t, err)
@@ -171,7 +171,7 @@ func TestClaimMessage_ConfirmForgetAndTheTenantDatabase(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, inboundmissionstore.ClaimDuplicate, got, "a confirmed key is never forgotten")
 
-	const other = "recon\x00webhook:okta:e2"
+	const other = "5:recon:webhook:okta:e2"
 	_, err = store.ClaimMessage(ctx, "acme", other, "m-4")
 	require.NoError(t, err)
 	require.NoError(t, store.ForgetMessage(ctx, "acme", other, "m-4"))

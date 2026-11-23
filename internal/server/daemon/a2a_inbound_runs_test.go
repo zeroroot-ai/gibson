@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/google/uuid"
@@ -1326,7 +1327,7 @@ func TestInboundRuns_AnAgentThatVanishedGivesTheMessageIdBack(t *testing.T) {
 	task, err := startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1}))
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateRejected, task.Status.State)
-	assert.Equal(t, []string{"acme/recon\x00webhook:crowdstrike:e1"}, pub.forgotten)
+	assert.Equal(t, []string{"acme/" + inboundMessageKey("recon", "webhook:crowdstrike:e1")}, pub.forgotten)
 
 	pub.forgetErr = errors.New("db down")
 	_, err = startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e2", map[string]any{"a": 1}))
@@ -1339,7 +1340,7 @@ func TestInboundRuns_ASecondRequestWhileTheFirstIsInWorkGetsARetryableAnswer(t *
 	starter := &recordingStarter{}
 	r := newInboundRuns(starter)
 	pub := r.published.(*fakePublished)
-	_, err := pub.ClaimMessage(context.Background(), "acme", "recon\x00webhook:crowdstrike:e1", "m-first")
+	_, err := pub.ClaimMessage(context.Background(), "acme", inboundMessageKey("recon", "webhook:crowdstrike:e1"), "m-first")
 	require.NoError(t, err)
 
 	task, err := startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1}))
@@ -1417,7 +1418,7 @@ func TestInboundRuns_ASlowStartEndsWithinItsBoundAndGivesBackTheClaim(t *testing
 	_, err := startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1}))
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Equal(t, []string{"acme/recon\x00webhook:crowdstrike:e1"}, pub.forgotten)
+	assert.Equal(t, []string{"acme/" + inboundMessageKey("recon", "webhook:crowdstrike:e1")}, pub.forgotten)
 	assert.Contains(t, pub.events, "release:slot-1")
 	assert.Less(t, inboundStartBound, inboundmissionstore.MessageLease, "the bound is under the lease")
 }
@@ -1438,4 +1439,14 @@ func TestInboundRuns_AConfirmThatMatchesNoRowEndsTheMission(t *testing.T) {
 	require.Len(t, starter.started, 1)
 	assert.Equal(t, []string{starter.started[0].MissionID}, stopped, "the mission ends")
 	assert.Contains(t, pub.events, "release:slot-1", "the task row is deleted")
+}
+
+// The key is valid text and has no NUL byte, which Postgres refuses in a text column.
+// Two pairs of agent and id never give one key.
+func TestInboundMessageKey_IsValidTextAndUnambiguous(t *testing.T) {
+	k := inboundMessageKey("recon", "webhook:okta:e1")
+	assert.NotContains(t, k, "\x00")
+	assert.True(t, utf8.ValidString(k))
+	assert.NotEqual(t, inboundMessageKey("a", "b:c"), inboundMessageKey("a:b", "c"))
+	assert.NotEqual(t, inboundMessageKey("recon", "x"), inboundMessageKey("other", "x"))
 }
