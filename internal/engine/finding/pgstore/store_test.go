@@ -715,3 +715,20 @@ func TestStore_ASecondSubmitKeepsTheFieldsOfTheDaemon(t *testing.T) {
 	check, _ := doc["check"].(map[string]any)
 	assert.Equal(t, string(finding.CheckTool), check["kind"])
 }
+
+// A round trip through the store keeps the agent name and the tags. The agent
+// name rides on EnhancedFinding, because encoding/json drops the name of the
+// embedded finding (incident-agent#8).
+func TestStore_GetKeepsTheAgentNameAndTheTags(t *testing.T) {
+	s := newTestStore(newFakeDB())
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+	f.AgentName = "incident-agent"
+	f.Finding.AgentName = "someone-else" // the embedded name must not win or leak
+	f.Tags = []string{"release:1.4", "pci"}
+	require.NoError(t, s.Store(context.Background(), "acme", f))
+
+	got, err := s.Get(context.Background(), "acme", f.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "incident-agent", got.AgentName)
+	assert.Equal(t, []string{"release:1.4", "pci"}, got.Tags)
+}
