@@ -215,6 +215,11 @@ func (q *redisWorkQueue) Enqueue(ctx context.Context, tenant, kind, name string,
 	if err := bindWorkMaxTokens(ctx, q.client, item); err != nil {
 		return "", fmt.Errorf("work queue enqueue: %w", err)
 	}
+	// Bind the agent and the task of agent work, so a call of the agent that
+	// the daemon runs for it finds the harness of its node.
+	if err := bindWorkAgent(ctx, q.client, kind, name, item); err != nil {
+		return "", fmt.Errorf("work queue enqueue: %w", err)
+	}
 
 	msgID, err := q.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: streamKey(tenant, kind, name),

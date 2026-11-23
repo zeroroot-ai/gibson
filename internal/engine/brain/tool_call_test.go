@@ -168,3 +168,20 @@ func TestAgentToolCall_RetentionSweepPurgesTextKeepsMetadata(t *testing.T) {
 		t.Fatalf("text before cutoff must be untouched: %+v", newCall)
 	}
 }
+
+// The record names the agent that made the call. A later observation fills the
+// name and never erases it.
+func TestAgentToolCall_RecordsTheAgent(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, AgentToolCallObserved{ToolCallID: "tc1", ToolName: "skill-script", Agent: "scan-agent"})
+	Reduce(w, AgentToolCallObserved{ToolCallID: "tc2", ToolName: "skill-script"})
+	Reduce(w, AgentToolCallObserved{ToolCallID: "tc2", Agent: "late-agent"})
+	Reduce(w, AgentToolCallObserved{ToolCallID: "tc1", Agent: "other"})
+	byID := map[string]string{}
+	for _, c := range w.AgentToolCallSnapshot() {
+		byID[c.ToolCallID] = c.Agent
+	}
+	if byID["tc1"] != "scan-agent" || byID["tc2"] != "late-agent" {
+		t.Fatalf("agents = %v", byID)
+	}
+}

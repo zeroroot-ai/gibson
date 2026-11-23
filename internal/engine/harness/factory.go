@@ -244,6 +244,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		missionSecrets:          resolveMissionSecrets(f.config.MissionSecrets),
 		skillStore:              f.config.SkillFiles,
 		missionDenyList:         f.config.MissionDenyList,
+		skillLoads:              f.config.SkillLoads,
 		workQueue:               f.config.WorkQueue,
 		callbackManager:         f.config.CallbackManager,
 		cgMinter:                minterFrom(f.config.CGMinter),

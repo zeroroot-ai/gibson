@@ -522,6 +522,9 @@ type ToolCallRecord struct {
 	// falls back to the agent run, so it cannot tell one run of a mission from
 	// the next (gibson#1217). Empty when the context carries no mission run.
 	MissionRunID string
+	// Agent is the name of the agent that made the call, from the context of
+	// the callback. It is empty when the call names no agent.
+	Agent string
 	// ToolName is the tool that was called.
 	ToolName string
 	// Arguments + Result are the full JSON the agent sent and the tool
@@ -863,6 +866,7 @@ func (s *HarnessCallbackService) captureGrantedToolCall(
 		MissionID:          contextInfo.GetMissionId(),
 		MissionRunID:       contextInfo.GetMissionRunId(),
 		RunID:              runID,
+		Agent:              contextInfo.GetAgentName(),
 		ToolName:           toolName,
 		Arguments:          argumentsJSON,
 		Result:             resultJSON,
@@ -887,7 +891,81 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	if isMetaTool(req.GetName()) {
 		return s.callMetaTool(ctx, req)
 	}
+	return s.callTool(ctx, req, s.resolveToolMessages)
+}
 
+// toolMessages builds the request message and the empty response message of a
+// tool call. A reply with an error ends the call before any dispatch.
+type toolMessages func(ctx context.Context, harness AgentHarness, req *harnesspb.CallToolProtoRequest) (request, response proto.Message, refused *harnesspb.CallToolProtoResponse)
+
+// resolveToolMessages builds the messages of the call of an agent in callback
+// mode: the tool descriptor gives the metadata, and the resolver reads the
+// input type that the agent names.
+func (s *HarnessCallbackService) resolveToolMessages(
+	ctx context.Context, harness AgentHarness, req *harnesspb.CallToolProtoRequest,
+) (request, response proto.Message, refused *harnesspb.CallToolProtoResponse) {
+	// Get tool descriptor to validate it exists and extract metadata
+	toolDesc, err := harness.GetToolDescriptor(ctx, req.Name)
+	if err != nil {
+		s.logger.Error("tool not found", "error", err, "tool", req.Name)
+		// gibson:no-tool-executed — the tool was never resolved, so it never ran.
+		return nil, nil, &harnesspb.CallToolProtoResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
+				Message: "tool not found: " + req.Name,
+			},
+		}
+	}
+
+	// Extract metadata from tool descriptor for FileDescriptorSet resolution
+	toolMetadata := make(map[string]string)
+	if toolDesc != nil && toolDesc.Metadata != nil {
+		toolMetadata = toolDesc.Metadata
+	}
+
+	// Use resolver to unmarshal input JSON into proto message
+	requestMsg, err := s.resolver.UnmarshalProtoJSON(ctx, req.InputType, req.InputJson, toolMetadata)
+	if err != nil {
+		s.logger.Error("failed to resolve and unmarshal input type",
+			"error", err,
+			"tool", req.Name,
+			"input_type", req.InputType)
+		// gibson:no-tool-executed — the request never became a valid proto
+		// call, so no tool was invoked.
+		return nil, nil, &harnesspb.CallToolProtoResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: fmt.Sprintf("failed to unmarshal input: %v", err),
+			},
+		}
+	}
+
+	// Create empty output message for tool to fill
+	responseMsg, err := s.resolver.ResolveOutputType(ctx, req.OutputType, toolMetadata)
+	if err != nil {
+		s.logger.Error("failed to resolve output type",
+			"error", err,
+			"tool", req.Name,
+			"output_type", req.OutputType)
+		// gibson:no-tool-executed — the output message could not even be
+		// constructed, so CallToolProto below was never reached.
+		return nil, nil, &harnesspb.CallToolProtoResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Message: fmt.Sprintf("failed to resolve output type: %v", err),
+			},
+		}
+	}
+	return requestMsg, responseMsg, nil
+}
+
+// callTool is the one path of a tool call from an agent: the harness of the
+// node of the agent, the deny list of the mission, the events, the dispatch and
+// the flight recorder. An agent in callback mode and an agent in pull mode both
+// run through it, and they differ only in how the messages are built.
+func (s *HarnessCallbackService) callTool(
+	ctx context.Context, req *harnesspb.CallToolProtoRequest, messages toolMessages,
+) (*harnesspb.CallToolProtoResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -936,57 +1014,9 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		"output_type":    req.OutputType,
 	})
 
-	// Get tool descriptor to validate it exists and extract metadata
-	toolDesc, err := harness.GetToolDescriptor(ctx, req.Name)
-	if err != nil {
-		s.logger.Error("tool not found", "error", err, "tool", req.Name)
-		// gibson:no-tool-executed — the tool was never resolved, so it never ran.
-		return &harnesspb.CallToolProtoResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
-				Message: fmt.Sprintf("tool not found: %s", req.Name),
-			},
-		}, nil
-	}
-
-	// Extract metadata from tool descriptor for FileDescriptorSet resolution
-	toolMetadata := make(map[string]string)
-	if toolDesc != nil && toolDesc.Metadata != nil {
-		toolMetadata = toolDesc.Metadata
-	}
-
-	// Use resolver to unmarshal input JSON into proto message
-	requestMsg, err := s.resolver.UnmarshalProtoJSON(ctx, req.InputType, req.InputJson, toolMetadata)
-	if err != nil {
-		s.logger.Error("failed to resolve and unmarshal input type",
-			"error", err,
-			"tool", req.Name,
-			"input_type", req.InputType)
-		// gibson:no-tool-executed — the request never became a valid proto
-		// call, so no tool was invoked.
-		return &harnesspb.CallToolProtoResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: fmt.Sprintf("failed to unmarshal input: %v", err),
-			},
-		}, nil
-	}
-
-	// Create empty output message for tool to fill
-	responseMsg, err := s.resolver.ResolveOutputType(ctx, req.OutputType, toolMetadata)
-	if err != nil {
-		s.logger.Error("failed to resolve output type",
-			"error", err,
-			"tool", req.Name,
-			"output_type", req.OutputType)
-		// gibson:no-tool-executed — the output message could not even be
-		// constructed, so CallToolProto below was never reached.
-		return &harnesspb.CallToolProtoResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: fmt.Sprintf("failed to resolve output type: %v", err),
-			},
-		}, nil
+	requestMsg, responseMsg, refused := messages(ctx, harness, req)
+	if refused != nil {
+		return refused, nil
 	}
 
 	// The id of this call. The record, the reply and the discovery processor

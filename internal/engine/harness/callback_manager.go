@@ -724,6 +724,13 @@ func (m *CallbackManager) CallMetaTool(ctx context.Context, tenant, missionID, r
 	return m.server.Service().CallMetaTool(ctx, tenant, missionID, runID, name, input)
 }
 
+// CallPullTool runs a sandboxed catalog tool for an agent in pull mode.
+func (m *CallbackManager) CallPullTool(
+	ctx context.Context, tenant, missionID, runID, agent, task, name string, input []byte,
+) (*harnesspb.CallToolProtoResponse, error) {
+	return m.server.Service().CallPullTool(ctx, tenant, missionID, runID, agent, task, name, input)
+}
+
 // SetMissionBlockedTools sets the source of the mission deny list on the
 // callback service. Call after NewCallbackManager, before Start(). Thread-safe.
 func (m *CallbackManager) SetMissionBlockedTools(src MissionBlockedToolsSource) {
