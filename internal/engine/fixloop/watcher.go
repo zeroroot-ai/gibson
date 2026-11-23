@@ -255,13 +255,18 @@ func noFixHead(fs []brain.FindingSnapshot) bool {
 	return false
 }
 
+// placeBlockProp is the node property of the place wait. It is the Watcher own
+// property, so it never erases the reason that the fix agent wrote.
+const placeBlockProp = "place_block"
+
 // placeBlockText is the text of the wait that a finding with no single Application
 // shows to a person.
 func placeBlockText(reason string) string { return "waiting on a person: " + reason }
 
 // blockedByPlace records why a finding gets no merge slot: it has no single
 // Application. The reason goes on the World (the event FindingPlaceBlocked) and on
-// the property fix_blocked_reason of the finding, the one that a person reads. The
+// the property place_block of the finding. The fix agent owns fix_blocked_reason,
+// and the Watcher never writes or clears it. The
 // state is in the World, so a restart neither repeats the wait nor loses it, and
 // the same state tells the Watcher to clear the wait (gibson#1469).
 func (w *Watcher) blockedByPlace(f brain.FindingSnapshot, reason, mission string) []brain.Event {
@@ -290,7 +295,7 @@ func (w *Watcher) placeBlockEvents(f brain.FindingSnapshot, text, mission string
 		// so the projector does not reset it.
 		brain.EntityObserved{
 			Label: "Finding", Key: f.ID, ScopeID: f.ScopeID, MissionID: mission,
-			Props: map[string]string{"fix_blocked_reason": text},
+			Props: map[string]string{placeBlockProp: text},
 		},
 	}
 }

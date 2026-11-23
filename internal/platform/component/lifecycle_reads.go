@@ -89,6 +89,11 @@ type ApplicationFinding struct {
 	// Finding again in each pass, because no actor clears the reason. Empty
 	// means that no pass gave up on it.
 	FixBlockedReason string `json:"fix_blocked_reason,omitempty"`
+	// PlaceBlock is the wait on a person that the Watcher of the fix loop shows when
+	// the Finding has no single Application (the node property place_block). It is
+	// not the reason of the agent: each has its own property, and the Watcher
+	// clears only this one.
+	PlaceBlock string `json:"place_block,omitempty"`
 	// MergeRequest and MergeRequestURL name the merge request of the current
 	// fix of the Finding: the FIXED_BY edge to the node whose key the Finding
 	// records. The fix agent reads them to learn the merge request of its job.
@@ -146,6 +151,7 @@ RETURN
   coalesce(f.priority_rule, '')    AS priority_rule,
   coalesce(f.priority_reason, '')  AS priority_reason,
   coalesce(f.fix_blocked_reason, '') AS fix_blocked_reason,
+  coalesce(f.place_block, '')      AS place_block,
   coalesce(mr.key, '')             AS merge_request,
   coalesce(mr.url, '')             AS merge_request_url,
   coalesce(f.fix_head_sha, '')     AS fix_head_sha,
@@ -216,6 +222,7 @@ func encodeApplicationFindings(rows []map[string]any) ([]byte, error) {
 			PriorityReason:  stringField(r, "priority_reason"),
 
 			FixBlockedReason: stringField(r, "fix_blocked_reason"),
+			PlaceBlock:       stringField(r, "place_block"),
 			MergeRequest:     stringField(r, "merge_request"),
 			MergeRequestURL:  stringField(r, "merge_request_url"),
 			FixHeadSHA:       stringField(r, "fix_head_sha"),

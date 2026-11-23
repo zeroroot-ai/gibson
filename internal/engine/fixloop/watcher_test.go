@@ -1107,7 +1107,7 @@ func TestStep_AFindingInTwoApplicationsGetsNoSlotAndAVisibleWait(t *testing.T) {
 			}
 			if eo, ok := ev.(brain.EntityObserved); ok && eo.Label == "Finding" {
 				observed++
-				if got := eo.Props["fix_blocked_reason"]; !strings.Contains(got, "waiting on a person") || !strings.Contains(got, "app-a") {
+				if got := eo.Props[placeBlockProp]; !strings.Contains(got, "waiting on a person") || !strings.Contains(got, "app-a") {
 					t.Errorf("pass %d: reason = %q", i, got)
 				}
 				if eo.ScopeID != "scope-1" {
@@ -1126,7 +1126,9 @@ func TestStep_AFindingInTwoApplicationsGetsNoSlotAndAVisibleWait(t *testing.T) {
 	for _, ev := range step() {
 		switch e := ev.(type) {
 		case brain.EntityObserved:
-			cleared = cleared || (e.Label == "Finding" && e.Props["fix_blocked_reason"] == "" && e.ScopeID == "scope-1")
+			_, agent := e.Props["fix_blocked_reason"]
+			v, own := e.Props[placeBlockProp]
+			cleared = cleared || (e.Label == "Finding" && own && v == "" && !agent && e.ScopeID == "scope-1")
 		case brain.MergeRequestQueued:
 			queued = true
 		}

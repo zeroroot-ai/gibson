@@ -180,3 +180,37 @@ func TestEntityUpsertParams_AFindingKeepsTheFixBlockedReason(t *testing.T) {
 		t.Fatal("a sighting rewrote the identity of the Finding")
 	}
 }
+
+// The Watcher writes the place wait to its own property. An event of the agent and
+// an event of the Watcher each carry only their own property, so one never erases
+// the other, and clearing the place block leaves the reason of the agent.
+func TestEntityUpsertParams_PlaceBlockAndAgentReasonAreSeparate(t *testing.T) {
+	agent, err := entityUpsertParams(brain.EntitySnapshot{Label: "Finding", Key: "f-1",
+		Props: map[string]string{"fix_blocked_reason": "the flaw is on a host"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := entityUpsertParams(brain.EntitySnapshot{Label: "Finding", Key: "f-1",
+		Props: map[string]string{"place_block": "waiting on a person: two Applications"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear, err := entityUpsertParams(brain.EntitySnapshot{Label: "Finding", Key: "f-1",
+		Props: map[string]string{"place_block": ""}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	props := func(p map[string]any) map[string]any { m, _ := p["props"].(map[string]any); return m }
+	if _, ok := props(agent)["place_block"]; ok {
+		t.Error("the agent event carries the place block")
+	}
+	if _, ok := props(set)["fix_blocked_reason"]; ok {
+		t.Error("the place block event carries the reason of the agent")
+	}
+	if v, ok := props(clear)["place_block"]; !ok || v != "" {
+		t.Errorf("clear props = %v, want an empty place_block", props(clear))
+	}
+	if _, ok := props(clear)["fix_blocked_reason"]; ok {
+		t.Error("clearing the place block touches the reason of the agent")
+	}
+}
