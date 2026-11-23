@@ -118,7 +118,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 AS runtime
+FROM ghcr.io/zeroroot-ai/mirror/alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f AS runtime
 
 # APT_CACHE_BUST — make `apk upgrade` actually run.
 #
