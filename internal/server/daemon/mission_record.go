@@ -39,15 +39,14 @@ func newMissionRecord(
 // pending with its creator, so ListMissions and the dashboard show it before it
 // runs (hosted#205). MissionStarted moves the same entity to running.
 func (d *daemonImpl) announceMission(tenant auth.TenantID, m *mission.Mission) {
-	if d.brainRegistry == nil {
-		return
+	if d.brainRegistry != nil {
+		d.brainRegistry.For(tenant.String()).Submit(brain.MissionCreated{
+			ID:          m.ID.String(),
+			Name:        m.Name,
+			Description: m.Description,
+			TargetID:    m.TargetID.String(),
+			TenantID:    m.TenantID,
+			CreatedBy:   m.CreatedBy,
+		})
 	}
-	d.brainRegistry.For(tenant.String()).Submit(brain.MissionCreated{
-		ID:          m.ID.String(),
-		Name:        m.Name,
-		Description: m.Description,
-		TargetID:    m.TargetID.String(),
-		TenantID:    m.TenantID,
-		CreatedBy:   m.CreatedBy,
-	})
 }

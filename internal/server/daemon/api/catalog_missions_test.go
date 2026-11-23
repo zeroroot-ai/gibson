@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
@@ -342,7 +343,7 @@ func TestRunCatalogMission_RendersThenStartsTheMission(t *testing.T) {
 	srv := NewDaemonServer(daemon, nil, nil)
 	params := map[string]string{"repositoryUrl": "https://github.com/acme/shop", "application": "acme/shop", "forgeConnector": "github-fixloop"}
 
-	resp, err := srv.RunCatalogMission(context.Background(), &daemonpb.RunCatalogMissionRequest{
+	resp, err := srv.RunCatalogMission(callerCtx(), &daemonpb.RunCatalogMissionRequest{
 		Name: "scan", Params: params, TargetId: "target-1",
 	})
 	if err != nil {
@@ -363,7 +364,7 @@ func TestRunCatalogMission_RendersThenStartsTheMission(t *testing.T) {
 		"no branch":       {Name: "scan", Params: map[string]string{"application": "acme/shop"}, TargetId: "target-1"},
 	} {
 		before := called
-		if _, rerr := srv.RunCatalogMission(context.Background(), req); status_grpc.Code(rerr) != codes.InvalidArgument {
+		if _, rerr := srv.RunCatalogMission(callerCtx(), req); status_grpc.Code(rerr) != codes.InvalidArgument {
 			t.Errorf("%s: err = %v, want InvalidArgument", name, rerr)
 		}
 		if called != before {
@@ -379,10 +380,15 @@ func TestRunCatalogMission_ADaemonErrorIsReturned(t *testing.T) {
 		return "", status_grpc.Error(codes.NotFound, "target not found")
 	}}
 	srv := NewDaemonServer(daemon, nil, nil)
-	resp, err := srv.RunCatalogMission(context.Background(), &daemonpb.RunCatalogMissionRequest{
+	resp, err := srv.RunCatalogMission(callerCtx(), &daemonpb.RunCatalogMissionRequest{
 		Name: "scan", TargetId: "t", Params: map[string]string{"imageRef": "r/i@sha256:abc"},
 	})
 	if status_grpc.Code(err) != codes.NotFound || resp != nil {
 		t.Errorf("resp = %v, err = %v, want NotFound", resp, err)
 	}
+}
+
+// callerCtx is the context of a verified caller.
+func callerCtx() context.Context {
+	return auth.WithIdentity(context.Background(), auth.Identity{Subject: "user:alice"})
 }
