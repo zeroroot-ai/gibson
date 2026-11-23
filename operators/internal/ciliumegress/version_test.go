@@ -202,6 +202,10 @@ func TestRequireFixedVersion_ReadsTheTagFromThePodSpec(t *testing.T) {
 	if err := run(twoContainerDaemonSet(pinned), agentPodWithStatus("latest", pinned, "quay.io/cilium/cilium:latest")); err != nil {
 		t.Fatalf("a status tag that names no version refused the start: %v", err)
 	}
+	// A mirror tag that is not a semantic version is no refusal either.
+	if err := run(twoContainerDaemonSet(pinned), agentPodWithStatus("mirror", pinned, "quay.io/cilium/cilium:1.20.2.1")); err != nil {
+		t.Fatalf("a status tag that is not a semantic version refused the start: %v", err)
+	}
 	// A status tag that names an old version still refuses.
 	err = run(twoContainerDaemonSet(pinned), agentPodWithStatus("oldstatus", pinned, "quay.io/cilium/cilium:v1.15.9"))
 	if !errors.Is(err, ErrCiliumVersion) {

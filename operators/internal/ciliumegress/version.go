@@ -108,7 +108,7 @@ func CheckVersion(version string) error {
 var imageIDRe = regexp.MustCompile(`^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[a-zA-Z0-9=_-]{32,}$`)
 
 // versionTagRe matches a tag that names a version, such as v1.20.2 or 1.20.2-cee.1.
-var versionTagRe = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+`)
+var versionTagRe = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.+-]*)?$`)
 
 // ImageVersion returns the tag of a container image, for example "v1.15.10"
 // from "quay.io/cilium/cilium:v1.15.10@sha256:abc". An image with a digest
