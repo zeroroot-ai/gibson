@@ -848,6 +848,7 @@ func (b *brainExecutor) dispatchConnectorTool(bind *missionBinding, req brain.Di
 	if b.connectors == nil {
 		return "", fmt.Errorf("tool %q: this daemon has no connector caller", tid.Canonical())
 	}
+	started := time.Now()
 	args := map[string]any{}
 	if in := strings.TrimSpace(req.Input); in != "" && in != "null" {
 		if err := json.Unmarshal([]byte(in), &args); err != nil {
@@ -863,7 +864,7 @@ func (b *brainExecutor) dispatchConnectorTool(bind *missionBinding, req brain.Di
 				Err: fmt.Sprintf("waiting for the approval of %s: request %s", tid.Canonical(), pending.ID),
 			})
 		}
-		if werr := b.waitForApproval(bind, pending.ID, req.Timeout); werr != nil {
+		if werr := b.waitForApproval(bind, pending.ID, timeLeft(req.Timeout, started)); werr != nil {
 			b.withdrawApproval(bind, pending.ID, werr)
 			return "", fmt.Errorf("tool %q: %w", tid.Canonical(), werr)
 		}
@@ -898,6 +899,17 @@ func (b *brainExecutor) nodeResult(_ *missionBinding, _ string, tid toolid.ID, r
 		return "", fmt.Errorf("tool %q: encode the result: %w", tid.Canonical(), err)
 	}
 	return string(out), nil
+}
+
+// timeLeft is the part of the timeout of a node that is left after the time since
+// started. The timeout is the bound of the whole node, so the wait for an approval
+// gets what the first call left. Zero stays zero (no timeout declared). A timeout
+// that has passed leaves the shortest wait, which ends at once.
+func timeLeft(timeout time.Duration, started time.Time) time.Duration {
+	if timeout <= 0 {
+		return 0
+	}
+	return max(timeout-time.Since(started), time.Nanosecond)
 }
 
 // errApprovalGone says that the approval request is not in the World.

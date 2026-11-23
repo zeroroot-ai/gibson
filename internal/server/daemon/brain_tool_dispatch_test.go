@@ -302,6 +302,8 @@ type fakeMissionConnector struct {
 	// errs are the errors of the first calls, in order. The call after the last
 	// one returns result and err.
 	errs []error
+	// delay is how long each call takes.
+	delay time.Duration
 	// mu guards every field above, because the node calls on its own goroutine
 	// while the test reads the count.
 	mu    sync.Mutex
@@ -318,6 +320,7 @@ func (f *fakeMissionConnector) callCount() int {
 func (f *fakeMissionConnector) CallConnectorForMission(
 	_ context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any,
 ) (any, error) {
+	time.Sleep(f.delay)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.tenant, f.mission, f.run, f.work, f.connector, f.tool, f.args = tenant, missionID, runID, workID, connector, tool, args
@@ -581,5 +584,41 @@ func TestWaitForApproval_NoWorldAndTheDefaultCap(t *testing.T) {
 	if err := b.waitForApproval(&missionBinding{ctx: ctx, tenant: "acme", eng: eng}, "req-cap", 0); err == nil ||
 		!strings.Contains(err.Error(), "ended") {
 		t.Errorf("err = %v, want the end of the mission", err)
+	}
+}
+
+// The timeout of a node bounds the whole node. A first call that takes time leaves
+// the wait for the approval only the rest of the timeout.
+func TestDispatchTool_TheApprovalWaitGetsTheTimeLeft(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-left")
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = &fakeMissionConnector{delay: 150 * time.Millisecond, err: &metatool.PendingApproval{ID: "req-left"}}
+	b.approvalPoll = time.Millisecond
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+	start := time.Now()
+	_, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w9", MissionID: "m1", Timeout: 250 * time.Millisecond, Target: "mcp:crowdstrike-response:isolate_x"})
+	if err == nil || !strings.Contains(err.Error(), "bound of the node") {
+		t.Fatalf("err = %v, want the bound of the node", err)
+	}
+	// The call took 150 ms, so the wait gets about 100 ms. A whole timeout again
+	// would end after about 400 ms.
+	if took := time.Since(start); took > 350*time.Millisecond {
+		t.Errorf("the node ran %v, want about the timeout of 250 ms", took)
+	}
+}
+
+func TestTimeLeft(t *testing.T) {
+	if got := timeLeft(0, time.Now()); got != 0 {
+		t.Errorf("no timeout = %v, want 0", got)
+	}
+	if got := timeLeft(time.Millisecond, time.Now().Add(-time.Hour)); got != time.Nanosecond {
+		t.Errorf("a passed timeout = %v, want the shortest wait", got)
+	}
+	if got := timeLeft(time.Hour, time.Now()); got <= 59*time.Minute || got > time.Hour {
+		t.Errorf("time left = %v", got)
 	}
 }
