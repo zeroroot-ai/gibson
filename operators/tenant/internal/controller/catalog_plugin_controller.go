@@ -180,7 +180,7 @@ func (c CatalogPluginConfig) Validate() error {
 // binds it into each plugin namespace.
 // +kubebuilder:rbac:groups=spire.spiffe.io,resources=clusterspiffeids,verbs=get;list;create;update;delete
 // +kubebuilder:rbac:groups=apps,namespace=kube-system,resources=daemonsets,resourceNames=cilium,verbs=get
-// +kubebuilder:rbac:groups=core,namespace=kube-system,resources=pods,verbs=get;list
+// +kubebuilder:rbac:groups=core,namespace=kube-system,resources=pods,verbs=list
 
 // CatalogPluginRunnable converges the cluster to the catalog plugins the
 // tenants enabled.
