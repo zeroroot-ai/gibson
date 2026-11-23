@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -300,13 +301,25 @@ type fakeMissionConnector struct {
 	err                                         error
 	// errs are the errors of the first calls, in order. The call after the last
 	// one returns result and err.
-	errs  []error
+	errs []error
+	// mu guards every field above, because the node calls on its own goroutine
+	// while the test reads the count.
+	mu    sync.Mutex
 	calls int
+}
+
+// callCount returns the number of calls, safe against a running node.
+func (f *fakeMissionConnector) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
 }
 
 func (f *fakeMissionConnector) CallConnectorForMission(
 	_ context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any,
 ) (any, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.tenant, f.mission, f.run, f.work, f.connector, f.tool, f.args = tenant, missionID, runID, workID, connector, tool, args
 	f.calls++
 	if f.calls <= len(f.errs) {
@@ -419,8 +432,8 @@ func TestDispatchTool_AMarkedToolWaitsForTheDecisionAndCallsOnce(t *testing.T) {
 	}()
 	// While the request is open, the node does not call again, however long it waits.
 	time.Sleep(60 * time.Millisecond)
-	if conn.calls != 1 {
-		t.Fatalf("the node called %d times while the request was open, want 1", conn.calls)
+	if conn.callCount() != 1 {
+		t.Fatalf("the node called %d times while the request was open, want 1", conn.callCount())
 	}
 	select {
 	case o := <-done:
@@ -436,8 +449,8 @@ func TestDispatchTool_AMarkedToolWaitsForTheDecisionAndCallsOnce(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("the node did not resume after the decision")
 	}
-	if conn.calls != 2 {
-		t.Errorf("calls = %d, want the first call and one call after the decision", conn.calls)
+	if conn.callCount() != 2 {
+		t.Errorf("calls = %d, want the first call and one call after the decision", conn.callCount())
 	}
 }
 
