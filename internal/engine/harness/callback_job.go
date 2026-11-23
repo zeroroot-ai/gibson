@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"time"
 
@@ -47,6 +48,7 @@ type JobSurface interface {
 	PendingInputs(ctx context.Context, tenantID, memberID string, limit int32) ([]*job.Input, error)
 	Acknowledge(ctx context.Context, tenantID, inputID string) error
 	SetTurn(ctx context.Context, tenantID, jobID string, sender job.Principal, inputID string) error
+	ReleaseJob(ctx context.Context, tenantID, jobID, memberID string) error
 	SetState(ctx context.Context, tenantID, jobID string, state job.State, claudeSessionID string) (*job.Job, error)
 	AddDeliverable(ctx context.Context, tenantID, jobID string, d *jobpb.Deliverable) (*job.Job, error)
 }
@@ -55,6 +57,9 @@ type JobSurface interface {
 // daemon backs it with the capability-grant minter; tests fake it.
 type TurnGrantMinter interface {
 	Mint(req capabilitygrant.MintRequest) (string, error)
+	// Ready reports whether the minter can mint at all: the signer and the bank surface are
+	// present. PullJob asks before it claims a job, so a daemon that cannot mint claims nothing.
+	Ready() error
 }
 
 // MemberLookup resolves the member a callback is coming from, and the bank it
@@ -113,6 +118,10 @@ func (noBankSurface) PendingInputs(context.Context, string, string, int32) ([]*j
 
 func (noBankSurface) Acknowledge(context.Context, string, string) error { return ErrNoBankSurface }
 
+func (noBankSurface) ReleaseJob(context.Context, string, string, string) error {
+	return ErrNoBankSurface
+}
+
 func (noBankSurface) SetTurn(context.Context, string, string, job.Principal, string) error {
 	return ErrNoBankSurface
 }
@@ -130,6 +139,8 @@ func (noBankSurface) MemberByRun(context.Context, string, string) (memberID, ban
 }
 
 func (noBankSurface) Mint(capabilitygrant.MintRequest) (string, error) { return "", ErrNoBankSurface }
+
+func (noBankSurface) Ready() error { return ErrNoBankSurface }
 
 func (noBankSurface) PublishMemberEvent(context.Context, string, string, []byte) {}
 
@@ -239,6 +250,12 @@ func (s *HarnessCallbackService) PullJob(ctx context.Context, req *harnesspb.Pul
 	if err != nil {
 		return nil, err
 	}
+	// A job that is claimed with no grant can hang: the node sends no input before the first turn
+	// ends. So the daemon checks that it can mint before it claims anything.
+	if rerr := s.turnGrants.Ready(); rerr != nil {
+		s.logger.WarnContext(ctx, "pull refused: no turn grant can be minted", "member_id", memberID, "err", rerr)
+		return nil, status.Error(codes.Unavailable, "the daemon cannot mint a turn grant now, so it hands out no job")
+	}
 	claimed, err := s.jobs.Claim(ctx, tenantID, bankID, memberID)
 	if err != nil {
 		if errors.Is(err, job.ErrNoFreeSlot) {
@@ -252,12 +269,61 @@ func (s *HarnessCallbackService) PullJob(ctx context.Context, req *harnesspb.Pul
 		// An empty queue. The response carries no job and no error.
 		return &harnesspb.PullJobResponse{}, nil
 	}
+	grant, err := s.firstTurnGrant(ctx, tenantID, req.GetContext(), claimed)
+	if err != nil {
+		// The minter was ready and still failed. The job goes back to the queue with its turn
+		// and its session, and it is never closed for a fault of the daemon.
+		s.releaseClaimed(ctx, tenantID, claimed.ID, memberID)
+		s.logger.WarnContext(ctx, "pull refused: no grant for the first turn", "job_id", claimed.ID, "err", err)
+		return nil, status.Error(codes.Unavailable,
+			"the daemon could not mint the turn grant, so the job went back to the queue")
+	}
 	s.logger.InfoContext(ctx, "member pulled a job",
 		"member_id", memberID, "bank_id", bankID, "job_id", claimed.ID)
 	s.emitMemberLine(ctx, tenantID, memberID, map[string]any{
 		"type": "job_opened", "job_id": claimed.ID, "goal": claimed.Spec.GetGoal(),
 	})
-	return &harnesspb.PullJobResponse{Job: jobToWire(claimed)}, nil
+	return &harnesspb.PullJobResponse{Job: jobToWire(claimed), Grant: grant}, nil
+}
+
+// firstTurnGrant mints the grant of the first turn of a pulled job, for the sender of the current
+// turn that Claim recorded: the opener for a job that never ran a turn, and the sender of the turn
+// that was running when a member was released. The member uses it for the tool calls of its first
+// turn, before any input arrives.
+func (s *HarnessCallbackService) firstTurnGrant(
+	ctx context.Context, tenantID string, info *harnesspb.ContextInfo, j *job.Job,
+) (string, error) {
+	if j.TurnSender.ID == "" {
+		// A job always has a turn sender: Open records the opener, and Claim keeps or resets it.
+		// A job with none has no authority to act with, so it gets no grant.
+		return "", errNoTurnSender
+	}
+	return s.mintTurnGrant(tenantID, callerRun(ctx, info), j.BankID, j.ID, j.TurnSender)
+}
+
+// errNoTurnSender is the error of a claimed job that records no sender for its current turn.
+var errNoTurnSender = errors.New("the job records no sender for its current turn")
+
+// releaseRetryBackoff is the wait before the one retry of a release that failed.
+var releaseRetryBackoff = 250 * time.Millisecond
+
+// releaseClaimed sends a job that PullJob claimed back to the queue. The context does not cancel,
+// so a pull that the member dropped does not leave the job claimed. A release that fails is tried
+// once more after a short backoff. If it fails again, the log names the job at error level, and
+// the stale limit of the bank or the timeout of the node ends the claim.
+func (s *HarnessCallbackService) releaseClaimed(ctx context.Context, tenantID, jobID, memberID string) {
+	detached := context.WithoutCancel(ctx)
+	err := s.jobs.ReleaseJob(detached, tenantID, jobID, memberID)
+	if err == nil {
+		return
+	}
+	s.logger.WarnContext(ctx, "the claimed job did not go back to the queue, one retry",
+		"job_id", jobID, "member_id", memberID, "err", err)
+	time.Sleep(releaseRetryBackoff)
+	if err = s.jobs.ReleaseJob(detached, tenantID, jobID, memberID); err != nil {
+		s.logger.ErrorContext(ctx, "the claimed job could not go back to the queue",
+			"job_id", jobID, "member_id", memberID, "err", err)
+	}
 }
 
 // SubscribeInput streams the calling member's unacknowledged inputs, each with
@@ -351,18 +417,7 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read the job an input belongs to: %v", err)
 	}
-	grant, err := s.turnGrants.Mint(capabilitygrant.MintRequest{
-		// The subject is the SENDER, not the member: the turn acts with the
-		// authority of whoever asked for it, which is the whole point of a
-		// per-turn grant.
-		Subject:        TurnGrantSubject(in.Sender),
-		Tenant:         tenantID,
-		MissionID:      j.BankID,
-		TaskID:         in.JobID,
-		MissionRunID:   runID, // the run of the member that takes the turn
-		RecipientClass: "agent",
-		AllowedRPCs:    TurnGrantRPCs(),
-	})
+	grant, err := s.mintTurnGrant(tenantID, runID, j.BankID, in.JobID, in.Sender)
 	if errors.Is(err, ErrNoBankSurface) {
 		return nil, status.Error(codes.FailedPrecondition, "this daemon cannot mint a turn grant")
 	}
@@ -376,6 +431,28 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 	}
 	wire.Grant = grant
 	return wire, nil
+}
+
+// mintTurnGrant mints the turn grant of one job for one sender and the run of the member that
+// takes the turn. The delivery of an input and the pull of a job use it, so both carry the same
+// grant. The subject is the SENDER, not the member: the turn acts with the authority of whoever
+// asked for it. The task is the job, and the grant carries the turn surface only.
+func (s *HarnessCallbackService) mintTurnGrant(
+	tenantID, runID, bankID, jobID string, sender job.Principal,
+) (string, error) {
+	grant, err := s.turnGrants.Mint(capabilitygrant.MintRequest{
+		Subject:        TurnGrantSubject(sender),
+		Tenant:         tenantID,
+		MissionID:      bankID,
+		TaskID:         jobID,
+		MissionRunID:   runID, // the run of the member that takes the turn
+		RecipientClass: "agent",
+		AllowedRPCs:    TurnGrantRPCs(),
+	})
+	if err != nil {
+		return "", fmt.Errorf("mint the turn grant of job %s: %w", jobID, err)
+	}
+	return grant, nil
 }
 
 // TurnGrantSubject renders the sender as a grant subject. A component's id is

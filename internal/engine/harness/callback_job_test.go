@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	jobpb "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
 // fakeJobs is an in-memory JobSurface.
@@ -42,6 +44,9 @@ type fakeJobs struct {
 	openErr    error
 	sendErr    error
 	turnErr    error
+	released   []string
+	claims     int
+	releaseErr error
 	opened     []job.OpenInput
 	sent       []job.SendInput
 	events     map[string][]*job.Event
@@ -91,6 +96,7 @@ func (f *fakeJobs) Events(_ context.Context, _, jobID string, since int64, _ int
 }
 
 func (f *fakeJobs) Claim(context.Context, string, string, string) (*job.Job, error) {
+	f.claims++
 	return f.claim, f.claimErr
 }
 
@@ -132,6 +138,11 @@ func (f *fakeJobs) SetTurn(_ context.Context, _, jobID string, sender job.Princi
 	return nil
 }
 
+func (f *fakeJobs) ReleaseJob(_ context.Context, _, jobID, memberID string) error {
+	f.released = append(f.released, jobID+"/"+memberID)
+	return f.releaseErr
+}
+
 func (f *fakeJobs) SetState(_ context.Context, _, jobID string, state job.State, session string) (*job.Job, error) {
 	if f.setErr != nil {
 		return nil, f.setErr
@@ -166,9 +177,13 @@ func (f *fakeMembers) MemberByRun(_ context.Context, _, runID string) (memberID,
 
 // recordingMinter records what a turn grant was minted for.
 type recordingMinter struct {
-	reqs []capabilitygrant.MintRequest
-	err  error
+	reqs     []capabilitygrant.MintRequest
+	err      error
+	notReady error
 }
+
+// Ready is the check before a claim. notReady makes it fail.
+func (m *recordingMinter) Ready() error { return m.notReady }
 
 func (m *recordingMinter) Mint(req capabilitygrant.MintRequest) (string, error) {
 	if m.err != nil {
@@ -201,6 +216,8 @@ func openJob(id string) *job.Job {
 	return &job.Job{
 		ID: id, BankID: "bank-1", MemberID: "m-1", State: job.StateWorking,
 		Spec: &jobpb.JobSpec{Goal: "fix it", CredentialNames: []string{"gitlab-token"}},
+		// A job always records the sender of its current turn: Open sets the opener.
+		TurnSender: job.Principal{Kind: job.PrincipalUser, ID: "alice"},
 	}
 }
 
@@ -557,6 +574,8 @@ func TestNoBankSurface_EverySeamRefuses(t *testing.T) {
 		"PendingInputs": func() error { _, err := n.PendingInputs(ctx, "t", "m", 1); return err },
 		"Acknowledge":   func() error { return n.Acknowledge(ctx, "t", "i") },
 		"SetTurn":       func() error { return n.SetTurn(ctx, "t", "j", job.Principal{}, "i") },
+		"ReleaseJob":    func() error { return n.ReleaseJob(ctx, "t", "j", "m") },
+		"Ready":         n.Ready,
 		"SetState":      func() error { _, err := n.SetState(ctx, "t", "j", job.StateWorking, ""); return err },
 		"AddDeliverable": func() error {
 			_, err := n.AddDeliverable(ctx, "t", "j", &jobpb.Deliverable{})
@@ -1016,5 +1035,321 @@ func TestSubscribeInput_ATurnThatCannotBeRecordedIsNotDelivered(t *testing.T) {
 
 	if n := len(stream.snapshot()); n != 0 {
 		t.Fatalf("delivered %d inputs, want none", n)
+	}
+}
+
+// A pulled job carries the grant of its first turn. The grant is a turn grant of the job: the
+// task is the job id, the mission is the bank, the run is the run of the member, and the subject
+// is the sender of the current turn that Claim recorded. For a job that never ran, that is the
+// opener. The turn surface is the only surface.
+func TestPullJob_CarriesTheTurnGrantOfTheFirstTurn(t *testing.T) {
+	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	bob := job.Principal{Kind: job.PrincipalUser, ID: "bob"}
+	for name, tc := range map[string]struct {
+		turn    job.Principal
+		subject string
+	}{
+		"the turn sender that Claim recorded": {alice, "user:alice"},
+		"another recorded sender":             {bob, "user:bob"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			jobs := newFakeJobs()
+			claim := openJob("job-1")
+			claim.OpenedBy, claim.TurnSender = alice, tc.turn
+			jobs.claim = claim
+			minter := &recordingMinter{}
+			s := memberService(t, jobs, liveMembers(), minter)
+
+			resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+
+			if err != nil {
+				t.Fatalf("PullJob: %v", err)
+			}
+			if resp.GetGrant() != "turn-grant-for-job-1" {
+				t.Fatalf("grant = %q, want the turn grant of job-1", resp.GetGrant())
+			}
+			if len(minter.reqs) != 1 {
+				t.Fatalf("minted %d grants, want one", len(minter.reqs))
+			}
+			req := minter.reqs[0]
+			if req.TaskID != "job-1" || req.MissionID != "bank-1" || req.MissionRunID != "run-1" ||
+				req.Subject != tc.subject || req.Tenant != "acme" || req.RecipientClass != "agent" {
+				t.Errorf("mint request = %+v", req)
+			}
+			for _, rpc := range req.AllowedRPCs {
+				if methodName(rpc) == "PullJob" {
+					t.Error("a turn grant must not carry the member's own surface")
+				}
+			}
+			if len(req.AllowedRPCs) != len(TurnGrantRPCs()) {
+				t.Errorf("rpcs = %v, want the turn surface", req.AllowedRPCs)
+			}
+		})
+	}
+}
+
+// A member that holds no job gets no grant: an empty queue, a member with no room, and a run that
+// is no member's mint nothing. A daemon that cannot mint returns the job with an empty grant, so
+// the claim is not lost.
+func TestPullJob_NoJobMeansNoGrant(t *testing.T) {
+	t.Run("an empty queue", func(t *testing.T) {
+		minter := &recordingMinter{}
+		s := memberService(t, newFakeJobs(), liveMembers(), minter)
+		resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+		if err != nil || resp.GetGrant() != "" || resp.GetJob() != nil || len(minter.reqs) != 0 {
+			t.Fatalf("resp = %+v, err = %v, minted %d", resp, err, len(minter.reqs))
+		}
+	})
+	t.Run("a member with no room", func(t *testing.T) {
+		jobs := newFakeJobs()
+		jobs.claim = openJob("job-1")
+		jobs.claimErr = job.ErrNoFreeSlot
+		minter := &recordingMinter{}
+		s := memberService(t, jobs, liveMembers(), minter)
+		resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+		if err != nil || resp.GetGrant() != "" || len(minter.reqs) != 0 {
+			t.Fatalf("resp = %+v, err = %v, minted %d", resp, err, len(minter.reqs))
+		}
+	})
+	t.Run("a run that is no member's", func(t *testing.T) {
+		jobs := newFakeJobs()
+		jobs.claim = openJob("job-1")
+		minter := &recordingMinter{}
+		s := memberService(t, jobs, liveMembers(), minter)
+		resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-unknown")})
+		if err == nil || resp != nil || len(minter.reqs) != 0 {
+			t.Fatalf("resp = %+v, err = %v, minted %d, want a refusal and no grant", resp, err, len(minter.reqs))
+		}
+	})
+}
+
+// A daemon that cannot mint hands out no job. The check comes BEFORE the claim, so no job stays
+// claimed by the member: a claimed job with no grant can hang, because the node sends no input
+// before the first turn ends.
+func TestPullJob_ADaemonThatCannotMintClaimsNothing(t *testing.T) {
+	for name, notReady := range map[string]error{
+		"no bank surface": ErrNoBankSurface,
+		"no signing key":  status.Error(codes.Unavailable, "no signing key"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			jobs := newFakeJobs()
+			jobs.claim = openJob("job-1")
+			s := memberService(t, jobs, liveMembers(), &recordingMinter{notReady: notReady})
+
+			resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+
+			if status.Code(err) != codes.Unavailable || resp != nil {
+				t.Fatalf("resp = %+v, err = %v, want Unavailable", resp, err)
+			}
+			if jobs.claims != 0 {
+				t.Fatalf("claimed %d times, want the check before the claim", jobs.claims)
+			}
+			if len(jobs.released) != 0 {
+				t.Errorf("released %v, want nothing to release", jobs.released)
+			}
+		})
+	}
+}
+
+// A mint that fails after the claim sends the one job back to the queue and answers Unavailable.
+// The job is released by id and by member, and it is never closed for a fault of the daemon.
+func TestPullJob_AMintThatFailsAfterTheClaimReleasesTheJob(t *testing.T) {
+	jobs := newFakeJobs()
+	jobs.claim = openJob("job-1")
+	s := memberService(t, jobs, liveMembers(), &recordingMinter{err: errors.New("signing key unavailable")})
+
+	resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+
+	if status.Code(err) != codes.Unavailable || resp != nil {
+		t.Fatalf("resp = %+v, err = %v, want Unavailable and no job", resp, err)
+	}
+	if len(jobs.released) != 1 || jobs.released[0] != "job-1/m-1" {
+		t.Fatalf("released = %v, want job-1 of member m-1", jobs.released)
+	}
+	if len(jobs.states) != 0 {
+		t.Errorf("the job changed state %v: a daemon fault must not close it", jobs.states)
+	}
+}
+
+// A job that a release re-queued in the middle of the turn of sender B keeps that turn. The
+// grant of the new member is for B, and never for the opener A.
+func TestPullJob_AReclaimedJobGetsTheGrantOfTheTurnThatWasRunning(t *testing.T) {
+	jobs := newFakeJobs()
+	claim := openJob("job-1")
+	claim.OpenedBy = job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	claim.TurnSender = job.Principal{Kind: job.PrincipalUser, ID: "bob"} // Claim kept the turn of B
+	claim.TurnInputID = "in-9"
+	jobs.claim = claim
+	minter := &recordingMinter{}
+	s := memberService(t, jobs, liveMembers(), minter)
+
+	if _, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")}); err != nil {
+		t.Fatalf("PullJob: %v", err)
+	}
+
+	if len(minter.reqs) != 1 || minter.reqs[0].Subject != "user:bob" {
+		t.Fatalf("mint requests = %+v, want one grant for user:bob", minter.reqs)
+	}
+	for _, req := range minter.reqs {
+		if req.Subject == "user:alice" {
+			t.Error("the grant of the opener must never go to the new member of B's turn")
+		}
+	}
+}
+
+// The first-turn grant binds an open to the job (the path of #1665). A member that uses the grant
+// of a pulled job for open_merge_request makes a record whose task is the job id, taken from the
+// verified grant and never from the body of the request.
+func TestPullJob_TheFirstTurnGrantBindsAnOpenToTheJob(t *testing.T) {
+	jobs := newFakeJobs()
+	claim := openJob("job-1")
+	claim.OpenedBy = job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	jobs.claim = claim
+	minter := &recordingMinter{}
+	s := memberService(t, jobs, liveMembers(), minter)
+	if _, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")}); err != nil {
+		t.Fatalf("PullJob: %v", err)
+	}
+	minted := minter.reqs[0]
+
+	var got []ToolCallRecord
+	svc := &HarnessCallbackService{logger: slog.Default()}
+	WithToolCallSink(func(_ context.Context, _ string, call ToolCallRecord) { got = append(got, call) })(svc)
+	info := &harnesspb.ContextInfo{MissionId: minted.MissionID, MissionRunId: minted.MissionRunID, TaskId: "job-forged"}
+	verified := withTaskGrantClaims(testCtxWithTenant(), sdkcg.Claims{
+		TaskID: minted.TaskID, MissionID: minted.MissionID, MissionRunID: minted.MissionRunID, Subject: minted.Subject,
+	})
+
+	svc.captureToolCall(verified, info, "tc1", "mcp:github-fixloop:open_merge_request", `{}`, `{}`, "")
+
+	if len(got) != 1 || got[0].GrantTaskID != "job-1" || got[0].MissionRunID != "run-1" {
+		t.Fatalf("record = %+v, want the task job-1 and the run of the member", got)
+	}
+}
+
+// A claimed job that records no sender for its turn has no authority to act with, so it gets no
+// grant. It takes the path of a failed mint: the job goes back to the queue and the pull answers
+// Unavailable. The opener is not a fallback.
+func TestPullJob_AJobWithNoTurnSenderGetsNoGrantAndGoesBack(t *testing.T) {
+	jobs := newFakeJobs()
+	claim := openJob("job-1")
+	claim.TurnSender = job.Principal{}
+	claim.OpenedBy = job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	jobs.claim = claim
+	minter := &recordingMinter{}
+	s := memberService(t, jobs, liveMembers(), minter)
+
+	resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+
+	if status.Code(err) != codes.Unavailable || resp != nil {
+		t.Fatalf("resp = %+v, err = %v, want Unavailable and no job", resp, err)
+	}
+	if len(minter.reqs) != 0 {
+		t.Errorf("minted %d grants, want none: the opener must not stand in for the sender", len(minter.reqs))
+	}
+	if len(jobs.released) != 1 || jobs.released[0] != "job-1/m-1" {
+		t.Errorf("released = %v, want job-1 of member m-1", jobs.released)
+	}
+}
+
+// capturedLog is a log handler that keeps each record.
+type capturedLog struct {
+	mu   sync.Mutex
+	logs []slog.Record
+}
+
+func (c *capturedLog) Enabled(context.Context, slog.Level) bool { return true }
+func (c *capturedLog) Handle(_ context.Context, r slog.Record) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.logs = append(c.logs, r)
+	return nil
+}
+func (c *capturedLog) WithAttrs([]slog.Attr) slog.Handler { return c }
+func (c *capturedLog) WithGroup(string) slog.Handler      { return c }
+
+// errorsFor returns the messages and the job ids of the error records.
+func (c *capturedLog) errorsFor() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []string
+	for _, r := range c.logs {
+		if r.Level < slog.LevelError {
+			continue
+		}
+		id := ""
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "job_id" {
+				id = a.Value.String()
+			}
+			return true
+		})
+		out = append(out, r.Message+" job_id="+id)
+	}
+	return out
+}
+
+// flakyRelease fails the first n calls of ReleaseJob.
+type flakyRelease struct {
+	*fakeJobs
+	failures int
+	calls    int
+}
+
+func (f *flakyRelease) ReleaseJob(ctx context.Context, tenant, jobID, memberID string) error {
+	f.calls++
+	if f.calls <= f.failures {
+		return errors.New("store down")
+	}
+	return f.fakeJobs.ReleaseJob(ctx, tenant, jobID, memberID)
+}
+
+// A release that fails is retried once with a short backoff on a context that does not cancel. A
+// retry that works releases the job and logs no error. A second failure logs an error that names the
+// job, so the stale limit or the node timeout is the visible end. The pull answers Unavailable in both.
+func TestPullJob_AFailedReleaseIsRetriedOnceThenLoggedWithTheJob(t *testing.T) {
+	old := releaseRetryBackoff
+	releaseRetryBackoff = time.Millisecond
+	t.Cleanup(func() { releaseRetryBackoff = old })
+
+	for name, tc := range map[string]struct {
+		failures   int
+		wantCalls  int
+		wantErrLog bool
+		wantFreed  bool
+	}{
+		"the retry works":     {failures: 1, wantCalls: 2, wantErrLog: false, wantFreed: true},
+		"both attempts fail":  {failures: 2, wantCalls: 2, wantErrLog: true, wantFreed: false},
+		"the first one works": {failures: 0, wantCalls: 1, wantErrLog: false, wantFreed: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			base := newFakeJobs()
+			base.claim = openJob("job-1")
+			jobs := &flakyRelease{fakeJobs: base, failures: tc.failures}
+			s := memberService(t, jobs, liveMembers(), &recordingMinter{err: errors.New("signing key unavailable")})
+			logs := &capturedLog{}
+			s.logger = slog.New(logs)
+			ctx, cancel := context.WithCancel(memberCtx("acme"))
+			cancel() // the member dropped the pull: the release must still run
+
+			_, err := s.PullJob(ctx, &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+
+			if status.Code(err) != codes.Unavailable {
+				t.Fatalf("err = %v, want Unavailable", err)
+			}
+			if jobs.calls != tc.wantCalls {
+				t.Errorf("release calls = %d, want %d", jobs.calls, tc.wantCalls)
+			}
+			if freed := len(base.released) > 0; freed != tc.wantFreed {
+				t.Errorf("released = %v, want freed = %v", base.released, tc.wantFreed)
+			}
+			errLogs := logs.errorsFor()
+			if tc.wantErrLog && (len(errLogs) != 1 || !strings.Contains(errLogs[0], "job_id=job-1")) {
+				t.Errorf("error logs = %v, want one that names job-1", errLogs)
+			}
+			if !tc.wantErrLog && len(errLogs) != 0 {
+				t.Errorf("error logs = %v, want none", errLogs)
+			}
+		})
 	}
 }

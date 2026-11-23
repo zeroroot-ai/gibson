@@ -162,6 +162,14 @@ func (f *fakeJobStore) SetTurn(_ context.Context, _, jobID string, sender job.Pr
 	j.TurnSender, j.TurnInputID = sender, inputID
 	return nil
 }
+func (f *fakeJobStore) ReleaseJob(_ context.Context, _, jobID, memberID string) error {
+	j, ok := f.jobs[jobID]
+	if !ok || j.MemberID != memberID {
+		return job.ErrNotFound
+	}
+	j.MemberID = ""
+	return nil
+}
 func (f *fakeJobStore) Acknowledge(context.Context, string, string) error { return nil }
 func (f *fakeJobStore) SetState(context.Context, string, string, job.State, string) (*job.Job, error) {
 	return nil, nil
