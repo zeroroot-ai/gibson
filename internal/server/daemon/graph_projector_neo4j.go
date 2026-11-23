@@ -372,6 +372,7 @@ MERGE (f:Finding {brain_id: $id})
       f.priority = $priority, f.priority_rule = $priority_rule, f.priority_reason = $priority_reason,
       f.merge_request = $merge_request,
       f.fix_head_sha = $fix_head_sha, f.fix_files = $fix_files,
+      f.place_block = $place_block,
       f.submitted_by = $submitted_by, f.agent_name = $agent_name, f.enrolled_by = $enrolled_by,
       f.updated_at = timestamp()
 WITH f
@@ -538,7 +539,7 @@ var findingReservedProps = map[string]struct{}{
 	"title": {}, "description": {}, "severity": {}, "address": {}, "status": {},
 	"vulnerability_id": {}, "priority": {}, "priority_rule": {}, "priority_reason": {},
 	"merge_request": {}, "submitted_by": {}, "agent_name": {}, "enrolled_by": {},
-	"fix_head_sha": {}, "fix_files": {},
+	"fix_head_sha": {}, "fix_files": {}, "place_block": {},
 	"created_at": {}, "verified_at": {}, "verified_status": {}, "id": {},
 }
 
@@ -994,6 +995,9 @@ func findingUpsertParams(f brain.FindingSnapshot) map[string]any {
 		// daemon read them on the Git host (gibson#1579). The files are JSON.
 		"fix_head_sha": f.FixHeadSHA,
 		"fix_files":    f.FixFiles,
+		// The wait of the fix loop on a finding with no single Application. The
+		// World owns it, so an entity sighting cannot set or clear it.
+		"place_block": f.PlaceBlock,
 		// The verified submitter (gibson#208): who raised the finding, under
 		// which registered name, and who enrolled that agent.
 		"submitted_by": f.SubmittedBy,

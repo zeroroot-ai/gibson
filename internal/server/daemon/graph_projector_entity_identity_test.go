@@ -4,6 +4,7 @@
 package daemon
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -181,36 +182,27 @@ func TestEntityUpsertParams_AFindingKeepsTheFixBlockedReason(t *testing.T) {
 	}
 }
 
-// The Watcher writes the place wait to its own property. An event of the agent and
-// an event of the Watcher each carry only their own property, so one never erases
-// the other, and clearing the place block leaves the reason of the agent.
-func TestEntityUpsertParams_PlaceBlockAndAgentReasonAreSeparate(t *testing.T) {
-	agent, err := entityUpsertParams(brain.EntitySnapshot{Label: "Finding", Key: "f-1",
-		Props: map[string]string{"fix_blocked_reason": "the flaw is on a host"}})
+// place_block is written from the Finding in the World. An entity sighting of a
+// Finding, the fix agent's included, cannot set or clear it, and the reason of the
+// agent stays its own property.
+func TestEntityUpsertParams_PlaceBlockIsReserved(t *testing.T) {
+	p, err := entityUpsertParams(brain.EntitySnapshot{Label: "Finding", Key: "f-1",
+		Props: map[string]string{"place_block": "", "fix_blocked_reason": "the flaw is on a host"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := entityUpsertParams(brain.EntitySnapshot{Label: "Finding", Key: "f-1",
-		Props: map[string]string{"place_block": "waiting on a person: two Applications"}})
-	if err != nil {
-		t.Fatal(err)
+	props, _ := p["props"].(map[string]any)
+	if _, ok := props["place_block"]; ok {
+		t.Error("an entity sighting set or cleared place_block")
 	}
-	clear, err := entityUpsertParams(brain.EntitySnapshot{Label: "Finding", Key: "f-1",
-		Props: map[string]string{"place_block": ""}})
-	if err != nil {
-		t.Fatal(err)
+	if props["fix_blocked_reason"] != "the flaw is on a host" {
+		t.Errorf("props = %v, want the reason of the agent", props)
 	}
-	props := func(p map[string]any) map[string]any { m, _ := p["props"].(map[string]any); return m }
-	if _, ok := props(agent)["place_block"]; ok {
-		t.Error("the agent event carries the place block")
+	got := findingUpsertParams(brain.FindingSnapshot{ID: "f-1", PlaceBlock: "waiting on a person: x"})
+	if got["place_block"] != "waiting on a person: x" {
+		t.Errorf("the projection of the Finding lacks place_block: %v", got["place_block"])
 	}
-	if _, ok := props(set)["fix_blocked_reason"]; ok {
-		t.Error("the place block event carries the reason of the agent")
-	}
-	if v, ok := props(clear)["place_block"]; !ok || v != "" {
-		t.Errorf("clear props = %v, want an empty place_block", props(clear))
-	}
-	if _, ok := props(clear)["fix_blocked_reason"]; ok {
-		t.Error("clearing the place block touches the reason of the agent")
+	if !strings.Contains(upsertFindingCypher, "f.place_block = $place_block") {
+		t.Error("the Cypher does not write place_block")
 	}
 }

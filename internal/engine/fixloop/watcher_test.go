@@ -1106,12 +1106,12 @@ func TestStep_AFindingInTwoApplicationsGetsNoSlotAndAVisibleWait(t *testing.T) {
 				t.Fatalf("a finding in two Applications was queued: %+v", ev)
 			}
 			if eo, ok := ev.(brain.EntityObserved); ok && eo.Label == "Finding" {
+				t.Errorf("pass %d: the Watcher wrote an entity property of the finding: %+v", i, eo.Props)
+			}
+			if pb, ok := ev.(brain.FindingPlaceBlocked); ok {
 				observed++
-				if got := eo.Props[placeBlockProp]; !strings.Contains(got, "waiting on a person") || !strings.Contains(got, "app-a") {
-					t.Errorf("pass %d: reason = %q", i, got)
-				}
-				if eo.ScopeID != "scope-1" {
-					t.Errorf("scope = %q, want the scope of the finding", eo.ScopeID)
+				if !strings.Contains(pb.Reason, "waiting on a person") || !strings.Contains(pb.Reason, "app-a") {
+					t.Errorf("pass %d: reason = %q", i, pb.Reason)
 				}
 			}
 		}
@@ -1125,10 +1125,8 @@ func TestStep_AFindingInTwoApplicationsGetsNoSlotAndAVisibleWait(t *testing.T) {
 	var cleared, queued bool
 	for _, ev := range step() {
 		switch e := ev.(type) {
-		case brain.EntityObserved:
-			_, agent := e.Props["fix_blocked_reason"]
-			v, own := e.Props[placeBlockProp]
-			cleared = cleared || (e.Label == "Finding" && own && v == "" && !agent && e.ScopeID == "scope-1")
+		case brain.FindingPlaceBlocked:
+			cleared = cleared || e.Reason == ""
 		case brain.MergeRequestQueued:
 			queued = true
 		}

@@ -99,7 +99,7 @@ func WaitingOnPerson(
 	linked := linkTimes(history)
 	placed := placeBlockTimes(history)
 	for _, f := range findings {
-		if f.PlaceBlock != "" {
+		if f.PlaceBlock != "" && f.Status != brain.FindingStatusVerified {
 			// A finding with a place block always shows the wait. When the history
 			// read no longer holds the event, the wait starts at the last known time
 			// of the finding, else now: short history never hides it.

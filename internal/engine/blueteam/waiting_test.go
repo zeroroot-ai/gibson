@@ -252,3 +252,13 @@ func TestWaitingOnPerson_NoSingleApplicationShowsWithShortHistory(t *testing.T) 
 		t.Errorf("unknown = %+v, want the wait since now", u)
 	}
 }
+
+// A verified finding with a stale block shows no wait.
+func TestWaitingOnPerson_VerifiedFindingWithStaleBlockShowsNoWait(t *testing.T) {
+	got := WaitingOnPerson([]brain.FindingSnapshot{
+		{ID: "v", Status: brain.FindingStatusVerified, PlaceBlock: "waiting on a person: x"},
+	}, nil, nil, at(5))
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want no wait", got)
+	}
+}

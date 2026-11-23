@@ -395,6 +395,8 @@ func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 				resetFix(f)
 			}
 			if e.Status == FindingStatusVerified {
+				// The fix ended, so a wait on its Application ends with it.
+				f.PlaceBlock = ""
 				f.VerifiedAt = e.At
 			}
 			q.Close()
@@ -523,6 +525,7 @@ func resetFix(f *Finding) {
 	f.FixHeadSHA, f.FixFiles = "", ""
 	f.FixHeadMissingReason, f.FixHeadMissingAt = "", time.Time{}
 	f.VerifiedAt = time.Time{}
+	f.PlaceBlock = ""
 }
 
 // FindingPlace is a node where a scan saw a Finding: an Image or a Repository,
