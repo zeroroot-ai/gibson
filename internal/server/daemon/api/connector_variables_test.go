@@ -99,3 +99,36 @@ func TestDesiredConnector_AVariableWithADefault(t *testing.T) {
 		assert.True(t, slices.Contains(d.GetEgressAllow(), want), "%s egress = %v", id, d.GetEgressAllow())
 	}
 }
+
+// The tenant names a secret of its own that holds a CA bundle. The daemon
+// hands the name to the operator, and refuses a name outside the prefix of the
+// connector (gibson#1517).
+func TestDesiredConnector_CABundleReachesTheOperator(t *testing.T) {
+	srv := newPendingServer()
+	entry := aapLikeEntry()
+	entry.Variables = append(entry.Variables, componentcatalog.TenantVariable{Name: "ca_bundle", Kind: componentcatalog.VariableKindCABundle})
+	base := map[string]string{"base_url": "https://aap.corp-example.com/"}
+
+	cfg, err := tenantChoice(entry, &tenantv1.EnableConnectorRequest{CatalogId: "aap-like",
+		Variables: map[string]string{"base_url": base["base_url"], "ca_bundle": "aap-like-ca-corp"}})
+	require.NoError(t, err)
+	d, err := srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: "aap-like", Config: cfg}, entry)
+	require.NoError(t, err)
+	assert.Equal(t, "aap-like-ca-corp", d.GetCaBundleSecret())
+	assert.NotContains(t, d.GetEnv(), "ca_bundle")
+
+	// No bundle: the field stays empty and the connector is unchanged.
+	d, err = srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: "aap-like",
+		Config: tenantconnector.Config{Variables: base}}, entry)
+	require.NoError(t, err)
+	assert.Empty(t, d.GetCaBundleSecret())
+
+	// Another secret of the tenant is refused at enable time and at hand-over.
+	_, err = tenantChoice(entry, &tenantv1.EnableConnectorRequest{CatalogId: "aap-like",
+		Variables: map[string]string{"base_url": base["base_url"], "ca_bundle": "aap-like-token"}})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+	bad, err := srv.desiredConnector(tenantconnector.Connector{TenantID: "acme", ConnectorID: "aap-like",
+		Config: tenantconnector.Config{Variables: map[string]string{"base_url": base["base_url"], "ca_bundle": "aap-like-token"}}}, entry)
+	require.Error(t, err)
+	assert.Nil(t, bad)
+}

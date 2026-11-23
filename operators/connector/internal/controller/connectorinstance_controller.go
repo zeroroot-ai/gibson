@@ -93,6 +93,10 @@ const (
 	// asking. It is shorter than the daemon's five-minute refresh pass, so a
 	// credential that dies is reported within one pass plus one recheck.
 	credentialRecheck = 2 * time.Minute
+
+	// caBundleRecheck is how long the controller waits for the daemon loop to
+	// write the CA bundle Secret.
+	caBundleRecheck = 10 * time.Second
 )
 
 // GrantRevoker revokes a tenant's connector grant through the daemon. The
@@ -227,6 +231,23 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// configured secret store and writes the <connector>-connector-cred Secret
 	// beside this CR, with an ownerReference to it (ADR-0061). The operator
 	// has no secret-store client by design; it only references the Secret.
+
+	// The CA bundle of the connector (gibson#1517). The daemon loop writes the
+	// Secret. The pod waits for it, and a Secret that this ConnectorInstance
+	// does not own is refused.
+	caReady, caErr := r.caBundleState(ctx, &ci)
+	if caErr != nil {
+		return failed("CABundle", caErr)
+	}
+	if !caReady {
+		ci.Status.Phase = connectorv1alpha1.ConnectorInstancePhaseProvisioning
+		setCondition(&ci, condReady, metav1.ConditionFalse, "CABundlePending",
+			"the CA bundle Secret is not written yet")
+		if err := r.Status().Update(ctx, &ci); err != nil {
+			return ctrl.Result{}, fmt.Errorf("status update: %w", err)
+		}
+		return ctrl.Result{RequeueAfter: caBundleRecheck}, nil
+	}
 
 	// Reconcile the ToolHive resource the ConnectorInstance owns.
 	th, err := r.desiredToolHive(&ci)
@@ -545,15 +566,25 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 		}
 		// The plain variables and the arguments of the catalog entry
 		// (gibson#1536). Names are sorted, so the spec is stable.
-		if len(ci.Spec.Env) > 0 {
-			names := make([]string, 0, len(ci.Spec.Env))
-			for name := range ci.Spec.Env {
+		podEnv := ci.Spec.Env
+		if ci.Spec.CABundleSecret != "" {
+			// The bundle sets SSL_CERT_FILE for this pod only, and it wins
+			// over a value of the catalog entry (gibson#1517).
+			podEnv = make(map[string]string, len(ci.Spec.Env)+1)
+			for k, v := range ci.Spec.Env {
+				podEnv[k] = v
+			}
+			podEnv[sslCertFileEnv] = caBundleFile
+		}
+		if len(podEnv) > 0 {
+			names := make([]string, 0, len(podEnv))
+			for name := range podEnv {
 				names = append(names, name)
 			}
 			sort.Strings(names)
 			env := make([]interface{}, 0, len(names))
 			for _, name := range names {
-				env = append(env, map[string]interface{}{"name": name, "value": ci.Spec.Env[name]})
+				env = append(env, map[string]interface{}{"name": name, "value": podEnv[name]})
 			}
 			spec["env"] = env
 		}
@@ -754,5 +785,8 @@ func mcpServerPodTemplate(ci *connectorv1alpha1.ConnectorInstance) map[string]in
 			map[string]interface{}{"name": pullSecretName(ci.Name)},
 		}
 	}
+	// The CA bundle of the tenant, for a server that a private CA signs
+	// (gibson#1517).
+	withCABundle(ci, podSpec)
 	return map[string]interface{}{"spec": podSpec}
 }
