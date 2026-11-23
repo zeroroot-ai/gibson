@@ -80,22 +80,25 @@ func TestScanAnchorEvents_RefuseWhatTheyCannotName(t *testing.T) {
 	}
 }
 
-func TestRepositoryKey(t *testing.T) {
+func TestRepositoryKey(t *testing.T) { //nolint:gosec // G101: the URLs hold fake user info on purpose
 	for in, want := range map[string]string{
-		"https://github.com/acme/shop":            "github.com/acme/shop",
-		"https://github.com:443/acme/shop":        "github.com/acme/shop",
-		"http://github.com:80/acme/shop":          "github.com/acme/shop",
-		"ssh://git@github.com/acme/shop.git":      "github.com/acme/shop",
-		"ssh://git@github.com:22/acme/shop.git":   "github.com/acme/shop",
-		"git@github.com:acme/shop.git":            "github.com/acme/shop",
-		"https://github.com./acme/shop":           "github.com/acme/shop",
-		"https://git.bank.internal:8443/Team/Api": "git.bank.internal:8443/Team/Api",
-		"git@gitlab.com:Group/Project.git":        "gitlab.com/Group/Project",
-		"https://GitHub.com/Acme/Shop":            "github.com/Acme/Shop",
-		"https://user:pw@github.com/acme/shop/":   "github.com/acme/shop",
-		"https://gitlab.com/a/b/c.git":            "gitlab.com/a/b/c",
-		"":                                        "",
-		"https://x.example":                       "",
+		"https://github.com/acme/shop":              "github.com/acme/shop",
+		"https://github.com:443/acme/shop":          "github.com/acme/shop",
+		"http://github.com:80/acme/shop":            "github.com/acme/shop",
+		"ssh://git@github.com/acme/shop.git":        "github.com/acme/shop",
+		"ssh://git@github.com:22/acme/shop.git":     "github.com/acme/shop",
+		"git@github.com:acme/shop.git":              "github.com/acme/shop",
+		"git+ssh://git@github.com:22/acme/shop.git": "github.com/acme/shop",
+		"ssh+git://git@github.com/acme/shop.git":    "github.com/acme/shop",
+		"https://[2001:db8::1]:8443/Team/Api":       "[2001:db8::1]:8443/Team/Api",
+		"https://github.com./acme/shop":             "github.com/acme/shop",
+		"https://git.bank.internal:8443/Team/Api":   "git.bank.internal:8443/Team/Api",
+		"git@gitlab.com:Group/Project.git":          "gitlab.com/Group/Project",
+		"https://GitHub.com/Acme/Shop":              "github.com/Acme/Shop",
+		"https://user:pw@github.com/acme/shop/":     "github.com/acme/shop",
+		"https://gitlab.com/a/b/c.git":              "gitlab.com/a/b/c",
+		"":                                          "",
+		"https://x.example":                         "",
 	} {
 		assert.Equal(t, want, RepositoryKey(in), in)
 	}
@@ -103,20 +106,21 @@ func TestRepositoryKey(t *testing.T) {
 
 // A clone URL can carry a token in its user info. The Repository node holds the
 // URL, and the World, the Timeline and the graph must hold none of it.
-func TestScanAnchorEvents_HoldNoUserInfo(t *testing.T) {
+func TestScanAnchorEvents_HoldNoUserInfo(t *testing.T) { //nolint:gosec // G101: the URL holds fake user info on purpose
 	p := scanParams()
 	p["repositoryUrl"] = "https://gitlab-ci-token:glpat-SECRET@gitlab.com/examplebank/customer-portal.git?private_token=SECRET#frag"
 	for _, e := range ScanAnchorEvents(p, "m") {
 		eo := e.(brain.EntityObserved)
-		blob := eo.Label + eo.Key
+		var blob strings.Builder
+		blob.WriteString(eo.Label + eo.Key)
 		for k, v := range eo.Props {
-			blob += k + v
+			blob.WriteString(k + v)
 		}
 		for _, edge := range eo.Edges {
-			blob += edge.TargetKey
+			blob.WriteString(edge.TargetKey)
 		}
-		if strings.Contains(blob, "SECRET") || strings.Contains(blob, "gitlab-ci-token") {
-			t.Errorf("%s holds the user info: %q", eo.Label, blob)
+		if got := blob.String(); strings.Contains(got, "SECRET") || strings.Contains(got, "gitlab-ci-token") {
+			t.Errorf("%s holds the user info: %q", eo.Label, got)
 		}
 	}
 	for _, e := range ScanAnchorEvents(p, "m") {

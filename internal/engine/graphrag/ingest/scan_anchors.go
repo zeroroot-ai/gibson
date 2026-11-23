@@ -46,7 +46,7 @@ var scpForm = regexp.MustCompile(`^[A-Za-z0-9._-]+@([A-Za-z0-9.-]+):(.+)$`)
 
 // defaultPorts are the ports that a scheme uses when the URL names none. A URL
 // that names the default port is the same repository as one that does not.
-var defaultPorts = map[string]string{"https": "443", "http": "80", "ssh": "22", "git": "9418"}
+var defaultPorts = map[string]string{"https": "443", "http": "80", "ssh": "22", "git+ssh": "22", "ssh+git": "22", "git": "9418"}
 
 // repositoryParts returns the host and the path of a repository URL, from the
 // URL form or the scp-like form. The host has no default port of its scheme and
@@ -62,14 +62,11 @@ func repositoryParts(rawURL string) (host, path string) {
 		return "", ""
 	}
 	name := strings.TrimSuffix(u.Hostname(), ".")
-	if port := u.Port(); port != "" && port != defaultPorts[strings.ToLower(u.Scheme)] {
-		if strings.Contains(name, ":") {
-			name = "[" + name + "]"
-		}
-		return name + ":" + port, u.Path
-	}
 	if strings.Contains(name, ":") {
-		name = "[" + name + "]"
+		name = "[" + name + "]" // an IPv6 address keeps its brackets before a port
+	}
+	if port := u.Port(); port != "" && port != defaultPorts[strings.ToLower(u.Scheme)] {
+		return name + ":" + port, u.Path
 	}
 	return name, u.Path
 }
