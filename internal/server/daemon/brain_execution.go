@@ -908,7 +908,7 @@ var errApprovalGone = errors.New("the request is gone")
 // whose node is gone. A request that is gone or decided already is left alone. The
 // write does not depend on the context of the mission, which may be canceled.
 func (b *brainExecutor) withdrawApproval(bind *missionBinding, approvalID string, cause error) {
-	if bind.eng == nil || errors.Is(cause, errApprovalGone) {
+	if errors.Is(cause, errApprovalGone) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(bind.ctx), 10*time.Second)

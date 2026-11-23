@@ -781,7 +781,7 @@ func applyDestructiveActionWithdrawn(w *World, e DestructiveActionWithdrawn) {
 		if a.HypothesisID != e.HypothesisID {
 			continue
 		}
-		if a.Decided {
+		if a.ActionKind != ActionKindToolCall || a.Decided {
 			q.Close()
 			return
 		}

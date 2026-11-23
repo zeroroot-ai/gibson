@@ -551,3 +551,22 @@ func TestDispatchTool_ANodeWithNoTimeoutWaitsAtMostTheCap(t *testing.T) {
 		t.Error("the request of a node that stopped waiting is not withdrawn")
 	}
 }
+
+// A binding with no World cannot wait for an approval, and a node with no timeout
+// uses the cap that ends with the mission.
+func TestWaitForApproval_NoWorldAndTheDefaultCap(t *testing.T) {
+	b := newBrainExecutor(nil, slog.Default())
+	if err := b.waitForApproval(&missionBinding{ctx: context.Background()}, "r", time.Second); err == nil {
+		t.Error("a binding with no World waited")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-cap")
+	b.approvalPoll = time.Millisecond
+	go func() { time.Sleep(30 * time.Millisecond); cancel() }()
+	if err := b.waitForApproval(&missionBinding{ctx: ctx, tenant: "acme", eng: eng}, "req-cap", 0); err == nil ||
+		!strings.Contains(err.Error(), "ended") {
+		t.Errorf("err = %v, want the end of the mission", err)
+	}
+}

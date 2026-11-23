@@ -165,8 +165,9 @@ const RestartApprovalReason = "the daemon restarted while the node waited for ap
 // is gone, and the node must not wait for ever. Call once on resume, after
 // rebuilding the World from the Timeline, like ResumeFailInFlight.
 func ResumeFailAwaitingApproval(w *World, now time.Time) []Event {
-	var out []Event
-	for _, wi := range AwaitingApproval(w) {
+	waiting := AwaitingApproval(w)
+	out := make([]Event, 0, 2*len(waiting))
+	for _, wi := range waiting {
 		out = append(out,
 			DestructiveActionWithdrawn{HypothesisID: wi.ApprovalID, Reason: RestartApprovalReason, AtUnixMS: now.UnixMilli()},
 			WorkCompleted{ID: wi.ID, RunID: wi.RunID, Err: RestartApprovalReason},

@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -157,5 +158,25 @@ func TestCallConnectorForMission_AMarkedToolWaitsForApproval(t *testing.T) {
 	}
 	if len(*called) != 0 {
 		t.Fatalf("the connector got a call before the approval: %v", *called)
+	}
+}
+
+// A deny list that cannot be read refuses the call, and a tenant id that is not
+// valid refuses it before any check.
+func TestCallConnectorForMission_ARefusedPolicyAndABadTenant(t *testing.T) {
+	svc, _, called, _ := missionConnectorSvc(t, map[string]bool{"component:connector/github-fixloop": true}, nil)
+	svc.missionBlockedTools = func(context.Context, string, string) ([]string, error) {
+		return nil, errors.New("the definition is unreadable")
+	}
+	if _, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "work-1", "github-fixloop", "read_file", nil); err == nil ||
+		!strings.Contains(err.Error(), "mission policy") {
+		t.Fatalf("err = %v, want a policy refusal", err)
+	}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{RunID: "run-1", MissionID: "m1", TenantID: "bad tenant!", Status: "active"}}
+	if _, err := svc.CallConnectorForMission(context.Background(), "bad tenant!", "m1", "run-1", "w", "github-fixloop", "read_file", nil); err == nil {
+		t.Fatal("a tenant id that is not valid must refuse")
+	}
+	if len(*called) != 0 {
+		t.Fatalf("the connector got a call: %v", *called)
 	}
 }
