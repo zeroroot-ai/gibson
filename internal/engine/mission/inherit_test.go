@@ -97,6 +97,22 @@ func TestInheritConstraints_AChildCannotLoosenWhatTheParentSet(t *testing.T) {
 		assert.Equal(t, forbidden, got.GetRestartPolicy(), "windows with nothing in common forbid a restart")
 		assert.Nil(t, got.GetRestartWindow())
 	})
+	t.Run("two full days share the full day", func(t *testing.T) {
+		full := &missionv1.MissionConstraints{RestartPolicy: inWindow, RestartWindow: win("00:00", "23:59")}
+		got := inherit(t, full, full)
+		assert.Equal(t, inWindow, got.GetRestartPolicy(), "both sides allow a restart at any time")
+		assert.Equal(t, "00:00", got.GetRestartWindow().GetStart())
+		assert.Equal(t, "23:59", got.GetRestartWindow().GetEnd())
+		// A full day that starts at another minute is a full day too.
+		shifted := &missionv1.MissionConstraints{RestartPolicy: inWindow, RestartWindow: win("10:00", "09:59")}
+		got = inherit(t, shifted, full)
+		assert.Equal(t, inWindow, got.GetRestartPolicy())
+		assert.Equal(t, "00:00", got.GetRestartWindow().GetStart())
+		// A full day against a part of the day gives the part.
+		got = inherit(t, full, &missionv1.MissionConstraints{RestartPolicy: inWindow, RestartWindow: win("02:00", "04:00")})
+		assert.Equal(t, "02:00", got.GetRestartWindow().GetStart())
+		assert.Equal(t, "04:00", got.GetRestartWindow().GetEnd())
+	})
 	t.Run("a window that crosses midnight", func(t *testing.T) {
 		night := &missionv1.MissionConstraints{RestartPolicy: inWindow, RestartWindow: win("22:00", "06:00")}
 		got := inherit(t, &missionv1.MissionConstraints{RestartPolicy: inWindow, RestartWindow: win("23:00", "23:30")}, night)

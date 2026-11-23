@@ -86,8 +86,10 @@ func restartRank(p missionv1.RestartPolicy) int {
 		return 0
 	case missionv1.RestartPolicy_RESTART_POLICY_IN_WINDOW:
 		return 1
-	default:
+	case missionv1.RestartPolicy_RESTART_POLICY_UNSPECIFIED, missionv1.RestartPolicy_RESTART_POLICY_FORBIDDEN:
 		return 2
+	default:
+		return 2 // a value that this release does not know is the strictest
 	}
 }
 
@@ -173,7 +175,8 @@ func parseClock(s string) (int, bool) {
 func formatClock(m int) string { return fmt.Sprintf("%02d:%02d", m/60, m%60) }
 
 // commonWindow returns the one range that two windows share. It returns false when
-// they share nothing, or when the shared minutes are not one range.
+// they share nothing, or when the shared minutes are not one range. Two full days
+// share the full day.
 func commonWindow(a, b *missionv1.RestartWindow) (*missionv1.RestartWindow, bool) {
 	sa, ok1 := windowMinutes(a)
 	sb, ok2 := windowMinutes(b)
@@ -191,9 +194,16 @@ func commonWindow(a, b *missionv1.RestartWindow) (*missionv1.RestartWindow, bool
 	if count == 0 {
 		return nil, false
 	}
+	// Two windows that both cover the whole day share the whole day. A full day has
+	// no start minute, so it is answered here.
+	if count == minutesPerDay {
+		return &missionv1.RestartWindow{Start: "00:00", End: "23:59"}, true
+	}
 	// A range starts at a covered minute whose previous minute is not covered. One
-	// start means one range. A full day has no start, and cannot arise from two
-	// windows that each end before the day is full.
+	// start means one range. Two shared ranges (for example 22:00-06:00 against
+	// 04:00-23:00 share 22:00-23:00 and 04:00-06:00) are not one window. The result
+	// is FORBIDDEN, because it is the simplest answer that never allows a restart
+	// outside both windows and breaks nothing that a person set.
 	starts, startAt := 0, 0
 	for m := range both {
 		if both[m] && !both[(m+minutesPerDay-1)%minutesPerDay] {
