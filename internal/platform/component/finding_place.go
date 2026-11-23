@@ -43,6 +43,8 @@ var ErrFindingNotFound = errors.New("graphrag: finding not found")
 const applicationReachesPlace = `
     EXISTS { (app)-[:HAS_DEPLOYMENT]->(:Deployment)-[:RUNS]->(:Image)-[:CONTAINS]->(place) }
     OR EXISTS { (app)-[:HAS_REPOSITORY]->(:Repository)<-[:BUILT_FROM]-(:Image)-[:CONTAINS]->(place) }
+    OR EXISTS { (app)-[:HAS_DEPLOYMENT]->(:Deployment)-[:RUNS]->(place:Image) }
+    OR EXISTS { (app)-[:HAS_REPOSITORY]->(:Repository)<-[:BUILT_FROM]-(place:Image) }
     OR EXISTS { (app)-[:HAS_REPOSITORY]->(place) }
     OR EXISTS { (app)-[:HAS_DEPLOYMENT]->(:Deployment)-[:EXPOSES]->(:Host)-[:RUNS_SERVICE]->(place) }
   `

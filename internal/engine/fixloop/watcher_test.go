@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +26,8 @@ type fakeReader struct {
 	deploy DeployFact
 	health HealthFact
 	err    error
+	// healthApp is the Application of the last health read.
+	healthApp string
 }
 
 func (f *fakeReader) MergeRequest(context.Context, string, string, string) (MergeFact, error) {
@@ -33,7 +36,8 @@ func (f *fakeReader) MergeRequest(context.Context, string, string, string) (Merg
 func (f *fakeReader) Deploy(context.Context, string, string, string) (DeployFact, error) {
 	return f.deploy, f.err
 }
-func (f *fakeReader) Health(context.Context, string, string, string, time.Time, time.Duration) (HealthFact, error) {
+func (f *fakeReader) Health(_ context.Context, _, _, app string, _ time.Time, _ time.Duration) (HealthFact, error) {
+	f.healthApp = app
 	return f.health, f.err
 }
 
@@ -1052,5 +1056,114 @@ func TestStep_AFixWithAHeadGetsAMergeSlot(t *testing.T) {
 	g.tick()
 	if len(g.w.MergeSlots()) != 1 {
 		t.Fatalf("slots = %+v, want one for a fix with a head", g.w.MergeSlots())
+	}
+}
+
+type errPlacer struct{ err error }
+
+func (p errPlacer) Application(context.Context, string, string) (string, error) { return "", p.err }
+
+// stubPlacer answers with a changing result.
+type stubPlacer struct {
+	app string
+	err error
+}
+
+func (p *stubPlacer) Application(context.Context, string, string) (string, error) {
+	return p.app, p.err
+}
+
+func applyAll(w *brain.World, evs []brain.Event) {
+	for _, ev := range evs {
+		brain.Reduce(w, ev)
+	}
+}
+
+// A finding with no single Application gets no merge slot, and it shows a wait on
+// a person with the reason, once, with the scope of the finding. When the finding
+// again reaches one Application, the wait ends through the same events
+// (gibson#1469).
+func TestStep_AFindingInTwoApplicationsGetsNoSlotAndAVisibleWait(t *testing.T) {
+	w := brain.NewWorld("t1")
+	brain.Reduce(w, brain.FindingRaised{ID: "f1", ScopeID: "scope-1", At: at(0)})
+	brain.Reduce(w, brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", MissionID: "fix-run-1", At: at(1)})
+	brain.Reduce(w, brain.FixHeadRecorded{ID: "f1", MergeRequest: "mr-1", HeadSHA: "abc", Files: "[]", MissionID: "fix-run-1", At: at(1)})
+	r := &fakeReader{mr: MergeFact{State: MROpen, PipelineGreen: true}}
+	placer := &stubPlacer{err: &PlaceError{Reason: "this finding affects more than one Application: app-a, app-b"}}
+	wt, err := NewWatcher(r, &fakeReverter{}, placer, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := func() []brain.Event {
+		evs := wt.Step(context.Background(), "t1", w.FindingSnapshot(), w.MergeSlots())
+		applyAll(w, evs)
+		return evs
+	}
+	var observed int
+	for i := range 2 {
+		for _, ev := range step() {
+			if _, ok := ev.(brain.MergeRequestQueued); ok {
+				t.Fatalf("a finding in two Applications was queued: %+v", ev)
+			}
+			if eo, ok := ev.(brain.EntityObserved); ok && eo.Label == "Finding" {
+				t.Errorf("pass %d: the Watcher wrote an entity property of the finding: %+v", i, eo.Props)
+			}
+			if pb, ok := ev.(brain.FindingPlaceBlocked); ok {
+				observed++
+				if !strings.Contains(pb.Reason, "waiting on a person") || !strings.Contains(pb.Reason, "app-a") {
+					t.Errorf("pass %d: reason = %q", i, pb.Reason)
+				}
+			}
+		}
+	}
+	if observed != 1 {
+		t.Errorf("the wait was written %d times, want once", observed)
+	}
+
+	// The finding reaches one Application: the wait ends, and the slot is queued.
+	placer.app, placer.err = "app-a", nil
+	var cleared, queued bool
+	for _, ev := range step() {
+		switch e := ev.(type) {
+		case brain.FindingPlaceBlocked:
+			cleared = cleared || e.Reason == ""
+		case brain.MergeRequestQueued:
+			queued = true
+		}
+	}
+	if !cleared || !queued {
+		t.Errorf("cleared=%v queued=%v, want both", cleared, queued)
+	}
+	if got := w.FindingSnapshot()[0].PlaceBlock; got != "" {
+		t.Errorf("PlaceBlock = %q after the wait ended", got)
+	}
+}
+
+// A finding in two Applications that has no slot cannot read health: the finding
+// stays fixed, the missing signal is recorded, and the wait shows the reason.
+func TestStep_HealthOfAFindingWithNoSingleApplicationIsUnavailableAndVisible(t *testing.T) {
+	g := newRig(t, "scan")
+	g.wt.placer = errPlacer{err: &PlaceError{Reason: "more than one Application"}}
+	g.merged()
+	g.r.deploy = DeployFact{Deployed: true, DeploymentKey: "dep-1", At: at(3)} // no Application key
+	g.r.health = HealthFact{Known: true, Done: true, Held: true, At: at(4)}
+	var unavailable, blocked bool
+	for range 2 {
+		for _, e := range g.tick() {
+			switch ev := e.(type) {
+			case brain.HealthUnavailable:
+				unavailable = true
+			case brain.FindingPlaceBlocked:
+				blocked = blocked || strings.Contains(ev.Reason, "more than one Application")
+			case brain.HealthObserved:
+				t.Fatalf("health was observed with no Application: %+v", ev)
+			}
+		}
+	}
+	if !unavailable || !blocked {
+		t.Errorf("unavailable=%v blocked=%v, want both", unavailable, blocked)
+	}
+	if g.r.healthApp != "" {
+		t.Errorf("health was read for %q", g.r.healthApp)
 	}
 }

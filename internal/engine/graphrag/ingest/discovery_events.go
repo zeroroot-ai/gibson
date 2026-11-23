@@ -6,6 +6,7 @@ package ingest
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -487,6 +488,7 @@ func subdomainObservedEvents(scope string, d *graphragpb.DiscoveryResult, domain
 // findingRaisedEvents emits one FindingRaised per titled finding, carrying the
 // address of the host it names.
 func findingRaisedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult, addressByHostID map[string]string) (events []brain.Event, skipped int) {
+	packages := packageImages(d)
 	for _, f := range d.Findings {
 		if f == nil || f.Title == "" {
 			skipped++
@@ -499,6 +501,8 @@ func findingRaisedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult, add
 			Severity:        f.Severity,
 			ScopeID:         execCtx.MissionID,
 			Address:         addressByHostID[f.GetParentId()],
+			Places:          placesOf(packages, f.GetParentId()),
+			Packages:        packagesOf(packages, f.GetParentId()),
 			MissionID:       execCtx.MissionID,
 			MissionRunID:    execCtx.missionRun(),
 			Status:          brain.FindingStatusOpen,
@@ -511,6 +515,68 @@ func findingRaisedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult, add
 		})
 	}
 	return events, skipped
+}
+
+// packageImages returns each Package node of the discovery by the value that a
+// Finding names as its parent, with the key of the Image that holds it. A scan
+// of an image sets Finding.ParentId to the id of the Package, and the Package
+// names its Image as its parent (gibson-executor parsers/trivy). The Finding is
+// placed at the Image of this discovery: a Package is shared by many images, so
+// the place is never the Package (gibson#1469).
+func packageImages(d *graphragpb.DiscoveryResult) map[string]string {
+	out := map[string]string{}
+	// The Images of this discovery. A Package that names an Image that this
+	// discovery did not report would place the Finding at a node that no scan
+	// wrote, so it gets no place (gibson#1469).
+	images := map[string]bool{}
+	for _, n := range d.CustomNodes {
+		if label, ok := admittedLabel(n.GetNodeType()); ok && label == "Image" {
+			if key := EntityKey(n.IdProperties); key != "" {
+				images[key] = true
+			}
+		}
+	}
+	for _, n := range d.CustomNodes {
+		if n == nil {
+			continue
+		}
+		if label, ok := admittedLabel(n.NodeType); !ok || label != "Package" {
+			continue
+		}
+		key := EntityKey(n.IdProperties)
+		if key == "" {
+			continue
+		}
+		image := ""
+		if label, ok := admittedLabel(n.GetParentType()); ok && label == "Image" {
+			image = EntityKey(n.ParentId)
+			if !images[image] {
+				slog.Warn("a Package names an Image that the discovery did not report, so its findings get no place",
+					"package", key, "image", image)
+				image = ""
+			}
+		}
+		out[key] = image
+	}
+	return out
+}
+
+// placesOf returns the place of a Finding whose parent is a Package of the
+// discovery: the Image that holds the Package.
+func placesOf(packages map[string]string, parent string) []brain.FindingPlace {
+	if image := packages[parent]; image != "" {
+		return []brain.FindingPlace{{Label: "Image", Key: image}}
+	}
+	return nil
+}
+
+// packagesOf returns the Package of a Finding whose parent is a Package of the
+// discovery.
+func packagesOf(packages map[string]string, parent string) []string {
+	if _, ok := packages[parent]; ok {
+		return []string{parent}
+	}
+	return nil
 }
 
 // findingNamespace is the UUID namespace of discovered finding IDs.

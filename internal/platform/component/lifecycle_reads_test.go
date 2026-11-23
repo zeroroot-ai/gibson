@@ -37,6 +37,7 @@ func TestEncodeApplicationFindings_MapsEveryColumn(t *testing.T) {
 		"priority_reason":  "listed in CISA KEV",
 
 		"fix_blocked_reason": "the flaw is on a host",
+		"place_block":        "waiting on a person: x",
 		"merge_request":      "https://forge.example/g/r/-/merge_requests/7",
 		"merge_request_url":  "https://forge.example/g/r/-/merge_requests/7",
 	}}
@@ -59,9 +60,9 @@ func TestEncodeApplicationFindings_MapsEveryColumn(t *testing.T) {
 		Reachable: true, Exposed: true,
 		DeploymentKey: "customer-portal/prod", ImageKey: "sha256:abc",
 		Priority: "P1", PriorityRule: "R01", PriorityReason: "listed in CISA KEV",
-		FixBlockedReason: "the flaw is on a host",
-		MergeRequest:     "https://forge.example/g/r/-/merge_requests/7",
-		MergeRequestURL:  "https://forge.example/g/r/-/merge_requests/7",
+		FixBlockedReason: "the flaw is on a host", PlaceBlock: "waiting on a person: x",
+		MergeRequest:    "https://forge.example/g/r/-/merge_requests/7",
+		MergeRequestURL: "https://forge.example/g/r/-/merge_requests/7",
 	}
 	if got[0] != want {
 		t.Errorf("mapping drifted:\n got %+v\nwant %+v", got[0], want)

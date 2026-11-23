@@ -120,7 +120,20 @@ type Reverter interface {
 	Revert(ctx context.Context, tenant, mergeRequest, missionID string) (RevertFact, error)
 }
 
-// Placer returns the Application or the Host that a finding touches.
+// PlaceError says that a finding has no single Application, and why: it affects
+// more than one Application, or it affects a Host and no Application. The fix
+// loop never picks one. It grants no merge slot, and the reason shows on the
+// finding as a wait on a person (gibson#1469).
+type PlaceError struct {
+	// Reason is the text for a person.
+	Reason string
+}
+
+// Error implements error.
+func (e *PlaceError) Error() string { return e.Reason }
+
+// Placer returns the Application or the Host that a finding touches. It returns a
+// *PlaceError when the finding has no single Application.
 type Placer interface {
 	Application(ctx context.Context, tenant, findingID string) (string, error)
 }

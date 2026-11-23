@@ -316,6 +316,8 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Severity:        f.Severity,
 			Status:          f.Status,
 			VulnerabilityID: f.VulnerabilityID,
+			Places:          f.Places,
+			Packages:        f.Packages,
 		})
 		// FindingRaised carries only some of the fields. The rest come back
 		// from the snapshot, or a restore would lose the scan provenance, the
@@ -666,6 +668,7 @@ func restoreFindingFields(w *World, s FindingSnapshot) {
 			continue
 		}
 		f.ScanScope, f.LastScan = s.ScanScope, s.LastScan
+		f.PlaceBlock = s.PlaceBlock
 		f.MergeRequest, f.MergeRequestState = s.MergeRequest, s.MergeRequestState
 		f.Priority, f.PriorityRule, f.PriorityReason = s.Priority, s.PriorityRule, s.PriorityReason
 		f.FixFacts = s.FixFacts

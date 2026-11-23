@@ -69,7 +69,7 @@ var projectedRelationshipTypes = []string{
 	// upsertFindingCypher; the rest travel as the e.type parameter of
 	// apoc.merge.relationship in upsertEntityCypher.
 	"BUILT_FROM", "CONTAINS", "EXPOSES", "FIXED_BY", "HAS_DEPLOYMENT",
-	"HAS_REPOSITORY", "INSTANCE_OF", "MERGED_INTO", "RUNS", "TOUCHES", "VERIFIED_BY",
+	"HAS_REPOSITORY", "INSTANCE_OF", "IN_PACKAGE", "MERGED_INTO", "RUNS", "TOUCHES", "VERIFIED_BY",
 	// Target (gibson#550): TARGETS is a constant in upsertTargetCypher and
 	// FOUND_ON one in upsertFindingCypher.
 	"FOUND_ON", // Finding -> Target
@@ -307,7 +307,10 @@ func (w *neo4jGraphWriter) UpsertHost(ctx context.Context, tenant string, h brai
 }
 
 // upsertFindingCypher MERGEs a :Finding and, when the affected host is already
-// projected, an AFFECTS edge to it (matched by scope+address). The edge is
+// projected, an AFFECTS edge to it (matched by scope+address). A Finding that
+// names a place (an Image or a Repository) gets an AFFECTS edge to it, and an
+// IN_PACKAGE edge to each Package that holds the weakness. Those nodes are merged
+// here too, so the edges land before the entity pass projects them. The edge is
 // conditional so the finding node is always created; a later pass links it once
 // the host lands (self-healing).
 //
@@ -369,6 +372,7 @@ MERGE (f:Finding {brain_id: $id})
       f.priority = $priority, f.priority_rule = $priority_rule, f.priority_reason = $priority_reason,
       f.merge_request = $merge_request,
       f.fix_head_sha = $fix_head_sha, f.fix_files = $fix_files,
+      f.place_block = $place_block,
       f.submitted_by = $submitted_by, f.agent_name = $agent_name, f.enrolled_by = $enrolled_by,
       f.updated_at = timestamp()
 WITH f
@@ -378,6 +382,16 @@ WITH f
 OPTIONAL MATCH (h:Host {scope: $scope, address: $address})
 FOREACH (_ IN CASE WHEN h IS NULL THEN [] ELSE [1] END |
   MERGE (f)-[:AFFECTS]->(h))
+WITH f
+FOREACH (k IN $affects_images |
+  MERGE (i:Image {key: k})
+  MERGE (f)-[:AFFECTS]->(i))
+FOREACH (k IN $affects_repositories |
+  MERGE (r:Repository {key: k})
+  MERGE (f)-[:AFFECTS]->(r))
+FOREACH (k IN $in_packages |
+  MERGE (p:Package {key: k})
+  MERGE (f)-[:IN_PACKAGE]->(p))
 WITH f
 OPTIONAL MATCH (tg:Target {id: $scope})
 FOREACH (_ IN CASE WHEN tg IS NULL THEN [] ELSE [1] END |
@@ -525,7 +539,7 @@ var findingReservedProps = map[string]struct{}{
 	"title": {}, "description": {}, "severity": {}, "address": {}, "status": {},
 	"vulnerability_id": {}, "priority": {}, "priority_rule": {}, "priority_reason": {},
 	"merge_request": {}, "submitted_by": {}, "agent_name": {}, "enrolled_by": {},
-	"fix_head_sha": {}, "fix_files": {},
+	"fix_head_sha": {}, "fix_files": {}, "place_block": {},
 	"created_at": {}, "verified_at": {}, "verified_status": {}, "id": {},
 }
 
@@ -962,6 +976,13 @@ func findingUpsertParams(f brain.FindingSnapshot) map[string]any {
 		"address":          f.Address,
 		"status":           status,
 		"vulnerability_id": f.VulnerabilityID,
+		// Where a scan saw the Finding (gibson#1469): the Images and the
+		// Repositories that AFFECTS points at, and the Packages that hold the
+		// weakness. A Package is data (IN_PACKAGE), never a place, because many
+		// images share one.
+		"affects_images":       placeKeys(f.Places, "Image"),
+		"affects_repositories": placeKeys(f.Places, "Repository"),
+		"in_packages":          nonNil(f.Packages),
 		// The typed priority (gibson#1522). Empty means no triage pass has decided.
 		"priority":        f.Priority,
 		"priority_rule":   f.PriorityRule,
@@ -974,6 +995,9 @@ func findingUpsertParams(f brain.FindingSnapshot) map[string]any {
 		// daemon read them on the Git host (gibson#1579). The files are JSON.
 		"fix_head_sha": f.FixHeadSHA,
 		"fix_files":    f.FixFiles,
+		// The wait of the fix loop on a finding with no single Application. The
+		// World owns it, so an entity sighting cannot set or clear it.
+		"place_block": f.PlaceBlock,
 		// The verified submitter (gibson#208): who raised the finding, under
 		// which registered name, and who enrolled that agent.
 		"submitted_by": f.SubmittedBy,
@@ -1078,4 +1102,23 @@ func observationParams(o brain.ObservationSnapshot) map[string]any {
 		"taxonomy_version": int64(taxonomy.Global.Version()),
 		"payload":          payload,
 	}
+}
+
+// placeKeys returns the keys of the places of one label. It never returns nil,
+// because a nil list is not a list for the FOREACH of the query.
+func placeKeys(places []brain.FindingPlace, label string) []string {
+	out := []string{}
+	for _, p := range places {
+		if p.Label == label {
+			out = append(out, p.Key)
+		}
+	}
+	return out
+}
+
+func nonNil(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }

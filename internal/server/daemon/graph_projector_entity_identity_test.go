@@ -4,6 +4,7 @@
 package daemon
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -178,5 +179,30 @@ func TestEntityUpsertParams_AFindingKeepsTheFixBlockedReason(t *testing.T) {
 	}
 	if _, ok := props["brain_id"]; ok {
 		t.Fatal("a sighting rewrote the identity of the Finding")
+	}
+}
+
+// place_block is written from the Finding in the World. An entity sighting of a
+// Finding, the fix agent's included, cannot set or clear it, and the reason of the
+// agent stays its own property.
+func TestEntityUpsertParams_PlaceBlockIsReserved(t *testing.T) {
+	p, err := entityUpsertParams(brain.EntitySnapshot{Label: "Finding", Key: "f-1",
+		Props: map[string]string{"place_block": "", "fix_blocked_reason": "the flaw is on a host"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	props, _ := p["props"].(map[string]any)
+	if _, ok := props["place_block"]; ok {
+		t.Error("an entity sighting set or cleared place_block")
+	}
+	if props["fix_blocked_reason"] != "the flaw is on a host" {
+		t.Errorf("props = %v, want the reason of the agent", props)
+	}
+	got := findingUpsertParams(brain.FindingSnapshot{ID: "f-1", PlaceBlock: "waiting on a person: x"})
+	if got["place_block"] != "waiting on a person: x" {
+		t.Errorf("the projection of the Finding lacks place_block: %v", got["place_block"])
+	}
+	if !strings.Contains(upsertFindingCypher, "f.place_block = $place_block") {
+		t.Error("the Cypher does not write place_block")
 	}
 }

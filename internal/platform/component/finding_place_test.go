@@ -50,3 +50,18 @@ func TestFindingPlacesManyCypher_IsTheOneFindingReadForEachID(t *testing.T) {
 	assert.Contains(t, findingPlacesManyCypher, "UNWIND $findings AS fid")
 	assert.Contains(t, findingPlacesManyCypher, strings.TrimSpace(applicationReachesPlace))
 }
+
+// A scan finding is placed at the Image or the Repository where the scan saw it.
+// The route walks both to the Application. A Package is never a place, because
+// many images share one (gibson#1469).
+func TestApplicationReachesPlace_WalksImagesAndRepositories(t *testing.T) {
+	for _, route := range []string{
+		"(app)-[:HAS_REPOSITORY]->(:Repository)<-[:BUILT_FROM]-(place:Image)",
+		"(app)-[:HAS_DEPLOYMENT]->(:Deployment)-[:RUNS]->(place:Image)",
+		"(app)-[:HAS_REPOSITORY]->(place)",
+	} {
+		assert.Contains(t, applicationReachesPlace, route)
+	}
+	assert.NotContains(t, applicationReachesPlace, "(:Repository)-[:CONTAINS]->(place)",
+		"a Repository does not place a Package")
+}

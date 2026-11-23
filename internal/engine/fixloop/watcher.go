@@ -224,15 +224,22 @@ func (w *Watcher) stepFixing(
 		return nil, nil
 	}
 	app, err := w.placer.Application(ctx, tenant, fs[0].ID)
+	var placeErr *PlaceError
+	if errors.As(err, &placeErr) {
+		// No single Application: no slot, and a visible wait on a person.
+		return w.blockedByPlace(fs[0], placeErr.Reason, mission), nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("place finding: %w", err)
 	}
 	if app == "" {
 		return nil, nil
 	}
-	return []brain.Event{brain.MergeRequestQueued{
+	// The finding reaches exactly one Application: a wait that an earlier pass wrote
+	// for more than one ends here.
+	return append(w.placeCleared(fs[0], mission), brain.MergeRequestQueued{
 		MergeRequest: mr, Application: app, At: w.now(), MissionID: mission,
-	}}, nil
+	}), nil
 }
 
 // noFixHead reports whether a finding of the merge request has no fix head. The
@@ -246,6 +253,41 @@ func noFixHead(fs []brain.FindingSnapshot) bool {
 		}
 	}
 	return false
+}
+
+// placeBlockText is the text of the wait that a finding with no single Application
+// shows to a person.
+func placeBlockText(reason string) string { return "waiting on a person: " + reason }
+
+// blockedByPlace records why a finding gets no merge slot: it has no single
+// Application. The reason goes on the World (the event FindingPlaceBlocked) and on
+// the property place_block of the finding. The fix agent owns fix_blocked_reason,
+// and the Watcher never writes or clears it. The
+// state is in the World, so a restart neither repeats the wait nor loses it, and
+// the same state tells the Watcher to clear the wait (gibson#1469).
+func (w *Watcher) blockedByPlace(f brain.FindingSnapshot, reason, mission string) []brain.Event {
+	text := placeBlockText(reason)
+	if f.PlaceBlock == text {
+		return nil
+	}
+	w.logger.Warn("fix loop: the finding has no single Application, so it gets no merge slot",
+		"finding", f.ID, "reason", reason)
+	return w.placeBlockEvents(f, text, mission)
+}
+
+// placeCleared ends the wait of a finding that again reaches exactly one
+// Application.
+func (w *Watcher) placeCleared(f brain.FindingSnapshot, mission string) []brain.Event {
+	if f.PlaceBlock == "" {
+		return nil
+	}
+	return w.placeBlockEvents(f, "", mission)
+}
+
+func (w *Watcher) placeBlockEvents(f brain.FindingSnapshot, text, mission string) []brain.Event {
+	// The projector writes place_block from the Finding in the World. It is not an
+	// entity property, so no sighting can set or clear it.
+	return []brain.Event{brain.FindingPlaceBlocked{ID: f.ID, Reason: text, MissionID: mission, At: w.now()}}
 }
 
 func (w *Watcher) noteRelease(mr string) {
@@ -350,7 +392,7 @@ func (w *Watcher) stepFixed(
 	if f.Health != "" {
 		wait = append(wait, w.endWait(slot, hasSlot, mr, fs, brain.WaitHoldUnreadable)...)
 	}
-	evs, err := w.stepFixedFacts(ctx, tenant, mr, f)
+	evs, err := w.stepFixedFacts(ctx, tenant, mr, f, slot, hasSlot)
 	for _, e := range evs {
 		if d, ok := e.(brain.DeployObserved); ok && d.HoldUnreadable && hasSlot {
 			wait = append(wait, w.beginWait(slot, mr, fs, brain.WaitHoldUnreadable,
@@ -381,7 +423,9 @@ func (w *Watcher) revertWaits(slot brain.MergeSlot, mr string, fs []brain.Findin
 	return append(out, w.endWait(slot, true, mr, fs, brain.WaitRevertFailed)...)
 }
 
-func (w *Watcher) stepFixedFacts(ctx context.Context, tenant, mr string, f brain.FindingSnapshot) ([]brain.Event, error) {
+func (w *Watcher) stepFixedFacts(
+	ctx context.Context, tenant, mr string, f brain.FindingSnapshot, slot brain.MergeSlot, hasSlot bool,
+) ([]brain.Event, error) {
 	switch {
 	case f.DeployedAt.IsZero():
 		d, err := w.reader.Deploy(ctx, tenant, f.FixMissionID, mr)
@@ -399,7 +443,7 @@ func (w *Watcher) stepFixedFacts(ctx context.Context, tenant, mr string, f brain
 	case f.Health == brain.HealthFailed:
 		return w.revert(ctx, tenant, mr, f)
 	case f.Health == "":
-		return w.readHealth(ctx, tenant, mr, f)
+		return w.readHealth(ctx, tenant, mr, f, slot, hasSlot)
 	}
 	return nil, nil
 }
@@ -497,7 +541,7 @@ func firstWithStatus(fs []brain.FindingSnapshot, status string) brain.FindingSna
 // readHealth decides the health event. The hold time starts at the deploy, or
 // at the end of the restart that the deploy needed. A restart that runs longer
 // than the limit is a failure.
-func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.FindingSnapshot) ([]brain.Event, error) {
+func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.FindingSnapshot, slot brain.MergeSlot, hasSlot bool) ([]brain.Event, error) {
 	pol := w.policy(tenant)
 	// The hold time was read once, at the deploy, and the deploy event holds it.
 	// A later read never needs the record of the fix mission.
@@ -525,9 +569,20 @@ func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.Fin
 		since = d.Restart.Ended
 	}
 	app := d.ApplicationKey
+	if app == "" && hasSlot {
+		// The Application of the merge slot is the one that the fix was granted for.
+		// The health read uses it, and it does not place the finding again.
+		app = slot.Application
+	}
 	if app == "" {
-		if app, err = w.placer.Application(ctx, tenant, f.ID); err != nil {
-			return nil, fmt.Errorf("place finding: %w", err)
+		var placeErr *PlaceError
+		var perr error
+		if app, perr = w.placer.Application(ctx, tenant, f.ID); errors.As(perr, &placeErr) {
+			// No single Application and no slot: no health signal to read. The
+			// finding stays fixed, and a person sees why.
+			return append(w.unavailable(mr, f), w.blockedByPlace(f, placeErr.Reason, f.FixMissionID)...), nil
+		} else if perr != nil {
+			return nil, fmt.Errorf("place finding: %w", perr)
 		}
 	}
 	if app == "" {

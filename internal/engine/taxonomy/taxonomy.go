@@ -52,7 +52,7 @@ import (
 // Version is the Taxonomy's platform-wide version. Bump it in the same change
 // that promotes a shape, so a projected graph can be attributed to the schema
 // that produced it.
-const Version = 6
+const Version = 7
 
 // ObservationLabel is the label every out-of-taxonomy shape lands on. It is a
 // compile-time constant and a plain identifier, so it is never caller-influenced.
@@ -151,6 +151,7 @@ var coreRelationshipTypes = []string{
 	"HAS_DEPLOYMENT", // Application -> Deployment
 	"HAS_REPOSITORY", // Application -> Repository
 	"INSTANCE_OF",    // Finding -> Vulnerability
+	"IN_PACKAGE",     // Finding -> Package: the Package that holds the weakness, as data, never a place
 	"MERGED_INTO",    // MergeRequest -> Repository
 	"RUNS",           // Deployment -> Image
 	"TOUCHES",        // Finding -> Control
