@@ -23,15 +23,14 @@
 //	2  a governed connector call reaches the mock over TLS                      "a governed call of the git host ..."
 //	3  the health signal of the tenant reads the metrics of the mock            "the health signal ..."
 //
-// What it does not prove yet: case 1 (the agent fixes the flaw, the signal holds,
-// the finding is verified with an exposure window) and case 2 (the fix breaks the
-// service, the daemon reverts it, the finding is open, and the revert rate counts
-// it). Both need a finding that a scan mission raised on an Application, and no
-// producer of that finding exists that a test can drive without a real scanner.
-// See the report on gibson#1469.
+// Case 1 and case 2 (fix_loop_cases_test.go) run the product path on top of it: the
+// catalog scan raises a finding from a dependency alert of the mock, the fix agent
+// fixes it through a coding job on a bank, and the daemon verifies it with an
+// exposure window (case 1) or reverts it and reopens the finding (case 2).
 //
-// It needs GIBSON_TEST_FIXTURES_ENABLED=true, DAEMON_GRPC_ADDR, FIXLOOP_MOCK_URL and
-// FIXLOOP_MOCK_CA_B64 (the PEM of the authority of the mock, in base64).
+// It needs GIBSON_TEST_FIXTURES_ENABLED=true, DAEMON_GRPC_ADDR, FIXLOOP_MOCK_URL,
+// FIXLOOP_MOCK_CA_B64 (the PEM of the authority of the mock, in base64),
+// EXIT_TEST_ANTHROPIC_API_KEY and EXIT_TEST_ANTHROPIC_WORKSPACE_ID.
 package e2e
 
 import (
