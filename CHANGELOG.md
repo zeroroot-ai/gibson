@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.172.0](https://github.com/zeroroot-ai/gibson/compare/v0.171.1...v0.172.0) (2026-11-23)
+
+
+### Features
+
+* **brain:** anchor the findings of a scan to its Application ([#1645](https://github.com/zeroroot-ai/gibson/issues/1645)) ([d4ab20f](https://github.com/zeroroot-ai/gibson/commit/d4ab20fd2f3c0c77a7fb4698a13d16322e3b6b94))
+* **brain:** write AFFECTS from a finding to the Package it names ([#1646](https://github.com/zeroroot-ai/gibson/issues/1646)) ([7562bb0](https://github.com/zeroroot-ai/gibson/commit/7562bb0e3de8492076a5f68eb1ce96408f3d83b9))
+* **connector:** trust a CA bundle of the tenant in one connector pod ([#1641](https://github.com/zeroroot-ai/gibson/issues/1641)) ([02219ea](https://github.com/zeroroot-ai/gibson/commit/02219ea245fd2f406008fa53e6902a4547d5c3e7))
+* **fixloop:** read the health hold from the mission constraints ([#1637](https://github.com/zeroroot-ai/gibson/issues/1637)) ([7f24c10](https://github.com/zeroroot-ai/gibson/commit/7f24c103bef6f9f53102e1f4eab8848d40689472))
+* **mission:** let a TOOL node call a connector tool on the governed path ([#1647](https://github.com/zeroroot-ai/gibson/issues/1647)) ([0d0f5fd](https://github.com/zeroroot-ai/gibson/commit/0d0f5fd591dbff57361c6336b35e94e61a577878))
+
+
+### Bug Fixes
+
+* **a2a:** pass the webhook data part to the mission as untrusted task data ([#1633](https://github.com/zeroroot-ai/gibson/issues/1633)) ([2501515](https://github.com/zeroroot-ai/gibson/commit/25015156e45f4a1f921a91eded339dfefc24c013))
+* **a2a:** refuse a message id that Postgres cannot store ([#1651](https://github.com/zeroroot-ai/gibson/issues/1651)) ([ab3ec3d](https://github.com/zeroroot-ai/gibson/commit/ab3ec3d67c712da40c4cb40dd5b2f4445d9d6780))
+* **blueteam:** always show the wait of a linked fix with no head ([#1652](https://github.com/zeroroot-ai/gibson/issues/1652)) ([75cb096](https://github.com/zeroroot-ai/gibson/commit/75cb096baf67b9891ee39a1dc851e888dc93ad71))
+* **brain:** keep the merge slot while a revert is pending ([#1650](https://github.com/zeroroot-ai/gibson/issues/1650)) ([ce745cd](https://github.com/zeroroot-ai/gibson/commit/ce745cd8fa1abb3e5a65eba8ee7b35ae14e951de))
+* **catalog:** pin the fix loop connectors to connectors v0.5.0 ([#1644](https://github.com/zeroroot-ai/gibson/issues/1644)) ([a92d0da](https://github.com/zeroroot-ai/gibson/commit/a92d0da3496a0a0ca6ca6911f808e84f8c50cd06))
+* **daemon:** check that the fix head is the commit that the fix job made ([#1638](https://github.com/zeroroot-ai/gibson/issues/1638)) ([4a0e566](https://github.com/zeroroot-ai/gibson/commit/4a0e56605ad2c30cfe32aa63c884467db854199e))
+* **fixloop:** treat a mission read that can never work as a gone record ([#1649](https://github.com/zeroroot-ai/gibson/issues/1649)) ([8da75eb](https://github.com/zeroroot-ai/gibson/commit/8da75eb1b4c6bf92f55e6005ef9cfd54f972b069))
+* **incidentreport:** key controls on catalog tool ids and name the grantor ([#1636](https://github.com/zeroroot-ai/gibson/issues/1636)) ([4f45c98](https://github.com/zeroroot-ai/gibson/commit/4f45c9898b010debc96221935cacc5b1e4e9553a))
+* **operators:** ask only for list on the Cilium agent pods ([#1635](https://github.com/zeroroot-ai/gibson/issues/1635)) ([0acf109](https://github.com/zeroroot-ai/gibson/commit/0acf109b0c8b505f239f4e09565355d63a9c3072))
+
 ## [0.171.1](https://github.com/zeroroot-ai/gibson/compare/v0.171.0...v0.171.1) (2026-11-23)
 
 
