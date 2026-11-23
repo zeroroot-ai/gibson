@@ -1038,7 +1038,8 @@ func TestSubscribeInput_ATurnThatCannotBeRecordedIsNotDelivered(t *testing.T) {
 
 // A pulled job carries the grant of its first turn. The grant is a turn grant of the job: the
 // task is the job id, the mission is the bank, the run is the run of the member, and the subject
-// is the sender of the current turn that Claim recorded (the opener for a job that never ran). The turn surface is the only surface.
+// is the sender of the current turn that Claim recorded. For a job that never ran, that is the
+// opener. The turn surface is the only surface.
 func TestPullJob_CarriesTheTurnGrantOfTheFirstTurn(t *testing.T) {
 	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
 	bob := job.Principal{Kind: job.PrincipalUser, ID: "bob"}
