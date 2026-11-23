@@ -731,6 +731,14 @@ func (m *CallbackManager) CallConnectorForTenant(
 	return m.server.Service().CallConnectorForTenant(ctx, tenant, missionID, connector, tool, args)
 }
 
+// CallConnectorForMission runs the connector call of a TOOL node of a mission on
+// the one governed path of a connector call (gibson#1469).
+func (m *CallbackManager) CallConnectorForMission(
+	ctx context.Context, tenant, missionID, runID, connector, tool string, args map[string]any,
+) (any, error) {
+	return m.server.Service().CallConnectorForMission(ctx, tenant, missionID, runID, connector, tool, args)
+}
+
 // CallMetaTool serves search_tools and invoke_tool for an agent in pull mode.
 func (m *CallbackManager) CallMetaTool(ctx context.Context, tenant, missionID, runID, name string, input []byte) (*harnesspb.CallToolProtoResponse, error) {
 	return m.server.Service().CallMetaTool(ctx, tenant, missionID, runID, name, input)

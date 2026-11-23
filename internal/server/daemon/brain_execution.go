@@ -38,6 +38,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
+	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
@@ -133,6 +134,10 @@ type brainExecutor struct {
 	jobFindings jobnode.FindingsResolver
 	// jobClaims holds the findings of a fix job while it runs (gibson#1454).
 	jobClaims jobnode.FixClaims
+	// connectors makes the connector call of a TOOL node (gibson#1469). It is
+	// read per dispatch, because the daemon builds the callback manager after
+	// the executor. nil means a tool node cannot name a connector tool.
+	connectors func() missionConnectorCaller
 	// models sends the model call of the Decider to the model gateway
 	// (gibson#1392). The gateway trace is the one source of the llm_call.observed
 	// and token.used events of that call, so the executor emits neither.
@@ -380,6 +385,12 @@ func (b *brainExecutor) dispatchPlugin(bind *missionBinding, req brain.DispatchR
 func (b *brainExecutor) dispatchTool(bind *missionBinding, req brain.DispatchRequest) (string, error) {
 	if req.Target == "" {
 		return "", fmt.Errorf("tool node has no tool name")
+	}
+	// A tool node that names mcp:<connector>:<tool> calls a connector of the
+	// tenant on the one governed path of a connector call, the path of
+	// invoke_tool (gibson#1469). Any other name takes the paths below.
+	if tid, err := toolid.Parse(req.Target); err == nil && tid.Source == toolid.SourceMCP {
+		return b.dispatchConnectorTool(bind, req, tid)
 	}
 	// A for_each instance runs against its OWN target, so the harness it gets
 	// must report that target: every scope reader — observationAttribution,
@@ -798,4 +809,35 @@ func agentWorkFailure(workID, runID string, err error) brain.WorkCompleted {
 		}
 	}
 	return brain.WorkCompleted{ID: workID, RunID: runID, Err: err.Error()}
+}
+
+// missionConnectorCaller makes the connector call of a TOOL node.
+// harness.CallbackManager satisfies it.
+type missionConnectorCaller interface {
+	CallConnectorForMission(ctx context.Context, tenant, missionID, runID, connector, tool string, args map[string]any) (any, error)
+}
+
+// dispatchConnectorTool runs a TOOL node that names a connector tool. The input
+// of the node is the JSON object of the arguments. The result is the JSON of the
+// tool result, which is the output of the node.
+func (b *brainExecutor) dispatchConnectorTool(bind *missionBinding, req brain.DispatchRequest, tid toolid.ID) (string, error) {
+	if b.connectors == nil || b.connectors() == nil {
+		return "", fmt.Errorf("tool %q: this daemon has no connector caller", tid.Canonical())
+	}
+	args := map[string]any{}
+	if in := strings.TrimSpace(req.Input); in != "" && in != "null" {
+		if err := json.Unmarshal([]byte(in), &args); err != nil {
+			return "", fmt.Errorf("tool %q: the input of the node is not a JSON object: %w", tid.Canonical(), err)
+		}
+	}
+	missionID := req.MissionID
+	res, err := b.connectors().CallConnectorForMission(bind.ctx, bind.tenant, missionID, bind.runID, tid.Connector, tid.Tool, args)
+	if err != nil {
+		return "", fmt.Errorf("tool %q: %w", tid.Canonical(), err)
+	}
+	out, err := json.Marshal(res)
+	if err != nil {
+		return "", fmt.Errorf("tool %q: encode the result: %w", tid.Canonical(), err)
+	}
+	return string(out), nil
 }

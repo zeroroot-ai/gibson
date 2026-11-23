@@ -290,3 +290,60 @@ func TestDispatchTool_PassesTheNodeNetworkToTheTool(t *testing.T) {
 		t.Errorf("the tool call carried network %+v, want %+v", h.gotNetwork, network)
 	}
 }
+
+type fakeMissionConnector struct {
+	tenant, mission, run, connector, tool string
+	args                                  map[string]any
+	result                                any
+	err                                   error
+}
+
+func (f *fakeMissionConnector) CallConnectorForMission(
+	_ context.Context, tenant, missionID, runID, connector, tool string, args map[string]any,
+) (any, error) {
+	f.tenant, f.mission, f.run, f.connector, f.tool, f.args = tenant, missionID, runID, connector, tool, args
+	return f.result, f.err
+}
+
+// A TOOL node that names mcp:<connector>:<tool> calls the connector with the
+// tenant and the run of its binding, and its input is the argument object. The
+// harness tool path is not used (gibson#1469).
+func TestDispatchTool_AConnectorToolTakesTheGovernedPath(t *testing.T) {
+	h := &toolHarness{output: `{"never":"used"}`}
+	conn := &fakeMissionConnector{result: map[string]any{"alerts": []any{}}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = func() missionConnectorCaller { return conn }
+	bind := &missionBinding{ctx: context.Background(), harness: h, tenant: "acme", runID: "run-9"}
+
+	out, err := b.dispatchTool(bind, brain.DispatchRequest{
+		WorkID: "w1", MissionID: "m1", Kind: "tool", Target: "mcp:github-fixloop:read_file", Input: `{"path":"go.mod"}`,
+	})
+	if err != nil {
+		t.Fatalf("dispatchTool: %v", err)
+	}
+	if out != `{"alerts":[]}` {
+		t.Errorf("out = %q", out)
+	}
+	if conn.tenant != "acme" || conn.run != "run-9" || conn.mission != "m1" || conn.connector != "github-fixloop" || conn.tool != "read_file" {
+		t.Errorf("call = %+v", conn)
+	}
+	if conn.args["path"] != "go.mod" {
+		t.Errorf("args = %v", conn.args)
+	}
+	if h.gotName != "" {
+		t.Errorf("the harness tool path ran for %q", h.gotName)
+	}
+
+	// A refusal of the governed path ends the node, and a bad input does too.
+	conn.err = errors.New("not allowed")
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{Target: "mcp:github-fixloop:read_file"}); err == nil {
+		t.Error("a refused call must fail the node")
+	}
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{Target: "mcp:github-fixloop:read_file", Input: `[1]`}); err == nil {
+		t.Error("an input that is not an object must fail the node")
+	}
+	b.connectors = nil
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{Target: "mcp:github-fixloop:read_file"}); err == nil {
+		t.Error("a daemon with no connector caller must fail the node")
+	}
+}

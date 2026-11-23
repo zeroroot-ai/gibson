@@ -516,34 +516,90 @@ func TenantGrantSubject(tenant string) string { return "tenant:" + tenant + "#me
 func (s *HarnessCallbackService) CallConnectorForTenant(
 	ctx context.Context, tenant, missionID, connector, tool string, args map[string]any,
 ) (any, error) {
-	if tenant == "" || connector == "" || tool == "" {
+	return s.callConnectorAs(ctx, connectorCallAs{
+		tenant: tenant, missionID: missionID, connector: connector, tool: tool, args: args, daemon: true,
+	})
+}
+
+// ErrMissionNodeRole is the refusal of a mission node that calls a tool with a
+// role. A merge needs the merge slot of an agent run, and a revert is the call
+// of the daemon only. A TOOL node does neither.
+var ErrMissionNodeRole = errors.New("a mission node cannot call a tool with the role merge or daemon")
+
+// CallConnectorForMission runs the connector call of a TOOL node of a mission
+// (gibson#1469). It takes the same path as CallConnectorForTenant and
+// invoke_tool, metatool.Handler.Call, so a node gets the same can_execute check,
+// the tenant kill switch, the approval mark, the audit records and the flight
+// recorder as an agent does.
+//
+// The subject of the can_execute check is TenantGrantSubject, the member set of
+// the tenant. That set holds can_execute on a connector only while the tenant
+// has the connector enabled (catalogEnablePosture), so a connector that the
+// tenant did not enable, or that its kill switch stops, is refused. The call is
+// not a call of the daemon: a tool with the role daemon is refused, and a tool
+// with the role merge is refused here before the handler. The mission policy of
+// the run applies: the deny list of the stored definition and the state of the
+// run. A policy that cannot be read refuses the call.
+func (s *HarnessCallbackService) CallConnectorForMission(
+	ctx context.Context, tenant, missionID, runID, connector, tool string, args map[string]any,
+) (any, error) {
+	if runID == "" {
+		return nil, errors.New("a connector call of a mission node needs the run of the mission")
+	}
+	policy, err := s.MissionPolicyForRun(ctx, tenant, runID)
+	if err != nil {
+		return nil, fmt.Errorf("the mission policy of run %q: %w", runID, err)
+	}
+	if entry, lerr := componentcatalog.LookupConnector(connector); lerr == nil {
+		if mark := entry.ApprovalFor(tool); mark.Merge || mark.DaemonOnly {
+			return nil, fmt.Errorf("%w: %s:%s", ErrMissionNodeRole, connector, tool)
+		}
+	}
+	return s.callConnectorAs(ctx, connectorCallAs{
+		tenant: tenant, missionID: missionID, runID: runID, connector: connector, tool: tool, args: args,
+		policy: policy,
+	})
+}
+
+type connectorCallAs struct {
+	tenant, missionID, runID, connector, tool string
+	args                                      map[string]any
+	policy                                    metatool.MissionPolicy
+	daemon                                    bool
+}
+
+// callConnectorAs is the one function behind the two calls above.
+func (s *HarnessCallbackService) callConnectorAs(ctx context.Context, c connectorCallAs) (any, error) {
+	if c.tenant == "" || c.connector == "" || c.tool == "" {
 		return nil, errors.New("a connector call of the daemon needs a tenant, a connector and a tool")
 	}
 	if s.connectors == nil || s.componentAuthorizer == nil {
 		return nil, errors.New("the connector client or the authorizer is not wired")
 	}
-	tid := toolid.ID{Source: toolid.SourceMCP, Connector: connector, Tool: tool}
-	subject := TenantGrantSubject(tenant)
-	tenantID, err := auth.NewTenantID(tenant)
+	tid := toolid.ID{Source: toolid.SourceMCP, Connector: c.connector, Tool: c.tool}
+	subject := TenantGrantSubject(c.tenant)
+	tenantID, err := auth.NewTenantID(c.tenant)
 	if err != nil {
-		return nil, fmt.Errorf("connector call for tenant %q: %w", tenant, err)
+		return nil, fmt.Errorf("connector call for tenant %q: %w", c.tenant, err)
 	}
-	ctx = auth.ContextWithTenantString(ctx, tenant)
+	ctx = auth.ContextWithTenantString(ctx, c.tenant)
 	ctx = auth.WithIdentity(ctx, auth.Identity{Subject: subject, Tenant: tenantID, CredentialType: auth.CredentialOIDCUser})
 
 	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
 	handler := metatool.NewHandler(nil, authorizer, s.connectors).WithApprovalGate(s.toolApproval)
 	result, err := handler.Call(ctx, metatool.Call{
-		Caller:    catalog.Caller{Subject: subject, Tenant: tenant, Mission: missionID},
+		Caller:    catalog.Caller{Subject: subject, Tenant: c.tenant, Mission: c.missionID},
 		ID:        tid.Canonical(),
-		Args:      args,
-		MissionID: missionID,
+		Args:      c.args,
+		Policy:    c.policy,
+		MissionID: c.missionID,
+		RunID:     c.runID,
 		Recorder:  s.RecordToolCall,
 		Observer:  &harnessCallObserver{s: s},
-		Daemon:    true,
+		Daemon:    c.daemon,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("connector call %s for tenant %q: %w", tid.Canonical(), tenant, err)
+		return nil, fmt.Errorf("connector call %s for tenant %q: %w", tid.Canonical(), c.tenant, err)
 	}
 	return result, nil
 }
