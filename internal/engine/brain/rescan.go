@@ -155,6 +155,14 @@ func RescanReconciliationSystem(w *World) []Event {
 			if f.Status != FindingStatusFixed && f.Status != FindingStatusVerified {
 				continue // only a fix is waiting on a rescan's verdict
 			}
+			if f.CheckKind == string(finding.CheckTool) {
+				// The check that raised a Finding is the check that verifies its
+				// fix. A Finding that a read of a tool of the buyer raised (a
+				// dependency alert) is verified by that tool saying the alert is
+				// fixed. A scan that does not re-raise it saw nothing about it,
+				// and its silence is no proof (gibson#1469).
+				continue
+			}
 			// The scan is a rerun of the check. It does not set a status. The
 			// VerificationSystem does, once the deploy and the health signal
 			// are known (gibson#1464). The evidence of the scan is no older

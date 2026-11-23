@@ -47,6 +47,9 @@ var paramsByMission = map[string]map[string]string{
 		"pipelineId":    "8891",
 		"pipelineUrl":   "https://gitlab.com/examplebank/customer-portal/-/pipelines/8891",
 		"imageRef":      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
+		// The dependency alerts of the Git host, read through its connector.
+		"forgeConnector": "gitlab-fixloop",
+		"project":        "examplebank/customer-portal",
 	},
 	"fix": {
 		"bank":           "bank/coding",
@@ -256,7 +259,21 @@ func TestRender_EveryToolItNamesIsInTheCatalog(t *testing.T) {
 			if n.GetType() != missionv1.NodeType_NODE_TYPE_TOOL {
 				continue
 			}
-			if name := n.GetToolConfig().GetToolName(); !shipped[name] {
+			name := n.GetToolConfig().GetToolName()
+			if strings.HasPrefix(name, "mcp:") {
+				// A connector tool (gibson#1469): the connector must be in the
+				// catalog. The manifest lists no tools, so the tool name is not checked.
+				parts := strings.Split(name, ":")
+				if len(parts) != 3 {
+					t.Errorf("mission %q node %q names the connector tool %q, which is not mcp:<connector>:<tool>", mission, id, name)
+					continue
+				}
+				if _, err := componentcatalog.LookupConnector(parts[1]); err != nil {
+					t.Errorf("mission %q node %q names connector %q, which is not in the catalog: %v", mission, id, parts[1], err)
+				}
+				continue
+			}
+			if !shipped[name] {
 				t.Errorf("mission %q node %q names tool %q, which the executor does not ship (it ships %v)",
 					mission, id, name, sortedKeys(shipped))
 			}

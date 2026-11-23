@@ -23,6 +23,8 @@
 //   pipelineId     the pipeline that triggered this scan
 //   pipelineUrl    that pipeline, for a human following the trail
 //   imageRef       the image that pipeline published, by digest
+//   forgeConnector the connector of the Git host, by catalog id
+//   project        the project path on the Git host, owner/repo
 //
 // The runtime branch reads `{{target.domain}}`, bound from the mission's
 // target at submit — never from a parameter, so a caller cannot point a
@@ -31,13 +33,15 @@
 import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
 
 _params: {
-	application:   string
-	repositoryUrl: string
-	ref:           string
-	commit:        string
-	pipelineId:    string
-	pipelineUrl:   string
-	imageRef:      string
+	application:    string
+	repositoryUrl:  string
+	ref:            string
+	commit:         string
+	pipelineId:     string
+	pipelineUrl:    string
+	imageRef:       string
+	forgeConnector: string
+	project:        string
 }
 
 // _context is attached to the agent node's task so the child inherits the
@@ -48,19 +52,19 @@ _params: {
 // value is wrapped. An agent that reads these as plain strings drops every
 // key silently — the defect zerocool-plugins#90 fixed on the agent side.
 _context: {
-	"zerocool.task":     {stringValue: "source-analysis"}
-	"application":       {stringValue: _params.application}
-	"pipeline.id":       {stringValue: _params.pipelineId}
-	"pipeline.url":      {stringValue: _params.pipelineUrl}
-	"repository.url":    {stringValue: _params.repositoryUrl}
-	"repository.ref":    {stringValue: _params.ref}
+	"zerocool.task": {stringValue: "source-analysis"}
+	"application": {stringValue: _params.application}
+	"pipeline.id": {stringValue: _params.pipelineId}
+	"pipeline.url": {stringValue: _params.pipelineUrl}
+	"repository.url": {stringValue: _params.repositoryUrl}
+	"repository.ref": {stringValue: _params.ref}
 	"repository.commit": {stringValue: _params.commit}
-	"image.ref":         {stringValue: _params.imageRef}
+	"image.ref": {stringValue: _params.imageRef}
 }
 
 mission: missionv1.#MissionDefinition & {
 	name:        "scan"
-	description: "Scan one Application from three sides — its image, its source, and what it is actually running."
+	description: "Scan one Application from four sides: its image, its source, what it is actually running, and the dependency alerts of its Git host."
 	version:     "1.0.0"
 	targetRef:   ""
 
@@ -82,8 +86,8 @@ mission: missionv1.#MissionDefinition & {
 			agentConfig: {
 				agentName: "zerocool"
 				task: {
-					id: "source"
-					goal: "Scan the \(_params.application) repository at commit \(_params.commit) and submit a Finding for every real weakness you can support with evidence."
+					id:      "source"
+					goal:    "Scan the \(_params.application) repository at commit \(_params.commit) and submit a Finding for every real weakness you can support with evidence."
 					context: _context
 				}
 			}
@@ -125,6 +129,20 @@ mission: missionv1.#MissionDefinition & {
 			}
 		}
 
+		// ---- dependency alerts ------------------------------------------
+		// The buyer's own alerts on the Git host, read through the connector of
+		// the tenant (the grant, the kill switch and the audit record apply). Each
+		// open alert is a Finding of this scan, so a rescan that reads no open
+		// alert for it verifies the fix (gibson#1469).
+		alerts: {
+			id:   "alerts"
+			type: missionv1.#NODE_TYPE_TOOL
+			toolConfig: {
+				toolName: "mcp:\(_params.forgeConnector):list_dependency_alerts"
+				input: {project: _params.project, state: "all"}
+			}
+		}
+
 		// ---- join -------------------------------------------------------
 		// One completion for the whole scan. A rescan can only decide that a
 		// `fixed` Finding is `verified` — that it did not see it again — if
@@ -133,10 +151,10 @@ mission: missionv1.#MissionDefinition & {
 			id:   "report"
 			type: missionv1.#NODE_TYPE_JOIN
 			joinConfig: {
-				waitFor: ["image", "source", "tls"]
+				waitFor: ["image", "source", "tls", "alerts"]
 				strategy: missionv1.#MERGE_STRATEGY_CONCAT
 			}
-			dependencies: ["image", "source", "tls"]
+			dependencies: ["image", "source", "tls", "alerts"]
 		}
 	}
 
@@ -147,8 +165,9 @@ mission: missionv1.#MissionDefinition & {
 		{from: "image", to: "report"},
 		{from: "source", to: "report"},
 		{from: "tls", to: "report"},
+		{from: "alerts", to: "report"},
 	]
 
-	entryPoints: ["image", "source", "ports"]
+	entryPoints: ["image", "source", "ports", "alerts"]
 	exitPoints: ["report"]
 }
