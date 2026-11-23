@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"time"
 
@@ -439,7 +440,7 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 func (s *HarnessCallbackService) mintTurnGrant(
 	tenantID, runID, bankID, jobID string, sender job.Principal,
 ) (string, error) {
-	return s.turnGrants.Mint(capabilitygrant.MintRequest{
+	grant, err := s.turnGrants.Mint(capabilitygrant.MintRequest{
 		Subject:        TurnGrantSubject(sender),
 		Tenant:         tenantID,
 		MissionID:      bankID,
@@ -448,6 +449,10 @@ func (s *HarnessCallbackService) mintTurnGrant(
 		RecipientClass: "agent",
 		AllowedRPCs:    TurnGrantRPCs(),
 	})
+	if err != nil {
+		return "", fmt.Errorf("mint the turn grant of job %s: %w", jobID, err)
+	}
+	return grant, nil
 }
 
 // TurnGrantSubject renders the sender as a grant subject. A component's id is

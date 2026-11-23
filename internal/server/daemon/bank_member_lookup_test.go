@@ -530,3 +530,39 @@ func TestBankMemberLiveness_TheFirstTurnGrantOfAPulledJobRenews(t *testing.T) {
 		t.Errorf("a member that does not hold the job: live = %v, err = %v, want a refusal", got, err)
 	}
 }
+
+// Ready says if the daemon can mint a turn grant. Without a signer it is Unavailable. With one it
+// is nil, and the minter then mints. PullJob asks before it claims.
+func TestLazyTurnGrantMinter_ReadyFollowsTheSigner(t *testing.T) {
+	without := &lazyTurnGrantMinter{daemon: &daemonImpl{}}
+	if err := without.Ready(); status.Code(err) != codes.Unavailable {
+		t.Fatalf("Ready with no signer = %v, want Unavailable", err)
+	}
+	with := &lazyTurnGrantMinter{daemon: &daemonImpl{cgMinter: testCGMinter(t)}}
+	if err := with.Ready(); err != nil {
+		t.Fatalf("Ready with a signer = %v, want nil", err)
+	}
+}
+
+// The job surface of the harness passes ReleaseJob to the store. It clears the member of a job the
+// member holds, keeps ErrNotFound for a job it does not hold, and reports a store that is down.
+func TestLazyJobSurface_ReleaseJobReachesTheStore(t *testing.T) {
+	ctx := context.Background()
+	jobs := newFakeJobStore()
+	jobs.jobs["job-1"] = &job.Job{ID: "job-1", MemberID: "m-1"}
+	surface := &lazyJobSurface{daemon: &daemonImpl{}, stores: func() (job.Store, error) { return jobs, nil }}
+
+	if err := surface.ReleaseJob(ctx, "acme", "job-1", "m-1"); err != nil {
+		t.Fatalf("ReleaseJob: %v", err)
+	}
+	if got := jobs.jobs["job-1"].MemberID; got != "" {
+		t.Errorf("member = %q, want the job back in the queue", got)
+	}
+	if err := surface.ReleaseJob(ctx, "acme", "job-1", "m-2"); !errors.Is(err, job.ErrNotFound) {
+		t.Errorf("a member that does not hold the job: %v, want ErrNotFound", err)
+	}
+	down := &lazyJobSurface{daemon: &daemonImpl{}, stores: func() (job.Store, error) { return nil, errors.New("no pool") }}
+	if err := down.ReleaseJob(ctx, "acme", "job-1", "m-1"); err == nil {
+		t.Error("no store must be reported on ReleaseJob")
+	}
+}
