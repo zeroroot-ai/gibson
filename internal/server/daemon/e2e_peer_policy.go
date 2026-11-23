@@ -176,11 +176,11 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			// The fix loop exit test (tests/e2e/fix_loop_cases_test.go): launch the
 			// real catalog scan and the fix agent, and read the outcome through the
 			// daemon only.
-			"/gibson.daemon.v1.DaemonService/RenderCatalogMission": true,
-			"/gibson.world.v1.WorldService/ListOpenFindings":       true,
-			"/gibson.world.v1.WorldService/GetExposure":            true,
-			"/gibson.world.v1.WorldService/GetRevertRate":          true,
-			"/gibson.world.v1.WorldService/ListWaitingOnPerson":    true,
+			"/gibson.daemon.v1.DaemonService/RunCatalogMission": true,
+			"/gibson.world.v1.WorldService/ListOpenFindings":    true,
+			"/gibson.world.v1.WorldService/GetExposure":         true,
+			"/gibson.world.v1.WorldService/GetRevertRate":       true,
+			"/gibson.world.v1.WorldService/ListWaitingOnPerson": true,
 			// The A2A inbound exit test (tests/e2e/a2a_inbound_test.go, epic
 			// gibson#1367). The runner publishes a mission definition for inbound
 			// calls as the tenant admin, grants and revokes a caller identity, and

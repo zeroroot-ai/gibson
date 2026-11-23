@@ -50,6 +50,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
@@ -64,6 +65,9 @@ const (
 	fixLoopOwner = "acme"
 	fixLoopRepo  = "shop"
 	fixLoopApp   = fixLoopOwner + "/" + fixLoopRepo
+	// The second repository holds the fixture of case 2.
+	fixLoopRepo2 = "shop2"
+	fixLoopApp2  = fixLoopOwner + "/" + fixLoopRepo2
 
 	fixLoopGitConnector     = "github-fixloop"
 	fixLoopMetricsConnector = "prometheus-health"
@@ -157,7 +161,7 @@ func fixLoopSecrets(ctx context.Context, t *testing.T, secrets secretsv1.Secrets
 	t.Helper()
 	gitCA = fixLoopGitConnector + "-ca-mock"
 	metricsCA = fixLoopMetricsConnector + "-ca-mock"
-	queries, err := json.Marshal(map[string]string{fixLoopApp: `up{job="shop"}`})
+	queries, err := json.Marshal(map[string]string{fixLoopApp: `up{job="shop"}`, fixLoopApp2: `up{job="shop2"}`})
 	require.NoError(t, err)
 	set := func(name string, cat secretsv1.SecretCategory, value []byte) {
 		_, serr := secrets.SetSecret(ctx, &secretsv1.SetSecretRequest{Name: name, Category: cat, Value: value})
@@ -294,6 +298,11 @@ func TestFixLoop(t *testing.T) {
 			return true, ""
 		})
 		require.Equal(t, true, got["known"], "the tenant stated a query for %s: %v", fixLoopApp, got)
+	})
+
+	runFixLoopCases(t, &fixLoopWorld{
+		ctx: ctx, clients: clients, forge: forge, daemon: clients.Daemon,
+		world: worldpb.NewWorldServiceClient(clients.Conn()), targetID: targetID, bankName: "fix-loop-bank",
 	})
 
 	work.Complete()
