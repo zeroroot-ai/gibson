@@ -475,7 +475,7 @@ func TestOriginate_ConcurrentChildrenNeverExceedTheParentEnvelope(t *testing.T) 
 
 // A child that a component originates inherits the health hold and the restart
 // rules of its parent, so the hold reaches every child, whoever originates it
-// (gibson#1469). The child keeps a hold that it sets itself.
+// (gibson#1469). A child can only make the hold longer.
 func TestOriginate_ChildInheritsTheHealthHoldOfItsParent(t *testing.T) {
 	ctx := context.Background()
 	f := newOriginatorFixture(t)
@@ -504,7 +504,7 @@ func TestOriginate_ChildInheritsTheHealthHoldOfItsParent(t *testing.T) {
 	require.NoError(t, err)
 	stored, err = UnmarshalDefinitionJSON([]byte(child.MissionDefinitionJSON))
 	require.NoError(t, err)
-	assert.Equal(t, 10*time.Second, stored.GetConstraints().GetHealthHold().AsDuration(), "a hold of the child wins")
+	assert.Equal(t, 2*time.Minute, stored.GetConstraints().GetHealthHold().AsDuration(), "a shorter hold of the child loses: the stricter value wins")
 
 	// A parent with a definition that does not parse stops the origination and
 	// reserves nothing.

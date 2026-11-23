@@ -235,7 +235,11 @@ func (o *Originator) Originate(ctx context.Context, req OriginateRequest) (*Miss
 	if parentErr != nil {
 		return nil, parentErr
 	}
-	def.Constraints = InheritConstraints(def.GetConstraints(), parentConstraints)
+	inherited, inheritErr := InheritConstraints(def.GetConstraints(), parentConstraints)
+	if inheritErr != nil {
+		return nil, inheritErr
+	}
+	def.Constraints = inherited
 
 	// Budget. The definition's own constraints are the REQUEST; what comes
 	// back from the ledger is the grant, and it is what the child mission

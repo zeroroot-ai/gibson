@@ -49,7 +49,7 @@ func TestHarnessCreate_ChildInheritsTheHealthHoldOfItsParent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2*time.Minute, hold, "the fix loop reads the hold of the parent")
 
-	// A child with its own hold keeps it.
+	// A child cannot shorten the hold. A longer hold of the child wins.
 	own, err := mission.MarshalDefinitionJSON(&missionpb.MissionDefinition{
 		Name: "fix two", Constraints: &missionpb.MissionConstraints{HealthHold: durationpb.New(10 * time.Second)},
 	})
@@ -62,7 +62,7 @@ func TestHarnessCreate_ChildInheritsTheHealthHoldOfItsParent(t *testing.T) {
 	require.NoError(t, err)
 	hold, err = fixHoldOf(rec)
 	require.NoError(t, err)
-	assert.Equal(t, 10*time.Second, hold)
+	assert.Equal(t, 2*time.Minute, hold, "a shorter hold of the child loses")
 
 	// A parent that is not in the store stops the origination.
 	missing := types.NewID()

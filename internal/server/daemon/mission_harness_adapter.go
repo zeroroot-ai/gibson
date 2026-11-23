@@ -79,26 +79,6 @@ func (a *missionHarnessAdapter) storeForCtx(ctx context.Context) (mission.Missio
 	return store, func() { conn.Release() }, nil
 }
 
-// parentDefinition reads the stored definition of the parent mission. A parent
-// that cannot be read stops the origination, so a child never starts with the
-// constraints of a mission that could not be checked.
-func (a *missionHarnessAdapter) parentDefinition(
-	ctx context.Context, store mission.MissionStore, parentID types.ID,
-) (*missionpb.MissionDefinition, error) {
-	parent, err := store.Get(ctx, parentID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "read the parent mission %s: %v", parentID, err)
-	}
-	if parent.MissionDefinitionJSON == "" {
-		return &missionpb.MissionDefinition{}, nil
-	}
-	def, err := mission.UnmarshalDefinitionJSON([]byte(parent.MissionDefinitionJSON))
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "parse the definition of the parent mission %s: %v", parentID, err)
-	}
-	return def, nil
-}
-
 // CreateMission implements harness.MissionClientIface.
 // Parses MissionDefinitionJSON into a MissionDefinition, creates the mission record,
 // and persists it to the store. Does NOT start execution (call Run for that).
@@ -132,11 +112,19 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 	// hold of the child that delivered a merge request, and the fix agent builds
 	// that child with no constraints (gibson#1469).
 	if req.ParentMissionID != nil {
-		parentDef, parentErr := a.parentDefinition(ctx, store, *req.ParentMissionID)
-		if parentErr != nil {
-			return nil, parentErr
+		parent, getErr := store.Get(ctx, *req.ParentMissionID)
+		if getErr != nil {
+			return nil, status.Errorf(codes.Internal, "read the parent mission %s: %v", *req.ParentMissionID, getErr)
 		}
-		def.Constraints = mission.InheritConstraints(def.GetConstraints(), parentDef.GetConstraints())
+		parentConstraints, parentErr := mission.ParentConstraints(parent)
+		if parentErr != nil {
+			return nil, status.Errorf(codes.Internal, "%v", parentErr)
+		}
+		inherited, inheritErr := mission.InheritConstraints(def.GetConstraints(), parentConstraints)
+		if inheritErr != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "%v", inheritErr)
+		}
+		def.Constraints = inherited
 	}
 
 	// Overlay explicit name/description from the request.
