@@ -341,7 +341,10 @@ func (s *postgresStore) Claim(ctx context.Context, tenantID, bankID, memberID st
 		}
 		if _, uerr := tx.Exec(ctx,
 			`UPDATE jobs SET member_id = $2, updated_at = now(),
-			        turn_sender_kind = opened_by_kind, turn_sender_id = opened_by_id, turn_input_id = ''
+			        turn_sender_kind = CASE WHEN turn_input_id = '' AND claude_session_id = ''
+			                                THEN opened_by_kind ELSE turn_sender_kind END,
+			        turn_sender_id   = CASE WHEN turn_input_id = '' AND claude_session_id = ''
+			                                THEN opened_by_id ELSE turn_sender_id END
 			 WHERE id = $1`, id, memberID); uerr != nil {
 			return fmt.Errorf("job: assign %s: %w", id, uerr)
 		}
@@ -573,6 +576,28 @@ func (s *postgresStore) ReleaseMember(ctx context.Context, tenantID, memberID st
 		return 0, fmt.Errorf("job: release member %s: %w", memberID, err)
 	}
 	return n, nil
+}
+
+func (s *postgresStore) ReleaseJob(ctx context.Context, tenantID, jobID, memberID string) error {
+	if jobID == "" || memberID == "" {
+		return fmt.Errorf("%w: release needs a job and a member", ErrInvalid)
+	}
+	c, err := s.conn(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	defer c.Release()
+
+	n, err := c.SQL().Exec(ctx,
+		`UPDATE jobs SET member_id = '', updated_at = now()
+		 WHERE id = $1 AND member_id = $2 AND state <> $3`, jobID, memberID, string(StateClosed))
+	if err != nil {
+		return fmt.Errorf("job: release job %s: %w", jobID, err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *postgresStore) Stale(ctx context.Context, tenantID, bankID string, staleSeconds int64, limit int32) ([]*Job, error) {

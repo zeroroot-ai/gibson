@@ -313,6 +313,17 @@ func (l *lazyJobSurface) SetTurn(
 	return nil
 }
 
+func (l *lazyJobSurface) ReleaseJob(ctx context.Context, tenantID, jobID, memberID string) error {
+	s, err := l.store()
+	if err != nil {
+		return err
+	}
+	if err := s.ReleaseJob(ctx, tenantID, jobID, memberID); err != nil {
+		return fmt.Errorf("job store: %w", err)
+	}
+	return nil
+}
+
 func (l *lazyJobSurface) SetState(ctx context.Context, tenantID, jobID string, state job.State, claudeSessionID string) (*job.Job, error) {
 	s, err := l.store()
 	if err != nil {
@@ -404,6 +415,14 @@ func (l *lazyMemberLookup) MemberByRun(ctx context.Context, tenantID, missionRun
 type lazyTurnGrantMinter struct{ daemon *daemonImpl }
 
 var _ harness.TurnGrantMinter = (*lazyTurnGrantMinter)(nil)
+
+// Ready reports whether the daemon has the signing key.
+func (l *lazyTurnGrantMinter) Ready() error {
+	if l.daemon.cgMinter == nil {
+		return errUnavailable("the daemon has no signing key, so it cannot mint a turn grant")
+	}
+	return nil
+}
 
 func (l *lazyTurnGrantMinter) Mint(req capabilitygrant.MintRequest) (string, error) {
 	if l.daemon.cgMinter == nil {

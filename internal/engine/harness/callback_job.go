@@ -47,6 +47,7 @@ type JobSurface interface {
 	PendingInputs(ctx context.Context, tenantID, memberID string, limit int32) ([]*job.Input, error)
 	Acknowledge(ctx context.Context, tenantID, inputID string) error
 	SetTurn(ctx context.Context, tenantID, jobID string, sender job.Principal, inputID string) error
+	ReleaseJob(ctx context.Context, tenantID, jobID, memberID string) error
 	SetState(ctx context.Context, tenantID, jobID string, state job.State, claudeSessionID string) (*job.Job, error)
 	AddDeliverable(ctx context.Context, tenantID, jobID string, d *jobpb.Deliverable) (*job.Job, error)
 }
@@ -55,6 +56,9 @@ type JobSurface interface {
 // daemon backs it with the capability-grant minter; tests fake it.
 type TurnGrantMinter interface {
 	Mint(req capabilitygrant.MintRequest) (string, error)
+	// Ready reports whether the minter can mint at all: the signer and the bank surface are
+	// present. PullJob asks before it claims a job, so a daemon that cannot mint claims nothing.
+	Ready() error
 }
 
 // MemberLookup resolves the member a callback is coming from, and the bank it
@@ -113,6 +117,10 @@ func (noBankSurface) PendingInputs(context.Context, string, string, int32) ([]*j
 
 func (noBankSurface) Acknowledge(context.Context, string, string) error { return ErrNoBankSurface }
 
+func (noBankSurface) ReleaseJob(context.Context, string, string, string) error {
+	return ErrNoBankSurface
+}
+
 func (noBankSurface) SetTurn(context.Context, string, string, job.Principal, string) error {
 	return ErrNoBankSurface
 }
@@ -130,6 +138,8 @@ func (noBankSurface) MemberByRun(context.Context, string, string) (memberID, ban
 }
 
 func (noBankSurface) Mint(capabilitygrant.MintRequest) (string, error) { return "", ErrNoBankSurface }
+
+func (noBankSurface) Ready() error { return ErrNoBankSurface }
 
 func (noBankSurface) PublishMemberEvent(context.Context, string, string, []byte) {}
 
@@ -239,6 +249,12 @@ func (s *HarnessCallbackService) PullJob(ctx context.Context, req *harnesspb.Pul
 	if err != nil {
 		return nil, err
 	}
+	// A job that is claimed with no grant can hang: the node sends no input before the first turn
+	// ends. So the daemon checks that it can mint before it claims anything.
+	if rerr := s.turnGrants.Ready(); rerr != nil {
+		s.logger.WarnContext(ctx, "pull refused: no turn grant can be minted", "member_id", memberID, "err", rerr)
+		return nil, status.Error(codes.Unavailable, "the daemon cannot mint a turn grant now, so it hands out no job")
+	}
 	claimed, err := s.jobs.Claim(ctx, tenantID, bankID, memberID)
 	if err != nil {
 		if errors.Is(err, job.ErrNoFreeSlot) {
@@ -252,32 +268,38 @@ func (s *HarnessCallbackService) PullJob(ctx context.Context, req *harnesspb.Pul
 		// An empty queue. The response carries no job and no error.
 		return &harnesspb.PullJobResponse{}, nil
 	}
+	grant, err := s.firstTurnGrant(ctx, tenantID, req.GetContext(), claimed)
+	if err != nil {
+		// The minter was ready and still failed. The job goes back to the queue with its turn
+		// and its session, and it is never closed for a fault of the daemon.
+		if rerr := s.jobs.ReleaseJob(context.WithoutCancel(ctx), tenantID, claimed.ID, memberID); rerr != nil {
+			s.logger.ErrorContext(ctx, "the claimed job could not go back to the queue",
+				"job_id", claimed.ID, "member_id", memberID, "err", rerr)
+		}
+		s.logger.WarnContext(ctx, "pull refused: no grant for the first turn", "job_id", claimed.ID, "err", err)
+		return nil, status.Error(codes.Unavailable,
+			"the daemon could not mint the turn grant, so the job went back to the queue")
+	}
 	s.logger.InfoContext(ctx, "member pulled a job",
 		"member_id", memberID, "bank_id", bankID, "job_id", claimed.ID)
 	s.emitMemberLine(ctx, tenantID, memberID, map[string]any{
 		"type": "job_opened", "job_id": claimed.ID, "goal": claimed.Spec.GetGoal(),
 	})
-	grant := s.firstTurnGrant(ctx, tenantID, req.GetContext(), claimed)
 	return &harnesspb.PullJobResponse{Job: jobToWire(claimed), Grant: grant}, nil
 }
 
-// firstTurnGrant mints the grant of the first turn of a pulled job. The opener is the sender of
-// the first turn, as Claim records it, so the grant renews while that turn runs. The member uses
-// it for the tool calls of its first turn, before any input arrives. A daemon that cannot mint
-// one returns an empty grant: the job is already claimed, and the response must still carry it.
+// firstTurnGrant mints the grant of the first turn of a pulled job, for the sender of the current
+// turn that Claim recorded: the opener for a job that never ran a turn, and the sender of the turn
+// that was running when a member was released. The member uses it for the tool calls of its first
+// turn, before any input arrives.
 func (s *HarnessCallbackService) firstTurnGrant(
 	ctx context.Context, tenantID string, info *harnesspb.ContextInfo, j *job.Job,
-) string {
+) (string, error) {
 	sender := j.TurnSender
 	if sender.ID == "" {
-		sender = j.OpenedBy
+		sender = j.OpenedBy // a job from before the turn was stored
 	}
-	grant, err := s.mintTurnGrant(tenantID, callerRun(ctx, info), j.BankID, j.ID, sender)
-	if err != nil {
-		s.logger.WarnContext(ctx, "the first turn of a pulled job has no grant", "job_id", j.ID, "err", err)
-		return ""
-	}
-	return grant
+	return s.mintTurnGrant(tenantID, callerRun(ctx, info), j.BankID, j.ID, sender)
 }
 
 // SubscribeInput streams the calling member's unacknowledged inputs, each with

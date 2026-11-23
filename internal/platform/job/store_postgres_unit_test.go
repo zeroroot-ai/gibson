@@ -747,11 +747,12 @@ func TestPostgresStore_ADriverErrorIsWrappedNotSwallowed(t *testing.T) {
 			_, err := store.Close(ctx, "acme", CloseInput{JobID: "j", Verdict: VerdictFailed, Closer: sender})
 			return err
 		},
-		"Claim":  func() error { _, err := store.Claim(ctx, "acme", "bank-1", "m-1"); return err },
-		"Ack":    func() error { return store.Acknowledge(ctx, "acme", "in-1") },
-		"Turn":   func() error { return store.SetTurn(ctx, "acme", "j", sender, "in-1") },
-		"Inputs": func() error { _, err := store.PendingInputs(ctx, "acme", "m-1", 10); return err },
-		"State":  func() error { _, err := store.SetState(ctx, "acme", "j", StateWorking, ""); return err },
+		"Claim":   func() error { _, err := store.Claim(ctx, "acme", "bank-1", "m-1"); return err },
+		"Ack":     func() error { return store.Acknowledge(ctx, "acme", "in-1") },
+		"Turn":    func() error { return store.SetTurn(ctx, "acme", "j", sender, "in-1") },
+		"Release": func() error { return store.ReleaseJob(ctx, "acme", "j", "m-1") },
+		"Inputs":  func() error { _, err := store.PendingInputs(ctx, "acme", "m-1", 10); return err },
+		"State":   func() error { _, err := store.SetState(ctx, "acme", "j", StateWorking, ""); return err },
 		"Deliv": func() error {
 			_, err := store.AddDeliverable(ctx, "acme", "j", &jobpb.Deliverable{Ref: "x"})
 			return err
@@ -779,6 +780,39 @@ func TestNewPostgresStore_RefusesANilPool(t *testing.T) {
 		}
 	}()
 	NewPostgresStore(nil)
+}
+
+// ReleaseJob clears the member from one job that the member holds. A job that the member does
+// not hold, or that is closed, is not found, and no id means no release.
+func TestPostgresStore_ReleaseJobClearsOneJobOfTheMember(t *testing.T) {
+	script := newScript()
+	script.affected["UPDATE jobs SET member_id = ''"] = 1
+	store, c := scriptedStore(t, script)
+	if err := store.ReleaseJob(context.Background(), "acme", "job-1", "m-1"); err != nil {
+		t.Fatalf("ReleaseJob: %v", err)
+	}
+	if !c.released {
+		t.Error("the connection must be released")
+	}
+	if len(script.seen) != 1 || !strings.Contains(script.seen[0], "id = $1 AND member_id = $2 AND state <>") {
+		t.Fatalf("a release names the job and the member and leaves closed jobs alone, ran %v", script.seen)
+	}
+
+	none := newScript()
+	none.affected["UPDATE jobs SET member_id = ''"] = 0
+	store, _ = scriptedStore(t, none)
+	if err := store.ReleaseJob(context.Background(), "acme", "job-1", "m-2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound for a member that does not hold the job", err)
+	}
+	for _, args := range [][2]string{{"", "m-1"}, {"job-1", ""}} {
+		if err := store.ReleaseJob(context.Background(), "acme", args[0], args[1]); !errors.Is(err, ErrInvalid) {
+			t.Errorf("ReleaseJob(%q, %q) = %v, want ErrInvalid", args[0], args[1], err)
+		}
+	}
+	unreachable := &postgresStore{conns: scriptedConns{err: errors.New("tenant not provisioned")}}
+	if err := unreachable.ReleaseJob(context.Background(), "acme", "job-1", "m-1"); err == nil {
+		t.Error("an unreachable tenant must be reported")
+	}
 }
 
 // TestPostgresStore_ReleaseMemberHandsOpenJobsBack asserts that a dead

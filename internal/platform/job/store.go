@@ -68,6 +68,12 @@ type Store interface {
 	// The reconciler calls it for a dead member (gibson#1709).
 	ReleaseMember(ctx context.Context, tenantID, memberID string) (int64, error)
 
+	// ReleaseJob clears the member from ONE job that the member holds and that is not closed, so
+	// the next Claim hands the job back. The turn and the claude_session_id stay. It reports
+	// ErrNotFound when the member does not hold that job. The daemon calls it when it cannot
+	// mint the grant of a job it just claimed: the daemon fault must not close the job.
+	ReleaseJob(ctx context.Context, tenantID, jobID, memberID string) error
+
 	// Stale returns open jobs of one bank whose last input is older than
 	// staleSeconds. The reconciler closes them as abandoned.
 	Stale(ctx context.Context, tenantID, bankID string, staleSeconds int64, limit int32) ([]*Job, error)

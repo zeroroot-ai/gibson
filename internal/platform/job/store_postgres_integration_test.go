@@ -278,6 +278,57 @@ func TestJobStore_TheCurrentTurnFollowsTheSender(t *testing.T) {
 	assert.ErrorIs(t, store.SetTurn(ctx, intTenant, "no-such-job", bob, "x"), job.ErrNotFound)
 }
 
+// TestJobStore_AReclaimKeepsTheTurnThatWasRunning: Claim resets the turn to the opener only for a
+// job that never ran a turn. A job that a release re-queued during the turn of sender B keeps B, so
+// the next member never acts with the authority of the opener A. ReleaseJob sends one job back.
+func TestJobStore_AReclaimKeepsTheTurnThatWasRunning(t *testing.T) {
+	store, pool, bankID := newJobStore(t)
+	ctx := context.Background()
+	bob := job.Principal{Kind: job.PrincipalUser, ID: "bob"}
+	free := func(member string) {
+		_, err := pool.Exec(ctx, `UPDATE bank_members SET jobs_in_flight = 0 WHERE id = $1`, member)
+		require.NoError(t, err)
+	}
+
+	// A job that never ran a turn goes back to the opener on a re-claim.
+	fresh, err := store.Open(ctx, intTenant, job.OpenInput{BankID: bankID, Spec: spec("fresh"), OpenedBy: opener()})
+	require.NoError(t, err)
+	first, err := store.Claim(ctx, intTenant, bankID, "m-1")
+	require.NoError(t, err)
+	require.Equal(t, fresh.ID, first.ID)
+	require.NoError(t, store.ReleaseJob(ctx, intTenant, fresh.ID, "m-1"))
+	free("m-1")
+	again, err := store.Claim(ctx, intTenant, bankID, "m-2")
+	require.NoError(t, err)
+	require.NotNil(t, again)
+	assert.Equal(t, opener(), again.TurnSender, "a job that never ran a turn is the opener's")
+
+	// A job whose turn of B started keeps B, whoever claims it next. The member m-2 holds the job
+	// in the middle of the turn of B when the reconciler releases it.
+	require.NoError(t, store.SetTurn(ctx, intTenant, fresh.ID, bob, "in-9"))
+	_, err = store.SetState(ctx, intTenant, fresh.ID, job.StateWorking, "sess-1")
+	require.NoError(t, err)
+	n, err := store.ReleaseMember(ctx, intTenant, "m-2")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n, "the job of m-2 goes back to the queue")
+	free("m-2")
+	reclaimed, err := store.Claim(ctx, intTenant, bankID, "m-1")
+	require.NoError(t, err)
+	require.NotNil(t, reclaimed)
+	assert.Equal(t, bob, reclaimed.TurnSender, "the new member must not get the authority of A")
+	assert.Equal(t, "in-9", reclaimed.TurnInputID)
+
+	// ReleaseJob frees only a job that the member holds.
+	assert.ErrorIs(t, store.ReleaseJob(ctx, intTenant, fresh.ID, "m-2"), job.ErrNotFound)
+	require.NoError(t, store.ReleaseJob(ctx, intTenant, fresh.ID, "m-1"))
+	got, err := store.Get(ctx, intTenant, fresh.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.MemberID)
+	assert.Equal(t, job.StateWorking, got.State, "a release never closes the job")
+	assert.Equal(t, "sess-1", got.ClaudeSessionID)
+	assert.Equal(t, bob, got.TurnSender)
+}
+
 func TestJobStore_SetStateAndDeliverables(t *testing.T) {
 	store, _, bankID := newJobStore(t)
 	ctx := context.Background()

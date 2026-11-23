@@ -44,6 +44,9 @@ type fakeJobs struct {
 	openErr    error
 	sendErr    error
 	turnErr    error
+	released   []string
+	claims     int
+	releaseErr error
 	opened     []job.OpenInput
 	sent       []job.SendInput
 	events     map[string][]*job.Event
@@ -93,6 +96,7 @@ func (f *fakeJobs) Events(_ context.Context, _, jobID string, since int64, _ int
 }
 
 func (f *fakeJobs) Claim(context.Context, string, string, string) (*job.Job, error) {
+	f.claims++
 	return f.claim, f.claimErr
 }
 
@@ -134,6 +138,11 @@ func (f *fakeJobs) SetTurn(_ context.Context, _, jobID string, sender job.Princi
 	return nil
 }
 
+func (f *fakeJobs) ReleaseJob(_ context.Context, _, jobID, memberID string) error {
+	f.released = append(f.released, jobID+"/"+memberID)
+	return f.releaseErr
+}
+
 func (f *fakeJobs) SetState(_ context.Context, _, jobID string, state job.State, session string) (*job.Job, error) {
 	if f.setErr != nil {
 		return nil, f.setErr
@@ -168,9 +177,13 @@ func (f *fakeMembers) MemberByRun(_ context.Context, _, runID string) (memberID,
 
 // recordingMinter records what a turn grant was minted for.
 type recordingMinter struct {
-	reqs []capabilitygrant.MintRequest
-	err  error
+	reqs     []capabilitygrant.MintRequest
+	err      error
+	notReady error
 }
+
+// Ready is the check before a claim. notReady makes it fail.
+func (m *recordingMinter) Ready() error { return m.notReady }
 
 func (m *recordingMinter) Mint(req capabilitygrant.MintRequest) (string, error) {
 	if m.err != nil {
@@ -1104,22 +1117,91 @@ func TestPullJob_NoJobMeansNoGrant(t *testing.T) {
 			t.Fatalf("resp = %+v, err = %v, minted %d, want a refusal and no grant", resp, err, len(minter.reqs))
 		}
 	})
-	for name, mintErr := range map[string]error{
-		"a daemon that cannot mint": ErrNoBankSurface,
-		"a minter that fails":       errors.New("signing key unavailable"),
+}
+
+// A daemon that cannot mint hands out no job. The check comes BEFORE the claim, so no job stays
+// claimed by the member: a claimed job with no grant can hang, because the node sends no input
+// before the first turn ends.
+func TestPullJob_ADaemonThatCannotMintClaimsNothing(t *testing.T) {
+	for name, notReady := range map[string]error{
+		"no bank surface": ErrNoBankSurface,
+		"no signing key":  status.Error(codes.Unavailable, "no signing key"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			jobs := newFakeJobs()
 			jobs.claim = openJob("job-1")
-			s := memberService(t, jobs, liveMembers(), &recordingMinter{err: mintErr})
+			s := memberService(t, jobs, liveMembers(), &recordingMinter{notReady: notReady})
+
 			resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
-			if err != nil {
-				t.Fatalf("PullJob: %v, want the job with no grant", err)
+
+			if status.Code(err) != codes.Unavailable || resp != nil {
+				t.Fatalf("resp = %+v, err = %v, want Unavailable", resp, err)
 			}
-			if resp.GetJob().GetId() != "job-1" || resp.GetGrant() != "" {
-				t.Fatalf("resp = %+v, want job-1 and an empty grant", resp)
+			if jobs.claims != 0 {
+				t.Fatalf("claimed %d times, want the check before the claim", jobs.claims)
+			}
+			if len(jobs.released) != 0 {
+				t.Errorf("released %v, want nothing to release", jobs.released)
 			}
 		})
+	}
+}
+
+// A mint that fails after the claim sends the one job back to the queue and answers Unavailable.
+// The job is released by id and by member, and it is never closed for a fault of the daemon.
+func TestPullJob_AMintThatFailsAfterTheClaimReleasesTheJob(t *testing.T) {
+	jobs := newFakeJobs()
+	jobs.claim = openJob("job-1")
+	s := memberService(t, jobs, liveMembers(), &recordingMinter{err: errors.New("signing key unavailable")})
+
+	resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+
+	if status.Code(err) != codes.Unavailable || resp != nil {
+		t.Fatalf("resp = %+v, err = %v, want Unavailable and no job", resp, err)
+	}
+	if len(jobs.released) != 1 || jobs.released[0] != "job-1/m-1" {
+		t.Fatalf("released = %v, want job-1 of member m-1", jobs.released)
+	}
+	if len(jobs.states) != 0 {
+		t.Errorf("the job changed state %v: a daemon fault must not close it", jobs.states)
+	}
+}
+
+// A release that fails is logged, and the answer is still Unavailable: the member retries.
+func TestPullJob_AFailedReleaseIsStillAnUnavailableAnswer(t *testing.T) {
+	jobs := newFakeJobs()
+	jobs.claim = openJob("job-1")
+	jobs.releaseErr = errors.New("store down")
+	s := memberService(t, jobs, liveMembers(), &recordingMinter{err: errors.New("signing key unavailable")})
+	_, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("err = %v, want Unavailable", err)
+	}
+}
+
+// A job that a release re-queued in the middle of the turn of sender B keeps that turn. The
+// grant of the new member is for B, and never for the opener A.
+func TestPullJob_AReclaimedJobGetsTheGrantOfTheTurnThatWasRunning(t *testing.T) {
+	jobs := newFakeJobs()
+	claim := openJob("job-1")
+	claim.OpenedBy = job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	claim.TurnSender = job.Principal{Kind: job.PrincipalUser, ID: "bob"} // Claim kept the turn of B
+	claim.TurnInputID = "in-9"
+	jobs.claim = claim
+	minter := &recordingMinter{}
+	s := memberService(t, jobs, liveMembers(), minter)
+
+	if _, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")}); err != nil {
+		t.Fatalf("PullJob: %v", err)
+	}
+
+	if len(minter.reqs) != 1 || minter.reqs[0].Subject != "user:bob" {
+		t.Fatalf("mint requests = %+v, want one grant for user:bob", minter.reqs)
+	}
+	for _, req := range minter.reqs {
+		if req.Subject == "user:alice" {
+			t.Error("the grant of the opener must never go to the new member of B's turn")
+		}
 	}
 }
 
