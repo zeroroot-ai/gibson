@@ -409,7 +409,8 @@ func answeredByConnector(err error) bool {
 		if e == nil || found {
 			return
 		}
-		if w, ok := e.(*jsonrpc.Error); ok && w.Code != rejectedCode { //nolint:errorlint // the walk tests one node, errors.As would skip the wrapper
+		// The walk tests one node: errors.As would skip the client wrapper.
+		if w, ok := e.(*jsonrpc.Error); ok && w.Code != rejectedCode { //nolint:errorlint // one node at a time
 			found = true
 			return
 		}
