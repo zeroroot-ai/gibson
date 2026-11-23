@@ -75,7 +75,7 @@ func TestRunCatalogMission_SuccessPathStampsTheRecordAndWritesTheAnchorsAfterThe
 	require.NoError(t, err)
 	assert.Equal(t, "acme", rec.TenantID, "ListMissions filters on the tenant of the record")
 	assert.Equal(t, creator, rec.CreatedBy)
-	assert.False(t, rec.CreatedAt.Time.IsZero())
+	assert.False(t, rec.CreatedAt.IsZero())
 	assert.Equal(t, "scan", rec.Name)
 	assert.Equal(t, mission.MissionStatusSubmitted, rec.Status)
 	assert.Equal(t, targetID, rec.TargetID)
@@ -98,4 +98,8 @@ func TestRunCatalogMission_SuccessPathStampsTheRecordAndWritesTheAnchorsAfterThe
 	_, err = d.RunCatalogMission(ctx, api.RunCatalogMissionData{Name: "scan", Params: params, TargetID: targetID.String(), CreatedBy: creator})
 	require.Error(t, err)
 	assert.Empty(t, order, "a failed start writes no anchor")
+	time.Sleep(100 * time.Millisecond) // the Engine folds events on its tick
+	count := 0
+	reg.For("acme").ReadWorld(func(w *brain.World) { count = len(w.MissionSnapshot()) })
+	assert.Equal(t, 1, count, "a failed start leaves no pending mission in the World")
 }

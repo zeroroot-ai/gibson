@@ -63,9 +63,6 @@ func (d *daemonImpl) RunCatalogMission(ctx context.Context, req api.RunCatalogMi
 	}
 	missionID := info.ID.String()
 
-	d.announceMission(tenant, &mission.Mission{
-		ID: info.ID, Name: req.Name, TargetID: targetID, TenantID: tenant.String(), CreatedBy: req.CreatedBy,
-	})
 	start := adapter.Run
 	if d.startMission != nil {
 		start = d.startMission
@@ -73,6 +70,12 @@ func (d *daemonImpl) RunCatalogMission(ctx context.Context, req api.RunCatalogMi
 	if err := start(ctx, missionID); err != nil {
 		return "", fmt.Errorf("start the catalog mission %q: %w", req.Name, err)
 	}
+	// The World learns of the mission only after the start succeeded, so a failed
+	// start leaves no pending mission in it. The projection of the run carries the
+	// creator too, so a run that projected first loses nothing.
+	d.announceMission(tenant, &mission.Mission{
+		ID: info.ID, Name: req.Name, TargetID: targetID, TenantID: tenant.String(), CreatedBy: req.CreatedBy,
+	})
 	// The anchors are written only after the mission started, so a mission that
 	// did not start leaves no anchor behind. The alerts node reads the anchors
 	// when it runs, which is after this point.

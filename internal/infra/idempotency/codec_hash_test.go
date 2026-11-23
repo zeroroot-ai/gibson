@@ -13,12 +13,12 @@ import (
 // The fingerprint of the request survives the codec, for a response and for a
 // terminal error. An entry from before the field decodes with no fingerprint.
 func TestCodec_RequestHashRoundTrips(t *testing.T) {
-	any, err := anypb.New(wrapperspb.String("m1"))
+	packed, err := anypb.New(wrapperspb.String("m1"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, in := range map[string]*CachedResponse{
-		"response": {Response: any, RequestHash: "abc"},
+		"response": {Response: packed, RequestHash: "abc"},
 		"error":    {TerminalError: &TerminalError{Code: 3, Message: "bad"}, RequestHash: "def"},
 	} {
 		raw, err := encodeEntry(in)
