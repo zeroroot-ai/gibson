@@ -4,6 +4,8 @@
 package mission
 
 import (
+	"fmt"
+
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -43,4 +45,21 @@ func InheritConstraints(child, parent *missionv1.MissionConstraints) *missionv1.
 		out.RestartWindow = proto.Clone(parent.GetRestartWindow()).(*missionv1.RestartWindow) //nolint:forcetypeassert // same type
 	}
 	return out
+}
+
+// ParentConstraints returns the constraints that a child inherits from a parent
+// mission record: the constraints of its stored definition, with any field that the
+// definition leaves unset taken from the constraints of the record. A definition
+// that cannot be parsed is an error, so a child never starts with the constraints of
+// a mission that could not be checked.
+func ParentConstraints(parent *Mission) (*missionv1.MissionConstraints, error) {
+	var fromDefinition *missionv1.MissionConstraints
+	if parent.MissionDefinitionJSON != "" {
+		def, err := UnmarshalDefinitionJSON([]byte(parent.MissionDefinitionJSON))
+		if err != nil {
+			return nil, fmt.Errorf("mission: originate: parse the definition of parent mission %s: %w", parent.ID, err)
+		}
+		fromDefinition = def.GetConstraints()
+	}
+	return InheritConstraints(fromDefinition, parent.Constraints), nil
 }
