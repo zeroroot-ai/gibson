@@ -20,6 +20,12 @@
 #                            (a tenant id, a platform URL) never land in the
 #                            Job manifest in clear.
 #
+#        E2E_RUNNER_EGRESS_INTERNET optional: set to true to give the Job the label
+#                            gibson.zeroroot.ai/egress-internet, so it reaches a
+#                            host outside the cluster on a public address. The
+#                            fix loop exit test needs it to reach the mock forge.
+#                            Unset, the Job is the same as before.
+#
 # The suite runs INSIDE the cluster, not over a port-forward. The daemon's
 # gRPC listener speaks SPIFFE mTLS and refuses to bind a non-loopback
 # plaintext listener at all (zero-trust-hardening Req 1.2), so a port-forward
@@ -59,6 +65,13 @@ if [ -n "${E2E_RUNNER_ENV_FILE:-}" ]; then
 fi
 kubectl -n "$NS" create secret generic gibson-e2e-runner-env --from-env-file="$env_file"
 
+# The label that lets the Job reach a public address outside the cluster. Unset,
+# the Job gets no such label.
+EGRESS_LABEL=""
+if [ "${E2E_RUNNER_EGRESS_INTERNET:-}" = "true" ]; then
+  EGRESS_LABEL='        gibson.zeroroot.ai/egress-internet: "true"'
+fi
+
 # The binary the Job runs. Unset, the image's ENTRYPOINT (e2e.test) runs.
 COMMAND_LINE=""
 if [ -n "${E2E_RUNNER_BINARY:-}" ]; then
@@ -95,6 +108,7 @@ spec:
         gibson.zeroroot.ai/net-role: platform
         gibson.zeroroot.ai/client-redis: "true"
         gibson.zeroroot.ai/egress-namespaces: "true"
+${EGRESS_LABEL}
     spec:
       restartPolicy: Never
       serviceAccountName: ${RELEASE}-${COMPONENT}
