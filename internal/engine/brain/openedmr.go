@@ -51,17 +51,27 @@ type OpenedMergeRequest struct {
 	At           time.Time `json:"at"`
 }
 
-// applyMergeRequestOpened keeps the record under the reference and the URL. A
-// record of one run is never replaced by an event of another run or mission.
+// openedKey is the key of a record: the reference or the URL of the merge request,
+// and the mission run of the call. A call of another run has a key of its own, so
+// a foreign open can neither replace nor block the record of the job.
+func openedKey(mergeRequest, missionRunID string) string {
+	return mergeRequest + "\x00" + missionRunID
+}
+
+// applyMergeRequestOpened keeps the record under the reference and under the URL,
+// for the mission run of the call. An event with no mission run is not kept,
+// because no job can claim it. Inside one run, a record is replaced only by a call
+// of the same agent run and mission.
 func applyMergeRequestOpened(w *World, e MergeRequestOpened) {
-	if e.HeadSHA == "" || e.SourceBranch == "" {
+	if e.HeadSHA == "" || e.SourceBranch == "" || e.MissionRunID == "" {
 		return
 	}
 	rec := OpenedMergeRequest(e)
-	for _, key := range []string{e.MergeRequest, e.URL} {
-		if key == "" {
+	for _, mr := range []string{e.MergeRequest, e.URL} {
+		if mr == "" {
 			continue
 		}
+		key := openedKey(mr, e.MissionRunID)
 		if old, ok := w.openedMRs[key]; ok && (old.RunID != e.RunID || old.MissionID != e.MissionID) {
 			continue
 		}
@@ -80,9 +90,9 @@ func applyMergeRequestOpened(w *World, e MergeRequestOpened) {
 }
 
 // OpenedMergeRequest returns the record of the merge request that the key names, as
-// a reference or as a URL.
-func (w *World) OpenedMergeRequest(key string) (OpenedMergeRequest, bool) {
-	r, ok := w.openedMRs[key]
+// a reference or as a URL, for the mission run of the call.
+func (w *World) OpenedMergeRequest(key, missionRunID string) (OpenedMergeRequest, bool) {
+	r, ok := w.openedMRs[openedKey(key, missionRunID)]
 	return r, ok
 }
 

@@ -886,8 +886,8 @@ func TestJobGraphLink_NoHeadWhenTheLinkIsRefusedOrTheHostGivesNone(t *testing.T)
 // mapHeads is a store of opened heads by tenant and merge request.
 type mapHeads map[string]openedHead
 
-func (m mapHeads) OpenedHead(tenant, mr string) (openedHead, bool) {
-	h, ok := m[tenant+"\x00"+mr]
+func (m mapHeads) OpenedHead(tenant, mr, run string) (openedHead, bool) {
+	h, ok := m[tenant+"\x00"+mr+"\x00"+run]
 	return h, ok
 }
 
@@ -898,7 +898,7 @@ func openedBy(tenant, mr, head string) mapHeads {
 }
 
 func openedByBranch(tenant, mr, head, branch string) mapHeads {
-	return mapHeads{tenant + "\x00" + mr: openedHead{sha: head, sourceBranch: branch}}
+	return mapHeads{tenant + "\x00" + mr + "\x00run-1": openedHead{sha: head, sourceBranch: branch, missionRunID: "run-1"}}
 }
 
 // headEventsOf closes the test job and returns the head events of the link.
@@ -964,20 +964,30 @@ func TestJobGraphLink_NoHeadFromTheOpenOfAnotherTenant(t *testing.T) {
 	}
 }
 
-// An open in another mission run does not vouch for the head of this job.
+// An open in another mission run has a record of its own. The link reads the record
+// of the run of the job, so the open of another run vouches for nothing.
 func TestJobGraphLink_NoHeadWhenTheOpenWasInAnotherRun(t *testing.T) {
-	o := openedBy("acme", testMRURL, testHeadSHA)
-	h := o["acme\x00"+testMRURL]
-	h.missionRunID = "run-other"
-	o["acme\x00"+testMRURL] = h
+	o := mapHeads{"acme\x00" + testMRURL + "\x00run-other": openedHead{sha: testHeadSHA, sourceBranch: "job/job-1", missionRunID: "run-other"}}
 	heads, missing := headEventsOf(t, o)
-	if len(heads) != 0 || len(missing) != 1 || !strings.Contains(missing[0].Reason, "run-other") {
+	if len(heads) != 0 || len(missing) != 1 || !strings.Contains(missing[0].Reason, "mission run of the job") {
 		t.Errorf("heads %+v, missing %+v", heads, missing)
 	}
-	h.missionRunID = "run-1" // the run of closedJob
-	o["acme\x00"+testMRURL] = h
-	if heads, _ := headEventsOf(t, o); len(heads) != 1 {
+	if heads, _ := headEventsOf(t, openedBy("acme", testMRURL, testHeadSHA)); len(heads) != 1 {
 		t.Errorf("the open in the run of the job must vouch: %+v", heads)
+	}
+}
+
+// A closed job with no mission run is refused. No call can be bound to it.
+func TestJobGraphLink_NoHeadForAJobWithNoMissionRun(t *testing.T) {
+	l := &jobGraphLink{opened: openedBy("acme", testMRURL, testHeadSHA), logger: testObsLogger().Slog()}
+	job := closedJob([]string{"f-1"}, mrDeliverable)
+	job.MissionRunID = ""
+	if reason := l.headMismatch(job, testMRURL, testHeadSHA); !strings.Contains(reason, "no mission run") {
+		t.Errorf("reason = %q, want a refusal that names the missing run", reason)
+	}
+	job.MissionRunID = "run-1"
+	if reason := l.headMismatch(job, testMRURL, testHeadSHA); reason != "" {
+		t.Errorf("reason = %q, want none for a job in the run of the open", reason)
 	}
 }
 
@@ -1001,6 +1011,7 @@ func TestOpenedEventOf_OnlyASuccessfulOpenGivesAnEvent(t *testing.T) {
 		"no head":      {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{"url":"u","source_branch":"b"}`},
 		"no key":       {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{"source_branch":"b","head_sha":"` + testHeadSHA + `"}`},
 		"bad result":   {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{not json`},
+		"no run":       {ToolName: "mcp:github-fixloop:open_merge_request", Result: res},
 	} {
 		if ev, ok := openedEventOf(call); ok {
 			t.Errorf("%s: got %+v", name, ev)
@@ -1011,7 +1022,7 @@ func TestOpenedEventOf_OnlyASuccessfulOpenGivesAnEvent(t *testing.T) {
 		ev.MergeRequest != "!7" || ev.URL != testMRURL || ev.HeadSHA != testHeadSHA {
 		t.Errorf("event = %+v, %v", ev, ok)
 	}
-	if ev, _ := openedEventOf(openCall("", openResultJSON("feature/x", testHeadSHA))); ev.JobID != "" {
+	if ev, _ := openedEventOf(openCall("run-1", openResultJSON("feature/x", testHeadSHA))); ev.JobID != "" {
 		t.Errorf("a branch that is no job branch has no job id: %+v", ev)
 	}
 }
@@ -1026,14 +1037,14 @@ func TestWorldOpenedHeads_SurviveARestartAndStayInTheirTenant(t *testing.T) {
 	recordOpenedHead(ctx, first, "acme", openCall("run-1", openResultJSON("job/job-1", testHeadSHA)))
 
 	second := brain.NewRegistry(ctx, factory)
-	got, ok := worldOpenedHeads{reg: second}.OpenedHead("acme", testMRURL)
+	got, ok := worldOpenedHeads{reg: second}.OpenedHead("acme", testMRURL, "run-1")
 	if !ok || got.sha != testHeadSHA || got.sourceBranch != "job/job-1" || got.missionRunID != "run-1" {
 		t.Fatalf("after the restart: %+v, %v", got, ok)
 	}
-	if _, ok := (worldOpenedHeads{reg: second}).OpenedHead("globex", testMRURL); ok {
+	if _, ok := (worldOpenedHeads{reg: second}).OpenedHead("globex", testMRURL, "run-1"); ok {
 		t.Error("the head of tenant acme is visible to tenant globex")
 	}
-	if _, ok := (worldOpenedHeads{}).OpenedHead("acme", testMRURL); ok {
+	if _, ok := (worldOpenedHeads{}).OpenedHead("acme", testMRURL, "run-1"); ok {
 		t.Error("a nil registry has no heads")
 	}
 }
@@ -1043,7 +1054,7 @@ func TestJobGraphLink_ALinkAfterARestartStillRecordsTheHead(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	factory := braintest.StoreFactory()
-	recordOpenedHead(ctx, brain.NewRegistry(ctx, factory), "acme", openCall("", openResultJSON("job/job-1", testHeadSHA)))
+	recordOpenedHead(ctx, brain.NewRegistry(ctx, factory), "acme", openCall("run-1", openResultJSON("job/job-1", testHeadSHA)))
 
 	restarted := brain.NewRegistry(ctx, factory)
 	heads, missing := headEventsOf(t, worldOpenedHeads{reg: restarted})
@@ -1067,7 +1078,7 @@ func TestToolCallSink_RecordsTheOpenAndCallsTheNextSink(t *testing.T) {
 	if next != 1 {
 		t.Errorf("the next sink ran %d times, want once", next)
 	}
-	if h, ok := (worldOpenedHeads{reg: reg}).OpenedHead("acme", testMRURL); !ok || h.sha != testHeadSHA {
+	if h, ok := (worldOpenedHeads{reg: reg}).OpenedHead("acme", testMRURL, "run-1"); !ok || h.sha != testHeadSHA {
 		t.Errorf("head = %+v, %v", h, ok)
 	}
 }

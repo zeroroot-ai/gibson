@@ -27,8 +27,7 @@ const openedRecordTimeout = 10 * time.Second
 type openedHead struct {
 	sha          string
 	sourceBranch string
-	// missionRunID is the mission run of the call. It is empty for an agent that
-	// runs outside a mission run.
+	// missionRunID is the mission run of the call.
 	missionRunID string
 }
 
@@ -36,8 +35,9 @@ type openedHead struct {
 // request of a tenant.
 type openedHeadReader interface {
 	// OpenedHead returns the head that the tool result named for the merge request
-	// key. ok is false when the Timeline of the tenant holds no result.
-	OpenedHead(tenant, mergeRequest string) (openedHead, bool)
+	// key, for the mission run of the job. ok is false when the Timeline of the
+	// tenant holds no result of that run.
+	OpenedHead(tenant, mergeRequest, missionRunID string) (openedHead, bool)
 }
 
 // worldOpenedHeads reads the heads from the World of the tenant. The Timeline is
@@ -48,13 +48,13 @@ type worldOpenedHeads struct{ reg *brain.Registry }
 
 var _ openedHeadReader = worldOpenedHeads{}
 
-func (w worldOpenedHeads) OpenedHead(tenant, mergeRequest string) (openedHead, bool) {
-	if w.reg == nil {
+func (w worldOpenedHeads) OpenedHead(tenant, mergeRequest, missionRunID string) (openedHead, bool) {
+	if w.reg == nil || missionRunID == "" {
 		return openedHead{}, false
 	}
 	var rec brain.OpenedMergeRequest
 	var ok bool
-	w.reg.For(tenant).ReadWorld(func(world *brain.World) { rec, ok = world.OpenedMergeRequest(mergeRequest) })
+	w.reg.For(tenant).ReadWorld(func(world *brain.World) { rec, ok = world.OpenedMergeRequest(mergeRequest, missionRunID) })
 	if !ok {
 		return openedHead{}, false
 	}
@@ -73,7 +73,7 @@ type openResult struct {
 // call. ok is false for any other call, for a call that failed, and for a result
 // that holds no head or no branch.
 func openedEventOf(call harness.ToolCallRecord) (brain.MergeRequestOpened, bool) {
-	if call.Err != "" || !strings.HasPrefix(call.ToolName, "mcp:") || !strings.HasSuffix(call.ToolName, openMergeRequestTool) {
+	if call.Err != "" || call.MissionRunID == "" || !strings.HasPrefix(call.ToolName, "mcp:") || !strings.HasSuffix(call.ToolName, openMergeRequestTool) {
 		return brain.MergeRequestOpened{}, false
 	}
 	var res openResult

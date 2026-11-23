@@ -271,11 +271,16 @@ func (l *jobGraphLink) headMismatch(c jobnode.ClosedJob, mrKey, hostHead string)
 	if l.opened == nil {
 		return "the daemon keeps no record of the heads that open_merge_request returned"
 	}
-	made, ok := l.opened.OpenedHead(c.TenantID, mrKey)
+	if c.MissionRunID == "" {
+		return "the closed job names no mission run, so no open_merge_request call can be bound to it"
+	}
+	// The record is read for the mission run of the job. An open in another run has
+	// a record of its own and is never read here.
+	made, ok := l.opened.OpenedHead(c.TenantID, mrKey, c.MissionRunID)
 	switch {
 	case !ok:
-		return "the daemon saw no result of open_merge_request for this merge request"
-	case made.missionRunID != "" && c.MissionRunID != "" && made.missionRunID != c.MissionRunID:
+		return "the daemon saw no result of open_merge_request in the mission run of the job for this merge request"
+	case made.missionRunID != c.MissionRunID:
 		return fmt.Sprintf("open_merge_request was called in mission run %q, not in the run %q of the job",
 			made.missionRunID, c.MissionRunID)
 	case made.sourceBranch != jobnode.JobBranch(c.JobID):

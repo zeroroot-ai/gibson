@@ -1022,5 +1022,36 @@ func TestStep_ATransientHoldErrorRecordsNoDeployAndTheNextStepReadsAgain(t *test
 func TestMaxHoldIsTheProtoBound(t *testing.T) {
 	if MaxHold != 24*time.Hour {
 		t.Errorf("MaxHold = %v, want 24h, the upper bound of health_hold", MaxHold)
+
+// A fix that has no head, with the reason recorded, gets no merge slot. The fix
+// agent makes no merge call without a head, so a slot would block the Application
+// for the grant window at each cycle.
+func TestStep_AFixWithNoHeadAndAReasonGetsNoMergeSlot(t *testing.T) {
+	g := newRig(t, "scan")
+	brain.Reduce(g.w, brain.FixHeadMissing{ID: "f1", MergeRequest: "mr-1", Reason: "the head moved", At: at(2)})
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+
+	g.tick()
+
+	if len(g.w.MergeSlots()) != 0 {
+		t.Fatalf("slots = %+v, want none for a fix with no head", g.w.MergeSlots())
+	}
+}
+
+// A fix with a head, and a fix whose head is not known yet, still get a slot.
+func TestStep_AFixWithAHeadOrWithNoReasonGetsAMergeSlot(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	if len(g.w.MergeSlots()) != 1 {
+		t.Fatalf("slots = %+v, want one: the head is not known yet and no reason is recorded", g.w.MergeSlots())
+	}
+
+	h := newRig(t, "scan")
+	brain.Reduce(h.w, brain.FixHeadRecorded{ID: "f1", MergeRequest: "mr-1", HeadSHA: "aaaa", At: at(2)})
+	h.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	h.tick()
+	if len(h.w.MergeSlots()) != 1 {
+		t.Fatalf("slots = %+v, want one for a fix with a head", h.w.MergeSlots())
 	}
 }
