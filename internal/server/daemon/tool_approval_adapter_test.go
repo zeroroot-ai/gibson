@@ -207,3 +207,85 @@ func TestToolApproval_TheMergeGateReadsTheWorld(t *testing.T) {
 		t.Fatalf("another tenant: want merge not granted, got %v", err)
 	}
 }
+
+// The race of the intake queue: the gate reads the slot as granted, and then the
+// release of the watcher is folded before the call is recorded. The gate must
+// refuse the call. It must not let the merge go to the host with a slot that is
+// gone, and the Application must not get a second slot for a second merge
+// (gibson#1609).
+func TestToolApproval_AReleaseFoldedBeforeTheCallRefusesTheMerge(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory(), brain.MergeGateSystem)
+	eng := registry.For("acme")
+	gate := newTenantRoutedToolApproval(registry)
+
+	now := time.Now().UTC()
+	eng.Submit(brain.MergeRequestQueued{MergeRequest: "mr-1", Application: "app-1", At: now, MissionID: "m1"})
+	eng.Submit(brain.MergeRequestQueued{MergeRequest: "mr-2", Application: "app-1", At: now.Add(time.Second), MissionID: "m2"})
+	waitFor := func(cond func(w *brain.World) bool) {
+		t.Helper()
+		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			var ok bool
+			eng.ReadWorld(func(w *brain.World) { ok = cond(w) })
+			if ok {
+				return
+			}
+		}
+		t.Fatal("the World did not reach the state in time")
+	}
+	waitFor(func(w *brain.World) bool { return w.MayMerge("mr-1") })
+
+	// The release of the watcher is folded after the gate read the slot and before
+	// the gate records the call.
+	gate.betweenReadAndRecord = func(e *brain.Engine) {
+		release := brain.MergeSlotExpired{
+			MergeRequest: "mr-1", Application: "app-1", At: time.Now().UTC(), CallBound: 2 * time.Minute,
+		}
+		if err := e.SubmitAndWait(ctx, release); err != nil {
+			t.Errorf("release: %v", err)
+		}
+	}
+	ok, err := gate.MayMerge(ctx, "acme", "mr-1")
+	if err != nil {
+		t.Fatalf("MayMerge: %v", err)
+	}
+	if ok {
+		t.Fatal("the gate allowed a merge for a slot that the release had already freed")
+	}
+
+	// The other fix gets the slot after the first one is gone, and only one slot
+	// of the Application is granted.
+	waitFor(func(w *brain.World) bool { return w.MayMerge("mr-2") })
+	eng.ReadWorld(func(w *brain.World) {
+		granted := 0
+		for _, sl := range w.MergeSlots() {
+			if sl.Granted {
+				granted++
+			}
+			if sl.MergeRequest == "mr-1" {
+				t.Errorf("the freed slot of mr-1 is back: %+v", sl)
+			}
+		}
+		if granted != 1 {
+			t.Errorf("granted slots = %d, want 1", granted)
+		}
+	})
+
+	// A release that comes after the call is held back by the reducer.
+	gate.betweenReadAndRecord = nil
+	ok, err = gate.MayMerge(ctx, "acme", "mr-2")
+	if err != nil || !ok {
+		t.Fatalf("MayMerge of the granted slot = %v, %v; want true", ok, err)
+	}
+	if err := eng.SubmitAndWait(ctx, brain.MergeSlotExpired{
+		MergeRequest: "mr-2", Application: "app-1", At: time.Now().UTC(), CallBound: 2 * time.Minute,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eng.ReadWorld(func(w *brain.World) {
+		if !w.MayMerge("mr-2") {
+			t.Error("a release after an allowed call freed the slot")
+		}
+	})
+}
