@@ -404,7 +404,9 @@ func TestBankMemberLiveness_TurnGrantRefusalsAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
-	claims := sdkcg.Claims{Tenant: tenant, MissionID: "bank-1", MissionRunID: "run-1", TaskID: "job-1", Subject: "user:alice"}
+	claims := sdkcg.Claims{
+		Tenant: tenant, MissionID: "bank-1", MissionRunID: "run-1", TaskID: "job-1", Subject: "user:alice",
+	}
 	newBanks := func() *fakeBankStore {
 		b := newFakeBankStore()
 		b.members["bank-1"] = []*bank.Member{{ID: "m-1", BankID: "bank-1", MissionRunID: "run-1", State: bank.MemberIdle}}
@@ -432,7 +434,8 @@ func TestBankMemberLiveness_TurnGrantRefusalsAndErrors(t *testing.T) {
 	})
 	t.Run("the job store fails", func(t *testing.T) {
 		boom := errors.New("job store is down")
-		got, err := live(newBanks(), getErrJobStore{fakeJobStore: newFakeJobStore(), err: boom}).IsMemberTurnGrantLive(ctx, claims)
+		broken := getErrJobStore{fakeJobStore: newFakeJobStore(), err: boom}
+		got, err := live(newBanks(), broken).IsMemberTurnGrantLive(ctx, claims)
 		if got || !errors.Is(err, boom) {
 			t.Fatalf("live = %v, err = %v, want not live and the store error", got, err)
 		}
