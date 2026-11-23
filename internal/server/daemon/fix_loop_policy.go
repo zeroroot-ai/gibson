@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -17,20 +18,33 @@ import (
 // mission (MissionConstraints.health_hold), so it comes from the stored
 // definition of the mission in the data plane of the tenant. It returns zero for
 // a mission that states none, and the fix loop then uses the default hold time.
-// A record that cannot be read is an error, and the fix loop reads the health
-// signal again at the next step.
+// A record that is gone, a mission id that is not valid, a pool that is not
+// configured and a definition that does not parse can never be read. They give
+// fixloop.ErrHoldNotFound, so the fix loop uses the upper bound of the hold and
+// shows the hold_unreadable wait. Any other read error may be transient, and the fix
+// loop reads again at the next step.
 func (d *daemonImpl) fixHold(ctx context.Context, tenant, missionID string) (time.Duration, error) {
 	if missionID == "" {
 		return 0, nil
 	}
 	rec, err := d.storedMission(ctx, tenant, missionID)
-	if mission.IsNotFoundError(err) {
+	if mission.IsNotFoundError(err) || errors.Is(err, errPermanentMissionRead) {
 		return 0, fmt.Errorf("fix hold: %w: %w", fixloop.ErrHoldNotFound, err)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("fix hold: %w", err)
 	}
-	return fixHoldOf(rec)
+	return holdFromRecord(rec)
+}
+
+// holdFromRecord reads the hold time from a stored record. A definition that does
+// not parse can never be read, so it gives fixloop.ErrHoldNotFound.
+func holdFromRecord(rec *mission.Mission) (time.Duration, error) {
+	hold, err := fixHoldOf(rec)
+	if errors.Is(err, errPermanentMissionRead) {
+		return 0, fmt.Errorf("fix hold: %w: %w", fixloop.ErrHoldNotFound, err)
+	}
+	return hold, err
 }
 
 // fixHoldOf reads the hold time from the stored definition of a mission. A
@@ -41,7 +55,7 @@ func fixHoldOf(rec *mission.Mission) (time.Duration, error) {
 	}
 	def, err := mission.UnmarshalDefinitionJSON([]byte(rec.MissionDefinitionJSON))
 	if err != nil {
-		return 0, fmt.Errorf("parse the definition of mission %s: %w", rec.ID, err)
+		return 0, fmt.Errorf("%w: parse the definition of mission %s: %w", errPermanentMissionRead, rec.ID, err)
 	}
 	return fixloop.HoldOf(def.GetConstraints()), nil
 }
