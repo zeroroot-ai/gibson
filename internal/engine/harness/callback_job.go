@@ -257,7 +257,27 @@ func (s *HarnessCallbackService) PullJob(ctx context.Context, req *harnesspb.Pul
 	s.emitMemberLine(ctx, tenantID, memberID, map[string]any{
 		"type": "job_opened", "job_id": claimed.ID, "goal": claimed.Spec.GetGoal(),
 	})
-	return &harnesspb.PullJobResponse{Job: jobToWire(claimed)}, nil
+	grant := s.firstTurnGrant(ctx, tenantID, req.GetContext(), claimed)
+	return &harnesspb.PullJobResponse{Job: jobToWire(claimed), Grant: grant}, nil
+}
+
+// firstTurnGrant mints the grant of the first turn of a pulled job. The opener is the sender of
+// the first turn, as Claim records it, so the grant renews while that turn runs. The member uses
+// it for the tool calls of its first turn, before any input arrives. A daemon that cannot mint
+// one returns an empty grant: the job is already claimed, and the response must still carry it.
+func (s *HarnessCallbackService) firstTurnGrant(
+	ctx context.Context, tenantID string, info *harnesspb.ContextInfo, j *job.Job,
+) string {
+	sender := j.TurnSender
+	if sender.ID == "" {
+		sender = j.OpenedBy
+	}
+	grant, err := s.mintTurnGrant(tenantID, callerRun(ctx, info), j.BankID, j.ID, sender)
+	if err != nil {
+		s.logger.WarnContext(ctx, "the first turn of a pulled job has no grant", "job_id", j.ID, "err", err)
+		return ""
+	}
+	return grant
 }
 
 // SubscribeInput streams the calling member's unacknowledged inputs, each with
@@ -351,18 +371,7 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read the job an input belongs to: %v", err)
 	}
-	grant, err := s.turnGrants.Mint(capabilitygrant.MintRequest{
-		// The subject is the SENDER, not the member: the turn acts with the
-		// authority of whoever asked for it, which is the whole point of a
-		// per-turn grant.
-		Subject:        TurnGrantSubject(in.Sender),
-		Tenant:         tenantID,
-		MissionID:      j.BankID,
-		TaskID:         in.JobID,
-		MissionRunID:   runID, // the run of the member that takes the turn
-		RecipientClass: "agent",
-		AllowedRPCs:    TurnGrantRPCs(),
-	})
+	grant, err := s.mintTurnGrant(tenantID, runID, j.BankID, in.JobID, in.Sender)
 	if errors.Is(err, ErrNoBankSurface) {
 		return nil, status.Error(codes.FailedPrecondition, "this daemon cannot mint a turn grant")
 	}
@@ -376,6 +385,24 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 	}
 	wire.Grant = grant
 	return wire, nil
+}
+
+// mintTurnGrant mints the turn grant of one job for one sender and the run of the member that
+// takes the turn. The delivery of an input and the pull of a job use it, so both carry the same
+// grant. The subject is the SENDER, not the member: the turn acts with the authority of whoever
+// asked for it. The task is the job, and the grant carries the turn surface only.
+func (s *HarnessCallbackService) mintTurnGrant(
+	tenantID, runID, bankID, jobID string, sender job.Principal,
+) (string, error) {
+	return s.turnGrants.Mint(capabilitygrant.MintRequest{
+		Subject:        TurnGrantSubject(sender),
+		Tenant:         tenantID,
+		MissionID:      bankID,
+		TaskID:         jobID,
+		MissionRunID:   runID, // the run of the member that takes the turn
+		RecipientClass: "agent",
+		AllowedRPCs:    TurnGrantRPCs(),
+	})
 }
 
 // TurnGrantSubject renders the sender as a grant subject. A component's id is

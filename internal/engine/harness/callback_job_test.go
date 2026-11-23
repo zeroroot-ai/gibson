@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	jobpb "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
 // fakeJobs is an in-memory JobSurface.
@@ -1016,5 +1018,137 @@ func TestSubscribeInput_ATurnThatCannotBeRecordedIsNotDelivered(t *testing.T) {
 
 	if n := len(stream.snapshot()); n != 0 {
 		t.Fatalf("delivered %d inputs, want none", n)
+	}
+}
+
+// A pulled job carries the grant of its first turn. The grant is a turn grant of the job: the
+// task is the job id, the mission is the bank, the run is the run of the member, and the subject
+// is the opener, who is the sender of the first turn. The turn surface is the only surface.
+func TestPullJob_CarriesTheTurnGrantOfTheFirstTurn(t *testing.T) {
+	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	bob := job.Principal{Kind: job.PrincipalUser, ID: "bob"}
+	for name, tc := range map[string]struct {
+		turn    job.Principal
+		subject string
+	}{
+		"the turn sender that Claim recorded": {alice, "user:alice"},
+		"no turn sender: the opener":          {job.Principal{}, "user:alice"},
+		"another recorded sender":             {bob, "user:bob"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			jobs := newFakeJobs()
+			claim := openJob("job-1")
+			claim.OpenedBy, claim.TurnSender = alice, tc.turn
+			jobs.claim = claim
+			minter := &recordingMinter{}
+			s := memberService(t, jobs, liveMembers(), minter)
+
+			resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+
+			if err != nil {
+				t.Fatalf("PullJob: %v", err)
+			}
+			if resp.GetGrant() != "turn-grant-for-job-1" {
+				t.Fatalf("grant = %q, want the turn grant of job-1", resp.GetGrant())
+			}
+			if len(minter.reqs) != 1 {
+				t.Fatalf("minted %d grants, want one", len(minter.reqs))
+			}
+			req := minter.reqs[0]
+			if req.TaskID != "job-1" || req.MissionID != "bank-1" || req.MissionRunID != "run-1" ||
+				req.Subject != tc.subject || req.Tenant != "acme" || req.RecipientClass != "agent" {
+				t.Errorf("mint request = %+v", req)
+			}
+			for _, rpc := range req.AllowedRPCs {
+				if methodName(rpc) == "PullJob" {
+					t.Error("a turn grant must not carry the member's own surface")
+				}
+			}
+			if len(req.AllowedRPCs) != len(TurnGrantRPCs()) {
+				t.Errorf("rpcs = %v, want the turn surface", req.AllowedRPCs)
+			}
+		})
+	}
+}
+
+// A member that holds no job gets no grant: an empty queue, a member with no room, and a run that
+// is no member's mint nothing. A daemon that cannot mint returns the job with an empty grant, so
+// the claim is not lost.
+func TestPullJob_NoJobMeansNoGrant(t *testing.T) {
+	t.Run("an empty queue", func(t *testing.T) {
+		minter := &recordingMinter{}
+		s := memberService(t, newFakeJobs(), liveMembers(), minter)
+		resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+		if err != nil || resp.GetGrant() != "" || resp.GetJob() != nil || len(minter.reqs) != 0 {
+			t.Fatalf("resp = %+v, err = %v, minted %d", resp, err, len(minter.reqs))
+		}
+	})
+	t.Run("a member with no room", func(t *testing.T) {
+		jobs := newFakeJobs()
+		jobs.claim = openJob("job-1")
+		jobs.claimErr = job.ErrNoFreeSlot
+		minter := &recordingMinter{}
+		s := memberService(t, jobs, liveMembers(), minter)
+		resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+		if err != nil || resp.GetGrant() != "" || len(minter.reqs) != 0 {
+			t.Fatalf("resp = %+v, err = %v, minted %d", resp, err, len(minter.reqs))
+		}
+	})
+	t.Run("a run that is no member's", func(t *testing.T) {
+		jobs := newFakeJobs()
+		jobs.claim = openJob("job-1")
+		minter := &recordingMinter{}
+		s := memberService(t, jobs, liveMembers(), minter)
+		resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-unknown")})
+		if err == nil || resp != nil || len(minter.reqs) != 0 {
+			t.Fatalf("resp = %+v, err = %v, minted %d, want a refusal and no grant", resp, err, len(minter.reqs))
+		}
+	})
+	for name, mintErr := range map[string]error{
+		"a daemon that cannot mint": ErrNoBankSurface,
+		"a minter that fails":       errors.New("signing key unavailable"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			jobs := newFakeJobs()
+			jobs.claim = openJob("job-1")
+			s := memberService(t, jobs, liveMembers(), &recordingMinter{err: mintErr})
+			resp, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
+			if err != nil {
+				t.Fatalf("PullJob: %v, want the job with no grant", err)
+			}
+			if resp.GetJob().GetId() != "job-1" || resp.GetGrant() != "" {
+				t.Fatalf("resp = %+v, want job-1 and an empty grant", resp)
+			}
+		})
+	}
+}
+
+// The first-turn grant binds an open to the job (the path of #1665). A member that uses the grant
+// of a pulled job for open_merge_request makes a record whose task is the job id, taken from the
+// verified grant and never from the body of the request.
+func TestPullJob_TheFirstTurnGrantBindsAnOpenToTheJob(t *testing.T) {
+	jobs := newFakeJobs()
+	claim := openJob("job-1")
+	claim.OpenedBy = job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	jobs.claim = claim
+	minter := &recordingMinter{}
+	s := memberService(t, jobs, liveMembers(), minter)
+	if _, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")}); err != nil {
+		t.Fatalf("PullJob: %v", err)
+	}
+	minted := minter.reqs[0]
+
+	var got []ToolCallRecord
+	svc := &HarnessCallbackService{logger: slog.Default()}
+	WithToolCallSink(func(_ context.Context, _ string, call ToolCallRecord) { got = append(got, call) })(svc)
+	info := &harnesspb.ContextInfo{MissionId: minted.MissionID, MissionRunId: minted.MissionRunID, TaskId: "job-forged"}
+	verified := withTaskGrantClaims(testCtxWithTenant(), sdkcg.Claims{
+		TaskID: minted.TaskID, MissionID: minted.MissionID, MissionRunID: minted.MissionRunID, Subject: minted.Subject,
+	})
+
+	svc.captureToolCall(verified, info, "tc1", "mcp:github-fixloop:open_merge_request", `{}`, `{}`, "")
+
+	if len(got) != 1 || got[0].GrantTaskID != "job-1" || got[0].MissionRunID != "run-1" {
+		t.Fatalf("record = %+v, want the task job-1 and the run of the member", got)
 	}
 }
