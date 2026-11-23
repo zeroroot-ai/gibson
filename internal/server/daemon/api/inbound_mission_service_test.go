@@ -97,6 +97,12 @@ func (m *memInboundStore) Reserve(context.Context, string, string, string, strin
 func (m *memInboundStore) Release(context.Context, string, string) error {
 	return errors.New("not used")
 }
+func (m *memInboundStore) TakeMessage(context.Context, string, string, string) (string, error) {
+	return "", errors.New("not used")
+}
+func (m *memInboundStore) ForgetMessage(context.Context, string, string) error {
+	return errors.New("not used")
+}
 func (m *memInboundStore) Owner(context.Context, string, string) (owner, agent string, err error) {
 	return "", "", errors.New("not used")
 }
