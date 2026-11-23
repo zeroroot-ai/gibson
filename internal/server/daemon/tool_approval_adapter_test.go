@@ -289,3 +289,68 @@ func TestToolApproval_AReleaseFoldedBeforeTheCallRefusesTheMerge(t *testing.T) {
 		}
 	})
 }
+
+func grantedGateFixture(t *testing.T) (context.Context, *tenantRoutedToolApproval, *brain.Engine) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory(), brain.MergeGateSystem)
+	eng := registry.For("acme")
+	eng.Submit(brain.MergeRequestQueued{MergeRequest: "mr-1", Application: "app-1", At: time.Now().UTC(), MissionID: "m1"})
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		var ok bool
+		eng.ReadWorld(func(w *brain.World) { ok = w.MayMerge("mr-1") })
+		if ok {
+			return ctx, newTenantRoutedToolApproval(registry), eng
+		}
+	}
+	t.Fatal("the slot was not granted in time")
+	return nil, nil, nil
+}
+
+// A record that fails or times out is "unavailable": the agent retries within merge_wait. They are not a final
+// refusal (gibson#1609).
+func TestToolApproval_AFailedRecordOrAMissingWorldIsUnavailable(t *testing.T) {
+	ctx, gate, _ := grantedGateFixture(t)
+	gate.recordCall = func(context.Context, *brain.Engine, brain.Event) error { return context.DeadlineExceeded }
+	_, err := gate.MayMerge(ctx, "acme", "mr-1")
+	if !errors.Is(err, metatool.ErrApprovalUnavailable) {
+		t.Fatalf("a failed record gave %v, want ErrApprovalUnavailable", err)
+	}
+
+	// The handler maps it the same way, so the harness answers UNAVAILABLE.
+	conn := &countingConnector{}
+	h := metatool.NewHandler(nil, allowAllAuthz{}, conn).
+		WithApprovalGate(gate).
+		WithApprovalMarks(func(_, tool string) componentcatalog.ToolApproval {
+			return componentcatalog.ToolApproval{Merge: tool == "merge_merge_request"}
+		})
+	_, err = h.Call(ctx, metatool.Call{
+		Caller: catalog.Caller{Subject: "agent", Tenant: "acme"}, ID: "mcp:forge:merge_merge_request",
+		Args: map[string]any{"merge_request": "mr-1"}, MissionID: "m1",
+		Observer: nopObserver{},
+		Recorder: func(context.Context, metatool.CallRecord, []byte, string) string { return "" },
+	})
+	if !errors.Is(err, metatool.ErrApprovalUnavailable) {
+		t.Fatalf("the merge call gave %v, want ErrApprovalUnavailable", err)
+	}
+	if len(conn.calls) != 0 {
+		t.Fatal("the connector got a call although the record failed")
+	}
+}
+
+// Two overlapping calls, or a clock that steps back, fold a later call first. The
+// reducer keeps the later time, and the earlier call is still valid.
+func TestToolApproval_ALaterCallFoldedFirstDoesNotRefuseTheEarlierOne(t *testing.T) {
+	ctx, gate, _ := grantedGateFixture(t)
+	gate.betweenReadAndRecord = func(e *brain.Engine) {
+		later := brain.MergeCallAllowed{MergeRequest: "mr-1", At: time.Now().UTC().Add(time.Hour)}
+		if err := e.SubmitAndWait(ctx, later); err != nil {
+			t.Errorf("later call: %v", err)
+		}
+	}
+	ok, err := gate.MayMerge(ctx, "acme", "mr-1")
+	if err != nil || !ok {
+		t.Fatalf("MayMerge = %v, %v; want true after a later call folded first", ok, err)
+	}
+}

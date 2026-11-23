@@ -23,6 +23,9 @@ type tenantRoutedToolApproval struct {
 	// betweenReadAndRecord is a seam for a test. It runs after the first read of
 	// the slot and before the call is recorded, where a release can come first.
 	betweenReadAndRecord func(eng *brain.Engine)
+	// recordCall records an allowed call in the World and waits for its fold. It
+	// is eng.SubmitAndWait, and a test replaces it to make the record fail.
+	recordCall func(ctx context.Context, eng *brain.Engine, ev brain.Event) error
 }
 
 var _ metatool.ApprovalGate = (*tenantRoutedToolApproval)(nil)
@@ -84,7 +87,9 @@ const mergeCallRecordTimeout = 5 * time.Second
 //
 // The gate answers yes only after the World holds the call. It records the call
 // (MergeCallAllowed) with SubmitAndWait, reads the World again, and answers yes
-// only when the slot is still granted and holds that call time. A release that the
+// only when the slot is still granted and holds that call time or a later one.
+// The reducer keeps the latest time, so a later call that was folded first does
+// not refuse this call. A release that the
 // intake queue folded before the call gives a refusal. A release that comes after
 // the call is held back by the reducer, which checks the call bound. The queue
 // orders the two events, so the call cannot slip past a release (gibson#1609).
@@ -94,7 +99,9 @@ func (a *tenantRoutedToolApproval) MayMerge(ctx context.Context, tenant, mergeRe
 	}
 	eng, ok := api.TenantEngine(a.registry, tenant)
 	if !ok {
-		return false, api.ErrWorldUnavailable
+		// The agent retries a call that the daemon cannot decide now, and it takes
+		// a refusal as final. The two errors of this gate say "unavailable".
+		return false, fmt.Errorf("%w: %w", metatool.ErrApprovalUnavailable, api.ErrWorldUnavailable)
 	}
 	var granted bool
 	eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge(mergeRequest) })
@@ -107,13 +114,17 @@ func (a *tenantRoutedToolApproval) MayMerge(ctx context.Context, tenant, mergeRe
 	callAt := time.Now().UTC()
 	wctx, cancel := context.WithTimeout(ctx, mergeCallRecordTimeout)
 	defer cancel()
-	if err := eng.SubmitAndWait(wctx, brain.MergeCallAllowed{MergeRequest: mergeRequest, At: callAt}); err != nil {
-		return false, fmt.Errorf("merge gate: the allowed call was not recorded: %w", err)
+	record := a.recordCall
+	if record == nil {
+		record = func(ctx context.Context, e *brain.Engine, ev brain.Event) error { return e.SubmitAndWait(ctx, ev) }
+	}
+	if err := record(wctx, eng, brain.MergeCallAllowed{MergeRequest: mergeRequest, At: callAt}); err != nil {
+		return false, fmt.Errorf("%w: merge gate: the allowed call was not recorded: %w", metatool.ErrApprovalUnavailable, err)
 	}
 	var held bool
 	eng.ReadWorld(func(w *brain.World) {
 		for _, sl := range w.MergeSlots() {
-			if sl.MergeRequest == mergeRequest && sl.Granted && sl.LastAllowedAt.Equal(callAt) {
+			if sl.MergeRequest == mergeRequest && sl.Granted && !sl.LastAllowedAt.Before(callAt) {
 				held = true
 			}
 		}
