@@ -58,7 +58,8 @@ func NewWatcher(r Reader, rv Reverter, p Placer, policy PolicySource, logger *sl
 }
 
 // WithHoldSource sets the source of the hold time of the health signal. The
-// Watcher asks it for the fix mission of each merge request. A mission that
+// Watcher asks it one time for each deploy, for the fix mission of the merge
+// request, and the deploy event keeps the answer. A mission that
 // states no hold time gets the hold time of the policy. Without a source, each
 // merge request gets the hold time of the policy.
 func (w *Watcher) WithHoldSource(h HoldSource) *Watcher {
@@ -324,7 +325,17 @@ func (w *Watcher) stepFixed(
 	case hasSlot && slot.Granted && !slot.GrantedAt.IsZero() && w.now().Sub(slot.GrantedAt) >= w.policy(tenant).grantWindow():
 		wait = w.beginWait(slot, mr, fs, brain.WaitNoHealthVerdict, "no health verdict")
 	}
+	// The hold wait ends with the health verdict.
+	if f.Health != "" {
+		wait = append(wait, w.endWait(slot, hasSlot, mr, fs, brain.WaitHoldUnreadable)...)
+	}
 	evs, err := w.stepFixedFacts(ctx, tenant, mr, f)
+	for _, e := range evs {
+		if d, ok := e.(brain.DeployObserved); ok && d.HoldUnreadable && hasSlot {
+			wait = append(wait, w.beginWait(slot, mr, fs, brain.WaitHoldUnreadable,
+				"the hold of the fix mission cannot be read")...)
+		}
+	}
 	if f.Health == brain.HealthFailed && hasSlot {
 		wait = append(wait, w.revertWaits(slot, mr, fs, evs, err)...)
 	}
@@ -359,7 +370,7 @@ func (w *Watcher) stepFixedFacts(ctx context.Context, tenant, mr string, f brain
 		if !d.Deployed || d.At.IsZero() {
 			return nil, nil // merged and not deployed yet
 		}
-		return deployEvents(mr, d, f.FixMissionID), nil
+		return deployEvents(mr, d, f.FixMissionID, w.holdAtDeploy(ctx, tenant, f.FixMissionID)), nil
 	case f.Health == brain.HealthFailed:
 		return w.revert(ctx, tenant, mr, f)
 	case f.Health == "":
@@ -375,15 +386,39 @@ const (
 	edgeDeployedIn    = "DEPLOYED_IN"
 )
 
+// holdRead is the hold time that the Watcher read from the fix mission at the
+// deploy. unreadable is true when the read failed.
+type holdRead struct {
+	hold       time.Duration
+	unreadable bool
+}
+
+// holdAtDeploy reads the hold time of the fix mission one time, when the Watcher
+// records the deploy. A mission that states none gives zero, and the default hold
+// time applies. A read that fails gives the default and the mark unreadable, and
+// the finding waits visibly with its own reason.
+func (w *Watcher) holdAtDeploy(ctx context.Context, tenant, missionID string) holdRead {
+	if w.hold == nil {
+		return holdRead{}
+	}
+	hold, err := w.hold(ctx, tenant, missionID)
+	if err != nil {
+		w.logger.Warn("fix loop: the hold time of the fix mission cannot be read, so the default applies",
+			"tenant", tenant, "mission_id", missionID, "error", err)
+		return holdRead{unreadable: true}
+	}
+	return holdRead{hold: max(hold, 0)}
+}
+
 // deployEvents records the deploy of a merged fix. The Timeline event holds
 // the time of the deploy. The graph gets the edge from the merge request to
 // the Deployment that carries it. A deploy with no deployment key has no node
 // to point at, so it gets the event and no edge.
-func deployEvents(mr string, d DeployFact, missionID string) []brain.Event {
+func deployEvents(mr string, d DeployFact, missionID string, hold holdRead) []brain.Event {
 	out := make([]brain.Event, 0, 3)
 	out = append(out, brain.DeployObserved{
 		MergeRequest: mr, DeploymentKey: d.DeploymentKey, ApplicationKey: d.ApplicationKey, At: d.At.UTC(),
-		MissionID: missionID,
+		MissionID: missionID, HoldSeconds: int64(hold.hold / time.Second), HoldUnreadable: hold.unreadable,
 	})
 	if d.DeploymentKey == "" {
 		return out
@@ -435,14 +470,10 @@ func firstWithStatus(fs []brain.FindingSnapshot, status string) brain.FindingSna
 // than the limit is a failure.
 func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.FindingSnapshot) ([]brain.Event, error) {
 	pol := w.policy(tenant)
-	if w.hold != nil {
-		hold, err := w.hold(ctx, tenant, f.FixMissionID)
-		if err != nil {
-			return nil, fmt.Errorf("read hold time: %w", err)
-		}
-		if hold > 0 {
-			pol.HoldTime = hold
-		}
+	// The hold time was read once, at the deploy, and the deploy event holds it.
+	// A later read never needs the record of the fix mission.
+	if f.HealthHold > 0 {
+		pol.HoldTime = f.HealthHold
 	}
 	d, err := w.reader.Deploy(ctx, tenant, f.FixMissionID, mr)
 	if err != nil {

@@ -895,6 +895,10 @@ func holdRig(t *testing.T, src HoldSource) (*rig, *holdReader) {
 	wt.WithHoldSource(src)
 	wt.now = func() time.Time { return g.now }
 	g.wt = wt
+	g.r.health = HealthFact{Known: true} // the signal exists and the hold time still runs
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick() // the green pipeline queues the merge request, so it has a merge slot
+	g.queueSecondFix()
 	g.merged()
 	g.deployed()
 	g.tick() // the health read follows the deploy
@@ -925,27 +929,49 @@ func TestStep_AMissionWithNoHoldGetsTheDefaultHold(t *testing.T) {
 	}
 }
 
-// A hold that cannot be read skips the read. The finding does not move.
-func TestStep_AHoldThatCannotBeReadSkipsTheHealthRead(t *testing.T) {
-	g := newRig(t, "scan")
-	hr := &holdReader{fakeReader: g.r}
-	wt, err := NewWatcher(hr, g.rv, fakePlacer{app: "app-1"}, nil, nil)
-	if err != nil {
-		t.Fatal(err)
+// The hold is read once, at the deploy. A later read of the health signal uses the
+// hold that the deploy event holds, so a deleted mission record never blocks it.
+func TestStep_TheHoldIsReadOnceAtTheDeploy(t *testing.T) {
+	calls := 0
+	g, hr := holdRig(t, func(context.Context, string, string) (time.Duration, error) {
+		calls++
+		if calls > 1 {
+			return 0, errors.New("the mission record is deleted")
+		}
+		return 45 * time.Minute, nil
+	})
+	g.tick()
+	g.tick()
+	if calls != 1 {
+		t.Errorf("the hold source was asked %d times, want once", calls)
 	}
-	wt.WithHoldSource(func(context.Context, string, string) (time.Duration, error) { return 0, errors.New("no record") })
-	wt.now = func() time.Time { return g.now }
-	g.wt = wt
-	g.merged()
-	g.deployed()
+	if hr.hold != 45*time.Minute {
+		t.Errorf("hold = %v, want the 45m of the deploy event", hr.hold)
+	}
+}
 
-	for _, e := range g.tick() {
-		if _, ok := e.(brain.HealthObserved); ok {
-			t.Fatalf("a hold error gave %+v", e)
+// A hold that cannot be read at the deploy gives the default hold and a visible
+// wait with its own reason. The health signal is still read.
+func TestStep_AHoldThatCannotBeReadAtTheDeployWaitsVisiblyAndUsesTheDefault(t *testing.T) {
+	g, hr := holdRig(t, func(context.Context, string, string) (time.Duration, error) {
+		return 0, errors.New("no record")
+	})
+	if hr.hold != DefaultPolicy().HoldTime {
+		t.Errorf("hold = %v, want the default", hr.hold)
+	}
+	var reason string
+	for _, sl := range g.w.MergeSlots() {
+		if sl.MergeRequest == "mr-1" {
+			reason = sl.Waits[brain.WaitHoldUnreadable]
 		}
 	}
-	if hr.mission != "" {
-		t.Error("the health signal was read with no hold")
+	if reason != "the hold of the fix mission cannot be read" {
+		t.Errorf("wait reason = %q, want its own reason (slots %+v)", reason, g.w.MergeSlots())
+	}
+	for _, sl := range g.w.MergeSlots() {
+		if _, general := sl.Waits[brain.WaitNoHealthVerdict]; general {
+			t.Error("the wait must not be the general no health verdict wait")
+		}
 	}
 }
 

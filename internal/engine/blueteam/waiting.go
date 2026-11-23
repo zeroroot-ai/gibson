@@ -33,6 +33,9 @@ const (
 	// WaitNoHealthVerdict is a `fixed` finding with no health verdict after the
 	// grant window of its merge slot (gibson#1609, gibson#1463).
 	WaitNoHealthVerdict WaitKind = brain.WaitNoHealthVerdict
+	// WaitHoldUnreadable is a `fixed` finding whose hold time the daemon could not
+	// read from the fix mission at the deploy.
+	WaitHoldUnreadable WaitKind = brain.WaitHoldUnreadable
 	// WaitRevertPending is a `fixed` finding whose health signal failed and whose
 	// revert merge request is not merged yet. Its slot blocks the Application
 	// until the revert merges (gibson#1609).
@@ -97,6 +100,8 @@ func WaitingOnPerson(
 			case "":
 				v := waits[waitKey{f.MergeRequest, brain.WaitNoHealthVerdict}]
 				add(WaitNoHealthVerdict, f.ID, v.at, v.reason)
+				h := waits[waitKey{f.MergeRequest, brain.WaitHoldUnreadable}]
+				add(WaitHoldUnreadable, f.ID, h.at, h.reason)
 			case brain.HealthFailed:
 				p := waits[waitKey{f.MergeRequest, brain.WaitRevertPending}]
 				add(WaitRevertPending, f.ID, p.at, p.reason)
