@@ -123,9 +123,10 @@ type ConnectorSpec struct {
 	Variables []TenantVariable `yaml:"variables"`
 }
 
-// errorClassImagePrefix is the registry path of the Zero Root connectors. Only these images may
-// declare errorClasses, so no vendor connector can claim the protocol.
-const errorClassImagePrefix = "ghcr.io/zeroroot-ai/connectors-"
+// errorClassImage is the exact form of a Zero Root connector image: one path segment after
+// connectors-, and a full sha256 digest. Only these images may declare errorClasses, so no
+// vendor connector can claim the protocol. A prefix test would pass a second path segment.
+var errorClassImage = regexp.MustCompile(`^ghcr\.io/zeroroot-ai/connectors-[a-z0-9-]+@sha256:[0-9a-f]{64}$`)
 
 // HonorsErrorClasses is true when the catalog connector id declares errorClasses. The daemon
 // reads error.class of a tool error only for such a connector. An unknown id is false.
@@ -636,9 +637,9 @@ func validateConnector(id string, s ConnectorSpec, egress []string) error {
 		return fmt.Errorf("%s: auth %q must be none, secret, or oauth", id, s.Auth)
 	}
 	if s.ErrorClasses && !(s.Shape == connectorv1alpha1.ConnectorShapeHosted &&
-		strings.HasPrefix(s.Image, errorClassImagePrefix)) {
-		return fmt.Errorf("%s: errorClasses is only for a Hosted connector image of %s*, got %q",
-			id, errorClassImagePrefix, s.Image)
+		errorClassImage.MatchString(s.Image)) {
+		return fmt.Errorf("%s: errorClasses is only for a Hosted connector image that matches %s, got %q",
+			id, errorClassImage, s.Image)
 	}
 	if !slices.Contains(ConnectorClasses, s.Class) {
 		return fmt.Errorf("%s: class %q must be one of %s", id, s.Class, strings.Join(ConnectorClasses, ", "))

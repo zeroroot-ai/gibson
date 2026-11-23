@@ -45,12 +45,26 @@ func TestErrorClasses_OnlyZeroRootConnectorImagesMayClaimIt(t *testing.T) {
 
 	const digest = "@sha256:14d500c02066672253f2a6c6e1b5c9f4e3aaa6a8b2568468e85404cbcd54b7de"
 	for name, image := range map[string]string{
-		"a vendor image":              "quay.io/crowdstrike/falcon-mcp" + digest,
-		"another zeroroot repository": "ghcr.io/zeroroot-ai/gibson-executor" + digest,
-		"a look-alike registry":       "ghcr.io/zeroroot-ai-evil/connectors-x" + digest,
+		"a vendor image":                 "quay.io/crowdstrike/falcon-mcp" + digest,
+		"another zeroroot repository":    "ghcr.io/zeroroot-ai/gibson-executor" + digest,
+		"a look-alike registry":          "ghcr.io/zeroroot-ai-evil/connectors-x" + digest,
+		"a second path segment":          "ghcr.io/zeroroot-ai/connectors-evil.example/x" + digest,
+		"a second segment after a slash": "ghcr.io/zeroroot-ai/connectors-a/b" + digest,
+		"a tag with no digest":           "ghcr.io/zeroroot-ai/connectors-github-fixloop:0.8.2",
+		"a short digest":                 "ghcr.io/zeroroot-ai/connectors-github-fixloop@sha256:f2485395",
+		"a digest with upper case":       "ghcr.io/zeroroot-ai/connectors-github-fixloop@sha256:" + strings.Repeat("F", 64),
+		"a digest with trailing text":    "ghcr.io/zeroroot-ai/connectors-github-fixloop" + digest + "x",
+		"an upper case name":             "ghcr.io/zeroroot-ai/connectors-GitHub" + digest,
+		"an empty name":                  "ghcr.io/zeroroot-ai/connectors-" + digest,
 	} {
 		_, err := loadOne(t, connectorBody(image, "errorClasses: true"))
-		if err == nil || !strings.Contains(err.Error(), "errorClasses is only for") {
+		if err == nil {
+			t.Errorf("%s: the manifest must be refused", name)
+			continue
+		}
+		// An image with no digest fails the pin check of every Hosted connector first. An image
+		// with a digest reaches the errorClasses check, and it must fail there.
+		if strings.Contains(image, "@sha256:") && !strings.Contains(err.Error(), "errorClasses is only for") {
 			t.Errorf("%s: err = %v, want the errorClasses refusal", name, err)
 		}
 	}
@@ -69,7 +83,7 @@ func TestErrorClasses_TheShippedCatalogClaimsItForTheZeroRootConnectorsOnly(t *t
 		if e.ErrorClasses != want[e.ID] {
 			t.Errorf("%s: errorClasses = %v, want %v", e.ID, e.ErrorClasses, want[e.ID])
 		}
-		if e.ErrorClasses && !strings.HasPrefix(e.Image, errorClassImagePrefix) {
+		if e.ErrorClasses && !errorClassImage.MatchString(e.Image) {
 			t.Errorf("%s: errorClasses with the image %q", e.ID, e.Image)
 		}
 		if HonorsErrorClasses(e.ID) != e.ErrorClasses {
