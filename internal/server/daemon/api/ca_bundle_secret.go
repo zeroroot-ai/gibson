@@ -24,21 +24,14 @@ import (
 // name comes from a field that the CodeQL query secret-to-log treats as secret
 // material. The error to the caller names the secret.
 func readCABundleSecret(ctx context.Context, store ConnectorSecretResolver, secretName string) ([]byte, error) {
-	return readCABundleAt(ctx, store, secrets.StoredName(secretsv1.SecretCategory_SECRET_CATEGORY_CRED, secretName), secretName)
-}
-
-// readCABundleAt reads the secret under the stored key and returns the CA
-// certificates of it as new PEM (cabundle.Normalize). The caller names the
-// secret as the user wrote it in shown, and the error uses that name.
-func readCABundleAt(ctx context.Context, store ConnectorSecretResolver, storedKey, shown string) ([]byte, error) {
-	pemData, err := store.Resolve(ctx, storedKey)
+	pemData, err := store.Resolve(ctx, secrets.StoredName(secretsv1.SecretCategory_SECRET_CATEGORY_CRED, secretName))
 	if err != nil {
 		slog.WarnContext(ctx, "the tenant secret of a CA bundle cannot be read", "error", err)
-		return nil, fmt.Errorf("the tenant secret %q for the CA bundle cannot be read", shown)
+		return nil, fmt.Errorf("the tenant secret %q for the CA bundle cannot be read", secretName)
 	}
 	clean, err := cabundle.Normalize(pemData)
 	if err != nil {
-		return nil, fmt.Errorf("the tenant secret %q is not a CA bundle: %w", shown, err)
+		return nil, fmt.Errorf("the tenant secret %q is not a CA bundle: %w", secretName, err)
 	}
 	return clean, nil
 }

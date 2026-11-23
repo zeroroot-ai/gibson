@@ -32,10 +32,12 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
+	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
 )
 
@@ -338,7 +340,10 @@ func (s *ConnectorAuthAdminServer) tenantClient(
 	if !hostOfConnector(instanceURL, entry, row) {
 		return nil, status.Errorf(codes.InvalidArgument, "instance_url must be a host of connector %q", entry.ID)
 	}
-	raw, err := s.secrets.Resolve(ctx, row.OAuthClientSecretName)
+	// The tenant stores the client secret with SetSecret, which stores a
+	// credential as cred:<name>. The row keeps the name as the tenant gave it.
+	raw, err := s.secrets.Resolve(ctx,
+		secrets.StoredName(secretsv1.SecretCategory_SECRET_CATEGORY_CRED, row.OAuthClientSecretName))
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return nil, status.Errorf(codes.FailedPrecondition,

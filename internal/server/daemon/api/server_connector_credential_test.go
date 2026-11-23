@@ -327,6 +327,12 @@ func TestConnectorCredentialReader_Read(t *testing.T) {
 			wantErr: true,
 		},
 		"credential not found": {store: liveTokenStore(t), refs: ref("gitlab-pat", ""), wantErr: true},
+		// A secret stored with no prefix is not read. SetSecret stores cred:<name>.
+		"bare credential is not read": {
+			store:   withData(map[string][]byte{"gitlab-pat": []byte("raw-value")}),
+			refs:    ref("gitlab-pat", ""),
+			wantErr: true,
+		},
 		"raw credential": {
 			store: withData(map[string][]byte{"cred:gitlab-pat": []byte("raw-value")}),
 			refs:  ref("gitlab-pat", ""),

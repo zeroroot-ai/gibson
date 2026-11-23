@@ -67,8 +67,12 @@ var (
 
 // ValidSecretName reports whether name can name a secret of the tenant in a
 // manifest or in an enable request.
+//
+// A name under "connector/" is refused. The store keeps the grant and the access
+// token of a connector under that prefix, and no manifest or tenant may name them.
 func ValidSecretName(name string) bool {
-	return secretNameRE.MatchString(name) && !strings.Contains(name, "..")
+	return secretNameRE.MatchString(name) && !strings.Contains(name, "..") &&
+		!strings.HasPrefix(name, "connector/")
 }
 
 // withDefaults returns the header with the default name and format filled in.
