@@ -41,10 +41,10 @@ spec:
   # The server serves seven tools at v0.5.0: merge_request_state,
   # merge_merge_request, revert_merge_request, deployment_state,
   # open_merge_request, close_merge_request and read_file. The fix agent opens a
-  # fix with open_merge_request and undoes it with close_merge_request. The two
-  # tools write a branch and a pull request and never merge. The token of the tenant needs
-  # a token with contents:write and pull_requests:write. The three tools that write or read, and the read tools, need only the grant,
-  # because the entry has no response actions.
+  # fix with open_merge_request and undoes it with close_merge_request.
+  # open_merge_request and close_merge_request never merge. The token needs contents:write and pull_requests:write.
+  # The tools that the manifest does not name need only the grant, because the
+  # entry has no response actions.
   # The merge tool runs only when the merge request holds its merge slot
   # (gibson#1458). Only the daemon calls the revert tool, after a failed
   # health signal that it read. The other tools need only the grant.
