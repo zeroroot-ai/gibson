@@ -179,6 +179,15 @@ func GroupActions(calls, changes []audit.PgEntry, from, to time.Time) []ActionGr
 // last change at or before t decides. A removal ends the grant, so no grantor
 // is in force.
 func grantorAt(events []grantEvent, t time.Time) string {
+	if e, ok := grantEventAt(events, t); ok {
+		return e.grantor
+	}
+	return ""
+}
+
+// grantEventAt returns the change that gave the grant in force at t. ok is false
+// when no change is at or before t, and when the last one removed the grant.
+func grantEventAt(events []grantEvent, t time.Time) (grantEvent, bool) {
 	var last *grantEvent
 	for i := range events {
 		e := &events[i]
@@ -187,9 +196,21 @@ func grantorAt(events []grantEvent, t time.Time) string {
 		}
 	}
 	if last == nil || !last.added {
-		return ""
+		return grantEvent{}, false
 	}
-	return last.grantor
+	return *last, true
+}
+
+// GrantorOf returns the person who gave principal the execute grant on object,
+// in force at t, and the time of that change. changes are the audit records of
+// agent_grant_added and agent_grant_removed. ok is false when no grant is in
+// force at t, or when the records name none.
+func GrantorOf(changes []audit.PgEntry, principal, object string, t time.Time) (grantor string, at time.Time, ok bool) {
+	e, found := grantEventAt(grantEvents(changes)[principal][object], t)
+	if !found {
+		return "", time.Time{}, false
+	}
+	return e.grantor, e.at, true
 }
 
 func sortedKeys(m map[string]bool) []string {

@@ -56,8 +56,10 @@ const historyLookback = brain.MaxViewLookback
 
 // Grant is a grant of a capability to an agent, and the person who gave it.
 type Grant struct {
-	ID            string
-	Capability    string
+	ID         string
+	Capability string
+	// GrantedBy is the person who gave the grant (the actor of its audit
+	// record), never the owner of the agent. It is empty when no record names it.
 	GrantedBy     string
 	GrantedAtUnix int64
 }
@@ -65,9 +67,10 @@ type Grant struct {
 // GrantResolver reads a grant by its id. The id comes from the Timeline event
 // of the call (agent_tool_call.observed), which the daemon wrote when the
 // grant allowed the call (gibson#1474). It returns nil and no error when the
-// tenant holds no grant with the id.
+// tenant holds no grant with the id. at is the time of the call. The grantor is
+// the person who gave the grant that was in force then.
 type GrantResolver interface {
-	GrantByID(ctx context.Context, tenant, grantID string) (*Grant, error)
+	GrantByID(ctx context.Context, tenant, grantID string, at time.Time) (*Grant, error)
 }
 
 // Reader builds incident reports.
@@ -133,7 +136,7 @@ func (r *Reader) Report(ctx context.Context, incidentKey string) (*Report, error
 		if a.Outcome == OutcomeRefused || a.GrantID == "" {
 			continue // a refused call has no grant, and a call with no grant id has none to read
 		}
-		g, gerr := r.grants.GrantByID(ctx, tenant, a.GrantID)
+		g, gerr := r.grants.GrantByID(ctx, tenant, a.GrantID, a.CalledAt)
 		if gerr != nil {
 			return nil, fmt.Errorf("incidentreport: read the grant of %s: %w", a.ToolID, gerr)
 		}
@@ -218,6 +221,7 @@ func (ix *Index) actions(incident string, alerts []string) []ActionLine {
 			ToolID: act.ToolID, Connector: connector, Tool: tool,
 			AgentName: ix.runs[c.ev.RunID],
 			GrantID:   c.ev.GrantID,
+			CalledAt:  calledAt(c.ev.RecordedAtUnixNano),
 			Outcome:   classify(c.ev.ErrCode, c.ev.Err, c.ev.Result),
 			Error:     c.ev.Err, Result: c.ev.Result,
 			Controls: append([]string(nil), act.Controls...),
@@ -307,4 +311,13 @@ func incidentStart(alertRows []map[string]any, now time.Time) time.Time {
 		return fallback
 	}
 	return time.UnixMilli(first).Add(-historySlack)
+}
+
+// calledAt returns the time of a call from the nanoseconds of its event. A zero
+// value gives the zero time.
+func calledAt(unixNano int64) time.Time {
+	if unixNano == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, unixNano)
 }

@@ -24,11 +24,11 @@ func history() []brain.Event {
 		/* 1 */ brain.EntityObserved{Label: "Alert", Key: "alert-1", MissionID: "m-1"},
 		/* 2 */ brain.EntityObserved{Label: "Incident", Key: "inc-1", MissionID: "m-1"},
 		/* 3 */ brain.EntityObserved{Label: "Host", Key: "host-9", MissionID: "m-1"},
-		/* 4 */ brain.AgentToolCallObserved{ToolCallID: "c1", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:crowdstrike:contain_host", Result: `{"accepted":true}`, GrantID: "g-1"},
-		/* 5 */ brain.AgentToolCallObserved{ToolCallID: "c2", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:okta:revoke_user_sessions", Err: "permission denied: the grant does not allow this tool"},
-		/* 6 */ brain.AgentToolCallObserved{ToolCallID: "c3", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:okta:suspend_user", Err: "pending authorization", GrantID: "g-1"},
+		/* 4 */ brain.AgentToolCallObserved{ToolCallID: "c1", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:crowdstrike-response:contain_host", Result: `{"accepted":true}`, GrantID: "g-1"},
+		/* 5 */ brain.AgentToolCallObserved{ToolCallID: "c2", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:okta-response:revoke_user_sessions", Err: "permission denied: the grant does not allow this tool"},
+		/* 6 */ brain.AgentToolCallObserved{ToolCallID: "c3", MissionID: "m-1", RunID: "run-1", ToolName: "mcp:okta-response:suspend_user", Err: "pending authorization", GrantID: "g-1"},
 		/* 7 */ brain.AgentToolCallObserved{ToolCallID: "c4", MissionID: "m-1", RunID: "run-1", ToolName: "native:nmap"},
-		/* 8 */ brain.AgentToolCallObserved{ToolCallID: "c5", MissionID: "m-OTHER", RunID: "run-1", ToolName: "mcp:crowdstrike:contain_host"},
+		/* 8 */ brain.AgentToolCallObserved{ToolCallID: "c5", MissionID: "m-OTHER", RunID: "run-1", ToolName: "mcp:crowdstrike-response:contain_host"},
 		/* 9 */ brain.FindingRaised{ID: "f-1", Title: "Exposed token", MissionID: "m-1"},
 		/* 10 */ brain.EntityObserved{Label: "MergeRequest", Key: "mr-1", MissionID: "m-1"},
 		/* 11 */ brain.FindingStatusChanged{ID: "f-1", Status: "fixing"},
@@ -91,14 +91,14 @@ func TestAssemble_ListsOnlyTheResponseActionsOfTheIncident(t *testing.T) {
 		got = append(got, a.ToolID+"@"+string(a.Outcome))
 	}
 	want := []string{
-		"mcp:crowdstrike:contain_host@done",
-		"mcp:okta:revoke_user_sessions@refused",
-		"mcp:okta:suspend_user@pending_authorization",
+		"mcp:crowdstrike-response:contain_host@done",
+		"mcp:okta-response:revoke_user_sessions@refused",
+		"mcp:okta-response:suspend_user@pending_authorization",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("actions = %v, want %v", got, want)
 	}
-	if a := rep.Actions[0]; a.AgentName != "incident-response" || a.Connector != "crowdstrike" || a.Tool != "contain_host" {
+	if a := rep.Actions[0]; a.AgentName != "incident-response" || a.Connector != "crowdstrike-response" || a.Tool != "contain_host" {
 		t.Errorf("action = %+v", a)
 	}
 	if a := rep.Actions[1]; a.Frame.TimelineSeq != 5 || a.Error == "" {
@@ -221,9 +221,9 @@ func (f fakeHistory) HistoryFrom(context.Context, time.Time) ([]brain.Event, uin
 
 type fakeGrants struct{ asked []string }
 
-func (f *fakeGrants) GrantByID(_ context.Context, tenant, id string) (*Grant, error) {
+func (f *fakeGrants) GrantByID(_ context.Context, tenant, id string, _ time.Time) (*Grant, error) {
 	f.asked = append(f.asked, tenant+"/"+id)
-	return &Grant{ID: id, Capability: "execute:tool:mcp:crowdstrike", GrantedBy: "user-7", GrantedAtUnix: 1700000000}, nil
+	return &Grant{ID: id, Capability: "execute:tool:mcp:crowdstrike-response", GrantedBy: "user-7", GrantedAtUnix: 1700000000}, nil
 }
 
 func tenantCtx(t *testing.T) context.Context {

@@ -105,3 +105,36 @@ func TestGroupActions_NamesTheAuditRecordsOfEachGroup(t *testing.T) {
 		t.Fatalf("record ids = %v", got)
 	}
 }
+
+func TestGrantorOf(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	changes := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "agent_principal:p1", "okta-response", t0),
+		change("agent_grant_removed", "admin-1", "agent_principal:p1", "okta-response", t0.Add(time.Hour)),
+		change("agent_grant_added", "admin-2", "agent_principal:p1", "okta-response", t0.Add(2*time.Hour)),
+		change("agent_grant_added", "admin-3", "agent_principal:p2", "okta-response", t0),
+	}
+	obj := authz.ConnectorComponentObject("okta-response")
+	tests := []struct {
+		name      string
+		principal string
+		at        time.Time
+		want      string
+		wantOK    bool
+	}{
+		{"before any grant", "agent_principal:p1", t0.Add(-time.Second), "", false},
+		{"first grant", "agent_principal:p1", t0.Add(time.Minute), "admin-1", true},
+		{"after the removal", "agent_principal:p1", t0.Add(90 * time.Minute), "", false},
+		{"second grant", "agent_principal:p1", t0.Add(3 * time.Hour), "admin-2", true},
+		{"another principal", "agent_principal:p2", t0.Add(time.Minute), "admin-3", true},
+		{"unknown principal", "agent_principal:p9", t0.Add(time.Minute), "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _, ok := GrantorOf(changes, tt.principal, obj, tt.at)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf("GrantorOf = %q, %v, want %q, %v", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
