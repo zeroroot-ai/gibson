@@ -162,8 +162,8 @@ func TestGrantorOf_ReadsTheRelationThatTheGrantAdminWrites(t *testing.T) {
 		t.Fatalf("the tuple relation of can_execute is %q, want direct_execute", rel)
 	}
 	md, _ := json.Marshal(map[string]string{"object": obj, "relation": "direct_execute"})
-	real := audit.PgEntry{Action: "agent_grant_added", ActorID: "admin-1", TargetID: "p1", Decision: "allow", Metadata: md, CreatedAt: t0}
-	if got, _, ok := GrantorOf([]audit.PgEntry{real}, "p1", obj, t0.Add(time.Minute)); !ok || got != "admin-1" {
+	written := audit.PgEntry{Action: "agent_grant_added", ActorID: "admin-1", TargetID: "p1", Decision: "allow", Metadata: md, CreatedAt: t0}
+	if got, _, ok := GrantorOf([]audit.PgEntry{written}, "p1", obj, t0.Add(time.Minute)); !ok || got != "admin-1" {
 		t.Errorf("GrantorOf = %q, %v, want admin-1", got, ok)
 	}
 	// A record of the computed relation names no grant, because it takes no tuple.
