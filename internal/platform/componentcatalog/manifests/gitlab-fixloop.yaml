@@ -1,7 +1,7 @@
 # GitLab fix loop connector. Zero Root builds the MCP server in zeroroot-ai/connectors
-# (gitlab-fixloop/, release v0.6.0), because the vendor publishes no server with these tools.
+# (gitlab-fixloop/, release v0.7.0), because the vendor publishes no server with these tools.
 # The image is public, signed and scanned, and the catalog pins it by digest.
-# Source of the environment: gitlab-fixloop/README.md of zeroroot-ai/connectors at v0.6.0.
+# Source of the environment: gitlab-fixloop/README.md of zeroroot-ai/connectors at v0.7.0.
 # The server speaks streamable HTTP on :8080 at /mcp.
 id: gitlab-fixloop
 kind: connector
@@ -13,7 +13,7 @@ spec:
   vendor: gitlab
   class: git-host
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-gitlab-fixloop@sha256:48d6133393b3698f6a1f693325187cd1af1d816a012017ffa1309fc4608da712
+  image: ghcr.io/zeroroot-ai/connectors-gitlab-fixloop@sha256:3aa4ca17bca161855686d8f6e37577f24e3b7652edf970460b1e2054a38fbab0
   transport: streamable-http
   port: 8080
   auth: none
@@ -36,9 +36,9 @@ spec:
       patterns:
         - https://gitlab.com
       installPatterns: true
-  # The server serves eight tools at v0.6.0: merge_request_state,
+  # The server serves nine tools at v0.7.0: merge_request_state,
   # merge_merge_request, revert_merge_request, deployment_state,
-  # open_merge_request, close_merge_request, read_file and list_dependency_alerts. The fix agent opens a
+  # open_merge_request, close_merge_request, read_file, list_tree and list_dependency_alerts. The fix agent opens a
   # fix with open_merge_request and undoes it with close_merge_request.
   # open_merge_request and close_merge_request never merge. The token needs the api scope.
   # The tools that the manifest does not name need only the grant, because the
@@ -46,6 +46,9 @@ spec:
   # The scan mission calls list_dependency_alerts of this connector, with the
   # project of the scan, to read the dependency alerts of the Git host as
   # findings (connectors#29, release v0.6.0).
+  # list_tree lists the files of a ref under a path (connectors#31, release v0.7.0). It is
+  # read-only and needs no more than the grant. Its cursor is bound to the project, the ref
+  # and the path.
   # GitLab: the token needs read_api, and the user of the token needs the Security Dashboard permission on a project of the Ultimate tier (the server reads the vulnerabilities through GraphQL).
   # The merge tool runs only when the merge request holds its merge slot
   # (gibson#1458). Only the daemon calls the revert tool, after a failed
