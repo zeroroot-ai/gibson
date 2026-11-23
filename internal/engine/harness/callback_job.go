@@ -378,9 +378,14 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 			if _, sent := delivered[in.ID]; sent {
 				continue
 			}
-			wire, gerr := s.inputWithTurnGrant(ctx, tenantID, runID, in)
+			wire, gerr := s.inputWithTurnGrant(ctx, tenantID, memberID, runID, in)
 			if gerr != nil {
 				return gerr
+			}
+			if wire == nil {
+				// The member does not hold the job now. Nothing was minted, and the skip is not
+				// remembered: if the same member claims the job again, the input is live.
+				continue
 			}
 			if serr := stream.Send(&harnesspb.SubscribeInputResponse{Input: wire}); serr != nil {
 				return status.Errorf(codes.Unavailable, "deliver an input: %v", serr)
@@ -390,6 +395,22 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 				"type": "job_input", "job_id": in.JobID, "kind": string(in.Kind),
 				"sender": TurnGrantSubject(in.Sender), "message": firstRunes(in.Message, 200),
 			})
+		}
+		// Prune the map to the ids of the current read, but only when the read was not full. A
+		// full read is cut at the limit, so an id that is missing may only be past the limit: an
+		// older input of a job that the member claimed again can push a sent input out of the read.
+		// Pruning then would send that input twice. With a short read, a missing id is acknowledged
+		// or a ghost.
+		if len(pending) < int(memberInboxBatch) {
+			inRead := make(map[string]struct{}, len(pending))
+			for _, in := range pending {
+				inRead[in.ID] = struct{}{}
+			}
+			for id := range delivered {
+				if _, ok := inRead[id]; !ok {
+					delete(delivered, id)
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -407,7 +428,9 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 // sat in a table between the send and the turn would be a standing credential
 // with a table for a home, and its lifetime would be the queue's depth rather
 // than the turn's.
-func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantID, runID string, in *job.Input) (*jobpb.Input, error) {
+func (s *HarnessCallbackService) inputWithTurnGrant(
+	ctx context.Context, tenantID, memberID, runID string, in *job.Input,
+) (*jobpb.Input, error) {
 	wire := &jobpb.Input{
 		Id: in.ID, JobId: in.JobID, Message: in.Message,
 		Sender: principal.ToProto(in.Sender), SentAt: timestamppb.New(in.SentAt),
@@ -416,6 +439,11 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 	j, err := s.jobs.Get(ctx, tenantID, in.JobID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read the job an input belongs to: %v", err)
+	}
+	// An input of a job that the member no longer holds, or of a closed job that is no wrap-up,
+	// is not delivered, and it gets no grant: the member could never acknowledge it.
+	if j.MemberID != memberID || (j.State == job.StateClosed && in.Kind != job.InputWrapUp) {
+		return nil, nil
 	}
 	grant, err := s.mintTurnGrant(tenantID, runID, j.BankID, in.JobID, in.Sender)
 	if errors.Is(err, ErrNoBankSurface) {

@@ -6,9 +6,12 @@ package harness
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1351,5 +1354,185 @@ func TestPullJob_AFailedReleaseIsRetriedOnceThenLoggedWithTheJob(t *testing.T) {
 				t.Errorf("error logs = %v, want none", errLogs)
 			}
 		})
+	}
+}
+
+// A ghost input is the input of a job that the member no longer holds, or of a closed job that is
+// no wrap-up. The member can never acknowledge it, so the daemon sends nothing and mints no grant
+// for it. A real input next to the ghosts is delivered with its grant.
+func TestSubscribeInput_GhostInputsGetNoGrantAndAreNotSent(t *testing.T) {
+	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	jobs := newFakeJobs()
+	jobs.jobs["live"] = openJob("live")
+	released := openJob("released")
+	released.MemberID = "" // a release put the job back in the queue
+	jobs.jobs["released"] = released
+	taken := openJob("taken")
+	taken.MemberID = "m-2" // another member holds it now
+	jobs.jobs["taken"] = taken
+	closed := openJob("closed")
+	closed.State = job.StateClosed
+	jobs.jobs["closed"] = closed
+	in := func(id, jobID string, kind job.InputKind) *job.Input {
+		return &job.Input{ID: id, JobID: jobID, Kind: kind, Message: id, SentAt: time.Now(), Sender: alice}
+	}
+	for i := range 25 {
+		jobs.pending = append(jobs.pending, in(fmt.Sprintf("ghost-%d", i), "released", job.InputTurn))
+	}
+	jobs.pending = append(jobs.pending,
+		in("taken-1", "taken", job.InputTurn),
+		in("closed-turn", "closed", job.InputTurn),
+		in("closed-wrap", "closed", job.InputWrapUp),
+		in("live-1", "live", job.InputTurn),
+	)
+	minter := &recordingMinter{}
+	s := memberService(t, jobs, liveMembers(), minter)
+
+	ctx, cancel := context.WithCancel(memberCtx("acme"))
+	stream := &recordingInputStream{ctx: ctx, cancel: cancel}
+	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+	if err := s.SubscribeInput(&harnesspb.SubscribeInputRequest{Context: memberInfo("run-1")}, stream); err != nil { //nolint:contextcheck // the stream carries the context
+		t.Fatalf("SubscribeInput: %v", err)
+	}
+
+	sent := stream.snapshot()
+	ids := make([]string, 0, len(sent))
+	for _, w := range sent {
+		ids = append(ids, w.GetId())
+	}
+	if len(ids) != 2 || ids[0] != "closed-wrap" || ids[1] != "live-1" {
+		t.Fatalf("delivered %v, want the wrap-up of the closed job and the live input only", ids)
+	}
+	if len(minter.reqs) != 2 {
+		t.Fatalf("minted %d grants, want one for each delivered input", len(minter.reqs))
+	}
+	for _, req := range minter.reqs {
+		if req.TaskID == "released" || req.TaskID == "taken" {
+			t.Errorf("a grant was minted for the ghost job %s", req.TaskID)
+		}
+	}
+}
+
+// holdsAfter is a job surface whose Get shows a job as held by the member only after held is set.
+type holdsAfter struct {
+	*fakeJobs
+	held atomic.Bool
+}
+
+func (h *holdsAfter) Get(ctx context.Context, tenant, id string) (*job.Job, error) {
+	j, err := h.fakeJobs.Get(ctx, tenant, id)
+	if err != nil {
+		return nil, err
+	}
+	out := *j
+	if !h.held.Load() {
+		out.MemberID = "m-2"
+	}
+	return &out, nil
+}
+
+// A skipped input is not remembered. The member does not hold the job at the first poll, so the
+// input is skipped and gets no grant. The same member claims the job again in the same stream, and
+// the next poll delivers the input with its grant.
+func TestSubscribeInput_ASkippedInputIsDeliveredWhenTheMemberClaimsTheJobAgain(t *testing.T) {
+	base := newFakeJobs()
+	base.jobs["job-1"] = openJob("job-1")
+	base.pending = []*job.Input{{
+		ID: "in-1", JobID: "job-1", Kind: job.InputTurn, Message: "go", SentAt: time.Now(),
+		Sender: job.Principal{Kind: job.PrincipalUser, ID: "alice"},
+	}}
+	jobs := &holdsAfter{fakeJobs: base}
+	minter := &recordingMinter{}
+	s := memberService(t, jobs, liveMembers(), minter)
+
+	ctx, cancel := context.WithCancel(memberCtx("acme"))
+	stream := &recordingInputStream{ctx: ctx, cancel: cancel}
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		jobs.held.Store(true) // the member claims the job again
+		time.Sleep(2500 * time.Millisecond)
+		cancel()
+	}()
+	if err := s.SubscribeInput(&harnesspb.SubscribeInputRequest{Context: memberInfo("run-1")}, stream); err != nil { //nolint:contextcheck // the stream carries the context
+		t.Fatalf("SubscribeInput: %v", err)
+	}
+
+	sent := stream.snapshot()
+	if len(sent) != 1 || sent[0].GetId() != "in-1" || sent[0].GetGrant() == "" {
+		t.Fatalf("delivered %v, want in-1 once with its grant", sent)
+	}
+	if len(minter.reqs) != 1 {
+		t.Errorf("minted %d grants, want one: none for the skip", len(minter.reqs))
+	}
+}
+
+// windowedInbox is a job surface whose inbox is cut at the limit, oldest first, and that forgets an
+// input once it is acknowledged, as the store does.
+type windowedInbox struct {
+	*fakeJobs
+	mu    sync.Mutex
+	inbox []*job.Input
+}
+
+func (w *windowedInbox) set(in []*job.Input) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.inbox = in
+}
+
+func (w *windowedInbox) PendingInputs(_ context.Context, _, _ string, limit int32) ([]*job.Input, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := append([]*job.Input(nil), w.inbox...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].SentAt.Before(out[j].SentAt) })
+	if limit >= 0 && len(out) > int(limit) {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// A sent input must not be sent twice when a re-claimed job brings a full window of older inputs
+// that push it out of the oldest-first read. The map is pruned only when the read was not full.
+func TestSubscribeInput_AFullReadDoesNotMakeTheDeliveredInputGoTwice(t *testing.T) {
+	base := newFakeJobs()
+	base.jobs["job-x"] = openJob("job-x")
+	base.jobs["job-old"] = openJob("job-old")
+	jobs := &windowedInbox{fakeJobs: base}
+	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	now := time.Now()
+	x := &job.Input{ID: "x", JobID: "job-x", Kind: job.InputTurn, Message: "x", SentAt: now, Sender: alice}
+	jobs.set([]*job.Input{x})
+	s := memberService(t, jobs, liveMembers(), &recordingMinter{})
+
+	ctx, cancel := context.WithCancel(memberCtx("acme"))
+	stream := &recordingInputStream{ctx: ctx, cancel: cancel}
+	go func() {
+		time.Sleep(1 * time.Second) // poll 1 has delivered x
+		older := make([]*job.Input, 0, int(memberInboxBatch)+1)
+		for i := range int(memberInboxBatch) {
+			older = append(older, &job.Input{
+				ID: fmt.Sprintf("old-%d", i), JobID: "job-old", Kind: job.InputTurn, Message: "old",
+				SentAt: now.Add(-time.Hour + time.Duration(i)*time.Second), Sender: alice,
+			})
+		}
+		jobs.set(append(older, x)) // the read is full of older inputs, and x is past the limit
+		time.Sleep(2 * time.Second)
+		jobs.set([]*job.Input{x}) // the member acknowledged the older inputs
+		time.Sleep(2500 * time.Millisecond)
+		cancel()
+	}()
+	if err := s.SubscribeInput(&harnesspb.SubscribeInputRequest{Context: memberInfo("run-1")}, stream); err != nil { //nolint:contextcheck // the stream carries the context
+		t.Fatalf("SubscribeInput: %v", err)
+	}
+
+	counts := map[string]int{}
+	for _, w := range stream.snapshot() {
+		counts[w.GetId()]++
+	}
+	if counts["x"] != 1 {
+		t.Fatalf("x was sent %d times, want exactly once (counts: %v)", counts["x"], counts)
+	}
+	if len(counts) != 1+int(memberInboxBatch) {
+		t.Errorf("sent %d distinct inputs, want x and the %d older ones", len(counts), memberInboxBatch)
 	}
 }

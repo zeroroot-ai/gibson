@@ -269,10 +269,10 @@ func (s *postgresStore) Close(ctx context.Context, tenantID string, in CloseInpu
 			return fmt.Errorf("%w: %s", ErrClosed, in.JobID)
 		}
 
-		now := time.Now().UTC()
+		// closed_at comes from the clock of the database, as the inbox filter compares it with now().
 		if _, uerr := tx.Exec(ctx,
-			`UPDATE jobs SET state = $2, verdict = $3, score = $4, closed_at = $5, updated_at = now() WHERE id = $1`,
-			in.JobID, string(StateClosed), string(in.Verdict), in.Score, now); uerr != nil {
+			`UPDATE jobs SET state = $2, verdict = $3, score = $4, closed_at = now(), updated_at = now() WHERE id = $1`,
+			in.JobID, string(StateClosed), string(in.Verdict), in.Score); uerr != nil {
 			return fmt.Errorf("job: close %s: %w", in.JobID, uerr)
 		}
 		// The wrap-up turn: commit, push, open the merge request, summarize.
@@ -372,8 +372,9 @@ func (s *postgresStore) PendingInputs(ctx context.Context, tenantID, memberID st
 		`SELECT i.id, i.job_id, i.seq, i.kind, i.message, i.sender_kind, i.sender_id, i.sent_at, i.acknowledged_at
 		 FROM job_inputs i JOIN jobs j ON j.id = i.job_id
 		 WHERE j.member_id = $1 AND i.acknowledged_at IS NULL
+		   AND (j.state <> $3 OR (i.kind = $4 AND j.closed_at > now() - interval '10 minutes'))
 		 ORDER BY i.sent_at ASC, i.seq ASC
-		 LIMIT $2`, memberID, clampPageSize(limit))
+		 LIMIT $2`, memberID, clampPageSize(limit), string(StateClosed), string(InputWrapUp))
 	if err != nil {
 		return nil, fmt.Errorf("job: pending inputs for %s: %w", memberID, err)
 	}
