@@ -13,6 +13,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
+	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
@@ -131,4 +132,38 @@ func TestDesiredConnector_CABundleReachesTheOperator(t *testing.T) {
 		Config: tenantconnector.Config{Variables: map[string]string{"base_url": base["base_url"], "ca_bundle": "aap-like-token"}}}, entry)
 	require.Error(t, err)
 	assert.Nil(t, bad)
+}
+
+// The operator asks for the CA bundle with the key "ca.crt". The daemon reads
+// the secret under the stored name that SetSecret gives a credential, and it
+// refuses a secret that holds anything but certificates (gibson#1517).
+func TestGetConnectorCredential_ReadsTheCABundleOfTheTenant(t *testing.T) {
+	bundle := testCABundle(t)
+	srv := credServer(&fakeCredStore{data: map[string][]byte{
+		"cred:github-fixloop-ca-mock":  bundle,
+		"cred:github-fixloop-ca-key":   []byte("-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"),
+		"github-fixloop-token":         []byte("tok"),
+		"github-fixloop-ca-not-stored": bundle, // no prefix: not a credential of the tenant
+	}})
+	get := func(name string) (*daemonoperatorv1.GetConnectorCredentialResponse, error) {
+		return srv.GetConnectorCredential(peerCtx(t, testConnectorOperatorSVID), &daemonoperatorv1.GetConnectorCredentialRequest{
+			TenantId: "acme", ConnectorId: "github-fixloop",
+			Credentials: []*daemonoperatorv1.ConnectorCredentialRef{
+				{Key: "github-fixloop-token", TargetEnv: "GITHUB_TOKEN"},
+				{Key: name, TargetEnv: "ca.crt"},
+			},
+		})
+	}
+
+	resp, err := get("github-fixloop-ca-mock")
+	require.NoError(t, err)
+	assert.Equal(t, bundle, resp.GetData()["ca.crt"])
+	assert.Equal(t, "tok", string(resp.GetData()["GITHUB_TOKEN"]))
+
+	_, err = get("github-fixloop-ca-key")
+	require.Error(t, err, "a secret that holds a private key is not a CA bundle")
+	assert.NotContains(t, err.Error(), "AAAA", "the error never holds the content")
+
+	_, err = get("github-fixloop-ca-not-stored")
+	require.Error(t, err)
 }

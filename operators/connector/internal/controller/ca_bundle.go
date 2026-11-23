@@ -4,10 +4,7 @@
 package controller
 
 import (
-	"bytes"
 	"context"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 
@@ -15,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
@@ -38,8 +36,9 @@ import (
 
 const (
 	// caBundleKey is the key of the PEM in the data of the CA Secret. The daemon
-	// returns the bundle under this key.
-	caBundleKey = "ca.crt"
+	// returns the bundle under this key. It is the key that the CA bundles of
+	// the model providers use too (gibson#1403).
+	caBundleKey = cabundle.Key
 
 	// caBundleVolume is the name of the volume of the CA Secret in the pod.
 	caBundleVolume = "connector-ca"
@@ -91,29 +90,13 @@ func checkCABundleSecret(sec *corev1.Secret, ci *connectorv1alpha1.ConnectorInst
 	return checkCAPEM(sec.Data[caBundleKey])
 }
 
-// checkCAPEM accepts a PEM that holds at least one CA certificate and nothing
-// else. A private key or another block type means that the tenant named the
-// wrong secret, and the pod must not get it.
+// checkCAPEM accepts a PEM that holds CA certificates and nothing else. A
+// private key or another block type means that the tenant named the wrong
+// secret, and the pod must not get it. The daemon makes the same check when it
+// reads the secret, and the operator makes it again before it writes the Secret.
 func checkCAPEM(data []byte) error {
-	rest := bytes.TrimSpace(data)
-	certs := 0
-	for len(rest) > 0 {
-		var block *pem.Block
-		block, rest = pem.Decode(rest)
-		if block == nil {
-			return fmt.Errorf("%w: the data holds text that is not PEM", ErrCABundle)
-		}
-		if block.Type != "CERTIFICATE" {
-			return fmt.Errorf("%w: the PEM holds a block of type %q, and only CERTIFICATE is allowed", ErrCABundle, block.Type)
-		}
-		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
-			return fmt.Errorf("%w: a certificate of the bundle does not parse", ErrCABundle)
-		}
-		certs++
-		rest = bytes.TrimSpace(rest)
-	}
-	if certs == 0 {
-		return fmt.Errorf("%w: the bundle holds no certificate", ErrCABundle)
+	if err := cabundle.Check(data); err != nil {
+		return fmt.Errorf("%w: %w", ErrCABundle, err)
 	}
 	return nil
 }

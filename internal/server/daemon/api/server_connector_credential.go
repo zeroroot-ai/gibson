@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
@@ -139,8 +140,17 @@ func (r connectorCredentialReader) read(
 		if ref.GetTargetEnv() == "" {
 			return nil, false, fmt.Errorf("connector %q: credential %q has no target env", connector, ref.GetKey())
 		}
-		value, err := r.resolveCredentialRef(tctx, connector, ref)
-		if err != nil {
+		var value []byte
+		if ref.GetTargetEnv() == cabundle.Key {
+			// The CA bundle of the connector (gibson#1517). The key "ca.crt"
+			// is no environment variable name, so no credential uses it. The
+			// bundle is read and checked the way the bundle of a provider is,
+			// so a secret that holds a key is refused here.
+			value, err = readCABundleSecret(tctx, r.secrets, ref.GetKey())
+			if err != nil {
+				return nil, false, fmt.Errorf("connector %q: %w", connector, err)
+			}
+		} else if value, err = r.resolveCredentialRef(tctx, connector, ref); err != nil {
 			return nil, false, err
 		}
 		data[ref.GetTargetEnv()] = value
