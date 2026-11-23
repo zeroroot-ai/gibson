@@ -177,9 +177,9 @@ func TestWaitingOnPerson_HoldUnreadable(t *testing.T) {
 	got := WaitingOnPerson(findings, nil, history, at(5))
 	if len(got) != 1 || got[0].ID != "open" || got[0].Kind != WaitHoldUnreadable || got[0].Reason != reason {
 		t.Fatalf("got %+v, want one hold_unreadable item for the open finding", got)
+	}
+}
 
-// A fixing finding with no fix head shows as an item with the reason, until a
-// head is recorded.
 func TestWaitingOnPerson_NoFixHead(t *testing.T) {
 	findings := []brain.FindingSnapshot{
 		{ID: "nohead", Status: brain.FindingStatusFixing, MergeRequest: "mr-1",
@@ -190,5 +190,20 @@ func TestWaitingOnPerson_NoFixHead(t *testing.T) {
 	got := WaitingOnPerson(findings, nil, nil, at(5))
 	if len(got) != 1 || got[0].ID != "nohead" || got[0].Kind != WaitNoFixHead || got[0].Reason != "the head moved" {
 		t.Fatalf("got %+v, want one no_fix_head item", got)
+	}
+}
+
+func TestWaitingOnPerson_NoFixHeadWithNoReason(t *testing.T) {
+	findings := []brain.FindingSnapshot{
+		{ID: "linked", Status: brain.FindingStatusFixing, MergeRequest: "mr-1"},
+		{ID: "unlinked", Status: brain.FindingStatusFixing},
+	}
+	history := []brain.Event{
+		brain.FindingStatusChanged{ID: "linked", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", At: at(2)},
+	}
+	got := WaitingOnPerson(findings, nil, history, at(5))
+	if len(got) != 1 || got[0].ID != "linked" || got[0].Kind != WaitNoFixHead ||
+		got[0].Reason != "no fix head was recorded" || !got[0].Since.Equal(at(2)) {
+		t.Fatalf("got %+v, want one no_fix_head item for the linked finding, since the link", got)
 	}
 }

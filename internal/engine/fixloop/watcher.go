@@ -208,7 +208,7 @@ func (w *Watcher) stepFixing(
 		return ended, nil
 	}
 	if noFixHead(fs) {
-		// The link recorded no head for this fix and said why. The fix agent makes no
+		// The fix has no head. The fix agent makes no
 		// merge call without a head, so a slot would only block the Application for
 		// the grant window at each cycle. The finding waits on a person instead.
 		w.logger.Warn("fix loop: the fix has no head, so the merge request gets no merge slot",
@@ -235,11 +235,13 @@ func (w *Watcher) stepFixing(
 	}}, nil
 }
 
-// noFixHead reports whether a finding of the merge request has no fix head and the
-// link recorded the reason (brain.FixHeadMissing).
+// noFixHead reports whether a finding of the merge request has no fix head. The
+// reason does not matter: the daemon can stop between the link events and the head
+// events, and a finding from before brain.FixHeadMissing has no reason. The fix
+// agent makes no merge call without a head, so such a fix gets no slot.
 func noFixHead(fs []brain.FindingSnapshot) bool {
 	for _, f := range fs {
-		if f.FixHeadSHA == "" && f.FixHeadMissingReason != "" {
+		if f.FixHeadSHA == "" {
 			return true
 		}
 	}

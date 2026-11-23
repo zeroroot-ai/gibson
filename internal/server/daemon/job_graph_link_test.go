@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,7 +18,9 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/fixloop"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // testNow is the time that the tests pass to fixedByEvents.
@@ -1080,5 +1083,39 @@ func TestToolCallSink_RecordsTheOpenAndCallsTheNextSink(t *testing.T) {
 	}
 	if h, ok := (worldOpenedHeads{reg: reg}).OpenedHead("acme", testMRURL, "run-1"); !ok || h.sha != testHeadSHA {
 		t.Errorf("head = %+v, %v", h, ok)
+	}
+}
+
+// The run that a coding job's open_merge_request call carries is the run of its
+// ClosedJob. ComponentService.CallTool puts the run of the work item in the call
+// record (service_connector_call.go), and RecordToolCall passes it as MissionRunId.
+// A bank member call carries the run of its grant (memberCall.contextInfo). This test
+// runs the real callback manager, so a change that sends another run fails here and
+// does not silently block every merge.
+func TestOpenMergeRequest_TheCallCarriesTheRunOfTheClosedJob(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	cb := harness.NewCallbackManager(harness.CallbackConfig{
+		ServiceOptions: []harness.CallbackServiceOption{harness.WithEventBus(NewEventBusAdapter(NewEventBus(slog.Default())))},
+		ListenAddress:  "127.0.0.1:0",
+	}, slog.Default())
+	d := &daemonImpl{brainRegistry: reg}
+	cb.SetToolCallSink(d.toolCallSink(ingestToolCall(reg)))
+	closed := closedJob([]string{"f-1"}, mrDeliverable) // MissionRunID "run-1"
+
+	cb.RecordToolCall(auth.ContextWithTenant(ctx, auth.MustNewTenantID(closed.TenantID)),
+		metatool.CallRecord{
+			Canonical: "mcp:github-fixloop:open_merge_request", MissionID: "m-1", RunID: closed.MissionRunID, ArgsJSON: []byte(`{}`),
+		},
+		[]byte(openResultJSON(jobnode.JobBranch(closed.JobID), testHeadSHA)), "")
+
+	got, ok := (worldOpenedHeads{reg: reg}).OpenedHead(closed.TenantID, testMRURL, closed.MissionRunID)
+	if !ok || got.missionRunID != closed.MissionRunID {
+		t.Fatalf("the open of the job has no record in the run %q of its closed job: %+v, %v", closed.MissionRunID, got, ok)
+	}
+	heads, missing := headEventsOf(t, worldOpenedHeads{reg: reg})
+	if len(heads) != 1 || len(missing) != 0 {
+		t.Errorf("the link of the closed job found no head: heads %+v, missing %+v", heads, missing)
 	}
 }

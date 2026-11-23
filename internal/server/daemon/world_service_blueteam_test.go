@@ -179,6 +179,7 @@ func TestListWaitingOnPerson(t *testing.T) {
 	submit(t, reg, "acme",
 		brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"},
 		brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", At: blueAt(1)},
+		brain.FixHeadRecorded{ID: "f1", MergeRequest: "mr-1", HeadSHA: "aaaa", At: blueAt(1)},
 		brain.MergeRequestObserved{Key: "mr-1", State: brain.MergeRequestRefused, At: blueAt(2)},
 	)
 	resp, err := srv.ListWaitingOnPerson(worldTenantCtx("acme"), &worldpb.ListWaitingOnPersonRequest{})
@@ -186,6 +187,22 @@ func TestListWaitingOnPerson(t *testing.T) {
 	require.Len(t, resp.Items, 1)
 	require.Equal(t, "merge_refused", resp.Items[0].Kind)
 	require.EqualValues(t, 4*3600, resp.Items[0].WaitedSeconds)
+}
+
+// A linked fix with no head waits on a person, since the link, with the reason that no
+// head was recorded.
+func TestListWaitingOnPerson_NoFixHead(t *testing.T) {
+	srv, reg := newBlueServer(t, blueAt(6))
+	submit(t, reg, "acme",
+		brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"},
+		brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", At: blueAt(1)},
+	)
+	resp, err := srv.ListWaitingOnPerson(worldTenantCtx("acme"), &worldpb.ListWaitingOnPersonRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	require.Equal(t, "no_fix_head", resp.Items[0].Kind)
+	require.Equal(t, "no fix head was recorded", resp.Items[0].Reason)
+	require.EqualValues(t, 5*3600, resp.Items[0].WaitedSeconds)
 }
 
 func TestListActionsByGrant(t *testing.T) {

@@ -63,7 +63,9 @@ type WaitItem struct {
 }
 
 // WaitingKinds are the kinds of the history events that WaitingOnPerson reads.
-var WaitingKinds = []string{brain.MergeRequestObserved{}.Kind(), brain.FixWaiting{}.Kind()}
+var WaitingKinds = []string{
+	brain.MergeRequestObserved{}.Kind(), brain.FixWaiting{}.Kind(), brain.FindingStatusChanged{}.Kind(),
+}
 
 // WaitingOnPerson returns each item that waits on a person, the longest wait
 // first. history is the durable Timeline of the tenant. The in-memory Timeline
@@ -88,13 +90,24 @@ func WaitingOnPerson(
 	}
 	refusals := lastRefusals(history)
 	waits := lastWaits(history)
+	linked := linkTimes(history)
 	for _, f := range findings {
 		switch f.Status {
 		case brain.FindingStatusFixing:
 			r := refusals[f.MergeRequest]
 			add(WaitMergeRefused, f.ID, r.at, r.reason)
-			if f.FixHeadSHA == "" {
-				add(WaitNoFixHead, f.ID, f.FixHeadMissingAt, f.FixHeadMissingReason)
+			// A linked fix with no head waits on a person, with or without a recorded
+			// reason. The daemon can stop between the link events and the head events,
+			// and a finding from before FixHeadMissing has no reason.
+			if f.FixHeadSHA == "" && f.MergeRequest != "" {
+				since, reason := f.FixHeadMissingAt, f.FixHeadMissingReason
+				if reason == "" {
+					reason = "no fix head was recorded"
+					if since = linked[f.ID]; since.IsZero() {
+						since = f.FixClaimedAt
+					}
+				}
+				add(WaitNoFixHead, f.ID, since, reason)
 			}
 			u := waits[waitKey{f.MergeRequest, brain.WaitMergeUnreadable}]
 			add(WaitMergeUnreadable, f.ID, u.at, u.reason)
@@ -131,6 +144,27 @@ func WaitingOnPerson(
 
 func rerunAfterDeploy(f brain.FindingSnapshot) bool {
 	return !f.RerunAt.IsZero() && f.RerunAt.After(f.DeployedAt)
+}
+
+// linkTimes returns, for each finding, the time of its last status change to fixing
+// with a merge request: the time of the link.
+func linkTimes(history []brain.Event) map[string]time.Time {
+	out := map[string]time.Time{}
+	for _, raw := range history {
+		var e brain.FindingStatusChanged
+		switch v := raw.(type) {
+		case brain.FindingStatusChanged:
+			e = v
+		case *brain.FindingStatusChanged:
+			e = *v
+		default:
+			continue
+		}
+		if e.Status == brain.FindingStatusFixing && e.MergeRequest != "" {
+			out[e.ID] = e.At
+		}
+	}
+	return out
 }
 
 // waitStart is the start of a wait and what the Timeline says about it.
