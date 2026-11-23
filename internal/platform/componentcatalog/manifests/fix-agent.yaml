@@ -4,12 +4,13 @@ displayName: Fix Agent
 description: >-
   Takes the open Findings of one Application and sends each one to the fix
   loop: it opens one fix job for a finding on a bank of coding agents, the job
-  delivers a merge request, and the daemon merges it on a green pipeline and
-  reads the health signal. The agent makes no model call and changes no code
-  itself. It never holds the token of the Git host.
+  delivers a merge request, and the agent merges it through the connector after
+  the daemon grants the merge slot. The daemon reads the deploy and the health
+  signal. The agent makes no model call and changes no code itself. It never
+  holds the token of the Git host.
 # No egress. The agent reaches only the harness callback service. The coding
-# agent of the bank does the work, and the driver of the job holds the token of
-# the Git host.
+# agent of the bank does the work through the governed connector tools, and the
+# connector holds the token of the Git host.
 spec:
   runtime: setec
   # Release 0.2.0 of zeroroot-ai/fix-agent, built on sdk v0.217.0. 0.2.0 merges
