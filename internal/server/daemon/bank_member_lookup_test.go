@@ -561,7 +561,8 @@ func TestLazyJobSurface_ReleaseJobReachesTheStore(t *testing.T) {
 	if err := surface.ReleaseJob(ctx, "acme", "job-1", "m-2"); !errors.Is(err, job.ErrNotFound) {
 		t.Errorf("a member that does not hold the job: %v, want ErrNotFound", err)
 	}
-	down := &lazyJobSurface{daemon: &daemonImpl{}, stores: func() (job.Store, error) { return nil, errors.New("no pool") }}
+	noStore := func() (job.Store, error) { return nil, errors.New("no pool") }
+	down := &lazyJobSurface{daemon: &daemonImpl{}, stores: noStore}
 	if err := down.ReleaseJob(ctx, "acme", "job-1", "m-1"); err == nil {
 		t.Error("no store must be reported on ReleaseJob")
 	}
