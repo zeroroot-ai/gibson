@@ -1137,3 +1137,25 @@ func TestOpenMergeRequest_AnOpenFromAnotherJobDoesNotBind(t *testing.T) {
 		t.Errorf("an open from job-2 bound to job-1: heads %+v, missing %+v", heads, missing)
 	}
 }
+
+// Turn 1 of job J pushes H1 and opens. Turn 2 of J, in another member run, pushes H2 and
+// opens again. The host holds H2, and the link of J records H2.
+func TestOpenMergeRequest_ASecondTurnOfTheJobInAnotherRunReplacesTheHead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	d := &daemonImpl{brainRegistry: reg}
+	sink := d.toolCallSink(ingestToolCall(reg))
+	closed := closedJob([]string{"f-1"}, mrDeliverable)
+	const h1 = "4444444444444444444444444444444444444444"
+
+	sink(ctx, closed.TenantID, openCall(closed.JobID, openResultJSON(jobnode.JobBranch(closed.JobID), h1)))
+	second := openCall(closed.JobID, openResultJSON(jobnode.JobBranch(closed.JobID), testHeadSHA)) // the host head
+	second.RunID, second.MissionRunID = "member-run-2", "member-run-2"
+	sink(ctx, closed.TenantID, second)
+
+	heads, missing := headEventsOf(t, worldOpenedHeads{reg: reg})
+	if len(heads) != 1 || len(missing) != 0 || heads[0].HeadSHA != testHeadSHA {
+		t.Errorf("the link must record the head of the second turn: heads %+v, missing %+v", heads, missing)
+	}
+}

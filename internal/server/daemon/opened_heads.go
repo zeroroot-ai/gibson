@@ -85,7 +85,7 @@ func openedEventOf(call harness.ToolCallRecord) (brain.MergeRequestOpened, bool)
 	return brain.MergeRequestOpened{
 		MergeRequest: res.MergeRequest, URL: res.URL, JobID: call.GrantTaskID, SourceBranch: res.SourceBranch,
 		HeadSHA: res.HeadSHA, RunID: call.RunID, MissionID: call.MissionID, MissionRunID: call.MissionRunID,
-		At: time.Unix(0, call.RecordedAtUnixNano).UTC(),
+		At: time.Unix(0, call.RecordedAtUnixNano).UTC(), Verified: true,
 	}, true
 }
 

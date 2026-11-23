@@ -67,6 +67,16 @@ func callerTask(ctx context.Context, info *harnesspb.ContextInfo) string {
 	return info.GetTaskId()
 }
 
+// WithoutTaskGrant returns a context with no task grant and no grant run. A mission
+// that a request starts runs under its own identity. If it kept the claims of the
+// request, a tool node of the mission would act as the job of the caller: the record of
+// its connector call would carry the task of the caller. The context keeps its values
+// and its cancellation.
+func WithoutTaskGrant(ctx context.Context) context.Context {
+	ctx = context.WithValue(ctx, taskGrantContextKey{}, struct{}{}) // not a Claims value, so there are none
+	return context.WithValue(ctx, grantRunContextKey{}, "")
+}
+
 // verifiedGrantTask returns the task of the verified task grant on ctx, or an empty
 // string when the request carried none. Unlike callerTask it never reads the body of
 // the request, so the value cannot be forged.

@@ -863,6 +863,17 @@ func (s *HarnessCallbackService) captureGrantedToolCall(
 	ctx context.Context, contextInfo *harnesspb.ContextInfo,
 	toolCallID, toolName, argumentsJSON, resultJSON, callErr, grantID, errCode string,
 ) string {
+	return s.captureToolCallAs(ctx, verifiedGrantTask(ctx), contextInfo,
+		toolCallID, toolName, argumentsJSON, resultJSON, callErr, grantID, errCode)
+}
+
+// captureToolCallAs is captureGrantedToolCall with the task of the grant given by the
+// caller. A call that the daemon makes for a tenant, and the call of a tool node, pass an
+// empty task, so no connector call of them counts as a turn of a job.
+func (s *HarnessCallbackService) captureToolCallAs(
+	ctx context.Context, grantTaskID string, contextInfo *harnesspb.ContextInfo,
+	toolCallID, toolName, argumentsJSON, resultJSON, callErr, grantID, errCode string,
+) string {
 	if s.toolCallSink == nil || contextInfo == nil {
 		return ""
 	}
@@ -878,7 +889,7 @@ func (s *HarnessCallbackService) captureGrantedToolCall(
 		ToolCallID:         toolCallID,
 		MissionID:          contextInfo.GetMissionId(),
 		MissionRunID:       contextInfo.GetMissionRunId(),
-		GrantTaskID:        verifiedGrantTask(ctx),
+		GrantTaskID:        grantTaskID,
 		RunID:              runID,
 		Agent:              contextInfo.GetAgentName(),
 		ToolName:           toolName,
@@ -2848,7 +2859,8 @@ func (s *HarnessCallbackService) RunMission(ctx context.Context, req *harnesspb.
 		}, nil
 	}
 
-	if err := s.missionManager.Run(ctx, req.MissionId); err != nil {
+	// The mission runs under its own identity, not under the task grant of this request.
+	if err := s.missionManager.Run(WithoutTaskGrant(ctx), req.MissionId); err != nil {
 		s.logger.Error("RunMission: failed to run mission", "mission_id", req.MissionId, "error", err)
 		return &harnesspb.RunMissionResponse{
 			Error: &harnesspb.HarnessError{

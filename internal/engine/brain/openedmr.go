@@ -34,6 +34,10 @@ type MergeRequestOpened struct {
 	MissionID    string
 	MissionRunID string
 	At           time.Time
+	// Verified is true when JobID is the task of a verified turn grant. An event
+	// from before the daemon read the grant took the job from the name of the branch,
+	// which an agent chooses, so it has no mark and never binds.
+	Verified bool
 }
 
 // Kind identifies the merge_request.opened brain event.
@@ -50,6 +54,7 @@ type OpenedMergeRequest struct {
 	MissionID    string    `json:"mission_id,omitempty"`
 	MissionRunID string    `json:"mission_run_id,omitempty"`
 	At           time.Time `json:"at"`
+	Verified     bool      `json:"verified,omitempty"`
 }
 
 // openedKey is the key of a record: the reference or the URL of the merge request,
@@ -61,11 +66,14 @@ func openedKey(mergeRequest, jobID string) string {
 }
 
 // applyMergeRequestOpened keeps the record under the reference and under the URL,
-// for the job of the call. An event with no job is not kept, because no job can
-// claim it. Inside one job, a record is replaced only by a call of the same agent run
-// and mission.
+// for the job of the call. An event with no job, and an event whose job is not
+// verified, is not kept, because no job can claim it. The key comes from the verified
+// grant, so inside one job the newest event replaces the record: a second turn of the
+// job, in another member run, pushes another head and opens again. A snapshot that
+// holds a record with no mark loses it on restore, because the restore folds it as an
+// event.
 func applyMergeRequestOpened(w *World, e MergeRequestOpened) {
-	if e.HeadSHA == "" || e.SourceBranch == "" || e.JobID == "" {
+	if e.HeadSHA == "" || e.SourceBranch == "" || e.JobID == "" || !e.Verified {
 		return
 	}
 	rec := OpenedMergeRequest(e)
@@ -74,9 +82,6 @@ func applyMergeRequestOpened(w *World, e MergeRequestOpened) {
 			continue
 		}
 		key := openedKey(mr, e.JobID)
-		if old, ok := w.openedMRs[key]; ok && (old.RunID != e.RunID || old.MissionID != e.MissionID) {
-			continue
-		}
 		if w.openedMRs == nil {
 			w.openedMRs = map[string]OpenedMergeRequest{}
 		}

@@ -11,7 +11,7 @@ import (
 func opened(run, mission, head string) MergeRequestOpened {
 	return MergeRequestOpened{
 		MergeRequest: "!7", URL: "https://forge.example/mr/7", JobID: "job-1", SourceBranch: "job/job-1",
-		HeadSHA: head, RunID: run, MissionID: mission, MissionRunID: "run-1", At: at(1),
+		HeadSHA: head, RunID: run, MissionID: mission, MissionRunID: "run-1", At: at(1), Verified: true,
 	}
 }
 
@@ -33,19 +33,49 @@ func TestMergeRequestOpened_FoldsUnderTheReferenceAndTheURL(t *testing.T) {
 	}
 }
 
-// Inside one mission run, a call of another agent run, or of another mission, cannot
-// replace the head. The agent run of the first call can update it.
-func TestMergeRequestOpened_AnotherRunCannotReplaceTheHead(t *testing.T) {
+// The key comes from the verified grant. Inside one job, the newest event replaces the
+// record: a second turn of the job, in another member run, pushes another head and opens
+// again, and the link must see that head.
+func TestMergeRequestOpened_TheNewestEventOfTheJobReplacesTheRecord(t *testing.T) {
 	w := NewWorld("t1")
-	Reduce(w, opened("agent-1", "m-1", "aaaa"))
-	Reduce(w, opened("agent-2", "m-1", "bbbb"))
-	Reduce(w, opened("agent-1", "m-2", "cccc"))
-	if r, _ := w.OpenedMergeRequest("!7", "job-1"); r.HeadSHA != "aaaa" {
-		t.Errorf("head = %q, want aaaa: another run replaced it", r.HeadSHA)
+	Reduce(w, opened("member-run-1", "bank-1", "aaaa"))
+	Reduce(w, opened("member-run-2", "bank-1", "bbbb")) // a restart, or another member of the bank
+	if r, _ := w.OpenedMergeRequest("!7", "job-1"); r.HeadSHA != "bbbb" || r.RunID != "member-run-2" {
+		t.Errorf("record = %+v, want the head bbbb of the second turn", r)
 	}
-	Reduce(w, opened("agent-1", "m-1", "dddd"))
-	if r, _ := w.OpenedMergeRequest("!7", "job-1"); r.HeadSHA != "dddd" {
-		t.Errorf("head = %q, want dddd: the same run may update it", r.HeadSHA)
+}
+
+// A record with no verified job never binds. An event from before the daemon read the
+// grant took its job from the name of the branch, and a snapshot from then holds such a
+// record. Both are dropped.
+func TestMergeRequestOpened_AnUnverifiedJobNeverBinds(t *testing.T) {
+	w := NewWorld("t1")
+	e := opened("agent-1", "m-1", "aaaa")
+	e.Verified = false
+	Reduce(w, e)
+	if got := w.OpenedMergeRequests(); len(got) != 0 {
+		t.Fatalf("an unverified event was kept: %+v", got)
+	}
+
+	// A snapshot of the old shape: one record with a branch-derived job and no mark.
+	old := opened("agent-1", "m-1", "oldh")
+	old.Verified = false
+	w.openedMRs = map[string]OpenedMergeRequest{openedKey("!7", "job-1"): OpenedMergeRequest(old)}
+	w.openedMROrder = []string{openedKey("!7", "job-1")}
+	verified := opened("agent-2", "m-2", "newh")
+	verified.MergeRequest, verified.URL = "!8", ""
+	verified.Verified = true
+	applyMergeRequestOpened(w, verified)
+
+	restored, err := RestoreWorld(SnapshotWorld(w, "seq-1"), "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := restored.OpenedMergeRequest("!7", "job-1"); ok {
+		t.Error("a record with no verified job survived the restore")
+	}
+	if r, ok := restored.OpenedMergeRequest("!8", "job-1"); !ok || r.HeadSHA != "newh" || !r.Verified {
+		t.Errorf("the verified record = %+v, %v, want it kept", r, ok)
 	}
 }
 
@@ -53,10 +83,10 @@ func TestMergeRequestOpened_AnotherRunCannotReplaceTheHead(t *testing.T) {
 // World, because each tenant has a World of its own.
 func TestMergeRequestOpened_TheLimitIsPerWorld(t *testing.T) {
 	acme, globex := NewWorld("acme"), NewWorld("globex")
-	Reduce(acme, MergeRequestOpened{MergeRequest: "!acme", SourceBranch: "job/a", HeadSHA: "aaaa", RunID: "r", JobID: "job-1", At: at(1)})
+	Reduce(acme, MergeRequestOpened{MergeRequest: "!acme", SourceBranch: "job/a", HeadSHA: "aaaa", RunID: "r", JobID: "job-1", At: at(1), Verified: true})
 	for i := 0; i <= openedMergeRequestLimit; i++ {
 		Reduce(globex, MergeRequestOpened{
-			MergeRequest: fmt.Sprintf("!g%d", i), SourceBranch: "job/g", HeadSHA: "gggg", RunID: "r", JobID: "job-1", At: at(1),
+			MergeRequest: fmt.Sprintf("!g%d", i), SourceBranch: "job/g", HeadSHA: "gggg", RunID: "r", JobID: "job-1", At: at(1), Verified: true,
 		})
 	}
 	if _, ok := globex.OpenedMergeRequest("!g0", "job-1"); ok {

@@ -28,7 +28,9 @@ import (
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -58,6 +60,7 @@ const validMissionID = "01234567-89ab-cdef-0123-456789abcdef"
 
 type cbMockMissionOperator struct {
 	runErr        error
+	runCtx        context.Context
 	statusInfo    *MissionStatusInfo
 	statusErr     error
 	waitResult    *MissionResultInfo
@@ -74,7 +77,8 @@ type cbMockMissionOperator struct {
 func (m *cbMockMissionOperator) CreateMission(_ context.Context, _ *CreateMissionRequest) (*MissionInfo, error) {
 	return m.createInfo, m.createErr
 }
-func (m *cbMockMissionOperator) Run(_ context.Context, _ string) error {
+func (m *cbMockMissionOperator) Run(ctx context.Context, _ string) error {
+	m.runCtx = ctx
 	return m.runErr
 }
 func (m *cbMockMissionOperator) GetStatus(_ context.Context, _ string) (*MissionStatusInfo, error) {
@@ -369,4 +373,48 @@ func TestGetMissionResults_ManagerError_ReturnsInternal(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp.Error)
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INTERNAL, resp.Error.Code)
+}
+
+// A mission that a job-granted request starts runs under its own identity. The context
+// that the mission manager gets holds neither the task grant nor the grant run of the
+// request. A tool node of that mission then records its open_merge_request call with no
+// job, so it never counts as a turn of the job of the caller.
+func TestRunMission_TheMissionContextHoldsNoTaskGrant(t *testing.T) {
+	mgr := &cbMockMissionOperator{}
+	svc := newCBCallbackServiceWithMgr(mgr)
+	granted := withGrantMissionRun(withTaskGrantClaims(context.Background(), sdkcg.Claims{TaskID: "job-1"}), "member-run-1")
+
+	_, err := svc.RunMission(granted, &harnesspb.RunMissionRequest{MissionId: validMissionID})
+
+	require.NoError(t, err)
+	require.NotNil(t, mgr.runCtx)
+	_, hasClaims := TaskGrantClaimsFromContext(mgr.runCtx)
+	assert.False(t, hasClaims, "the mission must not keep the task grant of the request")
+	assert.Empty(t, verifiedGrantTask(mgr.runCtx))
+	assert.Empty(t, callerRun(mgr.runCtx, &harnesspb.ContextInfo{}), "nor the run of the grant")
+}
+
+func TestWithoutTaskGrant_KeepsTheValuesAndTheCancellation(t *testing.T) {
+	type key struct{}
+	parent, cancel := context.WithCancel(context.WithValue(context.Background(), key{}, "kept"))
+	ctx := WithoutTaskGrant(withTaskGrantClaims(parent, sdkcg.Claims{TaskID: "job-1"}))
+	assert.Equal(t, "kept", ctx.Value(key{}))
+	assert.Empty(t, verifiedGrantTask(ctx))
+	cancel()
+	assert.Error(t, ctx.Err(), "the context still ends with its parent")
+}
+
+// The call of a tool node, and the call that the daemon makes for a tenant, go through
+// RecordToolCall. It records no task, also when the context still holds the claims of a
+// request.
+func TestRecordToolCall_RecordsNoTaskOfAGrant(t *testing.T) {
+	var got []ToolCallRecord
+	svc := &HarnessCallbackService{logger: slog.Default()}
+	WithToolCallSink(func(_ context.Context, _ string, call ToolCallRecord) { got = append(got, call) })(svc)
+	ctx := withTaskGrantClaims(testCtxWithTenant(), sdkcg.Claims{TaskID: "job-1"})
+
+	svc.RecordToolCall(ctx, metatool.CallRecord{Canonical: "mcp:github-fixloop:open_merge_request", RunID: "r1"}, []byte(`{}`), "")
+
+	require.Len(t, got, 1)
+	assert.Empty(t, got[0].GrantTaskID, "a tool node call is no turn of a job")
 }
