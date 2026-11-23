@@ -121,7 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           crd=charts/helm/gibson-crds/templates/gibson.zeroroot.ai_connectorinstances.yaml
-          if ! grep -q 'caBundleSecret' "$crd"; then
+          if ! grep -Eq '^\s+caBundleSecret:' "$crd"; then
             echo "::error::$crd has no spec.caBundleSecret. Is charts-ref a chart with the field?"
             exit 1
           fi

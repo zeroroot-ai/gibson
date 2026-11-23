@@ -74,7 +74,6 @@ const (
 // mockForge is the control client of the mock forge. It trusts the authority of
 // the mock and no other.
 type mockForge struct {
-	t    *testing.T
 	url  string
 	http *http.Client
 }
@@ -89,33 +88,33 @@ func newMockForge(t *testing.T) *mockForge {
 	require.NoError(t, err, "decode FIXLOOP_MOCK_CA_B64")
 	client, err := helpers.HTTPClientWithCA(string(ca))
 	require.NoError(t, err)
-	return &mockForge{t: t, url: strings.TrimRight(url, "/"), http: client}
+	return &mockForge{url: strings.TrimRight(url, "/"), http: client}
 }
 
 // call sends one JSON request to the mock and decodes the JSON answer. A status
 // of 300 or more fails the test.
-func (m *mockForge) call(method, path string, body any) map[string]any {
-	m.t.Helper()
+func (m *mockForge) call(t *testing.T, method, path string, body any) map[string]any {
+	t.Helper()
 	var rd io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
-		require.NoError(m.t, err)
+		require.NoError(t, err)
 		rd = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequest(method, m.url+path, rd)
-	require.NoError(m.t, err)
+	require.NoError(t, err)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := m.http.Do(req)
-	require.NoError(m.t, err, "%s %s", method, path)
+	require.NoError(t, err, "%s %s", method, path)
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
-	require.NoError(m.t, err)
-	require.Less(m.t, resp.StatusCode, 300, "%s %s answered %d: %s", method, path, resp.StatusCode, raw)
+	require.NoError(t, err)
+	require.Less(t, resp.StatusCode, 300, "%s %s answered %d: %s", method, path, resp.StatusCode, raw)
 	out := map[string]any{}
 	if len(bytes.TrimSpace(raw)) > 0 {
-		require.NoError(m.t, json.Unmarshal(raw, &out), "decode the answer of %s %s: %s", method, path, raw)
+		require.NoError(t, json.Unmarshal(raw, &out), "decode the answer of %s %s: %s", method, path, raw)
 	}
 	return out
 }
@@ -123,32 +122,32 @@ func (m *mockForge) call(method, path string, body any) map[string]any {
 // seedFlawedRepository makes the repository of the fixture: one file with a known
 // flaw, and an automatic deploy of each commit on the default branch. It returns
 // the number of an open pull request from a branch that changes the file.
-func (m *mockForge) seedFlawedRepository() int {
-	m.t.Helper()
-	m.call(http.MethodPost, "/_mock/reset", nil)
-	m.call(http.MethodPost, "/_mock/repos", map[string]any{
+func (m *mockForge) seedFlawedRepository(t *testing.T) int {
+	t.Helper()
+	m.call(t, http.MethodPost, "/_mock/reset", nil)
+	m.call(t, http.MethodPost, "/_mock/repos", map[string]any{
 		"owner": fixLoopOwner, "repo": fixLoopRepo,
 		"files": map[string]any{
 			"src/db.go": "package db\n\n// FLAW: the query is built with string concatenation.\n",
 		},
 		"auto_deploy": map[string]any{"environment": "production", "state": "success"},
 	})
-	m.call(http.MethodPost, "/_mock/repos/"+fixLoopApp+"/commits", map[string]any{
+	m.call(t, http.MethodPost, "/_mock/repos/"+fixLoopApp+"/commits", map[string]any{
 		"branch": "fix/e2e", "message": "fix: use a bound parameter",
 		"files": map[string]any{"src/db.go": "package db\n\n// The query uses a bound parameter.\n"},
 	})
-	pr := m.call(http.MethodPost, "/repos/"+fixLoopApp+"/pulls", map[string]any{
+	pr := m.call(t, http.MethodPost, "/repos/"+fixLoopApp+"/pulls", map[string]any{
 		"title": "Use a bound parameter", "head": "fix/e2e", "base": "main",
 	})
 	n, ok := pr["number"].(float64)
-	require.True(m.t, ok, "the mock answered no pull request number: %v", pr)
+	require.True(t, ok, "the mock answered no pull request number: %v", pr)
 	return int(n)
 }
 
 // setHealth sets the health value of the metrics of the mock from now on.
-func (m *mockForge) setHealth(value float64) {
-	m.t.Helper()
-	m.call(http.MethodPost, "/_mock/prometheus/health", map[string]any{"value": value})
+func (m *mockForge) setHealth(t *testing.T, value float64) {
+	t.Helper()
+	m.call(t, http.MethodPost, "/_mock/prometheus/health", map[string]any{"value": value})
 }
 
 // fixLoopSecrets stores the secrets of the two connectors in the tenant secret
@@ -196,8 +195,8 @@ func TestFixLoop(t *testing.T) {
 
 	var mrNumber int
 	t.Run("the mock forge answers over TLS and holds the flawed repository", func(t *testing.T) {
-		mrNumber = forge.seedFlawedRepository()
-		state := forge.call(http.MethodGet, "/_mock/repos/"+fixLoopApp, nil)
+		mrNumber = forge.seedFlawedRepository(t)
+		state := forge.call(t, http.MethodGet, "/_mock/repos/"+fixLoopApp, nil)
 		require.NotEmpty(t, state, "the mock holds the repository")
 	})
 
@@ -282,7 +281,7 @@ func TestFixLoop(t *testing.T) {
 	})
 
 	t.Run("the health signal of the tenant reads the metrics of the mock", func(t *testing.T) {
-		forge.setHealth(1)
+		forge.setHealth(t, 1)
 		var got map[string]any
 		helpers.Eventually(t, 3*time.Minute, "health_signal answers", func() (bool, string) {
 			var cerr error
