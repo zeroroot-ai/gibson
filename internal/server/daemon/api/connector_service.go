@@ -174,7 +174,7 @@ func (s *ConnectorService) EnableConnector(
 			return nil, status_grpc.Error(codes.FailedPrecondition,
 				"EnableConnector: the tenant secret store is not configured, so the CA bundle cannot be checked")
 		}
-		if _, rerr := readCABundleAt(ctx, s.secrets, name, name); rerr != nil {
+		if _, rerr := readCABundleSecret(ctx, s.secrets, name); rerr != nil {
 			return nil, status_grpc.Errorf(codes.InvalidArgument, "EnableConnector: ca_bundle: %v", rerr)
 		}
 	}

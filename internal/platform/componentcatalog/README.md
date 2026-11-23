@@ -202,7 +202,7 @@ variables:
     kind: ca_bundle       # no env, no patterns and no default
 ```
 
-The tenant stores a PEM bundle as a secret of its own with `SetSecret` and no category. This is the way a tenant stores the credentials of the same connector, so the daemon reads both under the name as given. A secret with the category `cred` is a different key and is not read. The name of the secret starts with `<connector id>-ca-`. The tenant gives the name in the `ca_bundle` key of the `EnableConnector` variables. The value is optional.
+The tenant stores a PEM bundle as a secret of its own with `SetSecret` and the category `cred`. This is the way a tenant stores the credentials of the same connector, so the daemon reads both under the stored name `cred:<name>`. The tenant gives the name without the prefix. A secret stored by another way is not read. The name of the secret starts with `<connector id>-ca-`. The tenant gives the name in the `ca_bundle` key of the `EnableConnector` variables. The value is optional.
 
 - The daemon hands the name to the connector operator. The prefix rule keeps a tenant from naming another secret, such as a vendor token.
 - The operator writes a Secret from the bundle in the namespace of the tenant only. The Secret belongs to the `ConnectorInstance`.

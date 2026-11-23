@@ -34,7 +34,9 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/cabundle"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
+	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -146,9 +148,9 @@ func (r connectorCredentialReader) read(
 			// is no environment variable name, so no credential uses it. The
 			// bundle is checked and re-encoded (cabundle.Normalize), so a secret
 			// that holds a key or any text outside the certificates is refused.
-			// The bundle is stored the way the credentials of the same
-			// connector are: under the name as given, with no category prefix.
-			value, err = readCABundleAt(tctx, r.secrets, ref.GetKey(), ref.GetKey())
+			// The tenant stores the bundle with SetSecret, so the read uses the
+			// stored name of a credential (secrets.StoredName).
+			value, err = readCABundleSecret(tctx, r.secrets, ref.GetKey())
 			if err != nil {
 				return nil, false, fmt.Errorf("connector %q: %w", connector, err)
 			}
@@ -235,7 +237,9 @@ var errNoProperty = errors.New("the credential has no such property")
 func (r connectorCredentialReader) resolveCredentialRef(
 	tctx context.Context, connector string, ref *daemonoperatorv1.ConnectorCredentialRef,
 ) ([]byte, error) {
-	raw, err := r.secrets.Resolve(tctx, ref.GetKey())
+	// The tenant stores the secret with SetSecret, which stores a credential as
+	// cred:<name>, so the read uses the same rule.
+	raw, err := r.secrets.Resolve(tctx, secrets.StoredName(secretsv1.SecretCategory_SECRET_CATEGORY_CRED, ref.GetKey()))
 	if err != nil {
 		return nil, fmt.Errorf("connector %q: resolve credential %q for %s: %w",
 			connector, ref.GetKey(), ref.GetTargetEnv(), err)

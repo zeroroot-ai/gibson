@@ -48,6 +48,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	tenantsecrets "github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
@@ -154,29 +155,34 @@ func (m *mockForge) setHealth(t *testing.T, value float64) {
 }
 
 // fixLoopSecrets stores the secrets of the two connectors in the tenant secret
-// store, the way a tenant admin does with SetSecret. The others have no category, as the manifests name them.
-// The CA bundle of a connector is stored like its credentials: with no category.
+// store, the way a tenant admin does with SetSecret. SetSecret needs a category.
+// Each secret has the category cred, so the store keeps it as cred:<name>. The
+// daemon reads the credentials and the CA bundle of a connector under that stored
+// name (secrets.StoredName). The caller names the secret without the prefix, and
+// DeleteSecret takes the stored name.
 func fixLoopSecrets(ctx context.Context, t *testing.T, secrets secretsv1.SecretsServiceClient, ca []byte) (gitCA, metricsCA string) {
 	t.Helper()
 	gitCA = fixLoopGitConnector + "-ca-mock"
 	metricsCA = fixLoopMetricsConnector + "-ca-mock"
 	queries, err := json.Marshal(map[string]string{fixLoopApp: `up{job="shop"}`, fixLoopApp2: `up{job="shop2"}`})
 	require.NoError(t, err)
-	set := func(name string, cat secretsv1.SecretCategory, value []byte) {
-		_, serr := secrets.SetSecret(ctx, &secretsv1.SetSecretRequest{Name: name, Category: cat, Value: value})
+	const cred = secretsv1.SecretCategory_SECRET_CATEGORY_CRED
+	set := func(name string, value []byte) {
+		_, serr := secrets.SetSecret(ctx, &secretsv1.SetSecretRequest{Name: name, Category: cred, Value: value})
 		require.NoError(t, serr, "SetSecret(%s)", name)
 		t.Cleanup(func() {
 			c, cancel := context.WithTimeout(auth.ContextWithTenantString(context.Background(), fixLoopTenant), 30*time.Second)
 			defer cancel()
-			_, _ = secrets.DeleteSecret(c, &secretsv1.DeleteSecretRequest{Name: name})
+			stored := tenantsecrets.StoredName(cred, name)
+			_, _ = secrets.DeleteSecret(c, &secretsv1.DeleteSecretRequest{Name: stored})
 		})
 	}
-	set(gitCA, secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, ca)
-	set(metricsCA, secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, ca)
+	set(gitCA, ca)
+	set(metricsCA, ca)
 	// The mock checks no credential. The values only have to exist.
-	set("github-fixloop-token", secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, []byte("mock-token"))
-	set("prometheus-health-bearer-token", secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, []byte("mock-token"))
-	set("prometheus-health-queries", secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, queries)
+	set("github-fixloop-token", []byte("mock-token"))
+	set("prometheus-health-bearer-token", []byte("mock-token"))
+	set("prometheus-health-queries", queries)
 	return gitCA, metricsCA
 }
 
