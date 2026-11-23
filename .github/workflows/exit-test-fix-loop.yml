@@ -61,8 +61,8 @@ env:
   CLUSTER: gibson
   NODE: gibson-control-plane
   E2E_OUT: ${{ github.workspace }}/e2e-out
-  # mock-forge of zeroroot-ai/connectors v0.5.0, by digest.
-  MOCK_FORGE_IMAGE: ghcr.io/zeroroot-ai/connectors-mock-forge@sha256:651f7435600c8518d4abdd968042cdf2dee16dee65b4988d66dad13af7faf822
+  # mock-forge of zeroroot-ai/connectors v0.6.0, by digest.
+  MOCK_FORGE_IMAGE: ghcr.io/zeroroot-ai/connectors-mock-forge@sha256:7c778b7617efa5065665e07d6c60da5ef186a6798e375641ba6fcd5bcb9313c0
 
 jobs:
   fix-loop:
