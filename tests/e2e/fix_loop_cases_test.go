@@ -34,7 +34,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
@@ -50,16 +52,22 @@ const (
 	fixLoopFixAgent     = "fix-agent"
 	fixLoopFixAgentRef  = "agent/" + fixLoopFixAgent
 	fixLoopScanInterval = 90 * time.Second
+	// The node of the fix agent: the coding job (25 minutes), the merge wait (10
+	// minutes) and a margin.
+	fixLoopNodeTimeout = 45 * time.Minute
 	// The waits of the cases. With the waits of TestFixLoop (36 minutes), the sum
-	// of all waits is 161 minutes, inside the go test timeout of 180 minutes that
-	// the workflow sets. A slow run so fails with its "Last state" message and
-	// never meets the kill of the go test timeout. The daemon holds a deploy for 10
-	// minutes (the default hold of the fix loop policy), and the coding job takes
-	// about 15 minutes, so each wait holds the hold and the job with room.
-	fixLoopScanTimeout   = 10 * time.Minute
-	fixLoopFixTimeout    = 30 * time.Minute
+	// of all waits is 191 minutes. The verify loop can overshoot its wait by one
+	// scan interval (90 seconds), so the workflow sets the go test timeout to 210
+	// minutes and the job timeout to 270 minutes (60 minutes of cluster start-up).
+	// A slow run so fails with its "Last state" message and never meets the kill of
+	// the go test timeout. The daemon holds a deploy for 10 minutes (the default
+	// hold of the fix loop policy).
+	fixLoopScanTimeout = 10 * time.Minute
+	// The fix wait covers the node timeout.
+	fixLoopFixTimeout    = fixLoopNodeTimeout
 	fixLoopVerifyTimeout = 25 * time.Minute
-	fixLoopRevertTimeout = 40 * time.Minute
+	// The revert wait covers the node timeout and the hold of the deploy.
+	fixLoopRevertTimeout = 55 * time.Minute
 	fixLoopReopenTimeout = 10 * time.Minute
 	// The advisory of the fixture. The repository requires the library at a
 	// version that the range holds. The fix is one line of go.mod.
@@ -175,7 +183,7 @@ func (w *fixLoopWorld) findingOf(t *testing.T, app string) *worldpb.OpenFindingV
 		require.NoError(t, err, "ListOpenFindings")
 		for _, f := range resp.GetFindings() {
 			for _, p := range f.GetPlaces() {
-				if strings.HasSuffix(p.GetKey(), "/"+app) && strings.Contains(f.GetTitle(), fixLoopAdvisory) {
+				if p.GetLabel() == component.PlaceApplication && p.GetKey() == app && strings.Contains(f.GetTitle(), fixLoopAdvisory) {
 					return f
 				}
 			}
@@ -201,6 +209,9 @@ func (w *fixLoopWorld) startFixAgent(t *testing.T, app, findingID string) *helpe
 		Nodes: map[string]*missionpb.MissionNode{
 			"fix": {
 				Id: "fix", Name: "Fix", Type: missionpb.NodeType_NODE_TYPE_AGENT,
+				// A sandboxed agent node with no timeout gets 30 minutes. The pass holds
+				// the coding job (25m) and the merge wait (10m), so the node needs more.
+				Timeout: durationpb.New(fixLoopNodeTimeout),
 				Config: &missionpb.MissionNode_AgentConfig{AgentConfig: &missionpb.AgentNodeConfig{
 					AgentName: fixLoopFixAgent,
 					Task: &typespb.Task{
@@ -208,7 +219,7 @@ func (w *fixLoopWorld) startFixAgent(t *testing.T, app, findingID string) *helpe
 						Context: map[string]*commonpb.TypedValue{
 							"application": str(app), "bank": str(w.bankName), "connector": str("connector/" + fixLoopGitConnector),
 							"project": str(app), "base_branch": str("main"), "finding": str(findingID),
-							"merge_wait": str("10m"), "timeout": str("30m"),
+							"merge_wait": str("10m"), "timeout": str("25m"),
 						},
 					},
 				}},
