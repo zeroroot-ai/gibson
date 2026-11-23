@@ -20,19 +20,24 @@ type MergeRequestOpened struct {
 	// deliverable of a job names either.
 	MergeRequest string
 	URL          string
-	// JobID is the job whose branch the tool opened. It is empty when the branch
-	// is no job branch.
+	// JobID is the job whose turn made the call. It is the task of the verified turn
+	// grant of the call. It is empty for a call with no turn grant, and the event is
+	// then not kept.
 	JobID        string
 	SourceBranch string
 	HeadSHA      string
 	// RunID and MissionID name the run and the mission of the call, so a call of
 	// another agent cannot replace the head of the merge request of a job.
-	// MissionRunID is the mission run of the call. It is empty for a call of an
-	// agent that runs outside a mission run, such as a member of a bank.
+	// MissionRunID is the mission run of the call. For a turn of a bank member it is
+	// the run of the member, not the run of the job node, so no binding reads it.
 	RunID        string
 	MissionID    string
 	MissionRunID string
 	At           time.Time
+	// Verified is true when JobID is the task of a verified turn grant. An event
+	// from before the daemon read the grant took the job from the name of the branch,
+	// which an agent chooses, so it has no mark and never binds.
+	Verified bool
 }
 
 // Kind identifies the merge_request.opened brain event.
@@ -49,21 +54,26 @@ type OpenedMergeRequest struct {
 	MissionID    string    `json:"mission_id,omitempty"`
 	MissionRunID string    `json:"mission_run_id,omitempty"`
 	At           time.Time `json:"at"`
+	Verified     bool      `json:"verified,omitempty"`
 }
 
 // openedKey is the key of a record: the reference or the URL of the merge request,
-// and the mission run of the call. A call of another run has a key of its own, so
-// a foreign open can neither replace nor block the record of the job.
-func openedKey(mergeRequest, missionRunID string) string {
-	return mergeRequest + "\x00" + missionRunID
+// and the job whose turn made the call. The job is the task of the verified turn
+// grant, so a caller cannot name another job. A call of another job has a key of
+// its own, so a foreign open can neither replace nor block the record of the job.
+func openedKey(mergeRequest, jobID string) string {
+	return mergeRequest + "\x00" + jobID
 }
 
 // applyMergeRequestOpened keeps the record under the reference and under the URL,
-// for the mission run of the call. An event with no mission run is not kept,
-// because no job can claim it. Inside one run, a record is replaced only by a call
-// of the same agent run and mission.
+// for the job of the call. An event with no job, and an event whose job is not
+// verified, is not kept, because no job can claim it. The key comes from the verified
+// grant, so inside one job the newest event replaces the record: a second turn of the
+// job, in another member run, pushes another head and opens again. A snapshot that
+// holds a record with no mark loses it on restore, because the restore folds it as an
+// event.
 func applyMergeRequestOpened(w *World, e MergeRequestOpened) {
-	if e.HeadSHA == "" || e.SourceBranch == "" || e.MissionRunID == "" {
+	if e.HeadSHA == "" || e.SourceBranch == "" || e.JobID == "" || !e.Verified {
 		return
 	}
 	rec := OpenedMergeRequest(e)
@@ -71,10 +81,7 @@ func applyMergeRequestOpened(w *World, e MergeRequestOpened) {
 		if mr == "" {
 			continue
 		}
-		key := openedKey(mr, e.MissionRunID)
-		if old, ok := w.openedMRs[key]; ok && (old.RunID != e.RunID || old.MissionID != e.MissionID) {
-			continue
-		}
+		key := openedKey(mr, e.JobID)
 		if w.openedMRs == nil {
 			w.openedMRs = map[string]OpenedMergeRequest{}
 		}
@@ -90,9 +97,9 @@ func applyMergeRequestOpened(w *World, e MergeRequestOpened) {
 }
 
 // OpenedMergeRequest returns the record of the merge request that the key names, as
-// a reference or as a URL, for the mission run of the call.
-func (w *World) OpenedMergeRequest(key, missionRunID string) (OpenedMergeRequest, bool) {
-	r, ok := w.openedMRs[openedKey(key, missionRunID)]
+// a reference or as a URL, for the job whose turn made the call.
+func (w *World) OpenedMergeRequest(key, jobID string) (OpenedMergeRequest, bool) {
+	r, ok := w.openedMRs[openedKey(key, jobID)]
 	return r, ok
 }
 

@@ -326,7 +326,9 @@ func (m *missionManager) runStoreFor(ctx context.Context, tenant auth.TenantID) 
 // node that dispatches to a registered remote component silently finds nothing
 // to dispatch to (gibson#1196).
 func newMissionContext(ctx context.Context, tenant auth.TenantID) (context.Context, context.CancelFunc) {
-	return context.WithCancel(auth.ContextWithTenant(context.WithoutCancel(ctx), tenant))
+	// A mission runs under its own identity. The claims of the request that started it
+	// stay behind: a tool node would otherwise act as the job of that request.
+	return context.WithCancel(auth.ContextWithTenant(harness.WithoutTaskGrant(context.WithoutCancel(ctx)), tenant))
 }
 
 // getActive retrieves an active mission scoped to the given tenant (C9 closure).

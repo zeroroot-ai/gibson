@@ -93,7 +93,7 @@ func ValidateSpec(spec *jobpb.JobSpec) error {
 		case strings.TrimSpace(r.GetName()) == "":
 			return fmt.Errorf("%w: repositories[%d]: name is required, it is the worktree directory", ErrInvalid, i)
 		case strings.TrimSpace(r.GetConnectorRef()) == "":
-			return fmt.Errorf("%w: repositories[%d]: connector_ref is required, or the driver has no credential to push with", ErrInvalid, i)
+			return fmt.Errorf("%w: repositories[%d]: connector_ref is required, because the job opens its merge request through that connector", ErrInvalid, i)
 		case strings.TrimSpace(r.GetProject()) == "":
 			return fmt.Errorf("%w: repositories[%d]: project is required", ErrInvalid, i)
 		case r.GetDeliverable() == jobpb.DeliverableKind_DELIVERABLE_KIND_UNSPECIFIED:

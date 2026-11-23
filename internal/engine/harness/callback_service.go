@@ -522,6 +522,10 @@ type ToolCallRecord struct {
 	// MissionID attributes the call to its mission's frame, mirroring
 	// the mission frame.
 	MissionID string
+	// GrantTaskID is the task of the verified task grant of the call. For a turn of a
+	// bank member it is the id of the job. It comes from the grant and never from the
+	// request body, and it is empty for a call with no task grant.
+	GrantTaskID string
 	// RunID is the mission run (or agent run) that made this call.
 	RunID string
 	// MissionRunID is the mission run that issued the call, and only that. RunID
@@ -859,6 +863,17 @@ func (s *HarnessCallbackService) captureGrantedToolCall(
 	ctx context.Context, contextInfo *harnesspb.ContextInfo,
 	toolCallID, toolName, argumentsJSON, resultJSON, callErr, grantID, errCode string,
 ) string {
+	return s.captureToolCallAs(ctx, verifiedGrantTask(ctx), contextInfo,
+		toolCallID, toolName, argumentsJSON, resultJSON, callErr, grantID, errCode)
+}
+
+// captureToolCallAs is captureGrantedToolCall with the task of the grant given by the
+// caller. A call that the daemon makes for a tenant, and the call of a tool node, pass an
+// empty task, so no connector call of them counts as a turn of a job.
+func (s *HarnessCallbackService) captureToolCallAs(
+	ctx context.Context, grantTaskID string, contextInfo *harnesspb.ContextInfo,
+	toolCallID, toolName, argumentsJSON, resultJSON, callErr, grantID, errCode string,
+) string {
 	if s.toolCallSink == nil || contextInfo == nil {
 		return ""
 	}
@@ -874,6 +889,7 @@ func (s *HarnessCallbackService) captureGrantedToolCall(
 		ToolCallID:         toolCallID,
 		MissionID:          contextInfo.GetMissionId(),
 		MissionRunID:       contextInfo.GetMissionRunId(),
+		GrantTaskID:        grantTaskID,
 		RunID:              runID,
 		Agent:              contextInfo.GetAgentName(),
 		ToolName:           toolName,
@@ -2843,7 +2859,8 @@ func (s *HarnessCallbackService) RunMission(ctx context.Context, req *harnesspb.
 		}, nil
 	}
 
-	if err := s.missionManager.Run(ctx, req.MissionId); err != nil {
+	// The mission runs under its own identity, not under the task grant of this request.
+	if err := s.missionManager.Run(WithoutTaskGrant(ctx), req.MissionId); err != nil {
 		s.logger.Error("RunMission: failed to run mission", "mission_id", req.MissionId, "error", err)
 		return &harnesspb.RunMissionResponse{
 			Error: &harnesspb.HarnessError{

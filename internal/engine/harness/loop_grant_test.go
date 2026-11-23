@@ -626,3 +626,27 @@ func TestMemberCall_ContextInfoCarriesTheRunOfTheGrant(t *testing.T) {
 		t.Errorf("context = %+v, want the run, the bank and the agent of the grant", info)
 	}
 }
+
+// The tool call record carries the task of the verified task grant, and never the task that
+// the request body names. For a turn of a bank member it is the id of the job, and the
+// link of a closed job binds the head of its merge request to it.
+func TestCaptureToolCall_CarriesTheTaskOfTheVerifiedGrant(t *testing.T) {
+	var got []ToolCallRecord
+	svc := &HarnessCallbackService{logger: slog.Default()}
+	WithToolCallSink(func(_ context.Context, _ string, call ToolCallRecord) { got = append(got, call) })(svc)
+	info := &harnesspb.ContextInfo{MissionId: "bank-1", MissionRunId: "member-run-1", TaskId: "job-forged"}
+
+	withGrant := withTaskGrantClaims(testCtxWithTenant(), sdkcg.Claims{TaskID: "job-1"})
+	svc.captureToolCall(withGrant, info, "tc1", "mcp:github-fixloop:open_merge_request", `{}`, `{}`, "")
+	svc.captureToolCall(testCtxWithTenant(), info, "tc2", "mcp:github-fixloop:open_merge_request", `{}`, `{}`, "")
+
+	if len(got) != 2 {
+		t.Fatalf("recorded %d calls, want 2", len(got))
+	}
+	if got[0].GrantTaskID != "job-1" || got[0].MissionRunID != "member-run-1" {
+		t.Errorf("with a grant: task %q run %q, want job-1 and the run of the member", got[0].GrantTaskID, got[0].MissionRunID)
+	}
+	if got[1].GrantTaskID != "" {
+		t.Errorf("with no grant: task %q, want none: the task of the body must not count", got[1].GrantTaskID)
+	}
+}

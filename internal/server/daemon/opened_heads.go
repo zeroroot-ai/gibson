@@ -12,7 +12,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 )
 
 // openMergeRequestTool is the tool that a coding job calls to open its merge
@@ -27,17 +26,17 @@ const openedRecordTimeout = 10 * time.Second
 type openedHead struct {
 	sha          string
 	sourceBranch string
-	// missionRunID is the mission run of the call.
-	missionRunID string
+	// jobID is the job whose turn made the call.
+	jobID string
 }
 
 // openedHeadReader returns the head that open_merge_request returned for a merge
 // request of a tenant.
 type openedHeadReader interface {
 	// OpenedHead returns the head that the tool result named for the merge request
-	// key, for the mission run of the job. ok is false when the Timeline of the
-	// tenant holds no result of that run.
-	OpenedHead(tenant, mergeRequest, missionRunID string) (openedHead, bool)
+	// key, for the job. ok is false when the Timeline of the tenant holds no result
+	// of a turn of that job.
+	OpenedHead(tenant, mergeRequest, jobID string) (openedHead, bool)
 }
 
 // worldOpenedHeads reads the heads from the World of the tenant. The Timeline is
@@ -48,17 +47,17 @@ type worldOpenedHeads struct{ reg *brain.Registry }
 
 var _ openedHeadReader = worldOpenedHeads{}
 
-func (w worldOpenedHeads) OpenedHead(tenant, mergeRequest, missionRunID string) (openedHead, bool) {
-	if w.reg == nil || missionRunID == "" {
+func (w worldOpenedHeads) OpenedHead(tenant, mergeRequest, jobID string) (openedHead, bool) {
+	if w.reg == nil || jobID == "" {
 		return openedHead{}, false
 	}
 	var rec brain.OpenedMergeRequest
 	var ok bool
-	w.reg.For(tenant).ReadWorld(func(world *brain.World) { rec, ok = world.OpenedMergeRequest(mergeRequest, missionRunID) })
+	w.reg.For(tenant).ReadWorld(func(world *brain.World) { rec, ok = world.OpenedMergeRequest(mergeRequest, jobID) })
 	if !ok {
 		return openedHead{}, false
 	}
-	return openedHead{sha: rec.HeadSHA, sourceBranch: rec.SourceBranch, missionRunID: rec.MissionRunID}, true
+	return openedHead{sha: rec.HeadSHA, sourceBranch: rec.SourceBranch, jobID: rec.JobID}, true
 }
 
 // openResult is the part of the result of open_merge_request that the daemon reads.
@@ -70,10 +69,12 @@ type openResult struct {
 }
 
 // openedEventOf returns the Timeline event for a successful open_merge_request
-// call. ok is false for any other call, for a call that failed, and for a result
-// that holds no head or no branch.
+// call of a turn of a job. ok is false for any other call, for a call that failed,
+// for a call with no verified task grant, and for a result that holds no head or no
+// branch. The job is the task of the verified grant, which a caller cannot forge.
 func openedEventOf(call harness.ToolCallRecord) (brain.MergeRequestOpened, bool) {
-	if call.Err != "" || call.MissionRunID == "" || !strings.HasPrefix(call.ToolName, "mcp:") || !strings.HasSuffix(call.ToolName, openMergeRequestTool) {
+	if call.Err != "" || call.GrantTaskID == "" || !strings.HasPrefix(call.ToolName, "mcp:") ||
+		!strings.HasSuffix(call.ToolName, openMergeRequestTool) {
 		return brain.MergeRequestOpened{}, false
 	}
 	var res openResult
@@ -81,14 +82,10 @@ func openedEventOf(call harness.ToolCallRecord) (brain.MergeRequestOpened, bool)
 		(res.MergeRequest == "" && res.URL == "") {
 		return brain.MergeRequestOpened{}, false
 	}
-	jobID, _ := strings.CutPrefix(res.SourceBranch, jobnode.JobBranch(""))
-	if jobID == res.SourceBranch {
-		jobID = "" // the branch is no job branch
-	}
 	return brain.MergeRequestOpened{
-		MergeRequest: res.MergeRequest, URL: res.URL, JobID: jobID, SourceBranch: res.SourceBranch, HeadSHA: res.HeadSHA,
-		RunID: call.RunID, MissionID: call.MissionID, MissionRunID: call.MissionRunID,
-		At: time.Unix(0, call.RecordedAtUnixNano).UTC(),
+		MergeRequest: res.MergeRequest, URL: res.URL, JobID: call.GrantTaskID, SourceBranch: res.SourceBranch,
+		HeadSHA: res.HeadSHA, RunID: call.RunID, MissionID: call.MissionID, MissionRunID: call.MissionRunID,
+		At: time.Unix(0, call.RecordedAtUnixNano).UTC(), Verified: true,
 	}, true
 }
 

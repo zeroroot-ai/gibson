@@ -505,7 +505,10 @@ func (s *HarnessCallbackService) runStateFor(ctx context.Context, tenant, runID 
 // harness callback context, such as a connector call through
 // ComponentService.CallTool. The tenant is on ctx.
 func (s *HarnessCallbackService) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
-	return s.captureGrantedToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID, TaskId: rec.WorkID},
+	// The call has no harness callback context, so it is no turn of a job. It records no
+	// task of a grant, also when ctx still holds the claims of a request that started the
+	// mission of a tool node.
+	return s.captureToolCallAs(ctx, "", &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID, TaskId: rec.WorkID},
 		uuid.NewString(), rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText, rec.GrantID, string(rec.ErrCode))
 }
 
