@@ -44,6 +44,11 @@ const (
 	// revert merge request is not merged yet. Its slot blocks the Application
 	// until the revert merges (gibson#1609).
 	WaitRevertPending WaitKind = brain.WaitRevertPending
+	// WaitNoSingleApplication is a finding that reaches no Application or more than
+	// one, so the fix loop gives it no merge slot. The reason is the text of
+	// Finding.PlaceBlock. The wait ends when the finding again reaches one
+	// Application (gibson#1469).
+	WaitNoSingleApplication WaitKind = "no_single_application"
 	// WaitRevertFailed is the same finding when the revert call failed.
 	WaitRevertFailed WaitKind = brain.WaitRevertFailed
 )
@@ -65,6 +70,7 @@ type WaitItem struct {
 // WaitingKinds are the kinds of the history events that WaitingOnPerson reads.
 var WaitingKinds = []string{
 	brain.MergeRequestObserved{}.Kind(), brain.FixWaiting{}.Kind(), brain.FindingStatusChanged{}.Kind(),
+	brain.FindingPlaceBlocked{}.Kind(),
 }
 
 // WaitingOnPerson returns each item that waits on a person, the longest wait
@@ -91,7 +97,11 @@ func WaitingOnPerson(
 	refusals := lastRefusals(history)
 	waits := lastWaits(history)
 	linked := linkTimes(history)
+	placed := placeBlockTimes(history)
 	for _, f := range findings {
+		if f.PlaceBlock != "" {
+			add(WaitNoSingleApplication, f.ID, placed[f.ID], f.PlaceBlock)
+		}
 		switch f.Status {
 		case brain.FindingStatusFixing:
 			r := refusals[f.MergeRequest]
@@ -144,6 +154,29 @@ func WaitingOnPerson(
 
 func rerunAfterDeploy(f brain.FindingSnapshot) bool {
 	return !f.RerunAt.IsZero() && f.RerunAt.After(f.DeployedAt)
+}
+
+// placeBlockTimes returns, for each finding, the time of the event that set its
+// place block. An event with an empty reason ends the wait.
+func placeBlockTimes(history []brain.Event) map[string]time.Time {
+	out := map[string]time.Time{}
+	for _, raw := range history {
+		var e brain.FindingPlaceBlocked
+		switch v := raw.(type) {
+		case brain.FindingPlaceBlocked:
+			e = v
+		case *brain.FindingPlaceBlocked:
+			e = *v
+		default:
+			continue
+		}
+		if e.Reason == "" {
+			delete(out, e.ID)
+			continue
+		}
+		out[e.ID] = e.At
+	}
+	return out
 }
 
 // linkTimes returns, for each finding, the time of its last status change to fixing

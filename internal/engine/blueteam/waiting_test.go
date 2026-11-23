@@ -207,3 +207,28 @@ func TestWaitingOnPerson_NoFixHeadWithNoReason(t *testing.T) {
 		t.Fatalf("got %+v, want one no_fix_head item for the linked finding, since the link", got)
 	}
 }
+
+// A finding with a place block waits on a person from the time of the event, with
+// the text of the block as the reason. A later event with no reason ends the wait,
+// and a finding with no block has no such item.
+func TestWaitingOnPerson_NoSingleApplication(t *testing.T) {
+	reason := "waiting on a person: this finding affects more than one Application: app-a, app-b"
+	findings := []brain.FindingSnapshot{
+		{ID: "blocked", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", PlaceBlock: reason},
+		{ID: "cleared", Status: brain.FindingStatusFixing, MergeRequest: "mr-2"},
+	}
+	history := []brain.Event{
+		brain.FindingPlaceBlocked{ID: "blocked", Reason: reason, At: at(1)},
+		brain.FindingPlaceBlocked{ID: "cleared", Reason: reason, At: at(1)},
+		brain.FindingPlaceBlocked{ID: "cleared", Reason: "", At: at(2)},
+	}
+	var got []WaitItem
+	for _, it := range WaitingOnPerson(findings, nil, history, at(5)) {
+		if it.Kind == WaitNoSingleApplication {
+			got = append(got, it)
+		}
+	}
+	if len(got) != 1 || got[0].ID != "blocked" || got[0].Reason != reason || got[0].Waited != 4*time.Hour {
+		t.Fatalf("got %+v, want one item for the blocked finding, since the event", got)
+	}
+}
