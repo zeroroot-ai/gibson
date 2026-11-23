@@ -409,11 +409,11 @@ func answeredByConnector(err error) bool {
 		if e == nil || found {
 			return
 		}
-		if w, ok := e.(*jsonrpc.Error); ok && w.Code != rejectedCode {
+		if w, ok := e.(*jsonrpc.Error); ok && w.Code != rejectedCode { //nolint:errorlint // the walk tests one node, errors.As would skip the wrapper
 			found = true
 			return
 		}
-		switch u := e.(type) {
+		switch u := e.(type) { //nolint:errorlint // the walk unwraps one level at a time
 		case interface{ Unwrap() []error }:
 			for _, c := range u.Unwrap() {
 				walk(c)
