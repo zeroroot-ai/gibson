@@ -25,17 +25,19 @@ type worldSnapshotData struct {
 	Work     []WorkSnapshot    `json:"work"`
 	Findings []FindingSnapshot `json:"findings"`
 	// MergeSlots is the merge queue of the fix loop (gibson#1466).
-	MergeSlots   []MergeSlot           `json:"merge_slots,omitempty"`
-	Labels       []LabelSnapshot       `json:"labels"`
-	Domains      []DomainSnapshot      `json:"domains"`
-	Subdomains   []SubdomainSnapshot   `json:"subdomains"`
-	Credentials  []CredentialSnapshot  `json:"credentials"`
-	Accounts     []AccountSnapshot     `json:"accounts"`
-	AgentRuns    []AgentRunSnapshot    `json:"agent_runs"`
-	LlmCalls     []LlmCallSnapshot     `json:"llm_calls"`
-	Decisions    []DecisionSnapshot    `json:"decisions"`
-	Observations []ObservationSnapshot `json:"observations"`
-	Entities     []EntitySnapshot      `json:"entities"`
+	MergeSlots []MergeSlot `json:"merge_slots,omitempty"`
+	// OpenedMergeRequests are the merge requests that open_merge_request opened.
+	OpenedMergeRequests []OpenedMergeRequest  `json:"opened_merge_requests,omitempty"`
+	Labels              []LabelSnapshot       `json:"labels"`
+	Domains             []DomainSnapshot      `json:"domains"`
+	Subdomains          []SubdomainSnapshot   `json:"subdomains"`
+	Credentials         []CredentialSnapshot  `json:"credentials"`
+	Accounts            []AccountSnapshot     `json:"accounts"`
+	AgentRuns           []AgentRunSnapshot    `json:"agent_runs"`
+	LlmCalls            []LlmCallSnapshot     `json:"llm_calls"`
+	Decisions           []DecisionSnapshot    `json:"decisions"`
+	Observations        []ObservationSnapshot `json:"observations"`
+	Entities            []EntitySnapshot      `json:"entities"`
 	// Hypotheses is the Hypothesis provenance class (ADR-0121, gibson#265):
 	// an agent's proposed, unproven claim. Snapshotted separately from every
 	// Evidence store and from Belief — the three provenance classes stay
@@ -122,28 +124,29 @@ type worldSnapshotData struct {
 // atSeq is the Timeline sequence ID of the last event folded into the snapshot.
 func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 	data := worldSnapshotData{
-		CountedTokenCalls:  w.countedTokenCallsSnapshot(),
-		Hosts:              w.Snapshot(),
-		Missions:           w.MissionSnapshot(),
-		Work:               w.WorkSnapshot(),
-		Findings:           w.FindingSnapshot(),
-		MergeSlots:         w.MergeSlots(),
-		Labels:             w.LabelSnapshot(),
-		Domains:            w.DomainSnapshot(),
-		Subdomains:         w.SubdomainSnapshot(),
-		Credentials:        w.CredentialSnapshot(),
-		Accounts:           w.AccountSnapshot(),
-		AgentRuns:          w.AgentRunSnapshot(),
-		LlmCalls:           w.LlmCallSnapshot(),
-		Decisions:          w.DecisionSnapshot(),
-		Observations:       w.ObservationSnapshot(),
-		Entities:           w.EntitySnapshot(),
-		Hypotheses:         w.HypothesisSnapshot(),
-		BetSettlements:     w.BetSettlementSnapshot(),
-		NodeBeliefs:        w.NodeBeliefSnapshot(),
-		EdgeOutcomes:       w.EdgeOutcomeSnapshot(),
-		DestructiveActions: w.DestructiveActionSnapshot(),
-		VoIPlans:           w.VoIPlanSnapshot(),
+		CountedTokenCalls:   w.countedTokenCallsSnapshot(),
+		Hosts:               w.Snapshot(),
+		Missions:            w.MissionSnapshot(),
+		Work:                w.WorkSnapshot(),
+		Findings:            w.FindingSnapshot(),
+		MergeSlots:          w.MergeSlots(),
+		OpenedMergeRequests: w.OpenedMergeRequests(),
+		Labels:              w.LabelSnapshot(),
+		Domains:             w.DomainSnapshot(),
+		Subdomains:          w.SubdomainSnapshot(),
+		Credentials:         w.CredentialSnapshot(),
+		Accounts:            w.AccountSnapshot(),
+		AgentRuns:           w.AgentRunSnapshot(),
+		LlmCalls:            w.LlmCallSnapshot(),
+		Decisions:           w.DecisionSnapshot(),
+		Observations:        w.ObservationSnapshot(),
+		Entities:            w.EntitySnapshot(),
+		Hypotheses:          w.HypothesisSnapshot(),
+		BetSettlements:      w.BetSettlementSnapshot(),
+		NodeBeliefs:         w.NodeBeliefSnapshot(),
+		EdgeOutcomes:        w.EdgeOutcomeSnapshot(),
+		DestructiveActions:  w.DestructiveActionSnapshot(),
+		VoIPlans:            w.VoIPlanSnapshot(),
 
 		AgentToolCalls:       w.AgentToolCallSnapshot(),
 		FlightRecorderPolicy: w.flightRecorderPolicy,
@@ -320,6 +323,9 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		restoreFindingFields(w, f)
 	}
 	w.mergeSlots = append([]MergeSlot(nil), data.MergeSlots...)
+	for _, r := range data.OpenedMergeRequests {
+		applyMergeRequestOpened(w, MergeRequestOpened(r))
+	}
 
 	// Replay labels.
 	for _, l := range data.Labels {

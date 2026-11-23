@@ -82,6 +82,9 @@ func newRig(t *testing.T, check string) *rig {
 	brain.Reduce(rg.w, brain.FindingStatusChanged{
 		ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", MissionID: "fix-run-1", At: at(1),
 	})
+	// The link records the head after it records the merge request. A fix with no head
+	// gets no merge slot.
+	brain.Reduce(rg.w, brain.FixHeadRecorded{ID: "f1", MergeRequest: "mr-1", HeadSHA: "aaaa", MissionID: "fix-run-1", At: at(1)})
 	return rg
 }
 
@@ -1022,5 +1025,32 @@ func TestStep_ATransientHoldErrorRecordsNoDeployAndTheNextStepReadsAgain(t *test
 func TestMaxHoldIsTheProtoBound(t *testing.T) {
 	if MaxHold != 24*time.Hour {
 		t.Errorf("MaxHold = %v, want 24h, the upper bound of health_hold", MaxHold)
+	}
+}
+
+func TestStep_AFixWithNoHeadGetsNoMergeSlot(t *testing.T) {
+	for name, reason := range map[string]string{"with a reason": "the head moved", "with no reason": ""} {
+		g := newRig(t, "scan")
+		brain.Reduce(g.w, brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusOpen, At: at(2)}) // resets the fix
+		brain.Reduce(g.w, brain.FindingStatusChanged{ID: "f1", Status: brain.FindingStatusFixing, MergeRequest: "mr-1", MissionID: "fix-run-1", At: at(3)})
+		if reason != "" {
+			brain.Reduce(g.w, brain.FixHeadMissing{ID: "f1", MergeRequest: "mr-1", Reason: reason, At: at(3)})
+		}
+		g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+
+		g.tick()
+
+		if len(g.w.MergeSlots()) != 0 {
+			t.Errorf("%s: slots = %+v, want none for a fix with no head", name, g.w.MergeSlots())
+		}
+	}
+}
+
+func TestStep_AFixWithAHeadGetsAMergeSlot(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	if len(g.w.MergeSlots()) != 1 {
+		t.Fatalf("slots = %+v, want one for a fix with a head", g.w.MergeSlots())
 	}
 }

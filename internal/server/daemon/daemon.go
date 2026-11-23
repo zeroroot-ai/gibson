@@ -1574,7 +1574,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// this, a fleet agent's tool calls reached the daemon only as bare
 		// tool.call.* pub/sub metadata with no argument/result text, so they
 		// never became part of the Timeline.
-		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
+		d.callback.SetToolCallSink(d.toolCallSink(ingestToolCall(d.brainRegistry)))
 		d.callback.SetSkillLoadSink(ingestSkillLoad(d.brainRegistry))
 		d.callback.SetReadMarkerStore(harness.NewBrainReadMarkerStore(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")

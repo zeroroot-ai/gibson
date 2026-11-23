@@ -45,8 +45,11 @@ type jobGraphLink struct {
 	findings func(tenant string) map[string]findingRef
 	// mergeRequests reads a merge request on the Git host of the tenant.
 	mergeRequests mergeRequestReader
-	now           func() time.Time
-	logger        *slog.Logger
+	// opened returns the head that open_merge_request returned to the tool gate.
+	// The link records the head of a fix only when the host head equals it.
+	opened openedHeadReader
+	now    func() time.Time
+	logger *slog.Logger
 
 	// pending holds the closes whose merge request the daemon could not read
 	// on the Git host, keyed by job id (gibson#1581). RetryPending reads them
@@ -108,7 +111,9 @@ type findingRef struct {
 
 var _ jobnode.CloseObserver = (*jobGraphLink)(nil)
 
-func newJobGraphLink(reg *brain.Registry, mrs mergeRequestReader, logger *slog.Logger) *jobGraphLink {
+func newJobGraphLink(
+	reg *brain.Registry, mrs mergeRequestReader, opened openedHeadReader, logger *slog.Logger,
+) *jobGraphLink {
 	return &jobGraphLink{
 		submit: func(tenant string, ev brain.Event) { reg.For(tenant).Submit(ev) },
 		findings: func(tenant string) map[string]findingRef {
@@ -119,6 +124,7 @@ func newJobGraphLink(reg *brain.Registry, mrs mergeRequestReader, logger *slog.L
 			return out
 		},
 		mergeRequests: mrs,
+		opened:        opened,
 		now:           func() time.Time { return time.Now().UTC() },
 		logger:        logger,
 	}
@@ -203,24 +209,26 @@ var headSHARe = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // headEvents builds the events that record the head commit and the changed files
 // of the merge request. It builds none when the host gave no valid head or no
-// complete list: the fields stay empty, and the log says why.
+// complete list. It also builds none when the head of the host is not the commit
+// that the fix job made: the tool open_merge_request returned that commit to the
+// tool gate, and the job branch can hold another commit at the time of the link.
+// In each such case the fix has no head, the log says why, and each finding that
+// the job holds gets a FixHeadMissing event with the reason, so the finding waits
+// visibly.
 func (l *jobGraphLink) headEvents(c jobnode.ClosedJob, mrKey string, held []string, fact fixloop.MergeFact, now time.Time) []brain.Event {
 	if len(held) == 0 {
 		return nil
 	}
-	switch {
-	case !headSHARe.MatchString(fact.HeadSHA):
-		l.logger.Warn("the host gave no valid head commit for the merge request of a fix job, so the fix has no head",
-			"job_id", c.JobID, "merge_request", mrKey)
-		return nil
-	case fact.ChangedFilesError != "":
-		l.logger.Warn("the host gave no list of the files of the merge request of a fix job",
-			"job_id", c.JobID, "merge_request", mrKey, "error", fact.ChangedFilesError)
-		return nil
-	case fact.ChangedFilesTruncated || len(fact.ChangedFiles) == 0 || len(fact.ChangedFiles) > maxFixFiles:
-		l.logger.Warn("the list of the files of the merge request of a fix job is not complete or is over the limit",
-			"job_id", c.JobID, "merge_request", mrKey, "files", len(fact.ChangedFiles), "truncated", fact.ChangedFilesTruncated)
-		return nil
+	if reason := l.noHeadReason(c, mrKey, fact); reason != "" {
+		l.logger.Warn("a fix job has no fix head, so the fix agent makes no merge call",
+			"job_id", c.JobID, "merge_request", mrKey, "reason", reason)
+		out := make([]brain.Event, 0, len(held))
+		for _, id := range held {
+			out = append(out, brain.FixHeadMissing{
+				ID: id, MergeRequest: mrKey, Reason: reason, MissionID: c.MissionRunID, At: now,
+			})
+		}
+		return out
 	}
 	files := make([]fixFileJSON, 0, len(fact.ChangedFiles))
 	for _, f := range fact.ChangedFiles {
@@ -238,6 +246,49 @@ func (l *jobGraphLink) headEvents(c jobnode.ClosedJob, mrKey string, held []stri
 		})
 	}
 	return out
+}
+
+// noHeadReason returns why the fix has no head, or "" when the host gave a valid
+// head and a complete list of files and the head is the commit that the job made.
+func (l *jobGraphLink) noHeadReason(c jobnode.ClosedJob, mrKey string, fact fixloop.MergeFact) string {
+	switch {
+	case !headSHARe.MatchString(fact.HeadSHA):
+		return "the host gave no valid head commit for the merge request"
+	case fact.ChangedFilesError != "":
+		return "the host gave no list of the files of the merge request: " + fact.ChangedFilesError
+	case fact.ChangedFilesTruncated || len(fact.ChangedFiles) == 0 || len(fact.ChangedFiles) > maxFixFiles:
+		return fmt.Sprintf("the list of the files of the merge request is not complete or is over the limit (%d files)",
+			len(fact.ChangedFiles))
+	}
+	return l.headMismatch(c, mrKey, fact.HeadSHA)
+}
+
+// headMismatch returns why the head of the host is not the commit that the fix
+// job made, or "" when it is. The commit that the job made is the head that
+// open_merge_request returned for the merge request of this tenant, on the job
+// branch.
+func (l *jobGraphLink) headMismatch(c jobnode.ClosedJob, mrKey, hostHead string) string {
+	if l.opened == nil {
+		return "the daemon keeps no record of the heads that open_merge_request returned"
+	}
+	if c.MissionRunID == "" {
+		return "the closed job names no mission run, so no open_merge_request call can be bound to it"
+	}
+	// The record is read for the mission run of the job. An open in another run has
+	// a record of its own and is never read here.
+	made, ok := l.opened.OpenedHead(c.TenantID, mrKey, c.MissionRunID)
+	switch {
+	case !ok:
+		return "the daemon saw no result of open_merge_request in the mission run of the job for this merge request"
+	case made.missionRunID != c.MissionRunID:
+		return fmt.Sprintf("open_merge_request was called in mission run %q, not in the run %q of the job",
+			made.missionRunID, c.MissionRunID)
+	case made.sourceBranch != jobnode.JobBranch(c.JobID):
+		return fmt.Sprintf("open_merge_request opened branch %q, not the job branch %q", made.sourceBranch, jobnode.JobBranch(c.JobID))
+	case made.sha != hostHead:
+		return fmt.Sprintf("open_merge_request returned head %s, and the host holds head %s", made.sha, hostHead)
+	}
+	return ""
 }
 
 // markPending keeps the close for RetryPending and records the wait on each
@@ -649,12 +700,14 @@ func (l *jobGraphLink) Adopt(tenant string, findings []brain.FindingSnapshot) {
 // wireFixLink builds the link of closed fix jobs, rebuilds the pending links of
 // each tenant when its engine starts, and starts the loop that reads them again.
 func (d *daemonImpl) wireJobClosed(ctx context.Context, mrs mergeRequestReader, logger *slog.Logger) {
-	d.brainExecutor.jobClosed = wireFixLink(ctx, d.brainRegistry, mrs, logger)
+	d.brainExecutor.jobClosed = wireFixLink(ctx, d.brainRegistry, mrs, worldOpenedHeads{reg: d.brainRegistry}, logger)
 }
 
 // wireFixLink is the link that wireJobClosed installs.
-func wireFixLink(ctx context.Context, reg *brain.Registry, mrs mergeRequestReader, logger *slog.Logger) *jobGraphLink {
-	link := newJobGraphLink(reg, mrs, logger)
+func wireFixLink(
+	ctx context.Context, reg *brain.Registry, mrs mergeRequestReader, opened openedHeadReader, logger *slog.Logger,
+) *jobGraphLink {
+	link := newJobGraphLink(reg, mrs, opened, logger)
 	reg.OnEngine(func(e *brain.Engine) { link.Adopt(e.World.Tenant, e.Findings()) })
 	go link.Run(ctx)
 	return link

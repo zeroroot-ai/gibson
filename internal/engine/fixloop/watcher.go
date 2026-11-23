@@ -207,6 +207,14 @@ func (w *Watcher) stepFixing(
 	if !fact.PipelineGreen || w.inBackoff(tenant, mr) {
 		return ended, nil
 	}
+	if noFixHead(fs) {
+		// The fix has no head. The fix agent makes no
+		// merge call without a head, so a slot would only block the Application for
+		// the grant window at each cycle. The finding waits on a person instead.
+		w.logger.Warn("fix loop: the fix has no head, so the merge request gets no merge slot",
+			"tenant", tenant, "merge_request", mr)
+		return ended, nil
+	}
 	mission := fixMission(fs)
 	if mission == "" {
 		// A slot binds a mission, and no call of an empty mission merges. A
@@ -225,6 +233,19 @@ func (w *Watcher) stepFixing(
 	return []brain.Event{brain.MergeRequestQueued{
 		MergeRequest: mr, Application: app, At: w.now(), MissionID: mission,
 	}}, nil
+}
+
+// noFixHead reports whether a finding of the merge request has no fix head. The
+// reason does not matter: the daemon can stop between the link events and the head
+// events, and a finding from before brain.FixHeadMissing has no reason. The fix
+// agent makes no merge call without a head, so such a fix gets no slot.
+func noFixHead(fs []brain.FindingSnapshot) bool {
+	for _, f := range fs {
+		if f.FixHeadSHA == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *Watcher) noteRelease(mr string) {
