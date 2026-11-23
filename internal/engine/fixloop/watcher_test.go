@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 var t0 = time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
@@ -864,5 +867,96 @@ func TestStep_AFailedHealthSignalWithAnUnmergedRevertIsAVisibleWait(t *testing.T
 	g.tick()
 	if g.hasSlot("mr-1") || !g.granted("mr-2") {
 		t.Fatalf("slots = %+v, want mr-1 gone and mr-2 granted after the revert merged", g.w.MergeSlots())
+	}
+}
+
+// holdReader records the hold time and the mission that the Watcher reads the
+// health signal for.
+type holdReader struct {
+	*fakeReader
+	hold    time.Duration
+	mission string
+}
+
+func (h *holdReader) Health(_ context.Context, _, mission, _ string, _ time.Time, hold time.Duration) (HealthFact, error) {
+	h.hold, h.mission = hold, mission
+	return h.health, h.err
+}
+
+// holdRig builds a rig whose reader records the health read, with the hold source.
+func holdRig(t *testing.T, src HoldSource) (*rig, *holdReader) {
+	t.Helper()
+	g := newRig(t, "scan")
+	hr := &holdReader{fakeReader: g.r}
+	wt, err := NewWatcher(hr, g.rv, fakePlacer{app: "app-1"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt.WithHoldSource(src)
+	wt.now = func() time.Time { return g.now }
+	g.wt = wt
+	g.merged()
+	g.deployed()
+	g.tick() // the health read follows the deploy
+	return g, hr
+}
+
+// The Watcher asks the hold source for the fix mission and reads the health
+// signal with the hold time of that mission.
+func TestStep_ReadsTheHoldTimeOfTheFixMission(t *testing.T) {
+	var asked []string
+	_, hr := holdRig(t, func(_ context.Context, tenant, missionID string) (time.Duration, error) {
+		asked = append(asked, tenant+"/"+missionID)
+		return 45 * time.Minute, nil
+	})
+	if hr.hold != 45*time.Minute {
+		t.Errorf("the health signal was read with hold %v, want 45m", hr.hold)
+	}
+	if len(asked) == 0 || asked[0] != "t1/fix-run-1" {
+		t.Errorf("the hold was asked for %v, want the fix mission of tenant t1", asked)
+	}
+}
+
+// A mission that states no hold time gets the default hold time.
+func TestStep_AMissionWithNoHoldGetsTheDefaultHold(t *testing.T) {
+	_, hr := holdRig(t, func(context.Context, string, string) (time.Duration, error) { return 0, nil })
+	if hr.hold != DefaultPolicy().HoldTime {
+		t.Errorf("hold = %v, want the default %v", hr.hold, DefaultPolicy().HoldTime)
+	}
+}
+
+// A hold that cannot be read skips the read. The finding does not move.
+func TestStep_AHoldThatCannotBeReadSkipsTheHealthRead(t *testing.T) {
+	g := newRig(t, "scan")
+	hr := &holdReader{fakeReader: g.r}
+	wt, err := NewWatcher(hr, g.rv, fakePlacer{app: "app-1"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt.WithHoldSource(func(context.Context, string, string) (time.Duration, error) { return 0, errors.New("no record") })
+	wt.now = func() time.Time { return g.now }
+	g.wt = wt
+	g.merged()
+	g.deployed()
+
+	for _, e := range g.tick() {
+		if _, ok := e.(brain.HealthObserved); ok {
+			t.Fatalf("a hold error gave %+v", e)
+		}
+	}
+	if hr.mission != "" {
+		t.Error("the health signal was read with no hold")
+	}
+}
+
+func TestHoldOf(t *testing.T) {
+	if got := HoldOf(nil); got != 0 {
+		t.Errorf("nil constraints = %v, want zero", got)
+	}
+	if got := HoldOf(&missionv1.MissionConstraints{HealthHold: durationpb.New(time.Hour)}); got != time.Hour {
+		t.Errorf("hold = %v, want 1h", got)
+	}
+	if got := HoldOf(&missionv1.MissionConstraints{HealthHold: durationpb.New(0)}); got != 0 {
+		t.Errorf("a zero hold = %v, want zero", got)
 	}
 }

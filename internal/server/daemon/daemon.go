@@ -1129,13 +1129,15 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	fixWatcher, err := fixloop.NewWatcher(
 		connectors, connectors,
 		applicationPlacer{querier: func() any { return d.graphragQuerier }},
-		nil, // the default policy until the constraints carry the hold time
+		nil, // the default policy
 		d.logger.WithComponent("fix-loop").Slog(),
 	)
 	if err != nil {
 		d.stopServices(ctx)
 		return fmt.Errorf("fix loop: %w", err)
 	}
+	// The hold time of the health signal is a constraint of the fix mission.
+	fixWatcher.WithHoldSource(d.fixHold)
 	go NewFixLoopRunner(
 		d.brainRegistry,
 		fixWatcher,

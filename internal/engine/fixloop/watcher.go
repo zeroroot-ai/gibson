@@ -23,6 +23,7 @@ type Watcher struct {
 	reverter Reverter
 	placer   Placer
 	policy   PolicySource
+	hold     HoldSource
 	now      func() time.Time
 	logger   *slog.Logger
 
@@ -54,6 +55,15 @@ func NewWatcher(r Reader, rv Reverter, p Placer, policy PolicySource, logger *sl
 		now: func() time.Time { return time.Now().UTC() }, logger: logger,
 		refused: map[string]string{}, released: map[string]time.Time{},
 	}, nil
+}
+
+// WithHoldSource sets the source of the hold time of the health signal. The
+// Watcher asks it for the fix mission of each merge request. A mission that
+// states no hold time gets the hold time of the policy. Without a source, each
+// merge request gets the hold time of the policy.
+func (w *Watcher) WithHoldSource(h HoldSource) *Watcher {
+	w.hold = h
+	return w
 }
 
 // Step reads the facts for each finding that has a merge request and returns
@@ -425,6 +435,15 @@ func firstWithStatus(fs []brain.FindingSnapshot, status string) brain.FindingSna
 // than the limit is a failure.
 func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.FindingSnapshot) ([]brain.Event, error) {
 	pol := w.policy(tenant)
+	if w.hold != nil {
+		hold, err := w.hold(ctx, tenant, f.FixMissionID)
+		if err != nil {
+			return nil, fmt.Errorf("read hold time: %w", err)
+		}
+		if hold > 0 {
+			pol.HoldTime = hold
+		}
+	}
 	d, err := w.reader.Deploy(ctx, tenant, f.FixMissionID, mr)
 	if err != nil {
 		return nil, fmt.Errorf("read deploy: %w", err)
