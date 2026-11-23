@@ -42,6 +42,47 @@ inputs:
     description: The kind cluster name.
     required: false
     default: gibson
+  connector-install-patterns:
+    description: >
+      The host patterns of the connectors of a server that the customer hosts, as
+      JSON: {"<connector>/<variable>": ["https://host:port"]}. The action sets it
+      as gibson-workloads.gibson.connectorInstallPatterns, so the daemon accepts
+      a connector URL that matches. Empty means no pattern, and the cluster is
+      the same as before.
+    required: false
+    default: ""
+  build-connector-operator:
+    description: >
+      Set to true when the test needs the connector-operator of the checkout, not
+      the one that charts pins. The action builds it, loads it and points the
+      chart at it.
+    required: false
+    default: "false"
+  mock-forge-image:
+    description: >
+      The digest reference of the mock-forge test image of zeroroot-ai/connectors,
+      ghcr.io/zeroroot-ai/connectors-mock-forge@sha256:<hex>. Set it to start the
+      mock as a container next to the kind nodes. Empty means no mock.
+    required: false
+    default: ""
+  mock-forge-host:
+    description: The DNS name that the mock answers to, from the pods of the cluster.
+    required: false
+    default: forge.mock.example.com
+  mock-forge-port:
+    description: The port of the mock.
+    required: false
+    default: "8443"
+outputs:
+  mock-forge-url:
+    description: The https URL of the mock as a pod sees it. Empty when the mock does not run.
+    value: ${{ steps.mock-forge.outputs.url }}
+  mock-forge-address:
+    description: The address host:port of the mock as the runner sees it. Empty when the mock does not run.
+    value: ${{ steps.mock-forge.outputs.address }}
+  mock-forge-ca-file:
+    description: The path on the runner of the PEM of the authority of the mock. Empty when the mock does not run.
+    value: ${{ steps.mock-forge.outputs.ca-file }}
 runs:
   using: composite
   steps:
@@ -130,6 +171,21 @@ runs:
           -f build/tenant-operator.Dockerfile -t "ghcr.io/zeroroot-ai/tenant-operator:${TAG}" .
         kind load docker-image "ghcr.io/zeroroot-ai/tenant-operator:${TAG}" --name "$CLUSTER"
 
+    # The connector-operator of the checkout, for a test of the code of this
+    # operator. The pinned one does not hold it (gibson#1517).
+    - name: Build and load the connector-operator of the checkout
+      if: ${{ inputs.build-connector-operator == 'true' }}
+      shell: bash
+      working-directory: gibson
+      env:
+        CLUSTER: ${{ inputs.cluster }}
+        TAG: ${{ inputs.image-tag }}
+      run: |
+        set -euo pipefail
+        docker buildx build --progress=plain --load \
+          -f build/connector-operator.Dockerfile -t "ghcr.io/zeroroot-ai/connector-operator:${TAG}" .
+        kind load docker-image "ghcr.io/zeroroot-ai/connector-operator:${TAG}" --name "$CLUSTER"
+
     # The e2eRunner values register the ClusterSPIFFEID of the runner, allow-list
     # its SVID on the daemon, and set GIBSON_TEST_FIXTURES_ENABLED. One patch means
     # one Argo sync and one rollout of each component.
@@ -150,6 +206,8 @@ runs:
         TAG: ${{ inputs.image-tag }}
         SHARED_SKILL_NAME: ${{ inputs.shared-skill-name }}
         SHARED_SKILL_REF: ${{ inputs.shared-skill-reference }}
+        INSTALL_PATTERNS: ${{ inputs.connector-install-patterns }}
+        BUILD_CONNECTOR_OPERATOR: ${{ inputs.build-connector-operator }}
       run: |
         set -euo pipefail
         # The operator source of Agent Skills: one entry in the daemon config.
@@ -163,8 +221,23 @@ runs:
         else
           shared_params=""
         fi
+        # The host patterns of the connectors of a server that the customer
+        # hosts. The value is JSON, which is a YAML flow mapping. With no
+        # input the values are the same as before.
+        patterns_values=""
+        if [ -n "${INSTALL_PATTERNS}" ]; then
+          printf '%s' "${INSTALL_PATTERNS}" | jq -e 'type == "object" and (to_entries | all(.value | type == "array"))' >/dev/null \
+            || { echo "::error::connector-install-patterns must be a JSON object of lists"; exit 1; }
+          patterns_values="    connectorInstallPatterns: $(printf '%s' "${INSTALL_PATTERNS}" | jq -c .)"$'\n'
+        fi
+        connector_params=""
+        if [ "${BUILD_CONNECTOR_OPERATOR}" = "true" ]; then
+          connector_params=',{"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.repository","value":"ghcr.io/zeroroot-ai/connector-operator","forceString":true}},{"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.tag","value":"'"${TAG}"'","forceString":true}},{"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.digest","value":"","forceString":true}},{"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}'
+        fi
+        values=$'gateway:\n  inClusterProviders:\n    - namespace: gibson-e2e-mock\n      podLabels:\n        app: mock-provider\n      ports:\n        - 8443\ngibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n'"${patterns_values}"$'  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n      - platform/e2e-member\n'
+        values_json=$(printf '%s' "${values}" | jq -Rs .)
         kubectl -n argocd patch application gibson --type json -p '[
-            {"op":"add","path":"/spec/source/helm/values","value":"gateway:\n  inClusterProviders:\n    - namespace: gibson-e2e-mock\n      podLabels:\n        app: mock-provider\n      ports:\n        - 8443\ngibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n      - platform/e2e-member\n"},
+            {"op":"add","path":"/spec/source/helm/values","value":'"${values_json}"'},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"'"${TAG}"'","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.digest","value":"","forceString":true}},
@@ -178,7 +251,7 @@ runs:
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.repository","value":"ghcr.io/zeroroot-ai/tenant-operator","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.tag","value":"'"${TAG}"'","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.digest","value":"","forceString":true}},
-            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}'"${shared_params}"'
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}'"${shared_params}${connector_params}"'
           ]'
 
         wait_image() { # kind name jsonpath suffix
@@ -199,6 +272,11 @@ runs:
         wait_image "deployment gibson-tenant-operator" \
           '{.spec.template.spec.containers[?(@.name=="manager")].image}' "tenant-operator:${TAG}"
         kubectl -n "$NS" rollout status deployment/gibson-tenant-operator --timeout=15m
+        if [ "${BUILD_CONNECTOR_OPERATOR}" = "true" ]; then
+          wait_image "deployment gibson-connector-operator" \
+            '{.spec.template.spec.containers[?(@.name=="manager")].image}' "connector-operator:${TAG}"
+          kubectl -n "$NS" rollout status deployment/gibson-connector-operator --timeout=15m
+        fi
 
     # agentgateway sends an unattached policy to no proxy. A route whose ext-authz
     # policy is not attached has no ext-authz check, so a call on it would pass
@@ -258,3 +336,78 @@ runs:
         EOF
         docker build -t ghcr.io/zeroroot-ai/gibson-e2e-runner:local /tmp/ectx
         kind load docker-image ghcr.io/zeroroot-ai/gibson-e2e-runner:local --name "$CLUSTER"
+
+    # The mock-forge test image of zeroroot-ai/connectors stands in for the forge
+    # and the metrics of a buyer. It runs as a container outside the cluster,
+    # because the egress policy of each connector denies the private ranges
+    # (RFC 1918, so also the 172.18.0.0/16 of the default kind network) and the
+    # ranges of the pods and the services, and that rule stays. The container
+    # therefore gets its own docker network with a public address range, the
+    # documentation range 198.51.100.0/24. Each kind node joins that network. The
+    # docker DNS of the network answers the name of the mock, and CoreDNS of the
+    # cluster forwards the name to it. The mock refuses plain HTTP on an address
+    # that is not loopback, so it runs with TLS and a certificate for its name.
+    - name: Start the mock forge next to the kind nodes
+      id: mock-forge
+      if: ${{ inputs.mock-forge-image != '' }}
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.mock-forge-image }}
+        HOST: ${{ inputs.mock-forge-host }}
+        PORT: ${{ inputs.mock-forge-port }}
+        CLUSTER: ${{ inputs.cluster }}
+      run: |
+        set -euo pipefail
+        NET=mock-forge-net
+        SUBNET=198.51.100.0/24
+        ADDR=198.51.100.10
+        DIR="${RUNNER_TEMP}/mock-forge"
+        case "${IMAGE}" in
+          *@sha256:*) ;;
+          *) echo "::error::mock-forge-image must be a digest reference (<repository>@sha256:<hex>)"; exit 1;;
+        esac
+        mkdir -p "${DIR}"
+        chmod 0777 "${DIR}"
+        docker network create --subnet "${SUBNET}" "${NET}"
+        docker run -d --name mock-forge --network "${NET}" --ip "${ADDR}" --network-alias "${HOST}" \
+          -e "LISTEN_ADDR=:${PORT}" \
+          -e "MOCK_TLS_SELF_SIGNED_HOSTS=${HOST},${ADDR}" \
+          -e "MOCK_TLS_CA_FILE=/ca/ca.pem" \
+          -v "${DIR}:/ca" \
+          "${IMAGE}"
+        nodes=$(kind get nodes --name "${CLUSTER}")
+        [ -n "${nodes}" ] || { echo "::error::kind cluster ${CLUSTER} has no node"; exit 1; }
+        for n in ${nodes}; do
+          docker network connect "${NET}" "$n"
+        done
+        # The runner reaches the mock by its address. A node reaches it by the
+        # name and by the address.
+        ok=""
+        for _ in $(seq 1 30); do
+          if [ -s "${DIR}/ca.pem" ] && curl -fsS --cacert "${DIR}/ca.pem" \
+               --resolve "${HOST}:${PORT}:${ADDR}" "https://${HOST}:${PORT}/_mock/state" >/dev/null; then
+            ok=1; break
+          fi
+          sleep 2
+        done
+        if [ -z "${ok}" ]; then
+          echo "::error::the mock forge did not answer over TLS"
+          docker logs mock-forge || true
+          exit 1
+        fi
+        for n in ${nodes}; do
+          if ! docker exec "$n" getent hosts "${HOST}" | grep -q "${ADDR}"; then
+            echo "::error::node $n does not resolve ${HOST} to ${ADDR}"
+            docker exec "$n" cat /etc/resolv.conf || true
+            exit 1
+          fi
+          if ! docker exec "$n" bash -c "exec 3<>/dev/tcp/${ADDR}/${PORT}"; then
+            echo "::error::node $n cannot open ${ADDR}:${PORT}"
+            exit 1
+          fi
+        done
+        {
+          echo "url=https://${HOST}:${PORT}"
+          echo "address=${ADDR}:${PORT}"
+          echo "ca-file=${DIR}/ca.pem"
+        } >> "${GITHUB_OUTPUT}"
