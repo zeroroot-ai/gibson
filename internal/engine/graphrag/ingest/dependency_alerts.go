@@ -32,7 +32,7 @@ import (
 //     purl as the trivy parser keys it, stays as data (IN_PACKAGE).
 //   - An alert with state fixed verifies its Finding, but only from a call with
 //     state "all" and a list that is not truncated, and only when the alert is
-//     verifiable: it has an advisory id and its package has one version.
+//     verifiable: it has an advisory id and an ecosystem, and its package has one version.
 //   - A dismissed alert verifies nothing. It waits for a person, and the result says
 //     so. An alert gone from the list verifies nothing either.
 //   - An alert that is not verifiable raises a Finding and never verifies it, and
@@ -102,11 +102,12 @@ func advisoryOf(ids []string) string {
 var dependencyAlertNamespace = uuid.MustParse("3c0b1d7e-5e0a-4f6a-9a53-7a3f2b1c9d10")
 
 // DependencyAlertFindingID returns the identity of the Finding of an alert. It is
-// stable across a fix: it holds the repository, the advisory, the ecosystem and
-// the package name, and no version. An alert with no advisory id is keyed on the
+// stable across a fix: it holds the repository, the advisory, the ecosystem, the
+// package name and the manifest path, and no version. One advisory can name a
+// package in two manifests, and the fix of one must not verify the other. An alert with no advisory id is keyed on the
 // id of the alert.
-func DependencyAlertFindingID(repoKey, advisory, ecosystem, pkg, alertID string) string {
-	key := fmt.Sprintf("alert|%s|%s|%s|%s", repoKey, advisory, ecosystem, pkg)
+func DependencyAlertFindingID(repoKey, advisory, ecosystem, pkg, manifest, alertID string) string {
+	key := fmt.Sprintf("alert|%s|%s|%s|%s|%s", repoKey, advisory, ecosystem, pkg, manifest)
 	if advisory == "" {
 		key = fmt.Sprintf("alert|%s|id|%s", repoKey, alertID)
 	}
@@ -144,7 +145,7 @@ func DependencyAlertEvents(result any, repoKey, missionID, runID string, now tim
 	seenPackage := map[string]bool{}
 	for _, a := range res.Alerts {
 		advisory := advisoryOf(a.AdvisoryIDs)
-		id := DependencyAlertFindingID(repoKey, advisory, a.Ecosystem, a.Package, a.ID)
+		id := DependencyAlertFindingID(repoKey, advisory, a.Ecosystem, a.Package, a.ManifestPath, a.ID)
 		switch strings.ToLower(a.State) {
 		case "open":
 			var pkgs []string
@@ -204,7 +205,7 @@ func DependencyAlertEvents(result any, repoKey, missionID, runID string, now tim
 // an advisory, the tool did not mark it not verifiable, and its package has one
 // version.
 func verifiable(a dependencyAlert, advisory string) bool {
-	if advisory == "" || a.VersionAmbiguous {
+	if advisory == "" || a.VersionAmbiguous || strings.TrimSpace(a.Ecosystem) == "" {
 		return false
 	}
 	return a.Verifiable == nil || *a.Verifiable
@@ -214,6 +215,8 @@ func notVerifiableReason(a dependencyAlert, advisory string) string {
 	switch {
 	case advisory == "" || (a.Verifiable != nil && !*a.Verifiable):
 		return fmt.Sprintf("alert %s has no advisory id", a.ID)
+	case strings.TrimSpace(a.Ecosystem) == "":
+		return fmt.Sprintf("alert %s has no ecosystem", a.ID)
 	case a.VersionAmbiguous:
 		return fmt.Sprintf("alert %s: the package is installed at several versions (%s)", a.ID, strings.Join(a.Versions, ", "))
 	}

@@ -197,3 +197,42 @@ func TestDependencyAlertEvents_AnAmbiguousVersionNeverVerifies(t *testing.T) {
 	_, reruns, _ = kinds(out.Events)
 	assert.Empty(t, reruns, "the tool marked the alert not verifiable")
 }
+
+// One advisory can name the same package in two manifests. They are two Findings,
+// and the fix of one verifies only its own.
+func TestDependencyAlertEvents_TheManifestPathKeysTheFinding(t *testing.T) {
+	web := alert("dependabot:1", "open", "v1.2.0", "GHSA-xxxx")
+	web["manifest_path"] = "web/package-lock.json"
+	api := alert("dependabot:2", "open", "v1.2.0", "GHSA-xxxx")
+	api["manifest_path"] = "api/package-lock.json"
+	out, err := DependencyAlertEvents(listOf(false, "", web, api), alertRepo, "m1", "r", alertNow)
+	require.NoError(t, err)
+	raised, _, _ := kinds(out.Events)
+	require.Len(t, raised, 2)
+	assert.NotEqual(t, raised[0].ID, raised[1].ID)
+
+	webFixed := alert("dependabot:1", "fixed", "v1.2.3", "GHSA-xxxx")
+	webFixed["manifest_path"] = "web/package-lock.json"
+	out, _ = DependencyAlertEvents(listOf(false, "", webFixed, api), alertRepo, "m2", "r", alertNow)
+	_, reruns, _ := kinds(out.Events)
+	byID := map[string]bool{}
+	for _, r := range reruns {
+		byID[r.ID] = r.Found
+	}
+	assert.False(t, byID[raised[0].ID], "the fixed manifest verifies its own Finding")
+	assert.True(t, byID[raised[1].ID], "the open manifest stays open")
+}
+
+// An alert with no ecosystem raises a Finding and never verifies it.
+func TestDependencyAlertEvents_NoEcosystemNeverVerifies(t *testing.T) {
+	a := alert("dependabot:5", "fixed", "v1.2.3", "GHSA-xxxx")
+	a["ecosystem"] = ""
+	open := alert("dependabot:6", "open", "v1.2.0", "GHSA-yyyy")
+	open["ecosystem"] = ""
+	out, err := DependencyAlertEvents(listOf(false, "", a, open), alertRepo, "m1", "r", alertNow)
+	require.NoError(t, err)
+	raised, reruns, _ := kinds(out.Events)
+	assert.Len(t, raised, 1, "the open alert still raises a Finding")
+	assert.Empty(t, reruns)
+	assert.Contains(t, strings.Join(out.Notes, "\n"), "no ecosystem")
+}
