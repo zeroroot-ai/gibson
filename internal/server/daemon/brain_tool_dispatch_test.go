@@ -302,6 +302,8 @@ type fakeMissionConnector struct {
 	// errs are the errors of the first calls, in order. The call after the last
 	// one returns result and err.
 	errs []error
+	// delay is how long each call takes.
+	delay time.Duration
 	// mu guards every field above, because the node calls on its own goroutine
 	// while the test reads the count.
 	mu    sync.Mutex
@@ -318,6 +320,7 @@ func (f *fakeMissionConnector) callCount() int {
 func (f *fakeMissionConnector) CallConnectorForMission(
 	_ context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any,
 ) (any, error) {
+	time.Sleep(f.delay)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.tenant, f.mission, f.run, f.work, f.connector, f.tool, f.args = tenant, missionID, runID, workID, connector, tool, args
@@ -491,7 +494,7 @@ func TestDispatchTool_TheApprovalWaitIsBounded(t *testing.T) {
 	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
 
 	if _, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w3", MissionID: "m1", Timeout: 30 * time.Millisecond, Target: "mcp:crowdstrike-response:isolate_x"}); err == nil ||
-		!strings.Contains(err.Error(), "bound of the node") {
+		!strings.Contains(err.Error(), "node timeout") {
 		t.Errorf("the bound of the node must end the wait, got %v", err)
 	}
 	// The request shows as withdrawn, and a verdict after that changes nothing.
@@ -504,7 +507,7 @@ func TestDispatchTool_TheApprovalWaitIsBounded(t *testing.T) {
 			}
 		}
 	})
-	if !withdrawn || !decided || !strings.Contains(reason, "bound of the node") {
+	if !withdrawn || !decided || !strings.Contains(reason, "node timeout") {
 		t.Errorf("the request after the timeout: withdrawn=%v decided=%v reason=%q", withdrawn, decided, reason)
 	}
 	if err := eng.DestructiveAuthorizationQueue().Decide("req-3", "u1", true); err == nil {
@@ -551,7 +554,7 @@ func TestDispatchTool_ANodeWithNoTimeoutWaitsAtMostTheCap(t *testing.T) {
 		t.Fatalf("maxApprovalWait = %v, want 24h", maxApprovalWait)
 	}
 	_, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w7", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"})
-	if err == nil || !strings.Contains(err.Error(), "bound of the node") {
+	if err == nil || !strings.Contains(err.Error(), "node timeout") {
 		t.Fatalf("the cap must end the wait, got %v", err)
 	}
 	var withdrawn bool
@@ -581,5 +584,82 @@ func TestWaitForApproval_NoWorldAndTheDefaultCap(t *testing.T) {
 	if err := b.waitForApproval(&missionBinding{ctx: ctx, tenant: "acme", eng: eng}, "req-cap", 0); err == nil ||
 		!strings.Contains(err.Error(), "ended") {
 		t.Errorf("err = %v, want the end of the mission", err)
+	}
+}
+
+// The timeout of a node bounds the whole node. A first call that takes time leaves
+// the wait for the approval only the rest of the timeout. The test reads the bound
+// that the wait got, so it has no run time to flake on.
+func TestDispatchTool_TheApprovalWaitGetsTheTimeLeft(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-left")
+	conn := &fakeMissionConnector{delay: 150 * time.Millisecond, err: &metatool.PendingApproval{ID: "req-left"}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = conn
+	b.approvalPoll = time.Millisecond
+	var got []time.Duration
+	b.waitBound = func(d time.Duration) { got = append(got, d) }
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+	_, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w9", MissionID: "m1", Timeout: 250 * time.Millisecond, Target: "mcp:crowdstrike-response:isolate_x"})
+	if err == nil || !strings.Contains(err.Error(), "the node timeout of 250ms passed before a decision") {
+		t.Fatalf("err = %v, want the node timeout", err)
+	}
+	// The first call took at least 150 ms, so the wait gets at most 100 ms.
+	if len(got) != 1 || got[0] <= 0 || got[0] > 100*time.Millisecond {
+		t.Errorf("the wait got %v, want one bound of at most 100ms", got)
+	}
+	if conn.callCount() != 1 {
+		t.Errorf("calls = %d, want 1: a timed-out node does not call again", conn.callCount())
+	}
+	if !actionWithdrawn(eng, "req-left") {
+		t.Error("the request of the timed-out node is not withdrawn")
+	}
+}
+
+// A timed-out node must not act: a request that a person decided during a slow
+// first call does not run the connector after the node timeout.
+func TestDispatchTool_ATimedOutNodeDoesNotActOnALateDecision(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-late")
+	decideApproval(t, eng, "req-late", true)
+	conn := &fakeMissionConnector{delay: 120 * time.Millisecond, err: &metatool.PendingApproval{ID: "req-late"}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = conn
+	b.waitBound = func(time.Duration) { t.Error("a timed-out node waited") }
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+	_, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w10", MissionID: "m1", Timeout: 50 * time.Millisecond, Target: "mcp:crowdstrike-response:isolate_x"})
+	if err == nil || !strings.Contains(err.Error(), "the node timeout of 50ms passed before a decision") {
+		t.Fatalf("err = %v, want the node timeout", err)
+	}
+	if conn.callCount() != 1 {
+		t.Errorf("calls = %d, want 1: the late decision must not run the connector", conn.callCount())
+	}
+}
+
+func actionWithdrawn(eng *brain.Engine, id string) bool {
+	var w bool
+	eng.ReadWorld(func(world *brain.World) {
+		for _, a := range world.DestructiveActionSnapshot() {
+			w = w || (a.HypothesisID == id && a.Withdrawn)
+		}
+	})
+	return w
+}
+
+func TestTimeLeft(t *testing.T) {
+	if left, expired := timeLeft(0, time.Now()); left != 0 || expired {
+		t.Errorf("no timeout = %v %v, want 0 and not expired", left, expired)
+	}
+	if left, expired := timeLeft(time.Millisecond, time.Now().Add(-time.Hour)); left != 0 || !expired {
+		t.Errorf("a passed timeout = %v %v, want expired", left, expired)
+	}
+	if left, expired := timeLeft(time.Hour, time.Now()); expired || left <= 59*time.Minute || left > time.Hour {
+		t.Errorf("time left = %v %v", left, expired)
 	}
 }

@@ -145,6 +145,8 @@ type brainExecutor struct {
 	// approvalMaxWait is the longest wait of a node that declares no timeout. Zero
 	// means maxApprovalWait. A test sets it.
 	approvalMaxWait time.Duration
+	// waitBound, when set, sees the bound that each approval wait gets. A test sets it.
+	waitBound func(time.Duration)
 	// models sends the model call of the Decider to the model gateway
 	// (gibson#1392). The gateway trace is the one source of the llm_call.observed
 	// and token.used events of that call, so the executor emits neither.
@@ -848,6 +850,7 @@ func (b *brainExecutor) dispatchConnectorTool(bind *missionBinding, req brain.Di
 	if b.connectors == nil {
 		return "", fmt.Errorf("tool %q: this daemon has no connector caller", tid.Canonical())
 	}
+	started := time.Now()
 	args := map[string]any{}
 	if in := strings.TrimSpace(req.Input); in != "" && in != "null" {
 		if err := json.Unmarshal([]byte(in), &args); err != nil {
@@ -863,8 +866,21 @@ func (b *brainExecutor) dispatchConnectorTool(bind *missionBinding, req brain.Di
 				Err: fmt.Sprintf("waiting for the approval of %s: request %s", tid.Canonical(), pending.ID),
 			})
 		}
-		if werr := b.waitForApproval(bind, pending.ID, req.Timeout); werr != nil {
+		left, expired := timeLeft(req.Timeout, started)
+		var werr error
+		if expired {
+			// The node timeout passed during the first call. A timed-out node must not
+			// act, so it does not read the request: a decision that came during a slow
+			// first call does not run the connector.
+			werr = errApprovalTimeout
+		} else {
+			werr = b.waitForApproval(bind, pending.ID, left)
+		}
+		if werr != nil {
 			b.withdrawApproval(bind, pending.ID, werr)
+			if errors.Is(werr, errApprovalTimeout) {
+				werr = fmt.Errorf("the node timeout of %s passed before a decision", b.nodeTimeout(req.Timeout))
+			}
 			return "", fmt.Errorf("tool %q: %w", tid.Canonical(), werr)
 		}
 		res, err = b.callConnectorNode(bind, req.MissionID, req.WorkID, tid, args)
@@ -899,6 +915,34 @@ func (b *brainExecutor) nodeResult(_ *missionBinding, _ string, tid toolid.ID, r
 	}
 	return string(out), nil
 }
+
+// timeLeft is the part of the timeout of a node that is left after the time since
+// started. The timeout is the bound of the whole node, so the wait for an approval
+// gets what the first call left. Zero with expired false means that the node
+// declares no timeout. When the timeout has passed, expired is true and the node
+// must not wait or act.
+func timeLeft(timeout time.Duration, started time.Time) (left time.Duration, expired bool) {
+	if timeout <= 0 {
+		return 0, false
+	}
+	left = timeout - time.Since(started)
+	return max(left, 0), left <= 0
+}
+
+// nodeTimeout is the timeout that bounded the wait of a node: the one that it
+// declares, else the cap.
+func (b *brainExecutor) nodeTimeout(declared time.Duration) time.Duration {
+	if declared > 0 {
+		return declared
+	}
+	if b.approvalMaxWait > 0 {
+		return b.approvalMaxWait
+	}
+	return maxApprovalWait
+}
+
+// errApprovalTimeout says that the timeout of the node passed before a decision.
+var errApprovalTimeout = errors.New("the node timeout passed")
 
 // errApprovalGone says that the approval request is not in the World.
 var errApprovalGone = errors.New("the request is gone")
@@ -935,6 +979,9 @@ func (b *brainExecutor) waitForApproval(bind *missionBinding, approvalID string,
 			bound = maxApprovalWait
 		}
 	}
+	if b.waitBound != nil {
+		b.waitBound(bound)
+	}
 	timer := time.NewTimer(bound)
 	defer timer.Stop()
 	deadline := timer.C
@@ -957,7 +1004,7 @@ func (b *brainExecutor) waitForApproval(bind *missionBinding, approvalID string,
 		case <-bind.ctx.Done():
 			return fmt.Errorf("the wait for the approval ended: %w", bind.ctx.Err())
 		case <-deadline:
-			return fmt.Errorf("the approval %s was not decided within the bound of the node (%s)", approvalID, bound)
+			return errApprovalTimeout
 		case <-time.After(poll):
 		}
 	}
