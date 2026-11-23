@@ -208,14 +208,20 @@ func (w *fixLoopWorld) startFixAgent(t *testing.T, app, findingID string) *helpe
 	return helpers.StartMission(w.ctx, t, w.daemon, created.GetMissionDefinitionId(), w.targetID)
 }
 
-// statusOf reads the status of the finding. A verified finding is not in the open
-// list, so the exposure read says whether it is verified.
-func (w *fixLoopWorld) statusOf(t *testing.T, app string) (st string, verified bool) {
+// statusOf reads the status of the finding. A finding in the open list has its
+// status there. A finding that is not in the list is verified only when the
+// exposure read says so, and never because the list does not hold it.
+func (w *fixLoopWorld) statusOf(t *testing.T, app, id string) (st string, verified bool) {
 	t.Helper()
 	if f := w.findingOf(t, app); f != nil {
 		return f.GetStatus(), false
 	}
-	return "", true
+	exp, err := w.world.GetExposure(w.ctx, &worldpb.GetExposureRequest{FindingId: id})
+	require.NoError(t, err, "GetExposure(%s)", id)
+	if exp.GetVerified() {
+		return "verified", true
+	}
+	return "not in the open list and not verified", false
 }
 
 // TestFixLoopCases is case 1 and case 2. It needs everything TestFixLoop needs, and
@@ -245,7 +251,7 @@ func runFixLoopCases(t *testing.T, w *fixLoopWorld) {
 
 		run := w.startFixAgent(t, app, id)
 		helpers.Eventually(t, fixLoopCaseTimeout, "the finding reaches fixing and then fixed", func() (bool, string) {
-			st, verified := w.statusOf(t, app)
+			st, verified := w.statusOf(t, app, id)
 			return verified || st == "fixed", "status " + st
 		})
 		_ = run
@@ -253,12 +259,12 @@ func runFixLoopCases(t *testing.T, w *fixLoopWorld) {
 		// The rescan reads the alert as fixed. The daemon verifies the finding after
 		// the health signal held, so the rescan repeats until it does.
 		helpers.Eventually(t, fixLoopCaseTimeout, "the finding is verified", func() (bool, string) {
-			if _, verified := w.statusOf(t, app); verified {
+			if _, verified := w.statusOf(t, app, id); verified {
 				return true, ""
 			}
 			w.runScan(t, app)
 			time.Sleep(fixLoopScanInterval)
-			st, _ := w.statusOf(t, app)
+			st, _ := w.statusOf(t, app, id)
 			return false, "status " + st
 		})
 
