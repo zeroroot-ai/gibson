@@ -2691,7 +2691,7 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 	// and the name must never stand for it (gibson#1469).
 	metadata, markErr := guardOrigination(metadata, catalogName, req.Name, definitionJSON)
 	if markErr != nil {
-		return &harnesspb.CreateMissionResponse{
+		return &harnesspb.CreateMissionResponse{ //nolint:nilerr // the refusal is the response, not a transport error
 			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, Message: markErr.Error()},
 		}, nil
 	}
