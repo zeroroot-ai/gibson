@@ -30,20 +30,24 @@ import (
 //     holds the version, and a fix changes it.
 //   - The Finding is placed at the Repository of the scan. The Package, keyed by the
 //     purl as the trivy parser keys it, stays as data (IN_PACKAGE).
-//   - An alert with state fixed verifies its Finding, but only on a complete list
-//     with no note, and only when the alert has an advisory id.
+//   - An alert with state fixed verifies its Finding, but only from a call with
+//     state "all" and a list that is not truncated, and only when the alert is
+//     verifiable: it has an advisory id and its package has one version.
 //   - A dismissed alert verifies nothing. It waits for a person, and the result says
 //     so. An alert gone from the list verifies nothing either.
-//   - An alert with no advisory id raises a Finding and never verifies it.
+//   - An alert that is not verifiable raises a Finding and never verifies it, and
+//     the result says why.
 
 // DependencyAlertsTool is the name of the connector tool.
 const DependencyAlertsTool = "list_dependency_alerts"
 
 // dependencyAlertsResult is the result of list_dependency_alerts.
 type dependencyAlertsResult struct {
-	Project   string            `json:"project"`
+	Project string `json:"project"`
+	// State is the state that the call asked for. Only a call with state "all"
+	// can verify a Finding.
+	State     string            `json:"state"`
 	Truncated bool              `json:"truncated"`
-	Note      string            `json:"note"`
 	Alerts    []dependencyAlert `json:"alerts"`
 }
 
@@ -60,6 +64,13 @@ type dependencyAlert struct {
 	VulnerableRange     string   `json:"vulnerable_version_range"`
 	FirstPatchedVersion string   `json:"first_patched_version"`
 	URL                 string   `json:"url"`
+	// Verifiable is false when the alert has no advisory id. Nil (an older tool)
+	// means that the advisory id decides.
+	Verifiable *bool `json:"verifiable"`
+	// VersionAmbiguous is true when the package is installed at several versions.
+	// The version and the purl are then empty.
+	VersionAmbiguous bool     `json:"version_ambiguous"`
+	Versions         []string `json:"versions"`
 }
 
 // DependencyAlertOutcome is what the mapping made of one result.
@@ -119,14 +130,14 @@ func DependencyAlertEvents(result any, repoKey, missionID, runID string, now tim
 		return DependencyAlertOutcome{}, fmt.Errorf("the scan has no Repository, so a Finding of %s has no place", DependencyAlertsTool)
 	}
 	var out DependencyAlertOutcome
-	// A truncated list or a note means that an alert that is missing may be missing
-	// from the list only. No alert verifies anything then.
-	complete := !res.Truncated && strings.TrimSpace(res.Note) == ""
+	// A truncated list may miss an alert, and a call with another state than "all"
+	// does not list the fixed alerts. No alert verifies anything then.
+	complete := !res.Truncated && strings.EqualFold(res.State, "all")
 	if res.Truncated {
 		out.Notes = append(out.Notes, "the list of alerts is truncated, so no alert verifies a finding")
 	}
-	if n := strings.TrimSpace(res.Note); n != "" {
-		out.Notes = append(out.Notes, "the tool says: "+n+", so no alert verifies a finding")
+	if !strings.EqualFold(res.State, "all") {
+		out.Notes = append(out.Notes, fmt.Sprintf("the call asked for state %q and not \"all\", so no alert verifies a finding", res.State))
 	}
 
 	var packages, findings, reruns []brain.Event
@@ -149,8 +160,8 @@ func DependencyAlertEvents(result any, repoKey, missionID, runID string, now tim
 					})
 				}
 			}
-			if advisory == "" {
-				out.Notes = append(out.Notes, fmt.Sprintf("alert %s has no advisory id, so it never verifies its Finding", a.ID))
+			if !verifiable(a, advisory) {
+				out.Notes = append(out.Notes, notVerifiableReason(a, advisory))
 			}
 			title := fmt.Sprintf("%s in %s %s", firstNonEmpty(advisory, "dependency alert "+a.ID), a.Package, a.Version)
 			findings = append(findings, brain.FindingRaised{
@@ -163,7 +174,7 @@ func DependencyAlertEvents(result any, repoKey, missionID, runID string, now tim
 				CheckKind: string(finding.CheckTool), CheckRef: DependencyAlertsTool,
 				At: now,
 			})
-			if advisory != "" {
+			if verifiable(a, advisory) {
 				// The alert is open: a fix that was merged did not hold.
 				reruns = append(reruns, brain.CheckRerun{
 					ID: id, CheckKind: string(finding.CheckTool), Found: true, EvidenceAt: now, MissionID: missionID,
@@ -171,8 +182,8 @@ func DependencyAlertEvents(result any, repoKey, missionID, runID string, now tim
 			}
 		case "fixed":
 			switch {
-			case advisory == "":
-				out.Notes = append(out.Notes, fmt.Sprintf("alert %s is fixed and has no advisory id, so it verifies nothing", a.ID))
+			case !verifiable(a, advisory):
+				out.Notes = append(out.Notes, notVerifiableReason(a, advisory)+", so it verifies nothing")
 			case !complete:
 				// The note above says why.
 			default:
@@ -187,6 +198,26 @@ func DependencyAlertEvents(result any, repoKey, missionID, runID string, now tim
 	}
 	out.Events = append(append(packages, findings...), reruns...)
 	return out, nil
+}
+
+// verifiable reports whether an alert can verify or reopen its Finding: it names
+// an advisory, the tool did not mark it not verifiable, and its package has one
+// version.
+func verifiable(a dependencyAlert, advisory string) bool {
+	if advisory == "" || a.VersionAmbiguous {
+		return false
+	}
+	return a.Verifiable == nil || *a.Verifiable
+}
+
+func notVerifiableReason(a dependencyAlert, advisory string) string {
+	switch {
+	case advisory == "" || (a.Verifiable != nil && !*a.Verifiable):
+		return fmt.Sprintf("alert %s has no advisory id", a.ID)
+	case a.VersionAmbiguous:
+		return fmt.Sprintf("alert %s: the package is installed at several versions (%s)", a.ID, strings.Join(a.Versions, ", "))
+	}
+	return fmt.Sprintf("alert %s is not verifiable", a.ID)
 }
 
 func alertDescription(a dependencyAlert) string {

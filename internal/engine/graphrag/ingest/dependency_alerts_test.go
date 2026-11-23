@@ -35,7 +35,11 @@ func listOf(truncated bool, note string, alerts ...map[string]any) map[string]an
 	for _, a := range alerts {
 		as = append(as, a)
 	}
-	return map[string]any{"project": "acme/shop", "truncated": truncated, "note": note, "alerts": as}
+	state := "all"
+	if note != "" {
+		state = note // a call that did not ask for "all"
+	}
+	return map[string]any{"project": "acme/shop", "state": state, "truncated": truncated, "alerts": as}
 }
 
 func kinds(evs []brain.Event) (raised []brain.FindingRaised, reruns []brain.CheckRerun, entities []brain.EntityObserved) {
@@ -168,4 +172,28 @@ func TestDependencyAlertEvents_AFixedAlertVerifiesTheFinding(t *testing.T) {
 		}
 		assert.Equal(t, want, w.FindingSnapshot()[0].Status, "alert state %s", state)
 	}
+}
+
+// An alert for a package at several versions has no version and no purl. It raises
+// a Finding and never verifies or reopens it.
+func TestDependencyAlertEvents_AnAmbiguousVersionNeverVerifies(t *testing.T) {
+	amb := alert("dependabot:9", "fixed", "", "GHSA-zzzz")
+	amb["version_ambiguous"] = true
+	amb["versions"] = []any{"v1.0.0", "v1.1.0"}
+	open := alert("dependabot:10", "open", "", "GHSA-zzzz")
+	open["version_ambiguous"] = true
+	open["versions"] = []any{"v1.0.0", "v1.1.0"}
+	out, err := DependencyAlertEvents(listOf(false, "", amb, open), alertRepo, "m1", "r", alertNow)
+	require.NoError(t, err)
+	raised, reruns, entities := kinds(out.Events)
+	assert.Len(t, raised, 1, "the open alert raises a Finding")
+	assert.Empty(t, reruns)
+	assert.Empty(t, entities, "no purl, no Package")
+	assert.Contains(t, strings.Join(out.Notes, "\n"), "several versions")
+
+	notVerifiable := alert("dependabot:11", "fixed", "v1.2.3", "GHSA-xxxx")
+	notVerifiable["verifiable"] = false
+	out, _ = DependencyAlertEvents(listOf(false, "", notVerifiable), alertRepo, "m1", "r", alertNow)
+	_, reruns, _ = kinds(out.Events)
+	assert.Empty(t, reruns, "the tool marked the alert not verifiable")
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func alertResult() map[string]any {
-	return map[string]any{"project": "acme/shop", "alerts": []any{map[string]any{
+	return map[string]any{"project": "acme/shop", "state": "all", "alerts": []any{map[string]any{
 		"id": "dependabot:1", "state": "open", "package": "github.com/acme/lib", "ecosystem": "go",
 		"purl": "pkg:golang/github.com/acme/lib@v1.2.0", "version": "v1.2.0", "advisory_ids": []any{"GHSA-xxxx"}, "severity": "high",
 	}}}
