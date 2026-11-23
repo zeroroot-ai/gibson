@@ -22,8 +22,10 @@ const (
 	// the grant, and the target is the principal of the agent.
 	grantAdded   = "agent_grant_added"
 	grantRemoved = "agent_grant_removed"
-	// relationExecute is the relation that lets an agent call a connector.
-	relationExecute = "can_execute"
+	// decisionAllow is the decision of an audit record of a grant change that took
+	// effect. A record with another decision (deny) records a change that failed
+	// after its record was written, so it never names a grantor.
+	decisionAllow = "allow"
 	// resultIntent is the record that comes before the call. Only the result
 	// record counts as an action.
 	resultIntent = "intent"
@@ -31,6 +33,23 @@ const (
 	// errUnauthorized is the error class of a call that the check refused.
 	errUnauthorized = "unauthorized"
 )
+
+// executeTupleRelation is the relation that the grant admin writes for the action
+// can_execute. can_execute is computed in the FGA model and takes no tuple, so
+// the tuple is on direct_execute (internal/platform/authz.GrantTupleRelation).
+var executeTupleRelation = mustExecuteRelation()
+
+func mustExecuteRelation() string {
+	r, ok := authz.GrantTupleRelation("can_execute")
+	if !ok {
+		panic("blueteam: the grant admin has no tuple relation for can_execute")
+	}
+	return r
+}
+
+// relationExecute is the action that lets an agent call a connector. A call is
+// grouped under it, and the grant of it is the tuple on executeTupleRelation.
+const relationExecute = "can_execute"
 
 // Grant names a grant by its object and relation.
 type Grant struct {
@@ -70,11 +89,11 @@ type grantEvent struct {
 func grantEvents(changes []audit.PgEntry) map[string]map[string][]grantEvent {
 	byAgent := map[string]map[string][]grantEvent{} // principal -> object -> events
 	for _, c := range changes {
-		if c.Action != grantAdded && c.Action != grantRemoved {
+		if (c.Action != grantAdded && c.Action != grantRemoved) || c.Decision != decisionAllow {
 			continue
 		}
 		var md struct{ Object, Relation string }
-		if json.Unmarshal(c.Metadata, &md) != nil || md.Relation != relationExecute {
+		if json.Unmarshal(c.Metadata, &md) != nil || md.Relation != executeTupleRelation {
 			continue
 		}
 		if byAgent[c.TargetID] == nil {

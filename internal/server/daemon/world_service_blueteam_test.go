@@ -206,8 +206,9 @@ func TestListActionsByGrant(t *testing.T) {
 			{Action: "connector.tool.call", ActorID: "agent:a2", TargetID: "gitlab", CreatedAt: blueAt(3),
 				Metadata: md(map[string]any{"result": "failure", "details": map[string]string{"error": "unauthorized"}})},
 		}, []audit.PgEntry{
-			{Action: "agent_grant_added", ActorID: "user:ann", TargetID: "agent:a1", CreatedAt: blueAt(0),
-				Metadata: md(map[string]any{"object": authz.ConnectorComponentObject("gitlab"), "relation": "can_execute"})},
+			// The grant admin writes the tuple relation direct_execute, with the decision allow.
+			{Action: "agent_grant_added", ActorID: "user:ann", TargetID: "agent:a1", Decision: "allow", CreatedAt: blueAt(0),
+				Metadata: md(map[string]any{"object": authz.ConnectorComponentObject("gitlab"), "relation": "direct_execute"})},
 		}, false, nil
 	}
 	resp, err := srv.ListActionsByGrant(worldTenantCtx("acme"), &worldpb.ListActionsByGrantRequest{

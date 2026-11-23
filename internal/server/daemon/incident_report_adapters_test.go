@@ -28,7 +28,7 @@ func TestAuditGrantChanges_ReadsTheRecordsOfOnePrincipalInOneTenant(t *testing.T
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	until := time.Unix(1700000500, 0)
-	meta := []byte(`{"object":"component:connector/okta-response","relation":"can_execute"}`)
+	meta := []byte(`{"object":"component:connector/okta-response","relation":"direct_execute"}`)
 
 	// The added records: one row. The removed records: none.
 	mock.ExpectQuery("SELECT COUNT").WithArgs("acme", "agent_grant_added", "agent_principal:p1", until).

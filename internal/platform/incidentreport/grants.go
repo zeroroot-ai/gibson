@@ -37,7 +37,7 @@ type StoreGrants struct {
 // The id comes from the event of the call, so the report never guesses a grant
 // from the name of an agent. GrantedBy is the person who gave the grant, read
 // from the audit record of the change that was in force at the time of the call.
-// It is empty when no such record exists. It is never the owner of the agent,
+// It is empty when no such record exists, and when the call has no time. It is never the owner of the agent,
 // because the owner of an agent did not give each grant of it.
 func (g StoreGrants) GrantByID(ctx context.Context, tenant, grantID string, at time.Time) (*Grant, error) {
 	gr, err := g.Source.GrantByID(ctx, tenant, grantID)
@@ -48,11 +48,10 @@ func (g StoreGrants) GrantByID(ctx context.Context, tenant, grantID string, at t
 		return nil, nil //nolint:nilnil // nil means that the tenant holds no grant with the id
 	}
 	out := &Grant{ID: gr.ID, Capability: gr.CapabilityName, GrantedAtUnix: gr.GrantedAt.Unix()}
-	if g.Changes == nil || gr.PrincipalRef == "" {
+	// A call with no time has no grantor. The grant in force today is not the grant
+	// of a call in the past.
+	if g.Changes == nil || gr.PrincipalRef == "" || at.IsZero() {
 		return out, nil
-	}
-	if at.IsZero() {
-		at = time.Now()
 	}
 	changes, err := g.Changes.GrantChanges(ctx, tenant, gr.PrincipalRef, at)
 	if err != nil {

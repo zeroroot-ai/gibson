@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 )
 
@@ -67,8 +68,11 @@ func (f fakeChanges) GrantChanges(_ context.Context, tenant, principal string, u
 }
 
 func change(action, actor, principal, object string, at int64) audit.PgEntry {
-	md, _ := json.Marshal(map[string]string{"object": object, "relation": "can_execute"})
-	return audit.PgEntry{Action: action, ActorID: actor, TargetID: principal, Metadata: md, CreatedAt: time.Unix(at, 0)}
+	rel, _ := authz.GrantTupleRelation("can_execute") // the relation that the grant admin writes
+	md, _ := json.Marshal(map[string]string{"object": object, "relation": rel})
+	return audit.PgEntry{
+		Action: action, ActorID: actor, TargetID: principal, Decision: "allow", Metadata: md, CreatedAt: time.Unix(at, 0),
+	}
 }
 
 func grantSource() *fakeSource {
@@ -152,8 +156,9 @@ func TestStoreGrants_AFailedAuditReadIsAnError(t *testing.T) {
 	}
 }
 
-// A call with no time reads the grant that is in force now.
-func TestStoreGrants_ACallWithNoTimeUsesNow(t *testing.T) {
+// A call with no time has no grantor. The grant in force now is not the grant of
+// the call.
+func TestStoreGrants_ACallWithNoTimeGivesNoGrantor(t *testing.T) {
 	obj := "component:connector/okta-response"
 	changes := fakeChanges{byTenant: map[string][]audit.PgEntry{"acme": {
 		change("agent_grant_added", "user-admin", "agent_principal:p1", obj, 1700000100),
@@ -162,8 +167,24 @@ func TestStoreGrants_ACallWithNoTimeUsesNow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GrantedBy != "user-admin" {
-		t.Errorf("GrantedBy = %q, want user-admin", got.GrantedBy)
+	if got.GrantedBy != "" {
+		t.Errorf("GrantedBy = %q, want empty", got.GrantedBy)
+	}
+}
+
+// A record with a deny decision names no grantor.
+func TestStoreGrants_AFailedChangeNamesNoGrantor(t *testing.T) {
+	obj := "component:connector/okta-response"
+	failed := change("agent_grant_added", "user-failed", "agent_principal:p1", obj, 1700000100)
+	failed.Decision = "deny"
+	changes := fakeChanges{byTenant: map[string][]audit.PgEntry{"acme": {failed}}}
+	got, err := StoreGrants{Source: grantSource(), Changes: changes}.
+		GrantByID(context.Background(), "acme", "g-1", time.Unix(1700000500, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GrantedBy != "" {
+		t.Errorf("GrantedBy = %q, want empty", got.GrantedBy)
 	}
 }
 
