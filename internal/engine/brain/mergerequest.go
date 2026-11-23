@@ -30,6 +30,10 @@ const (
 	// fix waits on a person. It moves no Finding. The exposure window counts the
 	// time until the next report as wait time.
 	MergeRequestRefused = "refused"
+	// MergeRequestOpen is the report of a merge request that the host shows open
+	// and not refused. It ends a refusal that an earlier report started
+	// (gibson#1609).
+	MergeRequestOpen = "open"
 )
 
 // MergeRequestObserved records the state of one merge request as the Git host
@@ -54,8 +58,23 @@ func (MergeRequestObserved) Kind() string { return "merge_request.observed" }
 // request carries. An unknown key or a state other than merged or closed
 // changes nothing.
 func applyMergeRequestObserved(w *World, e MergeRequestObserved) {
-	if e.Key == "" || (e.State != MergeRequestMerged && e.State != MergeRequestClosed) {
-		return // a refusal has no state to store. The Timeline holds it.
+	if e.Key == "" {
+		return
+	}
+	if e.State == MergeRequestRefused || e.State == MergeRequestOpen {
+		// The state is stored so the fix loop knows that a refusal is open, also
+		// after a restart. A merge request that the host settled keeps its state.
+		q := ecs.NewFilter1[Finding](w.ecs).Query()
+		for q.Next() {
+			f := q.Get()
+			if f.MergeRequest == e.Key && f.MergeRequestState != MergeRequestMerged && f.MergeRequestState != MergeRequestClosed {
+				f.MergeRequestState = e.State
+			}
+		}
+		return
+	}
+	if e.State != MergeRequestMerged && e.State != MergeRequestClosed {
+		return
 	}
 	if e.State == MergeRequestClosed {
 		releaseMergeSlot(w, e.Key)

@@ -33,6 +33,12 @@ const (
 	// WaitNoHealthVerdict is a `fixed` finding with no health verdict after the
 	// grant window of its merge slot (gibson#1609, gibson#1463).
 	WaitNoHealthVerdict WaitKind = brain.WaitNoHealthVerdict
+	// WaitRevertPending is a `fixed` finding whose health signal failed and whose
+	// revert merge request is not merged yet. Its slot blocks the Application
+	// until the revert merges (gibson#1609).
+	WaitRevertPending WaitKind = brain.WaitRevertPending
+	// WaitRevertFailed is the same finding when the revert call failed.
+	WaitRevertFailed WaitKind = brain.WaitRevertFailed
 )
 
 // WaitItem is one item that waits on a person.
@@ -87,9 +93,15 @@ func WaitingOnPerson(
 				add(WaitNextScan, f.ID, f.DeployedAt, "")
 			}
 			add(WaitNoHealthSignal, f.ID, f.HealthUnavailableAt, "")
-			if f.Health == "" {
+			switch f.Health {
+			case "":
 				v := waits[waitKey{f.MergeRequest, brain.WaitNoHealthVerdict}]
 				add(WaitNoHealthVerdict, f.ID, v.at, v.reason)
+			case brain.HealthFailed:
+				p := waits[waitKey{f.MergeRequest, brain.WaitRevertPending}]
+				add(WaitRevertPending, f.ID, p.at, p.reason)
+				r := waits[waitKey{f.MergeRequest, brain.WaitRevertFailed}]
+				add(WaitRevertFailed, f.ID, r.at, r.reason)
 			}
 		}
 	}

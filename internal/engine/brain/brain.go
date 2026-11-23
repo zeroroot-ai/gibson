@@ -565,7 +565,7 @@ func Reduce(w *World, ev Event) {
 	case MergeCallAllowed:
 		applyMergeCallAllowed(w, e)
 	case FixWaiting:
-		// The Timeline holds it. The World keeps no state of a wait.
+		applyFixWaiting(w, e)
 	case MergeRequestObserved:
 		applyMergeRequestObserved(w, e)
 	case VoIPlanRequested:

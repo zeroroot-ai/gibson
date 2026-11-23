@@ -614,18 +614,16 @@ func eventsOf[T brain.Event](evs []brain.Event) []T {
 	return out
 }
 
-// B. The host refuses the merge and the merge request is still open. The slot is
-// freed so the other fixes of the Application can go, the merge request is not
-// queued again, and the refusal names its reason. The finding stays fixing.
-func TestStep_ARefusedMergeFreesTheSlotAndIsNotQueuedAgain(t *testing.T) {
+// B. The host refuses the merge and the merge request is still open. The slot
+// stays, so no second fix of the Application ships while a person may merge the
+// merge request by hand. The refusal and its reason are the wait on a person.
+// The finding stays fixing.
+func TestStep_ARefusedMergeKeepsTheSlotAndRecordsTheWait(t *testing.T) {
 	g := newRig(t, "scan")
 	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
 	g.tick()
 	g.queueSecondFix()
 	g.tick()
-	if !g.granted("mr-1") || g.granted("mr-2") {
-		t.Fatalf("slots = %+v", g.w.MergeSlots())
-	}
 
 	g.r.mr = MergeFact{State: MRRefused, Reason: "branch protection requires a review", PipelineGreen: true, At: g.now}
 	evs := g.tick()
@@ -633,23 +631,74 @@ func TestStep_ARefusedMergeFreesTheSlotAndIsNotQueuedAgain(t *testing.T) {
 	if len(obs) != 1 || obs[0].State != brain.MergeRequestRefused || obs[0].Reason != "branch protection requires a review" {
 		t.Fatalf("observed = %+v, want one refusal with its reason", obs)
 	}
-	if !hasEvent[brain.MergeSlotExpired](evs) || g.hasSlot("mr-1") {
-		t.Fatalf("the slot of a refused merge was not freed: %+v", evs)
-	}
-	if !g.granted("mr-2") {
-		t.Fatal("the other fix of the Application did not get its slot")
+	if hasEvent[brain.MergeSlotExpired](evs) || !g.granted("mr-1") || g.granted("mr-2") {
+		t.Fatalf("a refused merge freed its slot: %+v", evs)
 	}
 	if got := g.status(); got != brain.FindingStatusFixing {
 		t.Fatalf("status = %q, want fixing", got)
 	}
 
-	// It is not queued again while the host keeps refusing, whatever the time.
-	g.now = g.now.Add(10 * DefaultPolicy().RequeueBackoff)
+	// The refusal is one event, and the slot stays, whatever the time.
+	g.now = g.now.Add(10 * DefaultPolicy().MergeGrantWindow)
 	for range 3 {
-		g.tick()
+		if more := g.tick(); len(more) != 0 {
+			t.Fatalf("a standing refusal gave events: %+v", more)
+		}
 	}
-	if g.hasSlot("mr-1") {
-		t.Fatal("a refused merge request was queued again")
+	if !g.granted("mr-1") || g.granted("mr-2") {
+		t.Fatal("a clock moved the slot of a refused merge")
+	}
+}
+
+// A person merges the refused merge request by hand. The host then shows it
+// merged, and the normal path goes on: the slot stays for the health verdict.
+func TestStep_ARefusedMergeThatAPersonMergedGoesTheNormalPath(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	g.queueSecondFix()
+	g.r.mr = MergeFact{State: MRRefused, Reason: "review required", At: g.now}
+	g.tick()
+	g.r.mr = MergeFact{State: MRMerged, At: g.now}
+	g.tick()
+	if got := g.status(); got != brain.FindingStatusFixed {
+		t.Fatalf("status = %q, want fixed", got)
+	}
+	if !g.hasSlot("mr-1") || g.granted("mr-2") {
+		t.Fatal("a second fix was granted before the health verdict of the merged fix")
+	}
+}
+
+// The host closes a refused merge request. The slot goes and the finding opens
+// again, as for any closed merge request.
+func TestStep_ARefusedMergeRequestThatTheHostClosedFreesItsSlot(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	g.r.mr = MergeFact{State: MRRefused, Reason: "review required", At: g.now}
+	g.tick()
+	g.r.mr = MergeFact{State: MRClosed, At: g.now}
+	g.tick()
+	if g.hasSlot("mr-1") || g.status() != brain.FindingStatusOpen {
+		t.Fatalf("slots = %+v status = %q, want the slot gone and the finding open", g.w.MergeSlots(), g.status())
+	}
+}
+
+// The refusal wait ends on the next read that is not refused.
+func TestStep_ARefusalEndsWhenTheMergeRequestIsPlainOpenAgain(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	g.r.mr = MergeFact{State: MRRefused, Reason: "review required", At: g.now}
+	g.tick()
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true, At: g.now}
+	evs := g.tick()
+	obs := eventsOf[brain.MergeRequestObserved](evs)
+	if len(obs) != 1 || obs[0].State != brain.MergeRequestOpen {
+		t.Fatalf("observed = %+v, want one report that ends the refusal", obs)
+	}
+	if more := g.tick(); len(eventsOf[brain.MergeRequestObserved](more)) != 0 {
+		t.Fatalf("the end of the refusal was recorded twice: %+v", more)
 	}
 }
 
@@ -742,18 +791,78 @@ func TestStep_ASlotWithAnAllowedCallInFlightIsNotFreedUntilAfterTheBound(t *test
 	}
 }
 
-// A call in flight also holds back the release of a refused merge.
-func TestStep_AnAllowedCallInFlightHoldsBackTheReleaseOfARefusedMerge(t *testing.T) {
+// 4. The open waits are on the slot, which the World folds from the Timeline. A
+// new Watcher, as after a restart, neither repeats a wait nor misses its end.
+func TestStep_ARestartBetweenTheBeginAndTheEndOfAWaitEndsIt(t *testing.T) {
 	g := newRig(t, "scan")
 	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
 	g.tick()
-	brain.Reduce(g.w, brain.MergeCallAllowed{MergeRequest: "mr-1", At: g.now})
-	g.r.mr = MergeFact{State: MRRefused, Reason: "review required", At: g.now}
-	if evs := g.tick(); hasEvent[brain.MergeSlotExpired](evs) {
-		t.Fatalf("the slot of a call in flight was freed: %+v", evs)
+	g.r.err = errors.New("the host is down")
+	if len(eventsOf[brain.FixWaiting](g.tick())) != 1 {
+		t.Fatal("the wait did not begin")
 	}
-	g.now = g.now.Add(DefaultPolicy().MergeCallBound)
-	if evs := g.tick(); !hasEvent[brain.MergeSlotExpired](evs) {
-		t.Fatalf("the slot of the refused merge was not freed after the bound: %+v", evs)
+
+	// The daemon restarts. The new Watcher holds no memory of the wait.
+	restarted, err := NewWatcher(g.r, g.rv, fakePlacer{app: "app-1"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.now = func() time.Time { return g.now }
+	g.wt = restarted
+
+	if again := g.tick(); len(eventsOf[brain.FixWaiting](again)) != 0 {
+		t.Fatalf("a restart repeated the wait: %+v", again)
+	}
+	g.r.err = nil
+	ended := eventsOf[brain.FixWaiting](g.tick())
+	if len(ended) != 1 || ended[0].Waiting {
+		t.Fatalf("waits = %+v, want the wait ended after the restart", ended)
+	}
+	if slots := g.w.MergeSlots(); len(slots) != 1 || len(slots[0].Waits) != 0 {
+		t.Fatalf("slots = %+v, want no open wait", slots)
+	}
+}
+
+// 3. A failed health signal keeps the slot until the revert merges. The list of
+// items that wait on a person says why: the revert is pending, or the revert call
+// failed (review M2, gibson#1609).
+func TestStep_AFailedHealthSignalWithAnUnmergedRevertIsAVisibleWait(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	g.queueSecondFix()
+	g.merged()
+	g.deployed()
+	g.r.health = HealthFact{Known: true, Done: true, Held: false, At: at(4)}
+	g.rv.waiting = true // the revert merge request waits for its pipeline
+	g.tick()
+	g.tick()
+
+	slots := g.w.MergeSlots()
+	if len(slots) == 0 || slots[0].MergeRequest != "mr-1" {
+		t.Fatalf("slots = %+v, want the slot of mr-1 kept", slots)
+	}
+	if reason := slots[0].Waits[brain.WaitRevertPending]; reason == "" {
+		t.Fatalf("waits = %+v, want a revert pending wait with its reason", slots[0].Waits)
+	}
+	if g.granted("mr-2") {
+		t.Fatal("a second fix was granted while the revert is pending")
+	}
+
+	// The revert call fails.
+	g.rv.err = errors.New("the host refused the revert")
+	g.tick()
+	slots = g.w.MergeSlots()
+	if slots[0].Waits[brain.WaitRevertFailed] == "" || slots[0].Waits[brain.WaitRevertPending] != "" {
+		t.Fatalf("waits = %+v, want only the revert failed wait", slots[0].Waits)
+	}
+
+	// The revert merges. The slot leaves and the next fix goes.
+	g.rv.err = nil
+	g.rv.waiting = false
+	g.tick()
+	g.tick()
+	if g.hasSlot("mr-1") || !g.granted("mr-2") {
+		t.Fatalf("slots = %+v, want mr-1 gone and mr-2 granted after the revert merged", g.w.MergeSlots())
 	}
 }

@@ -264,3 +264,72 @@ func TestMergeSlotExpirySystem_FreesNoGrantedSlotOnAClock(t *testing.T) {
 		t.Fatalf("the World freed a granted slot on a clock: %+v", evs)
 	}
 }
+
+// The reducer orders the allowed call and the release. A call that the gate
+// recorded after the watcher read the host and before the release keeps the slot,
+// also when the call event comes after the release time (gibson#1609).
+func TestMergeSlotExpired_TheReducerKeepsASlotWithACallInFlight(t *testing.T) {
+	bound := 2 * time.Minute
+	release := func(at time.Time) MergeSlotExpired {
+		return MergeSlotExpired{MergeRequest: "mr-1", Application: "shop", At: at, CallBound: bound}
+	}
+	setup := func() *World {
+		w := NewWorld("t1")
+		Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
+		Reduce(w, MergeGranted{MergeRequest: "mr-1", Application: "shop", At: at(1)})
+		return w
+	}
+
+	// The call is recorded after the watcher read (the release time).
+	w := setup()
+	Reduce(w, MergeCallAllowed{MergeRequest: "mr-1", At: at(2).Add(30 * time.Second)})
+	Reduce(w, release(at(2)))
+	if len(w.MergeSlots()) != 1 {
+		t.Fatal("a call recorded after the watcher read did not keep the slot")
+	}
+
+	// The call is recorded before the release, within the bound.
+	w = setup()
+	Reduce(w, MergeCallAllowed{MergeRequest: "mr-1", At: at(2).Add(-30 * time.Second)})
+	Reduce(w, release(at(2)))
+	if len(w.MergeSlots()) != 1 {
+		t.Fatal("a call within the bound did not keep the slot")
+	}
+
+	// A call older than the bound does not keep it. A release with no bound set
+	// is the release of another System and is not held back.
+	w = setup()
+	Reduce(w, MergeCallAllowed{MergeRequest: "mr-1", At: at(2).Add(-bound)})
+	Reduce(w, release(at(2)))
+	if len(w.MergeSlots()) != 0 {
+		t.Fatal("an old call kept the slot")
+	}
+	w = setup()
+	Reduce(w, MergeCallAllowed{MergeRequest: "mr-1", At: at(2)})
+	Reduce(w, MergeSlotExpired{MergeRequest: "mr-1", Application: "shop", At: at(2)})
+	if len(w.MergeSlots()) != 0 {
+		t.Fatal("a release with no call bound was held back")
+	}
+}
+
+// A wait sets and clears on the slot, and a wait of a merge request with no slot
+// changes nothing. The copy of the slots does not share the map.
+func TestFixWaiting_FoldsOntoTheSlot(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, FixWaiting{MergeRequest: "mr-9", WaitKind: WaitRevertPending, Reason: "x", Waiting: true})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
+	Reduce(w, FixWaiting{MergeRequest: "mr-1", WaitKind: WaitRevertPending, Reason: "first", Waiting: true})
+	Reduce(w, FixWaiting{MergeRequest: "mr-1", WaitKind: WaitRevertPending, Reason: "second", Waiting: true})
+	slots := w.MergeSlots()
+	if len(slots) != 1 || slots[0].Waits[WaitRevertPending] != "first" {
+		t.Fatalf("slots = %+v, want the first reason kept", slots)
+	}
+	slots[0].Waits["x"] = "changed"
+	if len(w.MergeSlots()[0].Waits) != 1 {
+		t.Fatal("the copy shares the map of the World")
+	}
+	Reduce(w, FixWaiting{MergeRequest: "mr-1", WaitKind: WaitRevertPending, Waiting: false})
+	if len(w.MergeSlots()[0].Waits) != 0 {
+		t.Fatal("the wait was not cleared")
+	}
+}

@@ -125,3 +125,37 @@ func TestWaitingOnPerson_UnreadableAndNoVerdictWaits(t *testing.T) {
 		}
 	}
 }
+
+// A failed health signal with an unmerged revert, and one whose revert call
+// failed, each show as an item with the reason. A held finding shows none.
+func TestWaitingOnPerson_RevertPendingAndRevertFailed(t *testing.T) {
+	failed := brain.FixFacts{CheckKind: "scan", DeployedAt: at(1), Health: brain.HealthFailed}
+	findings := []brain.FindingSnapshot{
+		{ID: "pending", Status: brain.FindingStatusFixed, MergeRequest: "mr-1", FixFacts: failed},
+		{ID: "callfailed", Status: brain.FindingStatusFixed, MergeRequest: "mr-2", FixFacts: failed},
+		{ID: "held", Status: brain.FindingStatusFixed, MergeRequest: "mr-3",
+			FixFacts: brain.FixFacts{CheckKind: "scan", DeployedAt: at(1), Health: brain.HealthHeld}},
+	}
+	history := []brain.Event{
+		brain.FixWaiting{MergeRequest: "mr-1", WaitKind: brain.WaitRevertPending, Reason: "revert pending: the revert merge request is not merged yet", Waiting: true, At: at(2)},
+		brain.FixWaiting{MergeRequest: "mr-2", WaitKind: brain.WaitRevertFailed, Reason: "the revert call failed", Waiting: true, At: at(3)},
+		brain.FixWaiting{MergeRequest: "mr-3", WaitKind: brain.WaitRevertPending, Reason: "x", Waiting: true, At: at(2)},
+	}
+	got := WaitingOnPerson(findings, nil, history, at(5))
+	want := map[string]struct {
+		kind   WaitKind
+		reason string
+	}{
+		"pending":    {WaitRevertPending, "revert pending: the revert merge request is not merged yet"},
+		"callfailed": {WaitRevertFailed, "the revert call failed"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want %d items", got, len(want))
+	}
+	for _, it := range got {
+		w, ok := want[it.ID]
+		if !ok || w.kind != it.Kind || w.reason != it.Reason {
+			t.Fatalf("item %+v, want %+v", it, w)
+		}
+	}
+}

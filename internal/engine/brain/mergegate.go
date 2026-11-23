@@ -3,7 +3,10 @@
 
 package brain
 
-import "time"
+import (
+	"maps"
+	"time"
+)
 
 // mergegate.go lets one fix at a time go out for each Application (gibson#1466).
 //
@@ -60,6 +63,11 @@ type MergeSlot struct {
 	// this slot. The watcher frees no slot within the call bound of it, because
 	// the call may still be on its way to the host (gibson#1609).
 	LastAllowedAt time.Time
+	// Waits holds the open waits on a person of this slot: the kind and the
+	// reason of each (FixWaiting). The World folds them from the Timeline, so a
+	// restart of the daemon keeps them and the fix loop reads them from here
+	// (gibson#1609).
+	Waits map[string]string
 }
 
 // MergeSlotExpired records that the daemon freed a slot that nothing else
@@ -70,12 +78,27 @@ type MergeSlotExpired struct {
 	Reason       string
 	At           time.Time
 	MissionID    string
+	// CallBound is set by the fix loop watcher. The reducer refuses the release
+	// when the gate allowed a merge call within CallBound of At, because the call
+	// may still be on its way to the host. The reducer is the one point that
+	// orders the allowed call and the release, so the check is here and nowhere
+	// earlier (gibson#1609). Zero means no such check.
+	CallBound time.Duration
 }
 
 // Kind identifies the merge_request.slot_expired brain event.
 func (MergeSlotExpired) Kind() string { return "merge_request.slot_expired" }
 
-func applyMergeSlotExpired(w *World, e MergeSlotExpired) { releaseMergeSlot(w, e.MergeRequest) }
+func applyMergeSlotExpired(w *World, e MergeSlotExpired) {
+	if s := findMergeSlot(w, e.MergeRequest); s != nil && e.CallBound > 0 && !s.LastAllowedAt.IsZero() {
+		// A call that the gate allowed after the release time, or within the bound
+		// before it, keeps the slot.
+		if d := e.At.Sub(s.LastAllowedAt); d < e.CallBound {
+			return
+		}
+	}
+	releaseMergeSlot(w, e.MergeRequest)
+}
 
 // MergeCallAllowed records that the gate allowed a merge call for a merge
 // request. The watcher reads it to free no slot that a call is still using.
@@ -95,6 +118,11 @@ func applyMergeCallAllowed(w *World, e MergeCallAllowed) {
 
 // Kinds of a fix that waits on a person and has no other record (gibson#1609).
 const (
+	// WaitRevertPending is a failed health signal whose revert merge request is
+	// not merged yet. The slot stays until it merges (review M2).
+	WaitRevertPending = "revert_pending"
+	// WaitRevertFailed is a failed health signal whose revert call failed.
+	WaitRevertFailed = "revert_failed"
 	// WaitMergeUnreadable is a merge request that the daemon cannot read on the
 	// Git host. The slot stays, because the daemon cannot know if it merged.
 	WaitMergeUnreadable = "merge_unreadable"
@@ -119,6 +147,26 @@ type FixWaiting struct {
 
 // Kind identifies the merge_request.fix_waiting brain event.
 func (FixWaiting) Kind() string { return "merge_request.fix_waiting" }
+
+// applyFixWaiting sets or clears one open wait on the slot of the merge request.
+// A wait of a merge request with no slot changes nothing: the slot is what the
+// wait explains.
+func applyFixWaiting(w *World, e FixWaiting) {
+	s := findMergeSlot(w, e.MergeRequest)
+	if s == nil || e.WaitKind == "" {
+		return
+	}
+	if !e.Waiting {
+		delete(s.Waits, e.WaitKind)
+		return
+	}
+	if s.Waits == nil {
+		s.Waits = map[string]string{}
+	}
+	if _, open := s.Waits[e.WaitKind]; !open {
+		s.Waits[e.WaitKind] = e.Reason
+	}
+}
 
 func findMergeSlot(w *World, mr string) *MergeSlot {
 	for i := range w.mergeSlots {
@@ -156,7 +204,15 @@ func releaseMergeSlot(w *World, mr string) {
 }
 
 // MergeSlots returns the queue in the order of the Timeline.
-func (w *World) MergeSlots() []MergeSlot { return append([]MergeSlot(nil), w.mergeSlots...) }
+func (w *World) MergeSlots() []MergeSlot {
+	out := append([]MergeSlot(nil), w.mergeSlots...)
+	for i := range out {
+		if len(out[i].Waits) > 0 {
+			out[i].Waits = maps.Clone(out[i].Waits)
+		}
+	}
+	return out
+}
 
 // MayMerge reports whether the merge request holds a granted slot. The slot is
 // bound to the merge request and to the tenant, and not to a mission: a later
