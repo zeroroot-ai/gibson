@@ -6,10 +6,14 @@ package fixloop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 var t0 = time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
@@ -864,5 +868,159 @@ func TestStep_AFailedHealthSignalWithAnUnmergedRevertIsAVisibleWait(t *testing.T
 	g.tick()
 	if g.hasSlot("mr-1") || !g.granted("mr-2") {
 		t.Fatalf("slots = %+v, want mr-1 gone and mr-2 granted after the revert merged", g.w.MergeSlots())
+	}
+}
+
+// holdReader records the hold time and the mission that the Watcher reads the
+// health signal for.
+type holdReader struct {
+	*fakeReader
+	hold    time.Duration
+	mission string
+}
+
+func (h *holdReader) Health(_ context.Context, _, mission, _ string, _ time.Time, hold time.Duration) (HealthFact, error) {
+	h.hold, h.mission = hold, mission
+	return h.health, h.err
+}
+
+// holdRig builds a rig whose reader records the health read, with the hold source.
+func holdRig(t *testing.T, src HoldSource) (*rig, *holdReader) {
+	t.Helper()
+	g := newRig(t, "scan")
+	hr := &holdReader{fakeReader: g.r}
+	wt, err := NewWatcher(hr, g.rv, fakePlacer{app: "app-1"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt.WithHoldSource(src)
+	wt.now = func() time.Time { return g.now }
+	g.wt = wt
+	g.r.health = HealthFact{Known: true} // the signal exists and the hold time still runs
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick() // the green pipeline queues the merge request, so it has a merge slot
+	g.queueSecondFix()
+	g.merged()
+	g.deployed()
+	g.tick() // the health read follows the deploy
+	return g, hr
+}
+
+// The Watcher asks the hold source for the fix mission and reads the health
+// signal with the hold time of that mission.
+func TestStep_ReadsTheHoldTimeOfTheFixMission(t *testing.T) {
+	var asked []string
+	_, hr := holdRig(t, func(_ context.Context, tenant, missionID string) (time.Duration, error) {
+		asked = append(asked, tenant+"/"+missionID)
+		return 45 * time.Minute, nil
+	})
+	if hr.hold != 45*time.Minute {
+		t.Errorf("the health signal was read with hold %v, want 45m", hr.hold)
+	}
+	if len(asked) == 0 || asked[0] != "t1/fix-run-1" {
+		t.Errorf("the hold was asked for %v, want the fix mission of tenant t1", asked)
+	}
+}
+
+// A mission that states no hold time gets the default hold time.
+func TestStep_AMissionWithNoHoldGetsTheDefaultHold(t *testing.T) {
+	_, hr := holdRig(t, func(context.Context, string, string) (time.Duration, error) { return 0, nil })
+	if hr.hold != DefaultPolicy().HoldTime {
+		t.Errorf("hold = %v, want the default %v", hr.hold, DefaultPolicy().HoldTime)
+	}
+}
+
+// The hold is read once, at the deploy. A later read of the health signal uses the
+// hold that the deploy event holds, so a deleted mission record never blocks it.
+func TestStep_TheHoldIsReadOnceAtTheDeploy(t *testing.T) {
+	calls := 0
+	g, hr := holdRig(t, func(context.Context, string, string) (time.Duration, error) {
+		calls++
+		if calls > 1 {
+			return 0, errors.New("the mission record is deleted")
+		}
+		return 45 * time.Minute, nil
+	})
+	g.tick()
+	g.tick()
+	if calls != 1 {
+		t.Errorf("the hold source was asked %d times, want once", calls)
+	}
+	if hr.hold != 45*time.Minute {
+		t.Errorf("hold = %v, want the 45m of the deploy event", hr.hold)
+	}
+}
+
+// A fix mission record that is gone gives the upper bound of the hold, never the
+// shorter default, and a visible wait with its own reason. The health signal is
+// still read.
+func TestStep_AGoneMissionRecordGivesTheUpperBoundAndAVisibleWait(t *testing.T) {
+	g, hr := holdRig(t, func(context.Context, string, string) (time.Duration, error) {
+		return 0, fmt.Errorf("read mission: %w", ErrHoldNotFound)
+	})
+	if hr.hold != MaxHold || hr.hold <= DefaultPolicy().HoldTime {
+		t.Errorf("hold = %v, want the upper bound %v and not the default", hr.hold, MaxHold)
+	}
+	var reason string
+	for _, sl := range g.w.MergeSlots() {
+		if sl.MergeRequest == "mr-1" {
+			reason = sl.Waits[brain.WaitHoldUnreadable]
+		}
+	}
+	if reason != "the hold of the fix mission cannot be read" {
+		t.Errorf("wait reason = %q, want its own reason (slots %+v)", reason, g.w.MergeSlots())
+	}
+	for _, sl := range g.w.MergeSlots() {
+		if _, general := sl.Waits[brain.WaitNoHealthVerdict]; general {
+			t.Error("the wait must not be the general no health verdict wait")
+		}
+	}
+}
+
+func TestHoldOf(t *testing.T) {
+	if got := HoldOf(nil); got != 0 {
+		t.Errorf("nil constraints = %v, want zero", got)
+	}
+	if got := HoldOf(&missionv1.MissionConstraints{HealthHold: durationpb.New(time.Hour)}); got != time.Hour {
+		t.Errorf("hold = %v, want 1h", got)
+	}
+	if got := HoldOf(&missionv1.MissionConstraints{HealthHold: durationpb.New(0)}); got != 0 {
+		t.Errorf("a zero hold = %v, want zero", got)
+	}
+}
+
+// An error other than not found records no deploy in this pass, and the next step
+// reads again. A transient error never shortens the hold.
+func TestStep_ATransientHoldErrorRecordsNoDeployAndTheNextStepReadsAgain(t *testing.T) {
+	fail := true
+	g, hr := holdRig(t, func(context.Context, string, string) (time.Duration, error) {
+		if fail {
+			return 0, errors.New("the data plane is down")
+		}
+		return 45 * time.Minute, nil
+	})
+	if fs := g.w.FindingSnapshot(); !fs[0].DeployedAt.IsZero() {
+		t.Fatalf("the deploy was recorded at %v while the hold could not be read", fs[0].DeployedAt)
+	}
+	if hr.mission != "" {
+		t.Error("the health signal was read with no hold")
+	}
+	for _, sl := range g.w.MergeSlots() {
+		if _, w := sl.Waits[brain.WaitHoldUnreadable]; w {
+			t.Error("a transient error must not open the hold_unreadable wait")
+		}
+	}
+
+	fail = false
+	g.tick() // records the deploy with the hold
+	g.tick() // reads the health signal
+	if hr.hold != 45*time.Minute {
+		t.Errorf("hold = %v, want the 45m that the next step read", hr.hold)
+	}
+}
+
+func TestMaxHoldIsTheProtoBound(t *testing.T) {
+	if MaxHold != 24*time.Hour {
+		t.Errorf("MaxHold = %v, want 24h, the upper bound of health_hold", MaxHold)
 	}
 }

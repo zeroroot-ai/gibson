@@ -121,6 +121,9 @@ type FixFacts struct {
 	// zero for a fix that is not deployed.
 	DeployedAt    time.Time
 	DeploymentKey string
+	// HealthHold is the hold time of the health signal that the deploy event
+	// recorded. Zero means the default hold time.
+	HealthHold time.Duration
 	// Health is what the health signal said after the deploy: empty, held or
 	// failed.
 	Health string
@@ -477,6 +480,7 @@ func resetFix(f *Finding) {
 	f.MergeRequestState = ""
 	f.DeployedAt = time.Time{}
 	f.DeploymentKey = ""
+	f.HealthHold = 0
 	f.Health = ""
 	f.HealthUnavailableAt = time.Time{}
 	f.RerunKind, f.RerunFound, f.RerunAt = "", false, time.Time{}

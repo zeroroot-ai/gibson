@@ -129,6 +129,10 @@ const (
 	// WaitNoHealthVerdict is a merged fix with no health verdict after the grant
 	// window. The hold time of the health signal is gibson#1463.
 	WaitNoHealthVerdict = "no_health_verdict"
+	// WaitHoldUnreadable is a merged fix whose fix mission record is gone, so the
+	// daemon could not read its hold time at the deploy. The fix uses the upper
+	// bound of the hold time.
+	WaitHoldUnreadable = "hold_unreadable"
 )
 
 // FixWaiting records that the fix of a merge request waits on a person, or that

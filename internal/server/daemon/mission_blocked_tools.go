@@ -19,6 +19,15 @@ import (
 // gives the same answer. It fails when the record cannot be read, and a caller
 // that needs the list then refuses its call.
 func (d *daemonImpl) storedBlockedTools(ctx context.Context, tenant, missionID string) ([]string, error) {
+	rec, err := d.storedMission(ctx, tenant, missionID)
+	if err != nil {
+		return nil, err
+	}
+	return blockedToolsOf(rec)
+}
+
+// storedMission reads the record of a mission from the data plane of the tenant.
+func (d *daemonImpl) storedMission(ctx context.Context, tenant, missionID string) (*mission.Mission, error) {
 	if d.pool == nil {
 		return nil, errors.New("the data plane pool is not configured")
 	}
@@ -40,7 +49,7 @@ func (d *daemonImpl) storedBlockedTools(ctx context.Context, tenant, missionID s
 	if err != nil {
 		return nil, fmt.Errorf("read mission %s: %w", missionID, err)
 	}
-	return blockedToolsOf(rec)
+	return rec, nil
 }
 
 // blockedToolsOf reads the deny list from the stored definition of a mission.

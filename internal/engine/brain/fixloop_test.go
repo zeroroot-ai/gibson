@@ -208,3 +208,38 @@ func TestSnapshot_KeepsTheFixLoopFacts(t *testing.T) {
 		t.Fatalf("merge slots = %v", restored.MergeSlots())
 	}
 }
+
+// The deploy event holds the hold time of the fix mission, so the health read
+// never needs the mission record. A new deploy replaces it, and the event keeps it
+// across the Timeline codec.
+func TestDeployObserved_HoldsTheHoldTimeOfTheFixMission(t *testing.T) {
+	w := fixedFinding(t, "scan")
+	Reduce(w, DeployObserved{MergeRequest: "mr-1", DeploymentKey: "dep-2", At: at(3), HoldSeconds: 2700})
+	if got := findingByID(t, w, "f1").HealthHold; got != 45*time.Minute {
+		t.Errorf("HealthHold = %v, want 45m", got)
+	}
+	Reduce(w, DeployObserved{MergeRequest: "mr-1", DeploymentKey: "dep-3", At: at(4)})
+	if got := findingByID(t, w, "f1").HealthHold; got != 0 {
+		t.Errorf("HealthHold = %v, want zero for a deploy that states none", got)
+	}
+
+	raw, err := EncodeEvent(DeployObserved{MergeRequest: "mr-1", At: at(3), HoldSeconds: 60, HoldUnreadable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, err := DecodeEvent(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := ev.(*DeployObserved)
+	if !ok {
+		got2, ok2 := ev.(DeployObserved)
+		if !ok2 {
+			t.Fatalf("decoded %T", ev)
+		}
+		got = &got2
+	}
+	if got.HoldSeconds != 60 || !got.HoldUnreadable {
+		t.Errorf("decoded %+v", got)
+	}
+}
