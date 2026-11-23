@@ -127,6 +127,10 @@ func (n nilDaemonStub) ListPlugins(_ context.Context) ([]PluginInfoInternal, err
 func (n nilDaemonStub) QueryPlugin(_ context.Context, _, _ string, _ map[string]any) (any, error) {
 	return nil, nil
 }
+func (n nilDaemonStub) RunCatalogMission(_ context.Context, _ RunCatalogMissionData) (string, error) {
+	return "", nil
+}
+
 func (n nilDaemonStub) RunMission(_ context.Context, _ RunMissionData) (string, error) {
 	return "stub-mission", nil
 }

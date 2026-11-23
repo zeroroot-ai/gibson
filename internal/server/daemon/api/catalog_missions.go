@@ -99,3 +99,46 @@ func (s *DaemonServer) RenderCatalogMission(
 	s.logger.Debug("rendered a catalog mission", "mission", name, "params", len(req.GetParams()))
 	return &daemonpb.RenderCatalogMissionResponse{Mission: def, Source: src}, nil
 }
+
+// RunCatalogMission implements DaemonServiceServer.RunCatalogMission.
+//
+// It runs a checked-in mission by name for the caller. The checks of the render
+// come first, so a caller sees every refusal of the closed parameter set before
+// any mission exists. The mission is created and queued in the tenant of the
+// caller and in no other: the daemon reads the tenant from the verified
+// identity, and the request has no tenant field (gibson#1469).
+//
+// The idempotency key is handled by the daemon interceptor. A second request
+// with the same key returns the first mission id, and a request that reuses the
+// key with another name or other params is refused there.
+func (s *DaemonServer) RunCatalogMission(
+	ctx context.Context,
+	req *daemonpb.RunCatalogMissionRequest,
+) (*daemonpb.RunCatalogMissionResponse, error) {
+	name := strings.TrimSpace(req.GetName())
+	if name == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument,
+			"name is required (checked-in missions: %s)", strings.Join(missioncatalog.Names(), ", "))
+	}
+	if req.GetTargetId() == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument,
+			"target_id is required: a mission binds to a registered target")
+	}
+	// Render once here for the refusal. The daemon renders again when it creates
+	// the mission, so the graph is the one of the binary and never a copy.
+	if _, err := missioncatalog.Render(ctx, name, req.GetParams()); err != nil {
+		return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := s.admitMission(ctx); err != nil {
+		return nil, err
+	}
+	id, err := s.daemon.RunCatalogMission(ctx, RunCatalogMissionData{
+		Name: name, Params: req.GetParams(), TargetID: req.GetTargetId(),
+	})
+	if err != nil {
+		s.logger.Error("failed to run a catalog mission", "mission", name, "error", err)
+		return nil, preserveStatus(err, "failed to run the catalog mission")
+	}
+	s.logger.Info("catalog mission started", "mission", name, "mission_id", id)
+	return &daemonpb.RunCatalogMissionResponse{MissionId: id}, nil
+}

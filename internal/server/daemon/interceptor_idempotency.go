@@ -5,12 +5,15 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/idempotency"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc"
 	grpccodes "google.golang.org/grpc/codes"
@@ -34,6 +37,34 @@ const idempotencyFieldName = "idempotency_key"
 // update it. A cached answer would drop the update (review R6).
 var identityKeyMethods = map[string]bool{
 	componentpb.ComponentService_SubmitFinding_FullMethodName: true,
+}
+
+// fingerprintMethods are the methods whose idempotency key is bound to the request
+// that first used it. A request that reuses the key with another name or other
+// params is refused, and the same request gets the first answer. The check covers
+// every field except the key itself.
+var fingerprintMethods = map[string]bool{
+	daemonpb.DaemonService_RunCatalogMission_FullMethodName: true,
+}
+
+// requestFingerprint is the hash of the request without its idempotency key. The
+// marshal is deterministic, so the same request gives the same hash.
+func requestFingerprint(req any) string {
+	msg, ok := req.(proto.Message)
+	if !ok {
+		return ""
+	}
+	clone := proto.Clone(msg)
+	r := clone.ProtoReflect()
+	if f := r.Descriptor().Fields().ByName(idempotencyFieldName); f != nil {
+		r.Clear(f)
+	}
+	raw, err := proto.MarshalOptions{Deterministic: true}.Marshal(clone)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 // idempotencyUnaryInterceptor returns a UnaryServerInterceptor that
@@ -97,6 +128,10 @@ func idempotencyUnaryInterceptor(store idempotency.Store, defaultTTL time.Durati
 			return handler(ctx, req)
 		}
 		method := info.FullMethod
+		fingerprint := ""
+		if fingerprintMethods[method] {
+			fingerprint = requestFingerprint(req)
+		}
 
 		// Phase 1: probe the cache.
 		cached, found, err := store.Get(ctx, tenant, method, key)
@@ -112,6 +147,9 @@ func idempotencyUnaryInterceptor(store idempotency.Store, defaultTTL time.Durati
 			return handler(ctx, req)
 		}
 		if found && cached != nil {
+			if err := checkFingerprint(cached, fingerprint); err != nil {
+				return nil, err
+			}
 			return replayCached(cached)
 		}
 
@@ -132,6 +170,9 @@ func idempotencyUnaryInterceptor(store idempotency.Store, defaultTTL time.Durati
 			// best-effort re-execution.
 			cached2, found2, gerr := store.Get(ctx, tenant, method, key)
 			if gerr == nil && found2 && cached2 != nil {
+				if err := checkFingerprint(cached2, fingerprint); err != nil {
+					return nil, err
+				}
 				return replayCached(cached2)
 			}
 		}
@@ -140,6 +181,7 @@ func idempotencyUnaryInterceptor(store idempotency.Store, defaultTTL time.Durati
 		resp, herr := handler(ctx, req)
 		toCache := buildCachedFromOutcome(resp, herr)
 		if toCache != nil {
+			toCache.RequestHash = fingerprint
 			if serr := store.Set(ctx, tenant, method, key, toCache, defaultTTL); serr != nil {
 				logger.WarnContext(ctx, "idempotency: store.Set failed; outcome not cached",
 					slog.String("grpc_method", info.FullMethod),
@@ -149,6 +191,16 @@ func idempotencyUnaryInterceptor(store idempotency.Store, defaultTTL time.Durati
 		}
 		return resp, herr
 	}
+}
+
+// checkFingerprint refuses a request that reuses a key with another request. An
+// entry with no fingerprint (an older entry) or a call with no fingerprint (a
+// method that did not opt in) is not checked.
+func checkFingerprint(cached *idempotency.CachedResponse, fingerprint string) error {
+	if fingerprint == "" || cached.RequestHash == "" || cached.RequestHash == fingerprint {
+		return nil
+	}
+	return grpcstatus.Error(grpccodes.InvalidArgument, "the idempotency key was used before with a different request")
 }
 
 // extractIdempotencyKey returns the value of a top-level string field

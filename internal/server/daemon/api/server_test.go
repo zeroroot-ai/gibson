@@ -26,6 +26,7 @@ type mockDaemon struct {
 	listPluginsFn             func(ctx context.Context) ([]PluginInfoInternal, error)
 	queryPluginFn             func(ctx context.Context, name, method string, params map[string]any) (any, error)
 	runMissionFn              func(ctx context.Context, req RunMissionData) (string, error)
+	runCatalogMissionFn       func(ctx context.Context, req RunCatalogMissionData) (string, error)
 	stopMissionFn             func(ctx context.Context, missionID string, force bool) error
 	listMissionsFn            func(ctx context.Context, activeOnly bool, statusFilter, namePattern string, limit, offset int) ([]MissionData, int, error)
 	subscribeFn               func(ctx context.Context, eventTypes []string, missionID string) (<-chan EventData, error)
@@ -84,6 +85,13 @@ func (m *mockDaemon) QueryPlugin(ctx context.Context, name, method string, param
 		return m.queryPluginFn(ctx, name, method, params)
 	}
 	return nil, nil
+}
+
+func (m *mockDaemon) RunCatalogMission(ctx context.Context, req RunCatalogMissionData) (string, error) {
+	if m.runCatalogMissionFn != nil {
+		return m.runCatalogMissionFn(ctx, req)
+	}
+	return "", nil
 }
 
 func (m *mockDaemon) RunMission(ctx context.Context, req RunMissionData) (string, error) {

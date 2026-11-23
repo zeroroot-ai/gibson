@@ -173,6 +173,10 @@ type daemonImpl struct {
 	// same store. Spec: gibson#228 / zeroroot-ai/.github#101.
 	idempotencyStore idempotency.Store
 
+	// scanAnchors writes the anchors of a scan (gibson#1469). The harness callback
+	// and RunCatalogMission both call it.
+	scanAnchors harness.ScanAnchorSink
+
 	// missionAuthzStore tracks the owning user per run for component authz callback resolution.
 	// One-code-path slice deploy#195: required; set unconditionally in the
 	// Redis init phase of Start().
@@ -1580,7 +1584,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// never became part of the Timeline.
 		d.callback.SetToolCallSink(d.toolCallSink(ingestToolCall(d.brainRegistry)))
 		d.callback.SetSkillLoadSink(ingestSkillLoad(d.brainRegistry))
-		d.callback.SetScanAnchorSink(ingestScanAnchors(d.brainRegistry, d.logger.WithComponent("scan-anchors").Slog()))
+		d.scanAnchors = ingestScanAnchors(d.brainRegistry, d.logger.WithComponent("scan-anchors").Slog())
+		d.callback.SetScanAnchorSink(d.scanAnchors)
 		d.callback.SetReadMarkerStore(harness.NewBrainReadMarkerStore(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")
 
