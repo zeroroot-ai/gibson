@@ -13,7 +13,7 @@ spec:
   vendor: prometheus
   class: observability
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-prometheus@sha256:43e3e952f4ad6609975e6a76843846bd673c15a28f353600f456f2ee4b00717e
+  image: ghcr.io/zeroroot-ai/connectors-prometheus@sha256:353d2379a6434e6f038719aac98cbdde681d39dc58508397f906febdf456662f
   transport: streamable-http
   port: 8080
   auth: none
