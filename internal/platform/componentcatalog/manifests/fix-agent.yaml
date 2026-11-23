@@ -4,16 +4,20 @@ displayName: Fix Agent
 description: >-
   Takes the open Findings of one Application and sends each one to the fix
   loop: it opens one fix job for a finding on a bank of coding agents, the job
-  delivers a merge request, and the daemon merges it on a green pipeline and
-  reads the health signal. The agent makes no model call and changes no code
-  itself. It never holds the token of the Git host.
+  delivers a merge request, and the agent merges it through the connector after
+  the daemon grants the merge slot. The daemon reads the deploy and the health
+  signal. The agent makes no model call and changes no code itself. It never
+  holds the token of the Git host.
 # No egress. The agent reaches only the harness callback service. The coding
-# agent of the bank does the work, and the driver of the job holds the token of
-# the Git host.
+# agent of the bank does the work through the governed connector tools, and the
+# connector holds the token of the Git host.
 spec:
   runtime: setec
-  # Release 0.1.0 of zeroroot-ai/fix-agent, built on sdk v0.213.0.
-  image: ghcr.io/zeroroot-ai/fix-agent@sha256:8e55b40a467dff1ecfc07d2f55f04bd0888fdf6d07ccbd5062016b81c9f83b3a
+  # Release 0.2.0 of zeroroot-ai/fix-agent, built on sdk v0.217.0. 0.2.0 merges
+  # the fix after the daemon grants the merge slot (fix-agent#8), merges a
+  # fixing finding whose merge request is still open (fix-agent#15) and keeps
+  # the file mode of each fix file (fix-agent#13).
+  image: ghcr.io/zeroroot-ai/fix-agent@sha256:c8e6cd91108eb53b7caf5b85d5efc6023cb4d91a988af643d3a6df357e47ddfd
   dispatchMode: sandboxed
   # Untrusted: the agent reads findings that tools of the buyer wrote, so it
   # runs only in a sandbox.
