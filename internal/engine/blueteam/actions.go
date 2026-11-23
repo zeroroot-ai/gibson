@@ -26,6 +26,9 @@ const (
 	// effect. A record with another decision (deny) records a change that failed
 	// after its record was written, so it never names a grantor.
 	decisionAllow = "allow"
+	// decisionDeny is the decision of the record that the grant admin writes when
+	// the FGA write failed after the allow record.
+	decisionDeny = "deny"
 	// resultIntent is the record that comes before the call. Only the result
 	// record counts as an action.
 	resultIntent = "intent"
@@ -84,25 +87,62 @@ type grantEvent struct {
 	grantor string
 }
 
+// changeKey names one grant change by what the grant admin writes: the action, the
+// actor, the target, the object and the relation.
+type changeKey struct{ action, actor, target, object, relation string }
+
 // grantEvents indexes the grant changes of the execute relation by agent
-// principal and by object.
+// principal and by object. It uses only records with an allow decision. The grant
+// admin writes the allow record before the FGA write, and a failed write adds a
+// deny record and leaves the allow. So an allow record that a later deny record
+// follows, for the same action, actor, target, object and relation, is a change
+// that did not take effect, and it is dropped.
 func grantEvents(changes []audit.PgEntry) map[string]map[string][]grantEvent {
-	byAgent := map[string]map[string][]grantEvent{} // principal -> object -> events
+	type parsed struct {
+		entry audit.PgEntry
+		key   changeKey
+	}
+	var allowed []parsed
+	failedAt := map[changeKey][]time.Time{}
 	for _, c := range changes {
-		if (c.Action != grantAdded && c.Action != grantRemoved) || c.Decision != decisionAllow {
+		if c.Action != grantAdded && c.Action != grantRemoved {
 			continue
 		}
 		var md struct{ Object, Relation string }
 		if json.Unmarshal(c.Metadata, &md) != nil || md.Relation != executeTupleRelation {
 			continue
 		}
+		k := changeKey{c.Action, c.ActorID, c.TargetID, md.Object, md.Relation}
+		switch c.Decision {
+		case decisionAllow:
+			allowed = append(allowed, parsed{c, k})
+		case decisionDeny:
+			failedAt[k] = append(failedAt[k], c.CreatedAt)
+		}
+	}
+	byAgent := map[string]map[string][]grantEvent{} // principal -> object -> events
+	for _, p := range allowed {
+		if failedAfter(failedAt[p.key], p.entry.CreatedAt) {
+			continue
+		}
+		c := p.entry
 		if byAgent[c.TargetID] == nil {
 			byAgent[c.TargetID] = map[string][]grantEvent{}
 		}
-		byAgent[c.TargetID][md.Object] = append(byAgent[c.TargetID][md.Object],
+		byAgent[c.TargetID][p.key.object] = append(byAgent[c.TargetID][p.key.object],
 			grantEvent{at: c.CreatedAt, added: c.Action == grantAdded, grantor: c.ActorID})
 	}
 	return byAgent
+}
+
+// failedAfter reports whether a deny record is at or after the time of an allow record.
+func failedAfter(denies []time.Time, allowAt time.Time) bool {
+	for _, d := range denies {
+		if !d.Before(allowAt) {
+			return true
+		}
+	}
+	return false
 }
 
 // callKey returns the group of one call record and its tool. ok is false for

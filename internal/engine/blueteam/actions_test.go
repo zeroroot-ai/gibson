@@ -203,3 +203,41 @@ func TestGroupActions_NamesTheGrantorFromAllowedDirectExecuteRecords(t *testing.
 		t.Fatalf("groups = %+v, want one group with grantor admin-1", groups)
 	}
 }
+
+// The grant admin writes the allow record before the FGA write. A failed write adds
+// a deny record for the same change and leaves the allow, so the allow is dropped.
+func TestGrantorOf_ADenyThatFollowsAnAllowOfTheSameChangeDropsTheAllow(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	obj := authz.ConnectorComponentObject("okta-response")
+	changes := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0),                      // took effect
+		change("agent_grant_added", "admin-2", "p1", "okta-response", t0.Add(time.Hour)),       // the write failed
+		failedChange("agent_grant_added", "admin-2", "p1", "okta-response", t0.Add(time.Hour)), // its deny record
+		change("agent_grant_removed", "admin-3", "p1", "okta-response", t0.Add(2*time.Hour)),   // the delete failed
+		failedChange("agent_grant_removed", "admin-3", "p1", "okta-response", t0.Add(2*time.Hour)),
+	}
+	got, _, ok := GrantorOf(changes, "p1", obj, t0.Add(3*time.Hour))
+	if !ok || got != "admin-1" {
+		t.Errorf("GrantorOf = %q, %v, want admin-1: neither failed change took effect", got, ok)
+	}
+
+	// A deny of another actor, target or object drops nothing.
+	other := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0),
+		failedChange("agent_grant_added", "admin-9", "p1", "okta-response", t0.Add(time.Hour)),
+		failedChange("agent_grant_added", "admin-1", "p2", "okta-response", t0.Add(time.Hour)),
+		failedChange("agent_grant_added", "admin-1", "p1", "crowdstrike-response", t0.Add(time.Hour)),
+	}
+	if got, _, ok := GrantorOf(other, "p1", obj, t0.Add(3*time.Hour)); !ok || got != "admin-1" {
+		t.Errorf("GrantorOf = %q, %v, want admin-1", got, ok)
+	}
+
+	// A deny that comes before a later allow of the same change does not drop that allow.
+	retried := []audit.PgEntry{
+		failedChange("agent_grant_added", "admin-1", "p1", "okta-response", t0),
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(time.Hour)),
+	}
+	if got, _, ok := GrantorOf(retried, "p1", obj, t0.Add(2*time.Hour)); !ok || got != "admin-1" {
+		t.Errorf("GrantorOf = %q, %v, want admin-1: the retry took effect", got, ok)
+	}
+}
