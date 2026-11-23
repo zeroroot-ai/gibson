@@ -60,7 +60,7 @@ func TestResponseActions_EachIDIsAToolOfACatalogManifest(t *testing.T) {
 			t.Errorf("%s: the connector %q is no response connector", a.ToolID, connector)
 		}
 		path := filepath.Join("..", "componentcatalog", "manifests", connector+".yaml")
-		raw, err := os.ReadFile(path)
+		raw, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
 			t.Errorf("%s: no manifest for connector %q: %v", a.ToolID, connector, err)
 			continue

@@ -6,6 +6,8 @@ package incidentreport
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,5 +135,43 @@ func TestStoreGrants_TheGrantInForceAtTheCallDecides(t *testing.T) {
 		if got.GrantedBy != tt.want {
 			t.Errorf("%s: GrantedBy = %q, want %q", tt.name, got.GrantedBy, tt.want)
 		}
+	}
+}
+
+type failingChanges struct{}
+
+func (failingChanges) GrantChanges(context.Context, string, string, time.Time) ([]audit.PgEntry, error) {
+	return nil, errors.New("audit down")
+}
+
+func TestStoreGrants_AFailedAuditReadIsAnError(t *testing.T) {
+	_, err := StoreGrants{Source: grantSource(), Changes: failingChanges{}}.
+		GrantByID(context.Background(), "acme", "g-1", time.Unix(1700000500, 0))
+	if err == nil || !strings.Contains(err.Error(), "audit down") {
+		t.Errorf("err = %v, want the audit error", err)
+	}
+}
+
+// A call with no time reads the grant that is in force now.
+func TestStoreGrants_ACallWithNoTimeUsesNow(t *testing.T) {
+	obj := "component:connector/okta-response"
+	changes := fakeChanges{byTenant: map[string][]audit.PgEntry{"acme": {
+		change("agent_grant_added", "user-admin", "agent_principal:p1", obj, 1700000100),
+	}}}
+	got, err := StoreGrants{Source: grantSource(), Changes: changes}.GrantByID(context.Background(), "acme", "g-1", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GrantedBy != "user-admin" {
+		t.Errorf("GrantedBy = %q, want user-admin", got.GrantedBy)
+	}
+}
+
+func TestCalledAt(t *testing.T) {
+	if !calledAt(0).IsZero() {
+		t.Error("a zero event time must give the zero time")
+	}
+	if got := calledAt(1700000000 * int64(time.Second)); got.Unix() != 1700000000 {
+		t.Errorf("calledAt = %v", got)
 	}
 }
