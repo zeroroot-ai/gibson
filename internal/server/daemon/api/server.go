@@ -657,6 +657,10 @@ type RunMissionData struct {
 	TargetIDs        []string
 	Variables        map[string]string
 	MemoryContinuity string
+	// TaskData is typed data that an outside caller sent with the task, by key. It
+	// is untrusted. The mission keeps it as data in its metadata, and nothing
+	// folds it into the text of a prompt or an instruction.
+	TaskData map[string]any
 	// NameSuffix is appended to the name of the definition to make the name of the
 	// mission. A mission record is one per name, and a later run of the same name
 	// is a new run of that record. A caller that needs a new mission with its own

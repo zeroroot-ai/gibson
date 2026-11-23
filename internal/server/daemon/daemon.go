@@ -1129,13 +1129,15 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	fixWatcher, err := fixloop.NewWatcher(
 		connectors, connectors,
 		applicationPlacer{querier: func() any { return d.graphragQuerier }},
-		nil, // the default policy until the constraints carry the hold time
+		nil, // the default policy
 		d.logger.WithComponent("fix-loop").Slog(),
 	)
 	if err != nil {
 		d.stopServices(ctx)
 		return fmt.Errorf("fix loop: %w", err)
 	}
+	// The hold time of the health signal is a constraint of the fix mission.
+	fixWatcher.WithHoldSource(d.fixHold)
 	go NewFixLoopRunner(
 		d.brainRegistry,
 		fixWatcher,
@@ -1572,7 +1574,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// this, a fleet agent's tool calls reached the daemon only as bare
 		// tool.call.* pub/sub metadata with no argument/result text, so they
 		// never became part of the Timeline.
-		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
+		d.callback.SetToolCallSink(d.toolCallSink(ingestToolCall(d.brainRegistry)))
 		d.callback.SetSkillLoadSink(ingestSkillLoad(d.brainRegistry))
 		d.callback.SetReadMarkerStore(harness.NewBrainReadMarkerStore(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")

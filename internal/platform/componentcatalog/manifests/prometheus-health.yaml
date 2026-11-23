@@ -1,7 +1,7 @@
 # Prometheus health signal connector. Zero Root builds the MCP server in zeroroot-ai/connectors
-# (prometheus/, release v0.1.0), because the vendor publishes no server with these tools.
+# (prometheus/, release v0.5.0), because the vendor publishes no server with these tools.
 # The image is public, signed and scanned, and the catalog pins it by digest.
-# Source of the environment: prometheus/README.md of zeroroot-ai/connectors at v0.1.0.
+# Source of the environment: prometheus/README.md of zeroroot-ai/connectors at v0.5.0.
 # The server speaks streamable HTTP on :8080 at /mcp.
 id: prometheus-health
 kind: connector
@@ -13,7 +13,7 @@ spec:
   vendor: prometheus
   class: observability
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-prometheus@sha256:2c446640cf65884b509319f0cc9166abc1f7fe9f5c286c7b3517605b9b319bff
+  image: ghcr.io/zeroroot-ai/connectors-prometheus@sha256:cba4537b249d057b9b1a261b8972291e7fa3d93fb73bb56183fd4d003025d009
   transport: streamable-http
   port: 8080
   auth: none

@@ -39,6 +39,15 @@ type DeployObserved struct {
 	ApplicationKey string
 	At             time.Time
 	MissionID      string
+	// HoldSeconds is the hold time of the health signal that the fix mission states
+	// (MissionConstraints.health_hold). The daemon reads it once, when it records
+	// the deploy, so a later read of the health signal never needs the mission
+	// record. Zero means the default hold time.
+	HoldSeconds int64
+	// HoldUnreadable is true when the fix mission record is gone, so the daemon
+	// could not read the hold time at the deploy. HoldSeconds then holds the upper
+	// bound, and a wait of kind WaitHoldUnreadable says why.
+	HoldUnreadable bool
 }
 
 // Kind identifies the deploy.observed brain event.
@@ -53,6 +62,7 @@ func applyDeployObserved(w *World, e DeployObserved) {
 	forEachFindingOfMR(w, e.MergeRequest, func(f *Finding) {
 		f.DeployedAt = e.At
 		f.DeploymentKey = e.DeploymentKey
+		f.HealthHold = time.Duration(e.HoldSeconds) * time.Second
 		f.Health = ""
 		f.HealthUnavailableAt = time.Time{}
 	})

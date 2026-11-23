@@ -121,6 +121,9 @@ type FixFacts struct {
 	// zero for a fix that is not deployed.
 	DeployedAt    time.Time
 	DeploymentKey string
+	// HealthHold is the hold time of the health signal that the deploy event
+	// recorded. Zero means the default hold time.
+	HealthHold time.Duration
 	// Health is what the health signal said after the deploy: empty, held or
 	// failed.
 	Health string
@@ -159,6 +162,10 @@ type FixFacts struct {
 	// means no fix has a merge request with a known head.
 	FixHeadSHA string
 	FixFiles   string
+	// FixHeadMissingReason and FixHeadMissingAt say why the link recorded no head
+	// for the current fix, and when. They are empty while the fix has a head.
+	FixHeadMissingReason string
+	FixHeadMissingAt     time.Time
 	// VerifiedAt is the time of the change to `verified`. A bounded reader
 	// of the history reads it to leave out an old fix (review M6).
 	VerifiedAt time.Time
@@ -477,6 +484,7 @@ func resetFix(f *Finding) {
 	f.MergeRequestState = ""
 	f.DeployedAt = time.Time{}
 	f.DeploymentKey = ""
+	f.HealthHold = 0
 	f.Health = ""
 	f.HealthUnavailableAt = time.Time{}
 	f.RerunKind, f.RerunFound, f.RerunAt = "", false, time.Time{}
@@ -485,5 +493,6 @@ func resetFix(f *Finding) {
 	f.FixClaim, f.FixClaimedAt = "", time.Time{}
 	f.FixLinkWait = FixLinkWait{}
 	f.FixHeadSHA, f.FixFiles = "", ""
+	f.FixHeadMissingReason, f.FixHeadMissingAt = "", time.Time{}
 	f.VerifiedAt = time.Time{}
 }

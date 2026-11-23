@@ -85,6 +85,20 @@ type Store interface {
 	// Owner returns the caller that started a mission and the agent of its
 	// publication, or ErrNotFound.
 	Owner(ctx context.Context, tenant, missionID string) (owner, agent string, err error)
+	// ClaimMessage claims the key of a message for the mission that the message
+	// starts. The key is unique inside the database of the tenant, so the same key
+	// in another tenant is a new key. ClaimNew means that the caller may start the
+	// mission. ClaimDuplicate means that a mission started from the key already.
+	// ClaimInFlight means that another call holds the claim and has not finished.
+	// A claim is a lease of MessageLease. A call that stops before it confirms the
+	// claim loses it when the lease ends, so no message is lost for good.
+	ClaimMessage(ctx context.Context, tenant, key, missionID string) (MessageClaim, error)
+	// ConfirmMessage records that the mission of the claim started. A confirmed key
+	// is a duplicate until MessageRetention ends.
+	ConfirmMessage(ctx context.Context, tenant, key, missionID string) error
+	// ForgetMessage gives back the claim of a message whose mission did not start,
+	// so that a retry can start it. It never deletes a confirmed key.
+	ForgetMessage(ctx context.Context, tenant, key, missionID string) error
 	// WithIdentityLock runs fn while it holds a lock on one identity in the database
 	// of the tenant. Two calls for the same identity run one after the other, also
 	// on two replicas. The lock ends when fn returns. fn reads the store through the
@@ -176,6 +190,27 @@ func NewPostgresStore(pool datapool.Pool) Store {
 	}
 	return &postgresStore{conns: poolConns{pool: pool}}
 }
+
+// MessageRetention is how long the store remembers the id of a message. A sender
+// that retries sends the same id again within this time.
+const MessageRetention = 7 * 24 * time.Hour
+
+// MessageLease is how long a claim of a message id holds before it is confirmed.
+// A start takes seconds, so a claim that is older than this belongs to a call that
+// stopped.
+const MessageLease = 5 * time.Minute
+
+// MessageClaim is the answer to ClaimMessage.
+type MessageClaim int
+
+// The answers to ClaimMessage.
+const (
+	ClaimNew MessageClaim = iota + 1
+	ClaimDuplicate
+	ClaimInFlight
+)
+
+const messageStarted = "started"
 
 var _ Store = (*postgresStore)(nil)
 
@@ -355,6 +390,89 @@ func (s *postgresStore) Release(ctx context.Context, tenant, slot string) error 
 	defer c.Release()
 	if _, err := c.SQL().Exec(ctx, `DELETE FROM inbound_tasks WHERE slot = $1`, slot); err != nil {
 		return fmt.Errorf("inboundmissionstore: release %s: %w", slot, err)
+	}
+	return nil
+}
+
+func (s *postgresStore) ClaimMessage(ctx context.Context, tenant, key, missionID string) (MessageClaim, error) {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return 0, fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	// An old key goes first, so the table stays small and an old id can start a mission again.
+	if _, err := c.SQL().Exec(ctx,
+		`DELETE FROM inbound_messages WHERE created_at < now() - make_interval(secs => $1)`,
+		MessageRetention.Seconds()); err != nil {
+		return 0, fmt.Errorf("inboundmissionstore: forget old message ids: %w", err)
+	}
+	// A new key belongs to this call. So does a pending key whose lease ended, but only
+	// when no task row exists for its mission: a task row means that the mission was
+	// reserved, and it may run, so a second mission for the same message would be a
+	// duplicate. Both tables are in the database of the tenant.
+	n, err := c.SQL().Exec(ctx,
+		`INSERT INTO inbound_messages (message_key, mission_id, state, lease_until)
+		 VALUES ($1, $2, 'pending', now() + make_interval(secs => $3))
+		 ON CONFLICT (message_key) DO UPDATE
+		   SET mission_id = EXCLUDED.mission_id, lease_until = EXCLUDED.lease_until, created_at = now()
+		   WHERE inbound_messages.state = 'pending' AND inbound_messages.lease_until < now()
+		     AND NOT EXISTS (SELECT 1 FROM inbound_tasks WHERE inbound_tasks.mission_id = inbound_messages.mission_id)`,
+		key, missionID, MessageLease.Seconds())
+	if err != nil {
+		return 0, fmt.Errorf("inboundmissionstore: claim message id: %w", err)
+	}
+	if n > 0 {
+		return ClaimNew, nil
+	}
+	var state string
+	var expired, reserved bool
+	err = c.SQL().QueryRow(ctx,
+		`SELECT m.state, m.lease_until < now(),
+		        EXISTS (SELECT 1 FROM inbound_tasks t WHERE t.mission_id = m.mission_id)
+		 FROM inbound_messages m WHERE m.message_key = $1`, key).Scan(&state, &expired, &reserved)
+	if errors.Is(err, datapool.ErrNoRows) {
+		// The retention delete of another call removed the row between the two statements.
+		return 0, fmt.Errorf("inboundmissionstore: message id vanished: %w", ErrNotFound)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("inboundmissionstore: read message id: %w", err)
+	}
+	// A confirmed key is a duplicate. So is a pending key whose lease ended and whose
+	// mission was reserved: the mission may run, and only its confirm failed.
+	if state == messageStarted || (expired && reserved) {
+		return ClaimDuplicate, nil
+	}
+	return ClaimInFlight, nil
+}
+
+func (s *postgresStore) ConfirmMessage(ctx context.Context, tenant, key, missionID string) error {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	n, err := c.SQL().Exec(ctx,
+		`UPDATE inbound_messages SET state = 'started', created_at = now()
+		 WHERE message_key = $1 AND mission_id = $2`, key, missionID)
+	if err != nil {
+		return fmt.Errorf("inboundmissionstore: confirm message id: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("inboundmissionstore: the claim of the message id is gone: %w", ErrNotFound)
+	}
+	return nil
+}
+
+func (s *postgresStore) ForgetMessage(ctx context.Context, tenant, key, missionID string) error {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	if _, err := c.SQL().Exec(ctx,
+		`DELETE FROM inbound_messages WHERE message_key = $1 AND mission_id = $2 AND state = 'pending'`,
+		key, missionID); err != nil {
+		return fmt.Errorf("inboundmissionstore: forget message id: %w", err)
 	}
 	return nil
 }

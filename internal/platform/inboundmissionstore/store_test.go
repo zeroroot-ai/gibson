@@ -484,3 +484,101 @@ func TestWithAgentLock_TakesTheLockOfPublishAndDeletesInTheSameTransaction(t *te
 	})
 	require.ErrorIs(t, err, ErrNotFound)
 }
+
+func TestClaimMessage(t *testing.T) {
+	ctx := context.Background()
+
+	fresh := &fakeDB{exec: okExec}
+	got, err := newStore(fresh).ClaimMessage(ctx, "acme", "5:recon:webhook:okta:e1", "m-1")
+	require.NoError(t, err)
+	assert.Equal(t, ClaimNew, got)
+	assert.Contains(t, fresh.seen[1], "INSERT INTO inbound_messages")
+	assert.Contains(t, fresh.seen[1], "inbound_messages.state = 'pending' AND inbound_messages.lease_until < now()",
+		"only a pending claim whose lease ended can be taken over")
+
+	exists := func(state string, expired, reserved bool) *fakeDB {
+		return &fakeDB{
+			exec:     func(string) (int64, error) { return 0, nil },
+			queryRow: func(string) datapool.Row { return fakeRow{values: []any{state, expired, reserved}} },
+		}
+	}
+	got, err = newStore(exists("started", false, true)).ClaimMessage(ctx, "acme", "k", "m-2")
+	require.NoError(t, err)
+	assert.Equal(t, ClaimDuplicate, got, "a started key is a duplicate")
+	got, err = newStore(exists("pending", false, true)).ClaimMessage(ctx, "acme", "k", "m-2")
+	require.NoError(t, err)
+	assert.Equal(t, ClaimInFlight, got, "a pending key with a live lease is in work")
+	got, err = newStore(exists("pending", true, true)).ClaimMessage(ctx, "acme", "k", "m-2")
+	require.NoError(t, err)
+	assert.Equal(t, ClaimDuplicate, got, "an expired lease with a task row is a duplicate: the mission may run")
+	got, err = newStore(exists("pending", true, false)).ClaimMessage(ctx, "acme", "k", "m-2")
+	require.NoError(t, err)
+	assert.Equal(t, ClaimInFlight, got, "an expired lease with no task row that lost the race is in work")
+	assert.Contains(t, fresh.seen[1], "NOT EXISTS (SELECT 1 FROM inbound_tasks WHERE inbound_tasks.mission_id = inbound_messages.mission_id)",
+		"a lease is taken over only when no task row exists for the old mission")
+}
+
+func TestClaimMessage_Failures(t *testing.T) {
+	ctx := context.Background()
+	_, err := newStore(&fakeDB{forErr: errBoom}).ClaimMessage(ctx, "acme", "k", "m")
+	require.ErrorIs(t, err, errBoom)
+
+	deleteFails := &fakeDB{exec: func(string) (int64, error) { return 0, errBoom }}
+	_, err = newStore(deleteFails).ClaimMessage(ctx, "acme", "k", "m")
+	require.ErrorIs(t, err, errBoom, "the delete of old keys fails")
+
+	insertFails := &fakeDB{exec: func(sql string) (int64, error) {
+		if strings.HasPrefix(sql, "INSERT") {
+			return 0, errBoom
+		}
+		return 0, nil
+	}}
+	_, err = newStore(insertFails).ClaimMessage(ctx, "acme", "k", "m")
+	require.ErrorIs(t, err, errBoom, "the insert fails")
+
+	conflict := func(row func(string) datapool.Row) *fakeDB {
+		return &fakeDB{exec: func(string) (int64, error) { return 0, nil }, queryRow: row}
+	}
+	_, err = newStore(conflict(func(string) datapool.Row { return fakeRow{err: datapool.ErrNoRows} })).ClaimMessage(ctx, "acme", "k", "m")
+	require.ErrorIs(t, err, ErrNotFound, "the row vanished between the two statements")
+	_, err = newStore(conflict(func(string) datapool.Row { return fakeRow{err: errBoom} })).ClaimMessage(ctx, "acme", "k", "m")
+	require.ErrorIs(t, err, errBoom, "the read of the state fails")
+}
+
+func TestClaimMessage_ReadsTheDatabaseOfTheTenant(t *testing.T) {
+	var tenants []string
+	db := &tenantRecordingDB{fakeDB: fakeDB{exec: okExec}, tenants: &tenants}
+	s := &postgresStore{conns: db}
+	_, err := s.ClaimMessage(context.Background(), "globex", "k", "m")
+	require.NoError(t, err)
+	require.NoError(t, s.ConfirmMessage(context.Background(), "acme", "k", "m"))
+	require.NoError(t, s.ForgetMessage(context.Background(), "initech", "k", "m"))
+	assert.Equal(t, []string{"globex", "acme", "initech"}, tenants, "each call uses the database of its own tenant")
+}
+
+type tenantRecordingDB struct {
+	fakeDB
+	tenants *[]string
+}
+
+func (d *tenantRecordingDB) For(_ context.Context, tenant string) (conn, error) {
+	*d.tenants = append(*d.tenants, tenant)
+	return &d.fakeDB, nil
+}
+
+func TestConfirmAndForgetMessage(t *testing.T) {
+	ctx := context.Background()
+	db := &fakeDB{exec: okExec}
+	require.NoError(t, newStore(db).ConfirmMessage(ctx, "acme", "k", "m"))
+	assert.Contains(t, db.seen[0], "SET state = 'started'")
+	require.NoError(t, newStore(db).ForgetMessage(ctx, "acme", "k", "m"))
+	assert.Contains(t, db.seen[1], "AND state = 'pending'", "a confirmed key is never deleted")
+
+	gone := &fakeDB{exec: func(string) (int64, error) { return 0, nil }}
+	require.ErrorIs(t, newStore(gone).ConfirmMessage(ctx, "acme", "k", "m"), ErrNotFound)
+	boom := &fakeDB{exec: func(string) (int64, error) { return 0, errBoom }}
+	require.ErrorIs(t, newStore(boom).ConfirmMessage(ctx, "acme", "k", "m"), errBoom)
+	require.ErrorIs(t, newStore(boom).ForgetMessage(ctx, "acme", "k", "m"), errBoom)
+	require.ErrorIs(t, newStore(&fakeDB{forErr: errBoom}).ConfirmMessage(ctx, "acme", "k", "m"), errBoom)
+	require.ErrorIs(t, newStore(&fakeDB{forErr: errBoom}).ForgetMessage(ctx, "acme", "k", "m"), errBoom)
+}

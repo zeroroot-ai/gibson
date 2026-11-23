@@ -613,3 +613,16 @@ func TestMemberSubmitFinding_RefusalsAndOutages(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, resp.GetError().GetCode(), "bank store down")
 }
+
+// A bank member call carries the run of its verified grant, and never a run that the
+// request names. The link of a closed fix job binds the head of its merge request to
+// this run, so the member call must carry it.
+func TestMemberCall_ContextInfoCarriesTheRunOfTheGrant(t *testing.T) {
+	m := memberCall{tenant: "acme", agent: "fix-agent", memberID: "member-1", bankID: "bank-1", runID: "run-1"}
+
+	info := m.contextInfo()
+
+	if info.GetMissionRunId() != "run-1" || info.GetMissionId() != "bank-1" || info.GetAgentName() != "fix-agent" {
+		t.Errorf("context = %+v, want the run, the bank and the agent of the grant", info)
+	}
+}

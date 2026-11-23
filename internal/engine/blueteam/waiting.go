@@ -21,6 +21,10 @@ const (
 	// WaitMergeRefused is a finding in `fixing` whose merge the branch
 	// protection refused.
 	WaitMergeRefused WaitKind = "merge_refused"
+	// WaitNoFixHead is a finding in `fixing` whose link recorded no head for the
+	// fix. The fix agent makes no merge call without a head, so a person looks at
+	// the merge request. The reason says why the daemon recorded none.
+	WaitNoFixHead WaitKind = "no_fix_head"
 	// WaitNextScan is a `fixed` finding that waits on the next scan of a tool
 	// of the buyer.
 	WaitNextScan WaitKind = "next_scan"
@@ -33,6 +37,9 @@ const (
 	// WaitNoHealthVerdict is a `fixed` finding with no health verdict after the
 	// grant window of its merge slot (gibson#1609, gibson#1463).
 	WaitNoHealthVerdict WaitKind = brain.WaitNoHealthVerdict
+	// WaitHoldUnreadable is a `fixed` finding whose hold time the daemon could not
+	// read from the fix mission at the deploy.
+	WaitHoldUnreadable WaitKind = brain.WaitHoldUnreadable
 	// WaitRevertPending is a `fixed` finding whose health signal failed and whose
 	// revert merge request is not merged yet. Its slot blocks the Application
 	// until the revert merges (gibson#1609).
@@ -56,7 +63,9 @@ type WaitItem struct {
 }
 
 // WaitingKinds are the kinds of the history events that WaitingOnPerson reads.
-var WaitingKinds = []string{brain.MergeRequestObserved{}.Kind(), brain.FixWaiting{}.Kind()}
+var WaitingKinds = []string{
+	brain.MergeRequestObserved{}.Kind(), brain.FixWaiting{}.Kind(), brain.FindingStatusChanged{}.Kind(),
+}
 
 // WaitingOnPerson returns each item that waits on a person, the longest wait
 // first. history is the durable Timeline of the tenant. The in-memory Timeline
@@ -81,11 +90,25 @@ func WaitingOnPerson(
 	}
 	refusals := lastRefusals(history)
 	waits := lastWaits(history)
+	linked := linkTimes(history)
 	for _, f := range findings {
 		switch f.Status {
 		case brain.FindingStatusFixing:
 			r := refusals[f.MergeRequest]
 			add(WaitMergeRefused, f.ID, r.at, r.reason)
+			// A linked fix with no head waits on a person, with or without a recorded
+			// reason. The daemon can stop between the link events and the head events,
+			// and a finding from before FixHeadMissing has no reason.
+			if f.FixHeadSHA == "" && f.MergeRequest != "" {
+				since, reason := f.FixHeadMissingAt, f.FixHeadMissingReason
+				if reason == "" {
+					reason = "no fix head was recorded"
+					if since = linked[f.ID]; since.IsZero() {
+						since = f.FixClaimedAt
+					}
+				}
+				add(WaitNoFixHead, f.ID, since, reason)
+			}
 			u := waits[waitKey{f.MergeRequest, brain.WaitMergeUnreadable}]
 			add(WaitMergeUnreadable, f.ID, u.at, u.reason)
 		case brain.FindingStatusFixed:
@@ -97,6 +120,8 @@ func WaitingOnPerson(
 			case "":
 				v := waits[waitKey{f.MergeRequest, brain.WaitNoHealthVerdict}]
 				add(WaitNoHealthVerdict, f.ID, v.at, v.reason)
+				h := waits[waitKey{f.MergeRequest, brain.WaitHoldUnreadable}]
+				add(WaitHoldUnreadable, f.ID, h.at, h.reason)
 			case brain.HealthFailed:
 				p := waits[waitKey{f.MergeRequest, brain.WaitRevertPending}]
 				add(WaitRevertPending, f.ID, p.at, p.reason)
@@ -119,6 +144,27 @@ func WaitingOnPerson(
 
 func rerunAfterDeploy(f brain.FindingSnapshot) bool {
 	return !f.RerunAt.IsZero() && f.RerunAt.After(f.DeployedAt)
+}
+
+// linkTimes returns, for each finding, the time of its last status change to fixing
+// with a merge request: the time of the link.
+func linkTimes(history []brain.Event) map[string]time.Time {
+	out := map[string]time.Time{}
+	for _, raw := range history {
+		var e brain.FindingStatusChanged
+		switch v := raw.(type) {
+		case brain.FindingStatusChanged:
+			e = v
+		case *brain.FindingStatusChanged:
+			e = *v
+		default:
+			continue
+		}
+		if e.Status == brain.FindingStatusFixing && e.MergeRequest != "" {
+			out[e.ID] = e.At
+		}
+	}
+	return out
 }
 
 // waitStart is the start of a wait and what the Timeline says about it.

@@ -23,6 +23,7 @@ type Watcher struct {
 	reverter Reverter
 	placer   Placer
 	policy   PolicySource
+	hold     HoldSource
 	now      func() time.Time
 	logger   *slog.Logger
 
@@ -54,6 +55,16 @@ func NewWatcher(r Reader, rv Reverter, p Placer, policy PolicySource, logger *sl
 		now: func() time.Time { return time.Now().UTC() }, logger: logger,
 		refused: map[string]string{}, released: map[string]time.Time{},
 	}, nil
+}
+
+// WithHoldSource sets the source of the hold time of the health signal. The
+// Watcher asks it one time for each deploy, for the fix mission of the merge
+// request, and the deploy event keeps the answer. A mission that
+// states no hold time gets the hold time of the policy. Without a source, each
+// merge request gets the hold time of the policy.
+func (w *Watcher) WithHoldSource(h HoldSource) *Watcher {
+	w.hold = h
+	return w
 }
 
 // Step reads the facts for each finding that has a merge request and returns
@@ -196,6 +207,14 @@ func (w *Watcher) stepFixing(
 	if !fact.PipelineGreen || w.inBackoff(tenant, mr) {
 		return ended, nil
 	}
+	if noFixHead(fs) {
+		// The fix has no head. The fix agent makes no
+		// merge call without a head, so a slot would only block the Application for
+		// the grant window at each cycle. The finding waits on a person instead.
+		w.logger.Warn("fix loop: the fix has no head, so the merge request gets no merge slot",
+			"tenant", tenant, "merge_request", mr)
+		return ended, nil
+	}
 	mission := fixMission(fs)
 	if mission == "" {
 		// A slot binds a mission, and no call of an empty mission merges. A
@@ -214,6 +233,19 @@ func (w *Watcher) stepFixing(
 	return []brain.Event{brain.MergeRequestQueued{
 		MergeRequest: mr, Application: app, At: w.now(), MissionID: mission,
 	}}, nil
+}
+
+// noFixHead reports whether a finding of the merge request has no fix head. The
+// reason does not matter: the daemon can stop between the link events and the head
+// events, and a finding from before brain.FixHeadMissing has no reason. The fix
+// agent makes no merge call without a head, so such a fix gets no slot.
+func noFixHead(fs []brain.FindingSnapshot) bool {
+	for _, f := range fs {
+		if f.FixHeadSHA == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *Watcher) noteRelease(mr string) {
@@ -314,7 +346,17 @@ func (w *Watcher) stepFixed(
 	case hasSlot && slot.Granted && !slot.GrantedAt.IsZero() && w.now().Sub(slot.GrantedAt) >= w.policy(tenant).grantWindow():
 		wait = w.beginWait(slot, mr, fs, brain.WaitNoHealthVerdict, "no health verdict")
 	}
+	// The hold wait ends with the health verdict.
+	if f.Health != "" {
+		wait = append(wait, w.endWait(slot, hasSlot, mr, fs, brain.WaitHoldUnreadable)...)
+	}
 	evs, err := w.stepFixedFacts(ctx, tenant, mr, f)
+	for _, e := range evs {
+		if d, ok := e.(brain.DeployObserved); ok && d.HoldUnreadable && hasSlot {
+			wait = append(wait, w.beginWait(slot, mr, fs, brain.WaitHoldUnreadable,
+				"the hold of the fix mission cannot be read")...)
+		}
+	}
 	if f.Health == brain.HealthFailed && hasSlot {
 		wait = append(wait, w.revertWaits(slot, mr, fs, evs, err)...)
 	}
@@ -349,7 +391,11 @@ func (w *Watcher) stepFixedFacts(ctx context.Context, tenant, mr string, f brain
 		if !d.Deployed || d.At.IsZero() {
 			return nil, nil // merged and not deployed yet
 		}
-		return deployEvents(mr, d, f.FixMissionID), nil
+		hold, err := w.holdAtDeploy(ctx, tenant, f.FixMissionID)
+		if err != nil {
+			return nil, err // the deploy is not recorded now, and the next step reads again
+		}
+		return deployEvents(mr, d, f.FixMissionID, hold), nil
 	case f.Health == brain.HealthFailed:
 		return w.revert(ctx, tenant, mr, f)
 	case f.Health == "":
@@ -365,15 +411,43 @@ const (
 	edgeDeployedIn    = "DEPLOYED_IN"
 )
 
+// holdRead is the hold time that the Watcher read from the fix mission at the
+// deploy. unreadable is true when the record of the mission is gone.
+type holdRead struct {
+	hold       time.Duration
+	unreadable bool
+}
+
+// holdAtDeploy reads the hold time of the fix mission one time, when the Watcher
+// records the deploy. A mission that states none gives zero, and the default hold
+// time applies. A record that is gone gives MaxHold and the mark unreadable, and the
+// finding waits visibly with its own reason. Any other error is returned, so the
+// Watcher records no deploy in this pass and reads again at the next step.
+func (w *Watcher) holdAtDeploy(ctx context.Context, tenant, missionID string) (holdRead, error) {
+	if w.hold == nil {
+		return holdRead{}, nil
+	}
+	hold, err := w.hold(ctx, tenant, missionID)
+	switch {
+	case errors.Is(err, ErrHoldNotFound):
+		w.logger.Warn("fix loop: the fix mission record is gone, so the hold is the upper bound",
+			"tenant", tenant, "mission_id", missionID, "hold", MaxHold)
+		return holdRead{hold: MaxHold, unreadable: true}, nil
+	case err != nil:
+		return holdRead{}, fmt.Errorf("read hold time: %w", err)
+	}
+	return holdRead{hold: min(max(hold, 0), MaxHold)}, nil
+}
+
 // deployEvents records the deploy of a merged fix. The Timeline event holds
 // the time of the deploy. The graph gets the edge from the merge request to
 // the Deployment that carries it. A deploy with no deployment key has no node
 // to point at, so it gets the event and no edge.
-func deployEvents(mr string, d DeployFact, missionID string) []brain.Event {
+func deployEvents(mr string, d DeployFact, missionID string, hold holdRead) []brain.Event {
 	out := make([]brain.Event, 0, 3)
 	out = append(out, brain.DeployObserved{
 		MergeRequest: mr, DeploymentKey: d.DeploymentKey, ApplicationKey: d.ApplicationKey, At: d.At.UTC(),
-		MissionID: missionID,
+		MissionID: missionID, HoldSeconds: int64(hold.hold / time.Second), HoldUnreadable: hold.unreadable,
 	})
 	if d.DeploymentKey == "" {
 		return out
@@ -425,6 +499,11 @@ func firstWithStatus(fs []brain.FindingSnapshot, status string) brain.FindingSna
 // than the limit is a failure.
 func (w *Watcher) readHealth(ctx context.Context, tenant, mr string, f brain.FindingSnapshot) ([]brain.Event, error) {
 	pol := w.policy(tenant)
+	// The hold time was read once, at the deploy, and the deploy event holds it.
+	// A later read never needs the record of the fix mission.
+	if f.HealthHold > 0 {
+		pol.HoldTime = f.HealthHold
+	}
 	d, err := w.reader.Deploy(ctx, tenant, f.FixMissionID, mr)
 	if err != nil {
 		return nil, fmt.Errorf("read deploy: %w", err)

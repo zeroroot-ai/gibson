@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
+package brain
+
+import "time"
+
+// openedMergeRequestLimit bounds the opened merge requests that one World keeps.
+// The oldest one goes first. The World belongs to one tenant, so the tenant that
+// opens the most merge requests can evict only its own.
+const openedMergeRequestLimit = 4096
+
+// MergeRequestOpened records that the tool open_merge_request succeeded for a
+// merge request. The daemon takes the values from the result of the tool call at
+// the tool gate, so they are not the claim of an agent. The link of a closed fix
+// job compares the head with the head that the Git host reports, so a commit that
+// the job did not make never becomes the head of the fix.
+type MergeRequestOpened struct {
+	// MergeRequest is the reference of the merge request, and URL is its URL. The
+	// deliverable of a job names either.
+	MergeRequest string
+	URL          string
+	// JobID is the job whose branch the tool opened. It is empty when the branch
+	// is no job branch.
+	JobID        string
+	SourceBranch string
+	HeadSHA      string
+	// RunID and MissionID name the run and the mission of the call, so a call of
+	// another agent cannot replace the head of the merge request of a job.
+	// MissionRunID is the mission run of the call. It is empty for a call of an
+	// agent that runs outside a mission run, such as a member of a bank.
+	RunID        string
+	MissionID    string
+	MissionRunID string
+	At           time.Time
+}
+
+// Kind identifies the merge_request.opened brain event.
+func (MergeRequestOpened) Kind() string { return "merge_request.opened" }
+
+// OpenedMergeRequest is the state that MergeRequestOpened leaves in the World.
+type OpenedMergeRequest struct {
+	MergeRequest string    `json:"merge_request"`
+	URL          string    `json:"url,omitempty"`
+	JobID        string    `json:"job_id,omitempty"`
+	SourceBranch string    `json:"source_branch"`
+	HeadSHA      string    `json:"head_sha"`
+	RunID        string    `json:"run_id,omitempty"`
+	MissionID    string    `json:"mission_id,omitempty"`
+	MissionRunID string    `json:"mission_run_id,omitempty"`
+	At           time.Time `json:"at"`
+}
+
+// openedKey is the key of a record: the reference or the URL of the merge request,
+// and the mission run of the call. A call of another run has a key of its own, so
+// a foreign open can neither replace nor block the record of the job.
+func openedKey(mergeRequest, missionRunID string) string {
+	return mergeRequest + "\x00" + missionRunID
+}
+
+// applyMergeRequestOpened keeps the record under the reference and under the URL,
+// for the mission run of the call. An event with no mission run is not kept,
+// because no job can claim it. Inside one run, a record is replaced only by a call
+// of the same agent run and mission.
+func applyMergeRequestOpened(w *World, e MergeRequestOpened) {
+	if e.HeadSHA == "" || e.SourceBranch == "" || e.MissionRunID == "" {
+		return
+	}
+	rec := OpenedMergeRequest(e)
+	for _, mr := range []string{e.MergeRequest, e.URL} {
+		if mr == "" {
+			continue
+		}
+		key := openedKey(mr, e.MissionRunID)
+		if old, ok := w.openedMRs[key]; ok && (old.RunID != e.RunID || old.MissionID != e.MissionID) {
+			continue
+		}
+		if w.openedMRs == nil {
+			w.openedMRs = map[string]OpenedMergeRequest{}
+		}
+		if _, ok := w.openedMRs[key]; !ok {
+			w.openedMROrder = append(w.openedMROrder, key)
+		}
+		w.openedMRs[key] = rec
+	}
+	for len(w.openedMROrder) > openedMergeRequestLimit {
+		delete(w.openedMRs, w.openedMROrder[0])
+		w.openedMROrder = w.openedMROrder[1:]
+	}
+}
+
+// OpenedMergeRequest returns the record of the merge request that the key names, as
+// a reference or as a URL, for the mission run of the call.
+func (w *World) OpenedMergeRequest(key, missionRunID string) (OpenedMergeRequest, bool) {
+	r, ok := w.openedMRs[openedKey(key, missionRunID)]
+	return r, ok
+}
+
+// OpenedMergeRequests returns the records in the order of the Timeline, once each.
+func (w *World) OpenedMergeRequests() []OpenedMergeRequest {
+	out := make([]OpenedMergeRequest, 0, len(w.openedMRs))
+	seen := map[OpenedMergeRequest]bool{}
+	for _, k := range w.openedMROrder {
+		r, ok := w.openedMRs[k]
+		if !ok || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+	}
+	return out
+}
+
+// FixHeadMissing records that the link of a closed fix job could not record a head
+// for the fix, and why. The finding waits on a person while it has no head,
+// because the fix agent makes no merge call without one.
+type FixHeadMissing struct {
+	ID           string
+	MergeRequest string
+	Reason       string
+	MissionID    string
+	At           time.Time
+}
+
+// Kind identifies the finding.fix_head_missing brain event.
+func (FixHeadMissing) Kind() string { return "finding.fix_head_missing" }
+
+// applyFixHeadMissing records the reason on the Finding whose current merge
+// request is the one that the event names. A Finding that has a head keeps it.
+func applyFixHeadMissing(w *World, e FixHeadMissing) {
+	forFinding(w, e.ID, func(f *Finding) {
+		if f.MergeRequest == e.MergeRequest && f.FixHeadSHA == "" {
+			f.FixHeadMissingReason, f.FixHeadMissingAt = e.Reason, e.At
+		}
+	})
+}

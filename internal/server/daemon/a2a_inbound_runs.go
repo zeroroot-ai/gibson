@@ -32,6 +32,18 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
+// inboundStartBound bounds the claim, the reserve and the start of one message. It
+// is far under inboundmissionstore.MessageLease, so a start that is still in work
+// when the lease ends cannot happen. A second call then never starts a second mission.
+const inboundStartBound = inboundmissionstore.MessageLease / 5
+
+// inboundMessageKey is the key of a message id for one agent. The agent length comes
+// first, so two pairs of agent and id never give one key. The key is valid text, because
+// Postgres refuses a NUL byte in a text column.
+func inboundMessageKey(agent, messageKey string) string {
+	return fmt.Sprintf("%d:%s:%s", len(agent), agent, messageKey)
+}
+
 // inboundTaskInputVariable is the mission variable that holds the text of an
 // inbound message. The text is the task input. The daemon never reads a target
 // from it.
@@ -65,6 +77,9 @@ type inboundRuns struct {
 	buildTimeout time.Duration
 	// stop ends a running mission of the tenant on the context.
 	stop func(ctx context.Context, missionID string) error
+	// startBound bounds the claim of the message id, the reserve and the start. Zero
+	// means inboundStartBound. A test sets it.
+	startBound time.Duration
 }
 
 // missionFindingReader reads the findings of one mission with all of their
@@ -220,6 +235,15 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		return nil, err
 	}
 
+	// The webhook of the message is data. It goes to the mission as typed task
+	// data, never into the task input text and never into an instruction.
+	var taskData map[string]any
+	if hook, present, werr := a2aserver.WebhookOf(req.Message); werr != nil {
+		return nil, fmt.Errorf("read the webhook of the message: %w", werr)
+	} else if present {
+		taskData = map[string]any{a2aserver.WebhookKey: hook}
+	}
+
 	tenant, err := auth.NewTenantID(c.Tenant)
 	if err != nil {
 		return nil, fmt.Errorf("%w: the tenant of the caller is not valid", a2aserver.ErrRefused)
@@ -247,18 +271,59 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	// The task row is written before the mission record, and it takes the ID that
 	// the mission record will take. A running mission therefore always has its row.
 	missionID := types.NewID().String()
+	// A message id that this agent of the tenant already started a mission for
+	// starts no second mission. The key holds the agent, so one id sent to two
+	// agents starts both. It is kept in the database of the tenant, so the same id
+	// in another tenant is a new id. The claim is a lease. A start that fails gives
+	// it back, and a daemon that stops loses it when the lease ends, so no message
+	// is lost for good. The claim is confirmed only after the start succeeded.
+	bound := r.startBound
+	if bound <= 0 {
+		bound = inboundStartBound
+	}
+	// The detached context still ends the claim, the reserve and the start before the
+	// lease of the claim ends. The calls that undo them use a context of their own.
+	baseCtx := ctx
+	ctx, cancelBound := context.WithTimeout(ctx, bound)
+	defer cancelBound()
+	msgKey := ""
+	if k := a2aserver.WebhookMessageKey(req.Message); k != "" {
+		msgKey = inboundMessageKey(req.Agent, k)
+		claim, cerr := r.published.ClaimMessage(ctx, c.Tenant, msgKey, missionID)
+		if cerr != nil {
+			return nil, fmt.Errorf("record the message id for agent %s: %w", req.Agent, cerr)
+		}
+		switch claim {
+		case inboundmissionstore.ClaimNew:
+			// The caller may start the mission.
+		case inboundmissionstore.ClaimDuplicate:
+			return a2aserver.RejectedTask("duplicate"), nil
+		case inboundmissionstore.ClaimInFlight:
+			return nil, fmt.Errorf("%w: agent %s", a2aserver.ErrInFlight, req.Agent)
+		}
+	}
+	forget := func() error {
+		if msgKey == "" {
+			return nil
+		}
+		return r.published.ForgetMessage(context.WithoutCancel(baseCtx), c.Tenant, msgKey, missionID)
+	}
 	slot, err := r.published.Reserve(ctx, c.Tenant, req.Agent, c.Subject, missionID)
 	switch {
 	case errors.Is(err, inboundmissionstore.ErrNotFound):
+		if ferr := forget(); ferr != nil {
+			return nil, fmt.Errorf("give back the message id for agent %s: %w", req.Agent, ferr)
+		}
 		return a2aserver.RejectedTask(a2aserver.ReasonAgentNotAvailable), nil
 	case err != nil:
-		return nil, fmt.Errorf("record the task for agent %s: %w", req.Agent, err)
+		return nil, fmt.Errorf("record the task for agent %s: %w", req.Agent, errors.Join(err, forget()))
 	}
 	started, err := r.starter.StartMission(ctx, api.RunMissionData{
 		MissionDefinitionID: pub.DefinitionID,
 		MissionID:           missionID,
 		TargetIDs:           targets,
 		Variables:           map[string]string{inboundTaskInputVariable: a2aserver.TextOf(req.Message)},
+		TaskData:            taskData,
 		// The mission start compares the definition and the targets that it loads with
 		// the pin of the publication, so a change after the check above starts nothing.
 		PinnedDefinitionHash: pub.DefinitionHash,
@@ -269,7 +334,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	})
 	if err != nil {
 		// The client may be gone, and the task row must still be deleted.
-		rerr := r.published.Release(context.WithoutCancel(ctx), c.Tenant, slot)
+		rerr := errors.Join(r.published.Release(context.WithoutCancel(baseCtx), c.Tenant, slot), forget())
 		// A tenant that is suspended, and a pin that does not match, are refusals
 		// of policy. The Task is rejected, as for any other refusal of a well
 		// formed message.
@@ -284,9 +349,28 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	if started != missionID {
 		// The record has an ID that the row does not name. The mission ends, and the
 		// task row is deleted.
-		serr := r.stop(context.WithoutCancel(ctx), started)
-		rerr := r.published.Release(context.WithoutCancel(ctx), c.Tenant, slot)
+		serr := r.stop(context.WithoutCancel(baseCtx), started)
+		rerr := errors.Join(r.published.Release(context.WithoutCancel(baseCtx), c.Tenant, slot), forget())
 		return nil, fmt.Errorf("the mission %s has an ID other than %s: %w", started, missionID, errors.Join(serr, rerr))
+	}
+	if msgKey != "" {
+		// The mission runs. A key that cannot be confirmed stays a lease and is never
+		// given back, so the mission is not started twice within the lease.
+		cerr := r.published.ConfirmMessage(context.WithoutCancel(baseCtx), c.Tenant, msgKey, missionID)
+		if errors.Is(cerr, inboundmissionstore.ErrNotFound) {
+			// The claim is gone, so another call may have taken it over and may start a
+			// second mission. This mission ends, and its task row is deleted.
+			serr := r.stop(context.WithoutCancel(baseCtx), missionID)
+			rerr := r.published.Release(context.WithoutCancel(baseCtx), c.Tenant, slot)
+			return nil, fmt.Errorf("the claim of the message id of agent %s is gone, so mission %s ended: %w",
+				req.Agent, missionID, errors.Join(cerr, serr, rerr))
+		}
+		if cerr != nil {
+			// The row stays pending. The next claim cannot take it over while the task row
+			// of this mission exists (inboundmissionstore.ClaimMessage).
+			slog.WarnContext(ctx, "the message id of a started mission could not be confirmed",
+				"tenant", c.Tenant, "agent", req.Agent, "mission_id", missionID, "error", cerr)
+		}
 	}
 	return &a2a.Task{
 		ID: a2a.TaskID(missionID), ContextID: missionID,

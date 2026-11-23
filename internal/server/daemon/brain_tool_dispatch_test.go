@@ -149,6 +149,12 @@ func TestDispatchTool_RejectsNamelessTool(t *testing.T) {
 // is ticked until the event lands.
 func dispatchOutcome(t *testing.T, h gibsonharness.AgentHarness, req brain.DispatchRequest) brain.WorkCompleted {
 	t.Helper()
+	return dispatchOutcomeWithData(t, h, req, nil)
+}
+
+// dispatchOutcomeWithData is dispatchOutcome for a mission with task data.
+func dispatchOutcomeWithData(t *testing.T, h gibsonharness.AgentHarness, req brain.DispatchRequest, data map[string]any) brain.WorkCompleted {
+	t.Helper()
 	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	got := make(chan brain.WorkCompleted, 1)
 	eng.Subscribe(func(ev brain.Event) {
@@ -162,7 +168,7 @@ func dispatchOutcome(t *testing.T, h gibsonharness.AgentHarness, req brain.Dispa
 
 	b := newBrainExecutor(nil, slog.Default())
 	req.MissionID = "m1"
-	b.register(req.MissionID, &missionBinding{ctx: context.Background(), eng: eng, harness: h})
+	b.register(req.MissionID, &missionBinding{ctx: context.Background(), eng: eng, harness: h, taskData: data})
 	b.Dispatch(req)
 
 	deadline := time.After(5 * time.Second)

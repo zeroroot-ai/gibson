@@ -16,6 +16,8 @@
 // The report holds evidence only. It states no verdict about a control.
 package incidentreport
 
+import "time"
+
 // Frame is the position of one line on the Timeline of the tenant.
 //
 // TimelineSeq is the 0-based position of the event, the number that
@@ -67,7 +69,8 @@ const (
 type GrantLine struct {
 	ID         string
 	Capability string
-	// GrantedBy is the person who owns the agent and gave the grant.
+	// GrantedBy is the person who gave the grant. It is never the owner of the
+	// agent, and it is empty when no audit record names the grantor.
 	GrantedBy string
 	// GrantedAtUnix is the time of the grant, in seconds.
 	GrantedAtUnix int64
@@ -83,7 +86,9 @@ type ActionLine struct {
 	// GrantID is the grant that the Timeline event of the call names. Grant
 	// holds the grant that it reads.
 	GrantID string
-	Outcome Outcome
+	// CalledAt is the time of the call. It is zero when the event has no time.
+	CalledAt time.Time
+	Outcome  Outcome
 	// Error is the error that the call returned. It is empty for a call that
 	// the connector accepted.
 	Error string

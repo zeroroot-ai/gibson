@@ -4,7 +4,9 @@
 package a2aserver
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 )
@@ -89,4 +91,77 @@ func targetIDs(raw any) ([]string, error) {
 		out = append(out, s)
 	}
 	return out, nil
+}
+
+// WebhookKey is the key of the webhook in a data part of an inbound message. The
+// value is task data of the mission, and the daemon never reads it as an
+// instruction.
+const WebhookKey = "webhook"
+
+// MaxWebhookBytes is the largest webhook data that the daemon accepts, in bytes of
+// JSON.
+const MaxWebhookBytes = 128 << 10
+
+// ErrAmbiguousWebhook reports a message with more than one webhook.
+var ErrAmbiguousWebhook = fmt.Errorf("%w: the message holds more than one webhook", a2a.ErrInvalidParams)
+
+// WebhookOf reads the webhook of an inbound message. It reads data parts only,
+// never a text part. present is false when no data part holds the key. The value
+// must be an object of at most MaxWebhookBytes bytes of JSON. A second webhook is
+// an error.
+func WebhookOf(m *a2a.Message) (data map[string]any, present bool, err error) {
+	if m == nil {
+		return nil, false, nil
+	}
+	for _, p := range m.Parts {
+		if p == nil {
+			continue
+		}
+		obj, ok := p.Data().(map[string]any)
+		if !ok {
+			continue
+		}
+		raw, has := obj[WebhookKey]
+		if !has {
+			continue
+		}
+		if present {
+			return nil, false, ErrAmbiguousWebhook
+		}
+		v, ok := raw.(map[string]any)
+		if !ok {
+			return nil, false, fmt.Errorf("%w: %q is not an object", a2a.ErrInvalidParams, WebhookKey)
+		}
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, false, fmt.Errorf("%w: %q is not JSON", a2a.ErrInvalidParams, WebhookKey)
+		}
+		if len(b) > MaxWebhookBytes {
+			return nil, false, fmt.Errorf("%w: %q is larger than %d bytes", a2a.ErrInvalidParams, WebhookKey, MaxWebhookBytes)
+		}
+		data, present = v, true
+	}
+	return data, present, nil
+}
+
+// webhookKeyPrefix starts the id of a message that carries a webhook.
+const webhookKeyPrefix = "webhook:"
+
+// WebhookMessageKey returns the key that drops a repeated webhook, or an empty
+// string when the message has none. The key is the message id
+// "webhook:<source>:<id>". A message with another id that holds the metadata
+// "webhook_id" gets the key "webhook:<webhook_source>:<webhook_id>".
+func WebhookMessageKey(m *a2a.Message) string {
+	if m == nil {
+		return ""
+	}
+	if strings.HasPrefix(m.ID, webhookKeyPrefix) && len(m.ID) > len(webhookKeyPrefix) {
+		return m.ID
+	}
+	id, _ := m.Metadata["webhook_id"].(string)
+	if id == "" {
+		return ""
+	}
+	source, _ := m.Metadata["webhook_source"].(string)
+	return webhookKeyPrefix + source + ":" + id
 }

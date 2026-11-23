@@ -10,11 +10,31 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/server/admin"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
+// grantRecord builds the audit record of a grant change from the output of the grant
+// admin writer, with the decision that the test names. A change in the relation, the
+// decision or the keys of the writer fails these tests.
+func grantRecord(action, decision, actor, agent, connector string, when time.Time) audit.PgEntry {
+	tuples := admin.GrantTuples(agent, []*tenantv1.GrantTuple{{Object: authz.ConnectorComponentObject(connector), Relation: "can_execute"}})
+	e := admin.GrantAuditEvents(actor, "acme", agent, action, decision, tuples)[0]
+	return audit.PgEntry{
+		TenantID: e.TenantID, ActorID: e.ActorID, ActorType: e.ActorType, Action: e.Action, TargetType: e.TargetType,
+		TargetID: e.TargetID, Decision: e.Decision, Metadata: e.Metadata, CreatedAt: when,
+	}
+}
+
+// change is the record of a change that took effect (decision allow).
 func change(action, actor, agent, connector string, when time.Time) audit.PgEntry {
-	md, _ := json.Marshal(map[string]string{"object": authz.ConnectorComponentObject(connector), "relation": "can_execute"})
-	return audit.PgEntry{Action: action, ActorID: actor, TargetType: "agent_grant", TargetID: agent, Metadata: md, CreatedAt: when}
+	return grantRecord(action, "allow", actor, agent, connector, when)
+}
+
+// failedChange is the record that the writer adds when the FGA write failed after the
+// allow record (decision deny).
+func failedChange(action, actor, agent, connector string, when time.Time) audit.PgEntry {
+	return grantRecord(action, "deny", actor, agent, connector, when)
 }
 
 func call(agent, connector, tool, result, errClass string, when time.Time) audit.PgEntry {
@@ -103,5 +123,161 @@ func TestGroupActions_NamesTheAuditRecordsOfEachGroup(t *testing.T) {
 	}
 	if got := groups[0].RecordIDs; len(got) != 2 || got[0] != "rec-1" || got[1] != "rec-2" {
 		t.Fatalf("record ids = %v", got)
+	}
+}
+
+func TestGrantorOf(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	changes := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "agent_principal:p1", "okta-response", t0),
+		change("agent_grant_removed", "admin-1", "agent_principal:p1", "okta-response", t0.Add(time.Hour)),
+		change("agent_grant_added", "admin-2", "agent_principal:p1", "okta-response", t0.Add(2*time.Hour)),
+		change("agent_grant_added", "admin-3", "agent_principal:p2", "okta-response", t0),
+	}
+	obj := authz.ConnectorComponentObject("okta-response")
+	tests := []struct {
+		name      string
+		principal string
+		at        time.Time
+		want      string
+		wantOK    bool
+	}{
+		{"before any grant", "agent_principal:p1", t0.Add(-time.Second), "", false},
+		{"first grant", "agent_principal:p1", t0.Add(time.Minute), "admin-1", true},
+		{"after the removal", "agent_principal:p1", t0.Add(90 * time.Minute), "", false},
+		{"second grant", "agent_principal:p1", t0.Add(3 * time.Hour), "admin-2", true},
+		{"another principal", "agent_principal:p2", t0.Add(time.Minute), "admin-3", true},
+		{"unknown principal", "agent_principal:p9", t0.Add(time.Minute), "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _, ok := GrantorOf(changes, tt.principal, obj, tt.at)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf("GrantorOf = %q, %v, want %q, %v", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+// The grant admin writes direct_execute, so the record of a real grant names it.
+func TestGrantorOf_ReadsTheRelationThatTheGrantAdminWrites(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	obj := authz.ConnectorComponentObject("okta-response")
+	rel, _ := authz.GrantTupleRelation("can_execute")
+	if rel != "direct_execute" {
+		t.Fatalf("the tuple relation of can_execute is %q, want direct_execute", rel)
+	}
+	md, _ := json.Marshal(map[string]string{"object": obj, "relation": "direct_execute"})
+	written := audit.PgEntry{Action: "agent_grant_added", ActorID: "admin-1", TargetID: "p1", Decision: "allow", Metadata: md, CreatedAt: t0}
+	if got, _, ok := GrantorOf([]audit.PgEntry{written}, "p1", obj, t0.Add(time.Minute)); !ok || got != "admin-1" {
+		t.Errorf("GrantorOf = %q, %v, want admin-1", got, ok)
+	}
+	// A record of the computed relation names no grant, because it takes no tuple.
+	md, _ = json.Marshal(map[string]string{"object": obj, "relation": "can_execute"})
+	computed := audit.PgEntry{Action: "agent_grant_added", ActorID: "admin-1", TargetID: "p1", Decision: "allow", Metadata: md, CreatedAt: t0}
+	if _, _, ok := GrantorOf([]audit.PgEntry{computed}, "p1", obj, t0.Add(time.Minute)); ok {
+		t.Error("a record of the computed relation named a grantor")
+	}
+}
+
+// Only a record with an allow decision counts. A failed re-add must not name its
+// actor, and a failed remove must not end a grant that is in force.
+func TestGrantorOf_UsesOnlyAllowedChanges(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	obj := authz.ConnectorComponentObject("okta-response")
+	changes := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0),
+		failedChange("agent_grant_added", "admin-2", "p1", "okta-response", t0.Add(time.Hour)),
+		failedChange("agent_grant_removed", "admin-3", "p1", "okta-response", t0.Add(2*time.Hour)),
+	}
+	got, _, ok := GrantorOf(changes, "p1", obj, t0.Add(3*time.Hour))
+	if !ok || got != "admin-1" {
+		t.Errorf("GrantorOf = %q, %v, want admin-1: the failed changes count for nothing", got, ok)
+	}
+}
+
+// GroupActions names the grantor of a call from the records that production writes.
+func TestGroupActions_NamesTheGrantorFromAllowedDirectExecuteRecords(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	changes := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0),
+		failedChange("agent_grant_added", "admin-2", "p1", "okta-response", t0.Add(time.Hour)),
+	}
+	calls := []audit.PgEntry{call("p1", "okta-response", "suspend_user", "success", "", t0.Add(2*time.Hour))}
+	groups := GroupActions(calls, changes, t0, t0.Add(3*time.Hour))
+	if len(groups) != 1 || groups[0].Grantor != "admin-1" {
+		t.Fatalf("groups = %+v, want one group with grantor admin-1", groups)
+	}
+}
+
+// The grant admin writes the allow record before the FGA write. A failed write adds
+// a deny record for the same change and leaves the allow, so the allow is dropped.
+func TestGrantorOf_ADenyThatFollowsAnAllowOfTheSameChangeDropsTheAllow(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	obj := authz.ConnectorComponentObject("okta-response")
+	changes := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0),                      // took effect
+		change("agent_grant_added", "admin-2", "p1", "okta-response", t0.Add(time.Hour)),       // the write failed
+		failedChange("agent_grant_added", "admin-2", "p1", "okta-response", t0.Add(time.Hour)), // its deny record
+		change("agent_grant_removed", "admin-3", "p1", "okta-response", t0.Add(2*time.Hour)),   // the delete failed
+		failedChange("agent_grant_removed", "admin-3", "p1", "okta-response", t0.Add(2*time.Hour)),
+	}
+	got, _, ok := GrantorOf(changes, "p1", obj, t0.Add(3*time.Hour))
+	if !ok || got != "admin-1" {
+		t.Errorf("GrantorOf = %q, %v, want admin-1: neither failed change took effect", got, ok)
+	}
+
+	// A deny of another actor, target or object drops nothing.
+	other := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0),
+		failedChange("agent_grant_added", "admin-9", "p1", "okta-response", t0.Add(time.Hour)),
+		failedChange("agent_grant_added", "admin-1", "p2", "okta-response", t0.Add(time.Hour)),
+		failedChange("agent_grant_added", "admin-1", "p1", "crowdstrike-response", t0.Add(time.Hour)),
+	}
+	if got, _, ok := GrantorOf(other, "p1", obj, t0.Add(3*time.Hour)); !ok || got != "admin-1" {
+		t.Errorf("GrantorOf = %q, %v, want admin-1", got, ok)
+	}
+
+	// A deny that comes before a later allow of the same change does not drop that allow.
+	retried := []audit.PgEntry{
+		failedChange("agent_grant_added", "admin-1", "p1", "okta-response", t0),
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(time.Hour)),
+	}
+	if got, _, ok := GrantorOf(retried, "p1", obj, t0.Add(2*time.Hour)); !ok || got != "admin-1" {
+		t.Errorf("GrantorOf = %q, %v, want admin-1: the retry took effect", got, ok)
+	}
+}
+
+// Each deny cancels only the latest earlier allow of its key. A add that took effect, a
+// remove, and a re-add that failed: the first add stays cancelled by nobody, and the
+// remove ends it, so no grant is in force. A failed re-add must not drop the first add.
+func TestGrantorOf_ADenyCancelsOnlyTheLatestEarlierAllow(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	obj := authz.ConnectorComponentObject("okta-response")
+	changes := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0),                  // t1: took effect
+		change("agent_grant_removed", "admin-1", "p1", "okta-response", t0.Add(time.Hour)), // t2: took effect
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(2*time.Hour)), // t3: the write failed
+		failedChange("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(2*time.Hour+time.Second)),
+	}
+	// After t3 the last change that took effect is the remove, so no grant is in force.
+	if got, _, ok := GrantorOf(changes, "p1", obj, t0.Add(3*time.Hour)); ok {
+		t.Errorf("GrantorOf = %q, want no grantor: the remove at t2 ended the grant", got)
+	}
+	// Between t1 and t2 the first add is in force. The failed re-add must not have dropped it.
+	if got, _, ok := GrantorOf(changes, "p1", obj, t0.Add(30*time.Minute)); !ok || got != "admin-1" {
+		t.Errorf("GrantorOf = %q, %v, want admin-1: the first add took effect", got, ok)
+	}
+
+	// Two failed re-adds cancel two allows, and the older add stays.
+	twice := []audit.PgEntry{
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0),
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(time.Hour)),
+		failedChange("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(time.Hour+time.Second)),
+		change("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(2*time.Hour)),
+		failedChange("agent_grant_added", "admin-1", "p1", "okta-response", t0.Add(2*time.Hour+time.Second)),
+	}
+	if got, at, ok := GrantorOf(twice, "p1", obj, t0.Add(3*time.Hour)); !ok || got != "admin-1" || !at.Equal(t0) {
+		t.Errorf("GrantorOf = %q at %v, %v, want admin-1 at t0: only the first add took effect", got, at, ok)
 	}
 }

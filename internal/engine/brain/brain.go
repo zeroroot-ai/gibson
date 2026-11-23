@@ -74,6 +74,10 @@ type World struct {
 	// mergeSlots is the merge queue of the fix loop (mergegate.go). Not
 	// ECS-backed: it is an ordered list, like agentSkillLoads.
 	mergeSlots []MergeSlot
+	// openedMRs holds the merge requests that open_merge_request opened, by
+	// reference and by URL (openedmr.go). openedMROrder is the order of the keys.
+	openedMRs     map[string]OpenedMergeRequest
+	openedMROrder []string
 	// clock is the time that a System puts on the events it emits. Reduce never
 	// reads it. A test replaces it.
 	clock       func() time.Time
@@ -550,6 +554,10 @@ func Reduce(w *World, ev Event) {
 		applyFixLinkPending(w, e)
 	case FixHeadRecorded:
 		applyFixHeadRecorded(w, e)
+	case FixHeadMissing:
+		applyFixHeadMissing(w, e)
+	case MergeRequestOpened:
+		applyMergeRequestOpened(w, e)
 	case FixLinkRefused:
 		applyFixLinkRefused(w, e)
 	case FixReverted:

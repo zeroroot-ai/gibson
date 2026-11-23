@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -582,6 +583,65 @@ func TestInboundMiddleware_SetsTheDeadlineFirstAndClearsItLast(t *testing.T) {
 			assert.Equal(t, "deadline:cleared", rec.events[len(rec.events)-1], "the deadline is cleared at the end")
 			firstWrite := slices.Index(rec.events, "write")
 			assert.Positive(t, firstWrite)
+		})
+	}
+}
+
+func TestWebhookOf(t *testing.T) {
+	hook := map[string]any{"title": "x"}
+	obj := a2a.NewDataPart(map[string]any{"webhook": hook})
+	tests := []struct {
+		name        string
+		msg         *a2a.Message
+		want        map[string]any
+		wantPresent bool
+		wantErr     bool
+	}{
+		{"nil message", nil, nil, false, false},
+		{"no data part", &a2a.Message{Parts: []*a2a.Part{a2a.NewTextPart("webhook")}}, nil, false, false},
+		{"the webhook", &a2a.Message{Parts: []*a2a.Part{a2a.NewTextPart("note"), obj}}, hook, true, false},
+		{"two webhooks", &a2a.Message{Parts: []*a2a.Part{obj, obj}}, nil, false, true},
+		{"not an object", &a2a.Message{Parts: []*a2a.Part{a2a.NewDataPart(map[string]any{"webhook": "x"})}}, nil, false, true},
+		{"a nil part", &a2a.Message{Parts: []*a2a.Part{nil, obj}}, hook, true, false},
+		{"another key", &a2a.Message{Parts: []*a2a.Part{a2a.NewDataPart(map[string]any{"targets": []any{"t"}}), obj}}, hook, true, false},
+		{"two webhook parts", &a2a.Message{Parts: []*a2a.Part{obj, a2a.NewDataPart(map[string]any{"webhook": map[string]any{"b": 1}})}}, nil, false, true},
+		{"not JSON", &a2a.Message{Parts: []*a2a.Part{a2a.NewDataPart(map[string]any{"webhook": map[string]any{"c": make(chan int)}})}}, nil, false, true},
+		{"too large", &a2a.Message{Parts: []*a2a.Part{a2a.NewDataPart(map[string]any{
+			"webhook": map[string]any{"body": strings.Repeat("a", MaxWebhookBytes)}})}}, nil, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, present, err := WebhookOf(tt.msg)
+			if tt.wantErr {
+				if !errors.Is(err, a2a.ErrInvalidParams) {
+					t.Fatalf("err = %v, want invalid params", err)
+				}
+				return
+			}
+			if err != nil || present != tt.wantPresent || !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got %v %v %v", got, present, err)
+			}
+		})
+	}
+}
+
+func TestWebhookMessageKey(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  *a2a.Message
+		want string
+	}{
+		{"nil", nil, ""},
+		{"plain id", &a2a.Message{ID: "msg-1"}, ""},
+		{"webhook id", &a2a.Message{ID: "webhook:okta:e1"}, "webhook:okta:e1"},
+		{"metadata", &a2a.Message{ID: "x", Metadata: map[string]any{"webhook_id": "e2", "webhook_source": "okta"}}, "webhook:okta:e2"},
+		{"empty metadata id", &a2a.Message{ID: "x", Metadata: map[string]any{"webhook_id": ""}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := WebhookMessageKey(tt.msg); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
 		})
 	}
 }
