@@ -46,6 +46,7 @@ type JobSurface interface {
 	Get(ctx context.Context, tenantID, id string) (*job.Job, error)
 	PendingInputs(ctx context.Context, tenantID, memberID string, limit int32) ([]*job.Input, error)
 	Acknowledge(ctx context.Context, tenantID, inputID string) error
+	SetTurn(ctx context.Context, tenantID, jobID string, sender job.Principal, inputID string) error
 	SetState(ctx context.Context, tenantID, jobID string, state job.State, claudeSessionID string) (*job.Job, error)
 	AddDeliverable(ctx context.Context, tenantID, jobID string, d *jobpb.Deliverable) (*job.Job, error)
 }
@@ -111,6 +112,10 @@ func (noBankSurface) PendingInputs(context.Context, string, string, int32) ([]*j
 }
 
 func (noBankSurface) Acknowledge(context.Context, string, string) error { return ErrNoBankSurface }
+
+func (noBankSurface) SetTurn(context.Context, string, string, job.Principal, string) error {
+	return ErrNoBankSurface
+}
 
 func (noBankSurface) SetState(context.Context, string, string, job.State, string) (*job.Job, error) {
 	return nil, ErrNoBankSurface
@@ -317,7 +322,7 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 			delivered[in.ID] = struct{}{}
 			s.emitMemberLine(ctx, tenantID, memberID, map[string]any{
 				"type": "job_input", "job_id": in.JobID, "kind": string(in.Kind),
-				"sender": turnGrantSubject(in.Sender), "message": firstRunes(in.Message, 200),
+				"sender": TurnGrantSubject(in.Sender), "message": firstRunes(in.Message, 200),
 			})
 		}
 		select {
@@ -350,7 +355,7 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 		// The subject is the SENDER, not the member: the turn acts with the
 		// authority of whoever asked for it, which is the whole point of a
 		// per-turn grant.
-		Subject:        turnGrantSubject(in.Sender),
+		Subject:        TurnGrantSubject(in.Sender),
 		Tenant:         tenantID,
 		MissionID:      j.BankID,
 		TaskID:         in.JobID,
@@ -364,14 +369,19 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "mint the turn grant: %v", err)
 	}
+	// The delivery starts the turn of this sender. The grant renews only while this sender
+	// holds the current turn of the job.
+	if err := s.jobs.SetTurn(ctx, tenantID, in.JobID, in.Sender, in.ID); err != nil {
+		return nil, status.Errorf(codes.Internal, "record the turn of the job: %v", err)
+	}
 	wire.Grant = grant
 	return wire, nil
 }
 
-// turnGrantSubject renders the sender as a grant subject. A component's id is
+// TurnGrantSubject renders the sender as a grant subject. A component's id is
 // already a typed principal; anything else is a person or a service, and the
 // subject says which.
-func turnGrantSubject(p job.Principal) string {
+func TurnGrantSubject(p job.Principal) string {
 	if p.Kind == job.PrincipalComponent {
 		return p.ID
 	}

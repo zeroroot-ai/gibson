@@ -44,6 +44,12 @@ type Store interface {
 	// acknowledged, oldest first. A member that reconnects reads them again.
 	PendingInputs(ctx context.Context, tenantID, memberID string, limit int32) ([]*Input, error)
 
+	// SetTurn records the current turn of a job: the sender whose authority the member acts
+	// with, and the input that started the turn (empty for the first turn of a pulled job).
+	// It returns ErrNotFound for a job that does not exist. It works on a closed job, because
+	// the wrap-up is a turn.
+	SetTurn(ctx context.Context, tenantID, jobID string, sender Principal, inputID string) error
+
 	// Acknowledge marks one input as run, so it is not delivered again.
 	Acknowledge(ctx context.Context, tenantID, inputID string) error
 

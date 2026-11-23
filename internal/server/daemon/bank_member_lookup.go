@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -54,7 +55,9 @@ func memberBaseGrantSubject(agentName string) string { return "component:agent:"
 // It is what lets a member's base grant renew: a member has no mission binding,
 // so its liveness is its row in the bank store.
 type bankMemberLiveness struct {
+	now   func() time.Time // the clock, time.Now when nil
 	banks func() (bank.Store, error)
+	jobs  func() (job.Store, error)
 }
 
 var _ api.LiveMemberLookup = (*bankMemberLiveness)(nil)
@@ -63,12 +66,94 @@ var _ api.LiveMemberLookup = (*bankMemberLiveness)(nil)
 // built after the renewal is wired, so a store captured at wiring time would
 // capture nothing. While the pool is down no grant is live.
 func newBankMemberLiveness(d *daemonImpl) *bankMemberLiveness {
-	return &bankMemberLiveness{banks: func() (bank.Store, error) {
-		if d.pool == nil {
-			return nil, errUnavailable("the data-plane pool is not up, so this daemon serves no banks")
+	return &bankMemberLiveness{
+		banks: func() (bank.Store, error) {
+			if d.pool == nil {
+				return nil, errUnavailable("the data-plane pool is not up, so this daemon serves no banks")
+			}
+			return bank.NewPostgresStore(d.pool), nil
+		},
+		jobs: func() (job.Store, error) {
+			if d.pool == nil {
+				return nil, errUnavailable("the data-plane pool is not up, so this daemon serves no jobs")
+			}
+			return job.NewPostgresStore(d.pool), nil
+		},
+	}
+}
+
+// wrapUpRenewalWindow is how long after the close of a job the wrap-up may renew its grant.
+// It covers the 5 minute retry of the member with margin.
+const wrapUpRenewalWindow = 10 * time.Minute
+
+// IsMemberTurnGrantLive is true only for the turn grant of a live member for a job that
+// the member holds. The grant must name the bank of the member as its mission and the run
+// of the member as its run, and its task must be a job of that bank that the member holds.
+// The member must not be dead. The grant carries the authority of one sender for one turn,
+// so it is live only for the sender of the current turn of the job (the subject of the
+// grant), while the job is open or working. A waiting job never renews. A closed job keeps
+// its wrap-up grant for 10 minutes after the close. A grant that names a job of another
+// member, or the base grant of the member (its task is the member, not a job), is not live.
+// A store error is an error, never an answer.
+func (l *bankMemberLiveness) IsMemberTurnGrantLive(ctx context.Context, claims sdkcg.Claims) (bool, error) {
+	banks, err := l.banks()
+	if err != nil {
+		return false, err
+	}
+	tenantID := claims.Tenant.String()
+	m, err := banks.MemberByRun(ctx, tenantID, claims.MissionRunID)
+	if errors.Is(err, bank.ErrNotFound) {
+		return false, nil // the run backs no member
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the member of run %s: %w", claims.MissionRunID, err)
+	}
+	if m.State == bank.MemberDead || m.BankID != claims.MissionID || claims.TaskID == "" || claims.TaskID == m.ID {
+		return false, nil
+	}
+	jobs, err := l.jobs()
+	if err != nil {
+		return false, err
+	}
+	j, err := jobs.Get(ctx, tenantID, claims.TaskID)
+	if errors.Is(err, job.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the job %s: %w", claims.TaskID, err)
+	}
+	if j.BankID != m.BankID || j.MemberID != m.ID {
+		return false, nil // the member does not hold the job
+	}
+	switch j.State {
+	case job.StateOpen, job.StateWorking:
+		// A job that the member holds and works on has a live turn.
+	case job.StateClosed:
+		if !l.withinWrapUpWindow(j) {
+			return false, nil
 		}
-		return bank.NewPostgresStore(d.pool), nil
-	}}
+	case job.StateWaiting:
+		return false, nil // a waiting job has no turn: nothing runs between turns
+	default:
+		return false, nil // a state that this daemon does not know holds no live turn
+	}
+	// A turn grant carries the authority of one sender for one turn. It renews only for the
+	// sender of the current turn. The member acknowledges an input when its turn starts, so the
+	// acknowledgement says nothing about the end of the turn.
+	return j.TurnSender.ID != "" && harness.TurnGrantSubject(j.TurnSender) == claims.Subject, nil
+}
+
+// withinWrapUpWindow is true while the wrap-up of a closed job may still renew its grant.
+// A closed job with no close time is outside the window.
+func (l *bankMemberLiveness) withinWrapUpWindow(j *job.Job) bool {
+	if j.ClosedAt.IsZero() {
+		return false
+	}
+	now := time.Now
+	if l.now != nil {
+		now = l.now
+	}
+	return !now().After(j.ClosedAt.Add(wrapUpRenewalWindow))
 }
 
 // IsMemberBaseGrantLive is true only for the base grant of a member that is not
@@ -210,6 +295,19 @@ func (l *lazyJobSurface) Acknowledge(ctx context.Context, tenantID, inputID stri
 		return err
 	}
 	if err := s.Acknowledge(ctx, tenantID, inputID); err != nil {
+		return fmt.Errorf("job store: %w", err)
+	}
+	return nil
+}
+
+func (l *lazyJobSurface) SetTurn(
+	ctx context.Context, tenantID, jobID string, sender job.Principal, inputID string,
+) error {
+	s, err := l.store()
+	if err != nil {
+		return err
+	}
+	if err := s.SetTurn(ctx, tenantID, jobID, sender, inputID); err != nil {
 		return fmt.Errorf("job store: %w", err)
 	}
 	return nil

@@ -247,6 +247,37 @@ func TestJobStore_UnacknowledgedInputRedelivers(t *testing.T) {
 	assert.Len(t, pending, 1)
 }
 
+// TestJobStore_TheCurrentTurnFollowsTheSender: the opener is the sender of the first turn, a pull
+// keeps it, a delivery moves it to the sender of the input, and it can move on a closed job
+// (the wrap-up is a turn). An unknown job is not found.
+func TestJobStore_TheCurrentTurnFollowsTheSender(t *testing.T) {
+	store, _, bankID := newJobStore(t)
+	ctx := context.Background()
+
+	j, err := store.Open(ctx, intTenant, job.OpenInput{BankID: bankID, Spec: spec("turns"), OpenedBy: opener()})
+	require.NoError(t, err)
+	assert.Equal(t, opener(), j.TurnSender, "the opener is the sender of the first turn")
+
+	pulled, err := store.Claim(ctx, intTenant, bankID, "m-1")
+	require.NoError(t, err)
+	require.NotNil(t, pulled)
+	assert.Equal(t, opener(), pulled.TurnSender)
+	assert.Empty(t, pulled.TurnInputID, "the first turn of a pulled job has no input row")
+
+	bob := job.Principal{Kind: job.PrincipalUser, ID: "bob"}
+	require.NoError(t, store.SetTurn(ctx, intTenant, j.ID, bob, "in-9"))
+	got, err := store.Get(ctx, intTenant, j.ID)
+	require.NoError(t, err)
+	assert.Equal(t, bob, got.TurnSender)
+	assert.Equal(t, "in-9", got.TurnInputID)
+
+	_, err = store.Close(ctx, intTenant, job.CloseInput{JobID: j.ID, Verdict: job.VerdictAccomplished, Closer: opener()})
+	require.NoError(t, err)
+	require.NoError(t, store.SetTurn(ctx, intTenant, j.ID, opener(), "wrap"), "the wrap-up is a turn of a closed job")
+
+	assert.ErrorIs(t, store.SetTurn(ctx, intTenant, "no-such-job", bob, "x"), job.ErrNotFound)
+}
+
 func TestJobStore_SetStateAndDeliverables(t *testing.T) {
 	store, _, bankID := newJobStore(t)
 	ctx := context.Background()

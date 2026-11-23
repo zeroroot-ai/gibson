@@ -9,6 +9,7 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -263,5 +264,228 @@ func TestBankMemberLiveness(t *testing.T) {
 	// While the data-plane pool is down no grant is live.
 	if got, err := newBankMemberLiveness(&daemonImpl{}).IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)); got || err == nil {
 		t.Errorf("a daemon with no pool gave live = %v, err = %v, want not live and an error", got, err)
+	}
+}
+
+// TestBankMemberLiveness_TurnGrant: a turn grant carries the authority of one sender for one
+// turn. It renews only for the sender of the current turn of a job that the member holds, while
+// the job is open or working. A waiting job never renews. A closed job keeps its wrap-up grant
+// for 10 minutes after the close. The base grant of the member is no turn grant.
+func TestBankMemberLiveness_TurnGrant(t *testing.T) {
+	ctx := context.Background()
+	closedAt := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+	now := closedAt.Add(time.Minute)
+	banks := newFakeBankStore()
+	banks.banks["bank-1"] = &bank.Bank{ID: "bank-1", AgentName: "claude"}
+	banks.members["bank-1"] = []*bank.Member{
+		{ID: "m-1", BankID: "bank-1", MissionRunID: "run-1", State: bank.MemberIdle},
+		{ID: "m-2", BankID: "bank-1", MissionRunID: "run-2", State: bank.MemberDead},
+	}
+	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	bob := job.Principal{Kind: job.PrincipalUser, ID: "bob"}
+	jobs := newFakeJobStore()
+	add := func(id, member, bankID string, state job.State, turn job.Principal, closed time.Time) {
+		jobs.jobs[id] = &job.Job{
+			ID: id, BankID: bankID, MemberID: member, State: state, TurnSender: turn, ClosedAt: closed,
+		}
+	}
+	none := time.Time{}
+	add("job-working", "m-1", "bank-1", job.StateWorking, alice, none) // a long coding turn, input acknowledged
+	add("job-pulled", "m-1", "bank-1", job.StateOpen, alice, none)     // the first turn of a pulled job
+	add("job-bobs-turn", "m-1", "bank-1", job.StateWorking, bob, none) // the turn of another sender started
+	add("job-no-turn", "m-1", "bank-1", job.StateWorking, job.Principal{}, none)
+	add("job-waiting", "m-1", "bank-1", job.StateWaiting, alice, none)
+	add("job-other", "m-9", "bank-1", job.StateWorking, alice, none)
+	add("job-bank2", "m-1", "bank-2", job.StateWorking, alice, none)
+	add("job-closed", "m-1", "bank-1", job.StateClosed, alice, closedAt)
+	add("job-late", "m-1", "bank-1", job.StateClosed, alice, closedAt.Add(-10*time.Minute))
+	add("job-noclose", "m-1", "bank-1", job.StateClosed, alice, none)
+	live := &bankMemberLiveness{
+		banks: func() (bank.Store, error) { return banks, nil },
+		jobs:  func() (job.Store, error) { return jobs, nil },
+		now:   func() time.Time { return now },
+	}
+	tenant, err := auth.NewTenantID("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := func(bankID, run, task string) sdkcg.Claims {
+		return sdkcg.Claims{Tenant: tenant, MissionID: bankID, MissionRunID: run, TaskID: task, Subject: "user:alice"}
+	}
+	for name, c := range map[string]struct {
+		claims sdkcg.Claims
+		want   bool
+	}{
+		"a working job in the turn of the sender":               {claims("bank-1", "run-1", "job-working"), true},
+		"the first turn of a pulled job (opener is the sender)": {claims("bank-1", "run-1", "job-pulled"), true},
+		"a job whose current turn belongs to another sender":    {claims("bank-1", "run-1", "job-bobs-turn"), false},
+		"a job with no turn":                                    {claims("bank-1", "run-1", "job-no-turn"), false},
+		"a waiting job":                                         {claims("bank-1", "run-1", "job-waiting"), false},
+		"a closed job within 10 minutes of the close":           {claims("bank-1", "run-1", "job-closed"), true},
+		"a closed job 11 minutes after the close":               {claims("bank-1", "run-1", "job-late"), false},
+		"a closed job with no close time":                       {claims("bank-1", "run-1", "job-noclose"), false},
+		"a job that another member holds":                       {claims("bank-1", "run-1", "job-other"), false},
+		"a job of another bank":                                 {claims("bank-1", "run-1", "job-bank2"), false},
+		"a job that does not exist":                             {claims("bank-1", "run-1", "job-9"), false},
+		"a dead member":                                         {claims("bank-1", "run-2", "job-working"), false},
+		"the run of a member of another bank":                   {claims("bank-2", "run-1", "job-working"), false},
+		"a run that backs no member":                            {claims("bank-1", "run-9", "job-working"), false},
+		"the base grant of the member (its task is the member)": {claims("bank-1", "run-1", "m-1"), false},
+		"a grant with no task":                                  {claims("bank-1", "run-1", ""), false},
+	} {
+		got, err := live.IsMemberTurnGrantLive(ctx, c.claims)
+		if err != nil {
+			t.Errorf("%s: a clean answer carries no error: %v", name, err)
+		}
+		if got != c.want {
+			t.Errorf("%s: live = %v, want %v", name, got, c.want)
+		}
+	}
+	// The turn moves from sender A to sender B: the grant of A stops, the grant of B starts.
+	jobs.jobs["job-working"].TurnSender = bob
+	if got, _ := live.IsMemberTurnGrantLive(ctx, claims("bank-1", "run-1", "job-working")); got {
+		t.Error("the grant of sender A must stop when the turn of sender B starts")
+	}
+	bobClaims := claims("bank-1", "run-1", "job-working")
+	bobClaims.Subject = "user:bob"
+	if got, _ := live.IsMemberTurnGrantLive(ctx, bobClaims); !got {
+		t.Error("the grant of sender B must renew in its own turn")
+	}
+	// The window ends 10 minutes after the close, to the instant.
+	at := func(d time.Duration) bool {
+		l := *live
+		l.now = func() time.Time { return closedAt.Add(d) }
+		got, err := l.IsMemberTurnGrantLive(ctx, claims("bank-1", "run-1", "job-closed"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if !at(10*time.Minute) || at(10*time.Minute+time.Second) || at(11*time.Minute) {
+		t.Errorf("the wrap-up window must end 10 minutes after the close")
+	}
+
+	// A store that is down is an error and never an answer.
+	down := errors.New("postgres is down")
+	for name, l := range map[string]*bankMemberLiveness{
+		"the bank store": {banks: func() (bank.Store, error) { return nil, down }, jobs: live.jobs},
+		"the job store":  {banks: live.banks, jobs: func() (job.Store, error) { return nil, down }},
+	} {
+		task := "job-working"
+		if got, err := l.IsMemberTurnGrantLive(ctx, claims("bank-1", "run-1", task)); got || err == nil {
+			t.Errorf("%s down gave live = %v, err = %v, want not live and an error", name, got, err)
+		}
+	}
+	// With a pool the lookup reads the Postgres stores.
+	pooled := newBankMemberLiveness(&daemonImpl{pool: &mockPool{conn: minimalConn()}})
+	if s, err := pooled.jobs(); err != nil || s == nil {
+		t.Errorf("a pool must give a job store: %v, %v", s, err)
+	}
+	if _, err := newBankMemberLiveness(&daemonImpl{}).jobs(); err == nil {
+		t.Error("no pool must give an error")
+	}
+}
+
+// getErrJobStore is a job store whose Get fails with a fixed error.
+type getErrJobStore struct {
+	*fakeJobStore
+	err error
+}
+
+func (g getErrJobStore) Get(context.Context, string, string) (*job.Job, error) { return nil, g.err }
+
+// The refusals and errors of the renewal lookup: a store that fails is an error and never an
+// answer, a job in a state that the daemon does not know holds no turn, and a job of the member
+// in another bank is not held.
+func TestBankMemberLiveness_TurnGrantRefusalsAndErrors(t *testing.T) {
+	ctx := context.Background()
+	tenant, err := auth.NewTenantID("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	claims := sdkcg.Claims{
+		Tenant: tenant, MissionID: "bank-1", MissionRunID: "run-1", TaskID: "job-1", Subject: "user:alice",
+	}
+	newBanks := func() *fakeBankStore {
+		b := newFakeBankStore()
+		b.members["bank-1"] = []*bank.Member{{ID: "m-1", BankID: "bank-1", MissionRunID: "run-1", State: bank.MemberIdle}}
+		return b
+	}
+	jobsWith := func(state job.State, bankID string) *fakeJobStore {
+		j := newFakeJobStore()
+		j.jobs["job-1"] = &job.Job{ID: "job-1", BankID: bankID, MemberID: "m-1", State: state, TurnSender: alice}
+		return j
+	}
+	live := func(b bank.Store, j job.Store) *bankMemberLiveness {
+		return &bankMemberLiveness{
+			banks: func() (bank.Store, error) { return b, nil },
+			jobs:  func() (job.Store, error) { return j, nil },
+		}
+	}
+
+	t.Run("the member store fails", func(t *testing.T) {
+		b := newBanks()
+		b.getErr = errors.New("postgres is down")
+		got, err := live(b, jobsWith(job.StateWorking, "bank-1")).IsMemberTurnGrantLive(ctx, claims)
+		if got || err == nil || !errors.Is(err, b.getErr) {
+			t.Fatalf("live = %v, err = %v, want not live and the store error", got, err)
+		}
+	})
+	t.Run("the job store fails", func(t *testing.T) {
+		boom := errors.New("job store is down")
+		broken := getErrJobStore{fakeJobStore: newFakeJobStore(), err: boom}
+		got, err := live(newBanks(), broken).IsMemberTurnGrantLive(ctx, claims)
+		if got || !errors.Is(err, boom) {
+			t.Fatalf("live = %v, err = %v, want not live and the store error", got, err)
+		}
+	})
+	t.Run("the job does not exist", func(t *testing.T) {
+		got, err := live(newBanks(), newFakeJobStore()).IsMemberTurnGrantLive(ctx, claims)
+		if got || err != nil {
+			t.Fatalf("live = %v, err = %v, want a clean refusal", got, err)
+		}
+	})
+	t.Run("the job belongs to another bank", func(t *testing.T) {
+		got, err := live(newBanks(), jobsWith(job.StateWorking, "bank-2")).IsMemberTurnGrantLive(ctx, claims)
+		if got || err != nil {
+			t.Fatalf("live = %v, err = %v, want a clean refusal", got, err)
+		}
+	})
+	t.Run("a state that the daemon does not know", func(t *testing.T) {
+		got, err := live(newBanks(), jobsWith(job.State("paused"), "bank-1")).IsMemberTurnGrantLive(ctx, claims)
+		if got || err != nil {
+			t.Fatalf("live = %v, err = %v, want a clean refusal", got, err)
+		}
+	})
+	t.Run("the control: the same job is live while it works", func(t *testing.T) {
+		got, err := live(newBanks(), jobsWith(job.StateWorking, "bank-1")).IsMemberTurnGrantLive(ctx, claims)
+		if !got || err != nil {
+			t.Fatalf("live = %v, err = %v, want live", got, err)
+		}
+	})
+}
+
+// The job surface that the harness uses reaches SetTurn of the store, keeps the error of the
+// store, and refuses while no store is up.
+func TestLazyJobSurface_SetTurnReachesTheStore(t *testing.T) {
+	ctx := context.Background()
+	jobs := newFakeJobStore()
+	jobs.jobs["job-1"] = &job.Job{ID: "job-1"}
+	surface := &lazyJobSurface{daemon: &daemonImpl{}, stores: func() (job.Store, error) { return jobs, nil }}
+	bob := job.Principal{Kind: job.PrincipalUser, ID: "bob"}
+
+	if err := surface.SetTurn(ctx, "acme", "job-1", bob, "in-1"); err != nil {
+		t.Fatalf("SetTurn: %v", err)
+	}
+	if got := jobs.jobs["job-1"]; got.TurnSender != bob || got.TurnInputID != "in-1" {
+		t.Errorf("turn = %+v / %q, want bob / in-1", got.TurnSender, got.TurnInputID)
+	}
+	if err := surface.SetTurn(ctx, "acme", "job-9", bob, "in-1"); !errors.Is(err, job.ErrNotFound) {
+		t.Errorf("a missing job must keep the error of the store: %v", err)
+	}
+	down := &lazyJobSurface{daemon: &daemonImpl{}, stores: func() (job.Store, error) { return nil, errors.New("no pool") }}
+	if err := down.SetTurn(ctx, "acme", "job-1", bob, "in-1"); err == nil {
+		t.Error("no store must be reported on SetTurn")
 	}
 }

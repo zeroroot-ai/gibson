@@ -75,7 +75,8 @@ func (s *postgresStore) conn(ctx context.Context, tenantID string) (conn, error)
 
 const jobColumns = `id, bank_id, member_id, state, spec, claude_session_id,
 	opened_by_kind, opened_by_id, opened_at, last_input_at, closed_at,
-	verdict, score, deliverables, attempts, spilled`
+	verdict, score, deliverables, attempts, spilled,
+	turn_sender_kind, turn_sender_id, turn_input_id`
 
 // Open records a new job. When MemberID names a member, the job is assigned
 // only if that member still has a free slot — checked inside the transaction,
@@ -99,6 +100,8 @@ func (s *postgresStore) Open(ctx context.Context, tenantID string, in OpenInput)
 		ID: string(types.NewID()), BankID: in.BankID, MemberID: in.MemberID,
 		State: StateOpen, Spec: in.Spec, OpenedBy: in.OpenedBy,
 		OpenedAt: now, LastInputAt: now,
+		// The opener is the sender of the first turn.
+		TurnSender: in.OpenedBy,
 	}
 
 	err = c.InTx(ctx, func(tx datapool.SQL) error {
@@ -112,8 +115,9 @@ func (s *postgresStore) Open(ctx context.Context, tenantID string, in OpenInput)
 			}
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO jobs (id, bank_id, member_id, state, spec, opened_by_kind, opened_by_id, opened_at, last_input_at)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+			`INSERT INTO jobs (id, bank_id, member_id, state, spec, opened_by_kind, opened_by_id, opened_at, last_input_at,
+			                   turn_sender_kind, turn_sender_id)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$6,$7)`,
 			j.ID, j.BankID, j.MemberID, string(j.State), specJSON,
 			string(j.OpenedBy.Kind), j.OpenedBy.ID, now, now); err != nil {
 			return fmt.Errorf("job: insert: %w", err)
@@ -336,7 +340,9 @@ func (s *postgresStore) Claim(ctx context.Context, tenantID, bankID, memberID st
 			return fmt.Errorf("job: claim from %s: %w", bankID, serr)
 		}
 		if _, uerr := tx.Exec(ctx,
-			`UPDATE jobs SET member_id = $2, updated_at = now() WHERE id = $1`, id, memberID); uerr != nil {
+			`UPDATE jobs SET member_id = $2, updated_at = now(),
+			        turn_sender_kind = opened_by_kind, turn_sender_id = opened_by_id, turn_input_id = ''
+			 WHERE id = $1`, id, memberID); uerr != nil {
 			return fmt.Errorf("job: assign %s: %w", id, uerr)
 		}
 		var rerr error
@@ -382,6 +388,25 @@ func (s *postgresStore) PendingInputs(ctx context.Context, tenantID, memberID st
 		return nil, fmt.Errorf("job: pending input rows: %w", rows.Err())
 	}
 	return out, nil
+}
+
+func (s *postgresStore) SetTurn(ctx context.Context, tenantID, jobID string, sender Principal, inputID string) error {
+	c, err := s.conn(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	defer c.Release()
+
+	affected, err := c.SQL().Exec(ctx,
+		`UPDATE jobs SET turn_sender_kind = $2, turn_sender_id = $3, turn_input_id = $4, updated_at = now()
+		 WHERE id = $1`, jobID, string(sender.Kind), sender.ID, inputID)
+	if err != nil {
+		return fmt.Errorf("job: set the turn of %s: %w", jobID, err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *postgresStore) Acknowledge(ctx context.Context, tenantID, inputID string) error {
@@ -697,13 +722,16 @@ func scanJob(row scanner) (*Job, error) {
 		closedAt     *time.Time
 		openedAt     time.Time
 		lastInputAt  time.Time
+		turnKind     string
 	)
 	if err := row.Scan(&j.ID, &j.BankID, &j.MemberID, &state, &specJSON, &j.ClaudeSessionID,
 		&openedKind, &j.OpenedBy.ID, &openedAt, &lastInputAt, &closedAt,
-		&verdict, &j.Score, &deliverables, &j.Attempts, &j.Spilled); err != nil {
+		&verdict, &j.Score, &deliverables, &j.Attempts, &j.Spilled,
+		&turnKind, &j.TurnSender.ID, &j.TurnInputID); err != nil {
 		return nil, fmt.Errorf("scan job row: %w", err)
 	}
 	j.State = State(state)
+	j.TurnSender.Kind = PrincipalKind(turnKind)
 	j.OpenedBy.Kind = PrincipalKind(openedKind)
 	j.Verdict = Verdict(verdict)
 	j.OpenedAt = openedAt.UTC()
