@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.174.0](https://github.com/zeroroot-ai/gibson/compare/v0.173.0...v0.174.0) (2026-11-23)
+
+
+### Features
+
+* **harness:** map the class of a connector tool error to a code ([#1678](https://github.com/zeroroot-ai/gibson/issues/1678)) ([ec20436](https://github.com/zeroroot-ai/gibson/commit/ec204367eedc63182254e70e9345c2f75204402b))
+* **harness:** renew the turn grant of a member while it holds the job ([#1671](https://github.com/zeroroot-ai/gibson/issues/1671)) ([e45345a](https://github.com/zeroroot-ai/gibson/commit/e45345a713c93da28b612e1e040a5ce641f308e6))
+* **harness:** send the grant of the first turn with a pulled job ([#1681](https://github.com/zeroroot-ai/gibson/issues/1681)) ([e24844c](https://github.com/zeroroot-ai/gibson/commit/e24844cab250e02bb1bf0874a681064c68789ef6))
+
+
+### Bug Fixes
+
+* **belief:** raise four packages in the dev lock for open advisories ([#1686](https://github.com/zeroroot-ai/gibson/issues/1686)) ([491fd7e](https://github.com/zeroroot-ai/gibson/commit/491fd7ebb2ece363d73091e644f55dc673225ba2))
+* **catalog:** pin claude-member 0.7.1 ([#1685](https://github.com/zeroroot-ai/gibson/issues/1685)) ([fca275e](https://github.com/zeroroot-ai/gibson/commit/fca275ec78ff52c34dd4bf19956bea172fdee6e3))
+* **catalog:** pin fix-agent 0.2.0 ([#1687](https://github.com/zeroroot-ai/gibson/issues/1687)) ([ee1f7e9](https://github.com/zeroroot-ai/gibson/commit/ee1f7e9f4b2863dc05718031cb7397ba89d8f7cd))
+* **harness:** give a connector transport failure a code that is not INVALID_ARGUMENT ([#1673](https://github.com/zeroroot-ai/gibson/issues/1673)) ([e018848](https://github.com/zeroroot-ai/gibson/commit/e018848fd48d94dc97a9b536712c32304cb2e6a3))
+* **harness:** keep ghost inputs out of the member inbox ([#1684](https://github.com/zeroroot-ai/gibson/issues/1684)) ([9eb4bca](https://github.com/zeroroot-ai/gibson/commit/9eb4bcac13645c2c7a05b93882ca0477ed6bcd0d))
+
 ## [0.173.0](https://github.com/zeroroot-ai/gibson/compare/v0.172.0...v0.173.0) (2026-11-23)
 
 
