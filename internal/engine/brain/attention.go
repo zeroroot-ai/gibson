@@ -56,6 +56,12 @@ type Finding struct {
 	// one Vulnerability node per id per tenant.
 	VulnerabilityID string
 
+	// AffectsPackage is the key of the Package node that this Finding is an
+	// occurrence in (gibson#1469). The projector writes (Finding)-[:AFFECTS]->
+	// (Package), the edge that FindingPlaces follows to the Application. Empty
+	// when the Finding names no Package.
+	AffectsPackage string
+
 	// ScanScope and LastScan are the Finding's rescan provenance (gibson#1686):
 	// which recurring scan is RESPONSIBLE for it, and when that scan last saw it.
 	//
@@ -221,6 +227,10 @@ type FindingRaised struct {
 
 	// VulnerabilityID is the shared identity of the weakness, when known.
 	VulnerabilityID string
+	// AffectsPackage is the key of the Package node that the Finding is an
+	// occurrence in, when the reporter names one (a scan of an image or of a
+	// dependency alert). The key is the one of the Package entity.
+	AffectsPackage string
 
 	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
 	// (gibson#208): the FGA principal that submitted the finding, the name the
@@ -275,7 +285,8 @@ func applyFindingRaised(w *World, e FindingRaised) {
 	w.findings.NewEntity(&Finding{
 		ID: e.ID, Title: e.Title, Description: e.Description, ScopeID: e.ScopeID,
 		Address: e.Address, Severity: e.Severity, Status: status, VulnerabilityID: e.VulnerabilityID,
-		ScanScope: scope, LastScan: scan,
+		AffectsPackage: e.AffectsPackage,
+		ScanScope:      scope, LastScan: scan,
 		FixFacts: FixFacts{
 			CheckKind: e.CheckKind, CheckRef: e.CheckRef,
 			RaisedAt: e.At, FirstSeenAt: firstSeen(e),
@@ -391,6 +402,8 @@ type FindingSnapshot struct {
 	Severity        string
 	Status          string
 	VulnerabilityID string
+	// AffectsPackage is the key of the Package that the Finding affects.
+	AffectsPackage string
 	// ScanScope and LastScan are the rescan provenance (gibson#1686): the
 	// recurring scan responsible for this Finding, and the scan that last saw it.
 	ScanScope string
@@ -465,7 +478,8 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 		out = append(out, FindingSnapshot{
 			ID: f.ID, Title: f.Title, Description: f.Description, ScopeID: f.ScopeID,
 			Address: f.Address, Severity: f.Severity, Status: f.Status, VulnerabilityID: f.VulnerabilityID,
-			ScanScope: f.ScanScope, LastScan: f.LastScan,
+			AffectsPackage: f.AffectsPackage,
+			ScanScope:      f.ScanScope, LastScan: f.LastScan,
 			MergeRequest: f.MergeRequest, MergeRequestState: f.MergeRequestState,
 			Priority: f.Priority, PriorityRule: f.PriorityRule, PriorityReason: f.PriorityReason,
 			FixFacts:     f.FixFacts,

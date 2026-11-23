@@ -487,6 +487,7 @@ func subdomainObservedEvents(scope string, d *graphragpb.DiscoveryResult, domain
 // findingRaisedEvents emits one FindingRaised per titled finding, carrying the
 // address of the host it names.
 func findingRaisedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult, addressByHostID map[string]string) (events []brain.Event, skipped int) {
+	packages := packageKeys(d)
 	for _, f := range d.Findings {
 		if f == nil || f.Title == "" {
 			skipped++
@@ -499,6 +500,7 @@ func findingRaisedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult, add
 			Severity:        f.Severity,
 			ScopeID:         execCtx.MissionID,
 			Address:         addressByHostID[f.GetParentId()],
+			AffectsPackage:  packages[f.GetParentId()],
 			MissionID:       execCtx.MissionID,
 			MissionRunID:    execCtx.missionRun(),
 			Status:          brain.FindingStatusOpen,
@@ -511,6 +513,27 @@ func findingRaisedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult, add
 		})
 	}
 	return events, skipped
+}
+
+// packageKeys returns the Package nodes of the discovery by the value that a
+// Finding names as its parent. A scan of an image sets Finding.ParentId to the
+// id of the Package (gibson-executor parsers/trivy). The value is the key that
+// entityObservedEvents gives the Package node, so the Finding and the node meet
+// on one key (gibson#1469).
+func packageKeys(d *graphragpb.DiscoveryResult) map[string]string {
+	out := map[string]string{}
+	for _, n := range d.CustomNodes {
+		if n == nil {
+			continue
+		}
+		if label, ok := admittedLabel(n.NodeType); !ok || label != "Package" {
+			continue
+		}
+		if key := EntityKey(n.IdProperties); key != "" {
+			out[key] = key
+		}
+	}
+	return out
 }
 
 // findingNamespace is the UUID namespace of discovered finding IDs.

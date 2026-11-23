@@ -307,7 +307,9 @@ func (w *neo4jGraphWriter) UpsertHost(ctx context.Context, tenant string, h brai
 }
 
 // upsertFindingCypher MERGEs a :Finding and, when the affected host is already
-// projected, an AFFECTS edge to it (matched by scope+address). The edge is
+// projected, an AFFECTS edge to it (matched by scope+address). A Finding that
+// names a Package gets an AFFECTS edge to the Package of that key, which is
+// merged here too, so the edge lands before the entity pass projects the node. The edge is
 // conditional so the finding node is always created; a later pass links it once
 // the host lands (self-healing).
 //
@@ -378,6 +380,10 @@ WITH f
 OPTIONAL MATCH (h:Host {scope: $scope, address: $address})
 FOREACH (_ IN CASE WHEN h IS NULL THEN [] ELSE [1] END |
   MERGE (f)-[:AFFECTS]->(h))
+WITH f
+FOREACH (_ IN CASE WHEN $affects_package = '' THEN [] ELSE [1] END |
+  MERGE (p:Package {key: $affects_package})
+  MERGE (f)-[:AFFECTS]->(p))
 WITH f
 OPTIONAL MATCH (tg:Target {id: $scope})
 FOREACH (_ IN CASE WHEN tg IS NULL THEN [] ELSE [1] END |
@@ -962,6 +968,9 @@ func findingUpsertParams(f brain.FindingSnapshot) map[string]any {
 		"address":          f.Address,
 		"status":           status,
 		"vulnerability_id": f.VulnerabilityID,
+		// The key of the Package that the Finding affects (gibson#1469). The
+		// edge lets FindingPlaces reach the Application.
+		"affects_package": f.AffectsPackage,
 		// The typed priority (gibson#1522). Empty means no triage pass has decided.
 		"priority":        f.Priority,
 		"priority_rule":   f.PriorityRule,
