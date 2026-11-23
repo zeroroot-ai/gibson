@@ -346,17 +346,17 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 
 // WorkSnapshot is a stable, comparable view of a WorkItem.
 type WorkSnapshot struct {
-	ID         string
-	MissionID  string
-	RunID      string
-	Kind       string
-	Target     string
-	Input      string
-	ParentID   string
-	DependsOn  []string
-	State      WorkState
-	Result     string
-	Err        string
+	ID        string
+	MissionID string
+	RunID     string
+	Kind      string
+	Target    string
+	Input     string
+	ParentID  string
+	DependsOn []string
+	State     WorkState
+	Result    string
+	Err       string
 	// ApprovalID mirrors WorkItem.ApprovalID.
 	ApprovalID string
 	MaxRetries int
