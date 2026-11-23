@@ -4,6 +4,7 @@
 package harness
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,8 +12,10 @@ import (
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	sdkmission "github.com/zeroroot-ai/sdk/mission"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
 func originate(t *testing.T, req *harnesspb.CreateMissionRequest) (*harnesspb.CreateMissionResponse, *MissionClientCreateRequest) {
@@ -61,4 +64,44 @@ func TestCreateMission_AGraphOfTheCallerNeverGetsTheMarkerOrACatalogName(t *test
 	resp, got = originate(t, byName)
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, resp.GetError().GetCode(), "the name of the request counts, in any letter case")
 	assert.Nil(t, got)
+}
+
+// The harness method CreateMission (an interface method that this change cannot prove
+// dead) takes the same check as the callback path: a forged marker is removed, the
+// caller's map is not changed, and a graph with a catalog name is refused.
+func TestDefaultAgentHarnessCreateMission_TakesTheSameGuard(t *testing.T) {
+	client := newMockMissionOperator()
+	parentID := types.NewID()
+	client.records = append(client.records, &MissionRecord{ID: parentID, Status: MissionStatusWorking})
+	h := createTestMissionHarness(client, DefaultSpawnLimits())
+	h.missionCtx.ID = parentID
+
+	own := map[string]any{mission.MetadataCatalogMission: "scan", "keep": "yes"}
+	_, err := h.CreateMission(context.Background(), map[string]any{"name": "my-graph"}, types.NewID().String(),
+		&sdkmission.CreateMissionOpts{Name: "mine", Metadata: own})
+	require.NoError(t, err)
+	_, forged := client.lastCreate.Metadata[mission.MetadataCatalogMission]
+	assert.False(t, forged, "a forged marker is removed")
+	assert.Equal(t, "yes", client.lastCreate.Metadata["keep"])
+	assert.Equal(t, "scan", own[mission.MetadataCatalogMission], "the map of the caller is not changed")
+
+	client.lastCreate = nil
+	_, err = h.CreateMission(context.Background(), map[string]any{"name": "scan"}, types.NewID().String(), nil)
+	require.Error(t, err, "a graph named scan is refused")
+	assert.Nil(t, client.lastCreate, "no mission is created")
+	_, err = h.CreateMission(context.Background(), map[string]any{"name": "x"}, types.NewID().String(),
+		&sdkmission.CreateMissionOpts{Name: "SCAN"})
+	require.Error(t, err, "the name of the options counts, in any letter case")
+}
+
+// The marker holds the canonical name that the render returns.
+func TestResolveMissionDefinitionJSON_ReturnsTheCanonicalCatalogName(t *testing.T) {
+	_, name, err := resolveMissionDefinitionJSON(context.Background(), &harnesspb.CreateMissionRequest{
+		CatalogMission: "  scan ", CatalogParams: map[string]string{"imageRef": "r/i@sha256:abc"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "scan", name)
+	_, name, err = resolveMissionDefinitionJSON(context.Background(), &harnesspb.CreateMissionRequest{MissionDefinitionJson: []byte(`{"name":"x"}`)})
+	require.NoError(t, err)
+	assert.Empty(t, name, "a graph of the caller has no catalog name")
 }

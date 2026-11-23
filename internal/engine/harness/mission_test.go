@@ -27,6 +27,7 @@ type mockMissionOperator struct {
 
 	// Behavior flags
 	createErr          error
+	lastCreate         *CreateMissionRequest
 	runErr             error
 	getStatusErr       error
 	waitErr            error
@@ -48,6 +49,7 @@ func newMockMissionOperator() *mockMissionOperator {
 }
 
 func (m *mockMissionOperator) CreateMission(ctx context.Context, req *CreateMissionRequest) (*MissionInfo, error) {
+	m.lastCreate = req
 	if m.createErr != nil {
 		return nil, m.createErr
 	}

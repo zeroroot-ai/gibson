@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -291,5 +292,25 @@ func TestMissionCheckpoints_ListsTheNodeEndsInOrder(t *testing.T) {
 		if w.ID == brain.WorkID("m-1", "one") && w.State != brain.WorkDone {
 			t.Fatalf("the frame at the position does not hold the end of one: %s", w.State)
 		}
+	}
+}
+
+// A catalog mission cannot be rewound. A rewind of a completed scan to its join would
+// raise no finding and would verify every fixed finding in its scope (gibson#1469).
+func TestRewind_RefusesACatalogMission(t *testing.T) {
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
+	first := storedChain(t)
+	first.Metadata = map[string]any{mission.MetadataCatalogMission: "scan"}
+	runChain(eng, first.ID.String())
+	starts := &startRecorder{}
+	store := newMemStore(first)
+	r := missionRewinder{tenant: "tenant-a", eng: eng, store: store, start: starts.start}
+
+	_, err := r.rewind(tenantCtx(t, "tenant-a"), api.RewindRequest{MissionID: first.ID.String(), CheckpointID: "one"})
+	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), "run the catalog mission again with RunCatalogMission") {
+		t.Fatalf("err = %v, want FailedPrecondition that names RunCatalogMission", err)
+	}
+	if len(starts.ids) != 0 || store.saves != 0 {
+		t.Fatal("a refused rewind started a run or saved a mission")
 	}
 }

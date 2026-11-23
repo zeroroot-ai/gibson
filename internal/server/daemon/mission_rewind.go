@@ -267,6 +267,14 @@ func (r missionRewinder) rewind(ctx context.Context, req api.RewindRequest) (str
 	if parent.MissionDefinitionJSON == "" {
 		return "", status.Errorf(codes.FailedPrecondition, "mission %s has no definition", req.MissionID)
 	}
+	// A rewind of a catalog mission is refused. A rewind of a completed scan to its
+	// join would raise no finding and would verify every fixed finding in its scope.
+	// The catalog mission starts again from the catalog (gibson#1469).
+	if catalog := catalogOf(parent); catalog != "" {
+		return "", status.Errorf(codes.FailedPrecondition,
+			"mission %s was launched from the catalog mission %q, so it cannot be rewound: run the catalog mission again with RunCatalogMission",
+			req.MissionID, catalog)
+	}
 	def, err := mission.UnmarshalDefinitionJSON([]byte(parent.MissionDefinitionJSON))
 	if err != nil {
 		return "", fmt.Errorf("rewind: parse definition of mission %s: %w", req.MissionID, err)
@@ -318,6 +326,8 @@ func rewoundMission(parent *mission.Mission, id types.ID, def *missionpb.Mission
 	for k, v := range parent.Metadata {
 		meta[k] = v
 	}
+	// A rewound mission is never a catalog launch.
+	delete(meta, mission.MetadataCatalogMission)
 	return &mission.Mission{
 		ID:                    id,
 		TenantID:              parent.TenantID,
