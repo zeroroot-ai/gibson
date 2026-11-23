@@ -12,8 +12,11 @@ description: >-
 # the Git host.
 spec:
   runtime: setec
-  # Release 0.1.0 of zeroroot-ai/fix-agent, built on sdk v0.213.0.
-  image: ghcr.io/zeroroot-ai/fix-agent@sha256:8e55b40a467dff1ecfc07d2f55f04bd0888fdf6d07ccbd5062016b81c9f83b3a
+  # Release 0.2.0 of zeroroot-ai/fix-agent, built on sdk v0.217.0. 0.2.0 merges
+  # the fix after the daemon grants the merge slot (fix-agent#8), merges a
+  # fixing finding whose merge request is still open (fix-agent#15) and keeps
+  # the file mode of each fix file (fix-agent#13).
+  image: ghcr.io/zeroroot-ai/fix-agent@sha256:c8e6cd91108eb53b7caf5b85d5efc6023cb4d91a988af643d3a6df357e47ddfd
   dispatchMode: sandboxed
   # Untrusted: the agent reads findings that tools of the buyer wrote, so it
   # runs only in a sandbox.
