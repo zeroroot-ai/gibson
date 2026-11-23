@@ -34,17 +34,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
 	bankpb "github.com/zeroroot-ai/sdk/api/gen/gibson/bank/v1"
-	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
-	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
-	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -52,13 +48,16 @@ const (
 	fixLoopFixAgent     = "fix-agent"
 	fixLoopFixAgentRef  = "agent/" + fixLoopFixAgent
 	fixLoopScanInterval = 90 * time.Second
-	// The node of the fix agent: the coding job (25 minutes), the merge wait (10
-	// minutes) and a margin.
-	fixLoopNodeTimeout = 45 * time.Minute
+	// The pass of the fix agent: the coding job and the merge wait. The mission
+	// fix-pass derives its node timeout from them: the coding timeout, two merge
+	// waits and 15 minutes of margin.
+	fixLoopCodingTimeout = 25 * time.Minute
+	fixLoopMergeWait     = 10 * time.Minute
+	fixLoopNodeTimeout   = fixLoopCodingTimeout + 2*fixLoopMergeWait + 15*time.Minute
 	// The waits of the cases. With the waits of TestFixLoop (36 minutes), the sum
-	// of all waits is 191 minutes. The verify loop can overshoot its wait by one
-	// scan interval (90 seconds), so the workflow sets the go test timeout to 210
-	// minutes and the job timeout to 270 minutes (60 minutes of cluster start-up).
+	// of all waits is 221 minutes. The verify loop can overshoot its wait by one
+	// scan interval (90 seconds), so the workflow sets the go test timeout to 240
+	// minutes and the job timeout to 300 minutes (60 minutes of cluster start-up).
 	// A slow run so fails with its "Last state" message and never meets the kill of
 	// the go test timeout. The daemon holds a deploy for 10 minutes (the default
 	// hold of the fix loop policy).
@@ -67,7 +66,7 @@ const (
 	fixLoopFixTimeout    = fixLoopNodeTimeout
 	fixLoopVerifyTimeout = 25 * time.Minute
 	// The revert wait covers the node timeout and the hold of the deploy.
-	fixLoopRevertTimeout = 55 * time.Minute
+	fixLoopRevertTimeout = fixLoopNodeTimeout + 10*time.Minute
 	fixLoopReopenTimeout = 10 * time.Minute
 	// The advisory of the fixture. The repository requires the library at a
 	// version that the range holds. The fix is one line of go.mod.
@@ -198,38 +197,23 @@ func (w *fixLoopWorld) findingOf(t *testing.T, app string) *worldpb.OpenFindingV
 // startFixAgent runs one pass of the fix agent for the finding. The agent opens
 // the coding job on the bank, the merge request, and the merge call that waits for
 // the merge slot. The mission ends when the pass ends.
-func (w *fixLoopWorld) startFixAgent(t *testing.T, app, findingID string) *helpers.MissionRun {
+func (w *fixLoopWorld) startFixAgent(t *testing.T, app, findingID string) string {
 	t.Helper()
-	str := func(v string) *commonpb.TypedValue {
-		return &commonpb.TypedValue{Kind: &commonpb.TypedValue_StringValue{StringValue: v}}
-	}
-	def := &missionpb.MissionDefinition{
-		Name:        helpers.RunName(t, "fix-loop-fix-agent"),
-		Description: "one pass of the fix agent",
-		Nodes: map[string]*missionpb.MissionNode{
-			"fix": {
-				Id: "fix", Name: "Fix", Type: missionpb.NodeType_NODE_TYPE_AGENT,
-				// A sandboxed agent node with no timeout gets 30 minutes. The pass holds
-				// the coding job (25m) and the merge wait (10m), so the node needs more.
-				Timeout: durationpb.New(fixLoopNodeTimeout),
-				Config: &missionpb.MissionNode_AgentConfig{AgentConfig: &missionpb.AgentNodeConfig{
-					AgentName: fixLoopFixAgent,
-					Task: &typespb.Task{
-						Id: "fix", Goal: "Fix the finding " + findingID + " of " + app,
-						Context: map[string]*commonpb.TypedValue{
-							"application": str(app), "bank": str(w.bankName), "connector": str("connector/" + fixLoopGitConnector),
-							"project": str(app), "base_branch": str("main"), "finding": str(findingID),
-							"merge_wait": str("10m"), "timeout": str("25m"),
-						},
-					},
-				}},
-			},
+	// The catalog mission fix-pass sets the node timeout from these two values.
+	// A sandboxed agent node with no timeout gets 30 minutes, so the mission
+	// derives it (coding timeout plus two merge waits plus a margin).
+	resp, err := w.daemon.RunCatalogMission(w.ctx, &daemonpb.RunCatalogMissionRequest{
+		Name: "fix-pass",
+		Params: map[string]string{
+			"application": app, "bank": w.bankName, "forgeConnector": fixLoopGitConnector,
+			"project": app, "baseBranch": "main", "finding": findingID,
+			"codingTimeout": fixLoopCodingTimeout.String(), "mergeWait": fixLoopMergeWait.String(),
 		},
-		EntryPoints: []string{"fix"},
-	}
-	created, err := w.daemon.CreateMissionDefinition(w.ctx, &daemonpb.CreateMissionDefinitionRequest{Definition: def})
-	require.NoError(t, err, "CreateMissionDefinition(fix agent)")
-	return helpers.StartMission(w.ctx, t, w.daemon, created.GetMissionDefinitionId(), w.targetID)
+		TargetId: w.targetID,
+	})
+	require.NoError(t, err, "RunCatalogMission(fix-pass) for %s", app)
+	require.NotEmpty(t, resp.GetMissionId())
+	return resp.GetMissionId()
 }
 
 // statusOf reads the status of the finding. A finding in the open list has its
