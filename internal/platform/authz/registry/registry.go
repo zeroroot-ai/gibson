@@ -1208,6 +1208,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.v1.DaemonService/RunCatalogMission": {
+		Service:           "gibson.daemon.v1.DaemonService",
+		Relation:          "writer",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.v1.DaemonService/RunMission": {
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
