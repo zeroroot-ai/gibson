@@ -89,10 +89,10 @@ func leafPEM(t *testing.T) []byte {
 func TestNormalize_RefusesTextOutsideTheBlocks(t *testing.T) {
 	c := certPEM(t, "c")
 	cases := map[string][]byte{
-		"text before":      append([]byte("ghp_secrettoken\n"), c...),
-		"text between":     append(append(append([]byte{}, c...), []byte("ghp_secrettoken\n")...), certPEM(t, "d")...),
-		"text after":       append(append([]byte{}, c...), []byte("ghp_secrettoken")...),
-		"a leaf, not a CA": leafPEM(t),
+		"text before":                   append([]byte("ghp_secrettoken\n"), c...),
+		"text between":                  append(append(append([]byte{}, c...), []byte("ghp_secrettoken\n")...), certPEM(t, "d")...),
+		"text after":                    append(append([]byte{}, c...), []byte("ghp_secrettoken")...),
+		"a leaf that another CA signed": leafSignedByAnotherCA(t),
 	}
 	for name, data := range cases {
 		out, err := Normalize(data)
@@ -119,5 +119,99 @@ func TestNormalize_ReEncodesTheCertificates(t *testing.T) {
 	}
 	if string(out) != string(c1)+string(c2) {
 		t.Errorf("output = %q", out)
+	}
+}
+
+// leafSignedByAnotherCA is a server certificate with no CA flag that a CA
+// signed. It is not a trust anchor.
+func leafSignedByAnotherCA(t *testing.T) []byte {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(10), Subject: pkix.Name{CommonName: "issuer"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := &x509.Certificate{
+		SerialNumber: big.NewInt(11), Subject: pkix.Name{CommonName: "leaf"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, leaf, ca, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+func intermediatePEM(t *testing.T) []byte {
+	t.Helper()
+	rootKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	rootTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(20), Subject: pkix.Name{CommonName: "root"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	rootDER, err := x509.CreateCertificate(rand.Reader, rootTmpl, rootTmpl, &rootKey.PublicKey, rootKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, _ := x509.ParseCertificate(rootDER)
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(21), Subject: pkix.Name{CommonName: "intermediate"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, root, &key.PublicKey, rootKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+// A bundle of a model provider or an outside agent worked with a self-signed
+// server certificate that has no CA flag, with a root that has no
+// BasicConstraints and with an intermediate. All three stay accepted. A leaf that
+// another CA signed is refused.
+func TestNormalize_AcceptsTheAnchorsThatTenantsUse(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"a self-signed leaf": leafPEM(t),
+		"an intermediate":    intermediatePEM(t),
+		"a CA":               certPEM(t, "ca"),
+	} {
+		if _, err := Normalize(data); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := Normalize(leafSignedByAnotherCA(t)); err == nil {
+		t.Error("a leaf that another CA signed must be refused")
+	}
+}
+
+// A BEGIN line with no END line is skipped by pem.Decode, and the next block is
+// returned. Normalize refuses the skipped text.
+func TestNormalize_RefusesAMalformedBlockBeforeACertificate(t *testing.T) {
+	in := append([]byte("-----BEGIN junk\nghp_secrettoken\n"), certPEM(t, "c")...)
+	out, err := Normalize(in)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if len(out) != 0 || strings.Contains(err.Error(), "ghp_secrettoken") {
+		t.Errorf("out = %q, err = %v", out, err)
 	}
 }

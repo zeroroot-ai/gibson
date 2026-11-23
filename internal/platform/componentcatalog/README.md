@@ -208,7 +208,7 @@ The tenant stores a PEM bundle as a secret of its own with `SetSecret` and no ca
 - The operator writes a Secret from the bundle in the namespace of the tenant only. The Secret belongs to the `ConnectorInstance`.
 - The operator mounts that Secret into the pod of this connector only, and sets `SSL_CERT_FILE` to the mounted file. A pod of another connector has no mount and no variable.
 - `EnableConnector` reads the secret at once and refuses a missing secret or one that is not a CA bundle.
-- The daemon returns the CA certificates only, as new PEM. It refuses any text outside the certificates, a block that is not a certificate, and a certificate that is not a CA.
+- The daemon returns the CA certificates only, as new PEM. It refuses any text outside the certificates, a block that is not a certificate, and a certificate that is neither a CA nor self-signed.
 - The operator refuses a Secret that the `ConnectorInstance` does not own, and it never takes one over.
 - A new bundle changes the hash annotation of the pod template, so the pod rolls and reads the new file.
 - When the tenant clears the variable, the operator deletes the CA Secret.

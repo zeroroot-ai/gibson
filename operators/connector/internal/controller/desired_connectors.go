@@ -573,7 +573,7 @@ func (r *DesiredConnectorsRunnable) dropCASecret(ctx context.Context, ci *connec
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("read Secret %s/%s: %w", ci.Namespace, live.Name, err)
+		return fmt.Errorf("read Secret %s/%s: %w", ci.Namespace, caSecretName(ci.Name), err)
 	}
 	if !ownedByInstance(&live, ci) {
 		return nil

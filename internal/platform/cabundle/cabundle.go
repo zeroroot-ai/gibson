@@ -34,6 +34,20 @@ func Check(pemData []byte) error {
 	return err
 }
 
+// isTrustAnchor reports whether a certificate can be a trust anchor: a CA with
+// valid BasicConstraints, or a self-signed certificate. A self-signed server
+// certificate (a self-hosted endpoint) and a v1 root with no BasicConstraints
+// are anchors that tenants use. A leaf that another CA signed is not.
+func isTrustAnchor(c *x509.Certificate) bool {
+	if c.IsCA && c.BasicConstraintsValid {
+		return true
+	}
+	if !bytes.Equal(c.RawSubject, c.RawIssuer) {
+		return false
+	}
+	return c.CheckSignature(c.SignatureAlgorithm, c.RawTBSCertificate, c.Signature) == nil
+}
+
 // Normalize returns the CA certificates of pemData as new PEM, and nothing else.
 //
 // The input must hold CERTIFICATE blocks and white space only. pem.Decode skips
@@ -61,6 +75,13 @@ func Normalize(pemData []byte) ([]byte, error) {
 		if block == nil {
 			return nil, errors.New("the bundle holds a PEM block that does not decode")
 		}
+		// pem.Decode skips a block that is malformed and returns the next one.
+		// The block that it returned must start where the text starts, so the
+		// skipped text cannot hide before a certificate.
+		consumed := rest[idx : len(rest)-len(after)]
+		if !bytes.HasPrefix(consumed, []byte("-----BEGIN "+block.Type+"-----")) {
+			return nil, errors.New("the bundle holds text that is not PEM outside the certificates")
+		}
 		if block.Type != "CERTIFICATE" {
 			return nil, fmt.Errorf("the bundle holds a %q block, and only CERTIFICATE blocks are allowed", block.Type)
 		}
@@ -68,8 +89,8 @@ func Normalize(pemData []byte) ([]byte, error) {
 		if err != nil {
 			return nil, errors.New("a certificate of the bundle does not parse")
 		}
-		if !cert.IsCA || !cert.BasicConstraintsValid {
-			return nil, errors.New("a certificate of the bundle is not a CA certificate")
+		if !isTrustAnchor(cert) {
+			return nil, errors.New("a certificate of the bundle is neither a CA certificate nor self-signed")
 		}
 		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})...)
 		rest = after
