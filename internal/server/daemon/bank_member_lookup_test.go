@@ -267,22 +267,10 @@ func TestBankMemberLiveness(t *testing.T) {
 	}
 }
 
-// pendingJobStore is a job store with inputs that a member has not acknowledged. The map holds
-// them by job id, as PendingJobInputs reads one job.
-type pendingJobStore struct {
-	*fakeJobStore
-	pending map[string][]*job.Input
-	err     error
-}
-
-func (p pendingJobStore) PendingJobInputs(_ context.Context, _, jobID string, _ int32) ([]*job.Input, error) {
-	return p.pending[jobID], p.err
-}
-
 // TestBankMemberLiveness_TurnGrant: a turn grant carries the authority of one sender for one
-// turn. It renews only while the member holds the job and an input of this job from this
-// sender is not acknowledged. A closed job keeps its wrap-up grant for 10 minutes after the
-// close. The base grant of the member is no turn grant.
+// turn. It renews only for the sender of the current turn of a job that the member holds, while
+// the job is open or working. A waiting job never renews. A closed job keeps its wrap-up grant
+// for 10 minutes after the close. The base grant of the member is no turn grant.
 func TestBankMemberLiveness_TurnGrant(t *testing.T) {
 	ctx := context.Background()
 	closedAt := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
@@ -296,34 +284,25 @@ func TestBankMemberLiveness_TurnGrant(t *testing.T) {
 	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
 	bob := job.Principal{Kind: job.PrincipalUser, ID: "bob"}
 	jobs := newFakeJobStore()
-	add := func(id, member, bankID string, state job.State, closed time.Time) {
-		jobs.jobs[id] = &job.Job{ID: id, BankID: bankID, MemberID: member, State: state, ClosedAt: closed}
+	add := func(id, member, bankID string, state job.State, turn job.Principal, closed time.Time) {
+		jobs.jobs[id] = &job.Job{
+			ID: id, BankID: bankID, MemberID: member, State: state, TurnSender: turn, ClosedAt: closed,
+		}
 	}
-	add("job-working", "m-1", "bank-1", job.StateWorking, time.Time{})
-	add("job-waiting", "m-1", "bank-1", job.StateWaiting, time.Time{})
-	add("job-bob", "m-1", "bank-1", job.StateWorking, time.Time{})
-	add("job-other", "m-9", "bank-1", job.StateWorking, time.Time{})
-	add("job-bank2", "m-1", "bank-2", job.StateWorking, time.Time{})
-	add("job-closed", "m-1", "bank-1", job.StateClosed, closedAt)
-	add("job-late", "m-1", "bank-1", job.StateClosed, closedAt.Add(-10*time.Minute))
-	add("job-noclose", "m-1", "bank-1", job.StateClosed, time.Time{})
-	add("job-done", "m-1", "bank-1", job.StateClosed, closedAt)
-	in := func(id, jobID string, sender job.Principal) []*job.Input {
-		return []*job.Input{{ID: id, JobID: jobID, Kind: job.InputTurn, Sender: sender}}
-	}
-	store := pendingJobStore{fakeJobStore: jobs, pending: map[string][]*job.Input{
-		"job-working": in("i1", "job-working", alice),
-		"job-bob":     in("i2", "job-bob", bob),
-		"job-other":   in("i3", "job-other", alice),
-		"job-bank2":   in("i4", "job-bank2", alice),
-		"job-closed":  in("i5", "job-closed", alice),
-		"job-late":    in("i6", "job-late", alice),
-		"job-noclose": in("i7", "job-noclose", alice),
-		// job-waiting and job-done have no input that is not acknowledged.
-	}}
+	none := time.Time{}
+	add("job-working", "m-1", "bank-1", job.StateWorking, alice, none) // a long coding turn, input acknowledged
+	add("job-pulled", "m-1", "bank-1", job.StateOpen, alice, none)     // the first turn of a pulled job
+	add("job-bobs-turn", "m-1", "bank-1", job.StateWorking, bob, none) // the turn of another sender started
+	add("job-no-turn", "m-1", "bank-1", job.StateWorking, job.Principal{}, none)
+	add("job-waiting", "m-1", "bank-1", job.StateWaiting, alice, none)
+	add("job-other", "m-9", "bank-1", job.StateWorking, alice, none)
+	add("job-bank2", "m-1", "bank-2", job.StateWorking, alice, none)
+	add("job-closed", "m-1", "bank-1", job.StateClosed, alice, closedAt)
+	add("job-late", "m-1", "bank-1", job.StateClosed, alice, closedAt.Add(-10*time.Minute))
+	add("job-noclose", "m-1", "bank-1", job.StateClosed, alice, none)
 	live := &bankMemberLiveness{
 		banks: func() (bank.Store, error) { return banks, nil },
-		jobs:  func() (job.Store, error) { return store, nil },
+		jobs:  func() (job.Store, error) { return jobs, nil },
 		now:   func() time.Time { return now },
 	}
 	tenant, err := auth.NewTenantID("acme")
@@ -337,13 +316,14 @@ func TestBankMemberLiveness_TurnGrant(t *testing.T) {
 		claims sdkcg.Claims
 		want   bool
 	}{
-		"a job with an input of the sender not acknowledged":    {claims("bank-1", "run-1", "job-working"), true},
-		"a job that waits between turns (all inputs done)":      {claims("bank-1", "run-1", "job-waiting"), false},
-		"a job whose only input is from another sender":         {claims("bank-1", "run-1", "job-bob"), false},
+		"a working job in the turn of the sender":               {claims("bank-1", "run-1", "job-working"), true},
+		"the first turn of a pulled job (opener is the sender)": {claims("bank-1", "run-1", "job-pulled"), true},
+		"a job whose current turn belongs to another sender":    {claims("bank-1", "run-1", "job-bobs-turn"), false},
+		"a job with no turn":                                    {claims("bank-1", "run-1", "job-no-turn"), false},
+		"a waiting job":                                         {claims("bank-1", "run-1", "job-waiting"), false},
 		"a closed job within 10 minutes of the close":           {claims("bank-1", "run-1", "job-closed"), true},
 		"a closed job 11 minutes after the close":               {claims("bank-1", "run-1", "job-late"), false},
 		"a closed job with no close time":                       {claims("bank-1", "run-1", "job-noclose"), false},
-		"a closed job whose wrap-up is acknowledged":            {claims("bank-1", "run-1", "job-done"), false},
 		"a job that another member holds":                       {claims("bank-1", "run-1", "job-other"), false},
 		"a job of another bank":                                 {claims("bank-1", "run-1", "job-bank2"), false},
 		"a job that does not exist":                             {claims("bank-1", "run-1", "job-9"), false},
@@ -360,6 +340,16 @@ func TestBankMemberLiveness_TurnGrant(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s: live = %v, want %v", name, got, c.want)
 		}
+	}
+	// The turn moves from sender A to sender B: the grant of A stops, the grant of B starts.
+	jobs.jobs["job-working"].TurnSender = bob
+	if got, _ := live.IsMemberTurnGrantLive(ctx, claims("bank-1", "run-1", "job-working")); got {
+		t.Error("the grant of sender A must stop when the turn of sender B starts")
+	}
+	bobClaims := claims("bank-1", "run-1", "job-working")
+	bobClaims.Subject = "user:bob"
+	if got, _ := live.IsMemberTurnGrantLive(ctx, bobClaims); !got {
+		t.Error("the grant of sender B must renew in its own turn")
 	}
 	// The window ends 10 minutes after the close, to the instant.
 	at := func(d time.Duration) bool {
@@ -380,9 +370,6 @@ func TestBankMemberLiveness_TurnGrant(t *testing.T) {
 	for name, l := range map[string]*bankMemberLiveness{
 		"the bank store": {banks: func() (bank.Store, error) { return nil, down }, jobs: live.jobs},
 		"the job store":  {banks: live.banks, jobs: func() (job.Store, error) { return nil, down }},
-		"the inputs": {banks: live.banks, now: live.now, jobs: func() (job.Store, error) {
-			return pendingJobStore{fakeJobStore: jobs, err: down}, nil
-		}},
 	} {
 		task := "job-working"
 		if got, err := l.IsMemberTurnGrantLive(ctx, claims("bank-1", "run-1", task)); got || err == nil {

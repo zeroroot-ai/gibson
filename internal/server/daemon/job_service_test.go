@@ -154,8 +154,13 @@ func (f *fakeJobStore) Claim(context.Context, string, string, string) (*job.Job,
 func (f *fakeJobStore) PendingInputs(context.Context, string, string, int32) ([]*job.Input, error) {
 	return nil, nil
 }
-func (f *fakeJobStore) PendingJobInputs(context.Context, string, string, int32) ([]*job.Input, error) {
-	return nil, nil
+func (f *fakeJobStore) SetTurn(_ context.Context, _, jobID string, sender job.Principal, inputID string) error {
+	j, ok := f.jobs[jobID]
+	if !ok {
+		return job.ErrNotFound
+	}
+	j.TurnSender, j.TurnInputID = sender, inputID
+	return nil
 }
 func (f *fakeJobStore) Acknowledge(context.Context, string, string) error { return nil }
 func (f *fakeJobStore) SetState(context.Context, string, string, job.State, string) (*job.Job, error) {

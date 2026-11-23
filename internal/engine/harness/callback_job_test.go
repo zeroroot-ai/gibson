@@ -41,6 +41,7 @@ type fakeJobs struct {
 	setErr     error
 	openErr    error
 	sendErr    error
+	turnErr    error
 	opened     []job.OpenInput
 	sent       []job.SendInput
 	events     map[string][]*job.Event
@@ -116,6 +117,18 @@ func (f *fakeJobs) Acknowledge(_ context.Context, _, inputID string) error {
 		return f.ackErr
 	}
 	f.acked = append(f.acked, inputID)
+	return nil
+}
+
+func (f *fakeJobs) SetTurn(_ context.Context, _, jobID string, sender job.Principal, inputID string) error {
+	if f.turnErr != nil {
+		return f.turnErr
+	}
+	j, ok := f.jobs[jobID]
+	if !ok {
+		return job.ErrNotFound
+	}
+	j.TurnSender, j.TurnInputID = sender, inputID
 	return nil
 }
 
@@ -326,6 +339,13 @@ func TestSubscribeInput_DeliversEachInputWithItsOwnTurnGrant(t *testing.T) {
 		if req.MissionRunID != "run-1" {
 			t.Errorf("turn grant %d carries run %q, want the run of the member (run-1)", i, req.MissionRunID)
 		}
+	}
+	// The delivery starts the turn of the sender: the grant renews for that sender only.
+	if got := jobs.jobs["job-1"]; got.TurnSender.ID != "alice" || got.TurnInputID != "in-1" {
+		t.Errorf("turn of job-1 = %+v / %q, want alice / in-1", got.TurnSender, got.TurnInputID)
+	}
+	if got := jobs.jobs["job-2"]; got.TurnSender.ID != "agent_principal:node" || got.TurnInputID != "in-2" {
+		t.Errorf("turn of job-2 = %+v / %q, want the component / in-2", got.TurnSender, got.TurnInputID)
 	}
 	if minter.reqs[0].Subject != "user:alice" {
 		t.Errorf("subject = %q; a turn carries the SENDER's authority, not the member's", minter.reqs[0].Subject)
@@ -951,5 +971,49 @@ func TestPullJob_TheGrantsRunNamesTheMember(t *testing.T) {
 	_, err = s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: info})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("PullJob with no run: err = %v, want InvalidArgument", err)
+	}
+}
+
+// The member acknowledges an input when its turn starts (it reports working), and a coding turn
+// can run past the 30 minute life of the grant. The acknowledgement must not end the turn: the
+// current turn of the job stays with its sender, so the renewal still works.
+func TestReportJobState_TheAcknowledgementKeepsTheCurrentTurn(t *testing.T) {
+	jobs := newFakeJobs()
+	j := openJob("job-1")
+	j.TurnSender, j.TurnInputID = job.Principal{Kind: job.PrincipalUser, ID: "alice"}, "in-1"
+	jobs.jobs["job-1"] = j
+	jobs.pending = []*job.Input{{ID: "in-1", JobID: "job-1"}}
+	s := memberService(t, jobs, liveMembers(), &recordingMinter{})
+
+	if _, err := s.ReportJobState(memberCtx("acme"), &harnesspb.ReportJobStateRequest{
+		Context: memberInfo("run-1"), JobId: "job-1", State: jobpb.JobState_JOB_STATE_WORKING,
+	}); err != nil {
+		t.Fatalf("ReportJobState: %v", err)
+	}
+	if len(jobs.acked) != 1 {
+		t.Fatalf("acked = %v, want the input of the turn", jobs.acked)
+	}
+	if got := jobs.jobs["job-1"]; got.TurnSender.ID != "alice" || got.TurnInputID != "in-1" {
+		t.Errorf("the acknowledgement moved the turn to %+v / %q", got.TurnSender, got.TurnInputID)
+	}
+}
+
+// A turn that cannot be recorded gets no grant: a grant for a turn that no row names would
+// never renew.
+func TestSubscribeInput_ATurnThatCannotBeRecordedIsNotDelivered(t *testing.T) {
+	jobs := newFakeJobs()
+	jobs.jobs["job-1"] = openJob("job-1")
+	jobs.turnErr = errors.New("store down")
+	jobs.pending = []*job.Input{{ID: "in-1", JobID: "job-1", Kind: job.InputTurn, SentAt: time.Now(),
+		Sender: job.Principal{Kind: job.PrincipalUser, ID: "alice"}}}
+	s := memberService(t, jobs, liveMembers(), &recordingMinter{})
+
+	ctx, cancel := context.WithCancel(memberCtx("acme"))
+	stream := &recordingInputStream{ctx: ctx, cancel: cancel}
+	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
+	_ = s.SubscribeInput(&harnesspb.SubscribeInputRequest{Context: memberInfo("run-1")}, stream) //nolint:contextcheck // the stream carries the context
+
+	if n := len(stream.snapshot()); n != 0 {
+		t.Fatalf("delivered %d inputs, want none", n)
 	}
 }

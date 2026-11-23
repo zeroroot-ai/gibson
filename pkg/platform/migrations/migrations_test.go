@@ -29,13 +29,13 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	// publications (gibson#1567), and 024 maps the old finding statuses to
 	// the four of ADR-0178 (gibson#1556 review m11), and 025 is the loop
 	// grant of a bank member (gibson#1612), and 026 is the message ids of inbound
-	// A2A calls (gibson#1611).
+	// A2A calls (gibson#1611), and 027 is the current turn of a job (gibson#1670).
 	upCount, downCount := countSQL(t, Tenant, tenantDir)
-	if upCount != 26 {
-		t.Errorf("tenant: expected 26 up.sql files, got %d", upCount)
+	if upCount != 27 {
+		t.Errorf("tenant: expected 27 up.sql files, got %d", upCount)
 	}
-	if downCount != 26 {
-		t.Errorf("tenant: expected 26 down.sql files, got %d", downCount)
+	if downCount != 27 {
+		t.Errorf("tenant: expected 27 down.sql files, got %d", downCount)
 	}
 }
 
@@ -117,14 +117,15 @@ func TestEmbed_UpDownPairing(t *testing.T) {
 //	024 — finding_status_values (the old statuses to the four, gibson#1556)
 //	025 — loop_grants (the loop grant of a bank member, gibson#1612)
 //	026 — inbound_messages (the message ids of inbound A2A calls, gibson#1611)
+//	027 — job_turn (the current turn of a job, gibson#1670)
 func TestTenantMaxVersion(t *testing.T) {
 	t.Parallel()
 	v, err := TenantMaxVersion()
 	if err != nil {
 		t.Fatalf("TenantMaxVersion: %v", err)
 	}
-	if v != 26 {
-		t.Errorf("TenantMaxVersion: got %d, want 26", v)
+	if v != 27 {
+		t.Errorf("TenantMaxVersion: got %d, want 27", v)
 	}
 }
 

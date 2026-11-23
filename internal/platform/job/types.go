@@ -153,6 +153,12 @@ type Job struct {
 	Deliverables    []*jobpb.Deliverable
 	Attempts        int32
 	Spilled         bool
+	// TurnSender and TurnInputID name the current turn: the sender whose authority the member
+	// acts with, and the input that started the turn (empty for the first turn of a pulled
+	// job, whose sender is the opener). A turn grant renews only for the sender of the
+	// current turn.
+	TurnSender  Principal
+	TurnInputID string
 }
 
 // Input is one message to a job. The grant is never a field: it is minted when

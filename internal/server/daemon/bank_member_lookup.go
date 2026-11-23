@@ -82,9 +82,6 @@ func newBankMemberLiveness(d *daemonImpl) *bankMemberLiveness {
 	}
 }
 
-// pendingTurnInputs bounds the read of the inputs of one job that a member has not finished.
-const pendingTurnInputs = 100
-
 // wrapUpRenewalWindow is how long after the close of a job the wrap-up may renew its grant.
 // It covers the 5 minute retry of the member with margin.
 const wrapUpRenewalWindow = 10 * time.Minute
@@ -93,10 +90,11 @@ const wrapUpRenewalWindow = 10 * time.Minute
 // the member holds. The grant must name the bank of the member as its mission and the run
 // of the member as its run, and its task must be a job of that bank that the member holds.
 // The member must not be dead. The grant carries the authority of one sender for one turn,
-// so it is live only while an input of this job from that sender (the subject of the grant)
-// is not acknowledged. A closed job keeps its wrap-up grant for 10 minutes after the close.
-// A grant that names a job of another member, or the base grant of the member (its task is
-// the member, not a job), is not live. A store error is an error, never an answer.
+// so it is live only for the sender of the current turn of the job (the subject of the
+// grant), while the job is open or working. A waiting job never renews. A closed job keeps
+// its wrap-up grant for 10 minutes after the close. A grant that names a job of another
+// member, or the base grant of the member (its task is the member, not a job), is not live.
+// A store error is an error, never an answer.
 func (l *bankMemberLiveness) IsMemberTurnGrantLive(ctx context.Context, claims sdkcg.Claims) (bool, error) {
 	banks, err := l.banks()
 	if err != nil {
@@ -127,22 +125,20 @@ func (l *bankMemberLiveness) IsMemberTurnGrantLive(ctx context.Context, claims s
 	if j.BankID != m.BankID || j.MemberID != m.ID {
 		return false, nil // the member does not hold the job
 	}
-	if j.State == job.StateClosed && !l.withinWrapUpWindow(j) {
-		return false, nil
-	}
-	// A turn grant carries the authority of one sender for one turn. It lives only while an
-	// input of this job from that sender is not acknowledged. A job that waits between turns
-	// holds no live grant.
-	pending, err := jobs.PendingJobInputs(ctx, tenantID, j.ID, pendingTurnInputs)
-	if err != nil {
-		return false, fmt.Errorf("read the inputs of job %s: %w", j.ID, err)
-	}
-	for _, in := range pending {
-		if harness.TurnGrantSubject(in.Sender) == claims.Subject {
-			return true, nil
+	switch j.State {
+	case job.StateOpen, job.StateWorking:
+		// A job that the member holds and works on has a live turn.
+	case job.StateClosed:
+		if !l.withinWrapUpWindow(j) {
+			return false, nil
 		}
+	default:
+		return false, nil // a waiting job has no turn: nothing runs between turns
 	}
-	return false, nil
+	// A turn grant carries the authority of one sender for one turn. It renews only for the
+	// sender of the current turn. The member acknowledges an input when its turn starts, so the
+	// acknowledgement says nothing about the end of the turn.
+	return j.TurnSender.ID != "" && harness.TurnGrantSubject(j.TurnSender) == claims.Subject, nil
 }
 
 // withinWrapUpWindow is true while the wrap-up of a closed job may still renew its grant.
@@ -297,6 +293,19 @@ func (l *lazyJobSurface) Acknowledge(ctx context.Context, tenantID, inputID stri
 		return err
 	}
 	if err := s.Acknowledge(ctx, tenantID, inputID); err != nil {
+		return fmt.Errorf("job store: %w", err)
+	}
+	return nil
+}
+
+func (l *lazyJobSurface) SetTurn(
+	ctx context.Context, tenantID, jobID string, sender job.Principal, inputID string,
+) error {
+	s, err := l.store()
+	if err != nil {
+		return err
+	}
+	if err := s.SetTurn(ctx, tenantID, jobID, sender, inputID); err != nil {
 		return fmt.Errorf("job store: %w", err)
 	}
 	return nil

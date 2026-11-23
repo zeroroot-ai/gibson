@@ -247,43 +247,35 @@ func TestJobStore_UnacknowledgedInputRedelivers(t *testing.T) {
 	assert.Len(t, pending, 1)
 }
 
-// TestJobStore_PendingJobInputsReadsOneJob: a member with more than 100 inputs on one job
-// still reads the input of another job. PendingInputs reads the oldest inputs of all jobs of
-// the member, so the 100 oldest can hide a later job. PendingJobInputs filters by job, and
-// it never reads a job of another tenant member.
-func TestJobStore_PendingJobInputsReadsOneJob(t *testing.T) {
+// TestJobStore_TheCurrentTurnFollowsTheSender: the opener is the sender of the first turn, a pull
+// keeps it, a delivery moves it to the sender of the input, and it can move on a closed job
+// (the wrap-up is a turn). An unknown job is not found.
+func TestJobStore_TheCurrentTurnFollowsTheSender(t *testing.T) {
 	store, _, bankID := newJobStore(t)
 	ctx := context.Background()
 
-	busy, err := store.Open(ctx, intTenant,
-		job.OpenInput{BankID: bankID, MemberID: "m-1", Spec: spec("busy"), OpenedBy: opener()})
+	j, err := store.Open(ctx, intTenant, job.OpenInput{BankID: bankID, Spec: spec("turns"), OpenedBy: opener()})
 	require.NoError(t, err)
-	for i := 0; i < 105; i++ {
-		_, err = store.Send(ctx, intTenant, job.SendInput{JobID: busy.ID, Message: "turn", Sender: opener()})
-		require.NoError(t, err)
-	}
-	later, err := store.Open(ctx, intTenant,
-		job.OpenInput{BankID: bankID, MemberID: "m-1", Spec: spec("later"), OpenedBy: opener()})
-	require.NoError(t, err)
-	wrap, err := store.Send(ctx, intTenant,
-		job.SendInput{JobID: later.ID, Kind: job.InputWrapUp, Message: "wrap up", Sender: opener()})
-	require.NoError(t, err)
+	assert.Equal(t, opener(), j.TurnSender, "the opener is the sender of the first turn")
 
-	all, err := store.PendingInputs(ctx, intTenant, "m-1", 100)
+	pulled, err := store.Claim(ctx, intTenant, bankID, "m-1")
 	require.NoError(t, err)
-	for _, in := range all {
-		require.NotEqual(t, later.ID, in.JobID, "the 100 oldest inputs of the member hide the later job")
-	}
+	require.NotNil(t, pulled)
+	assert.Equal(t, opener(), pulled.TurnSender)
+	assert.Empty(t, pulled.TurnInputID, "the first turn of a pulled job has no input row")
 
-	got, err := store.PendingJobInputs(ctx, intTenant, later.ID, 100)
+	bob := job.Principal{Kind: job.PrincipalUser, ID: "bob"}
+	require.NoError(t, store.SetTurn(ctx, intTenant, j.ID, bob, "in-9"))
+	got, err := store.Get(ctx, intTenant, j.ID)
 	require.NoError(t, err)
-	require.Len(t, got, 1)
-	assert.Equal(t, wrap.ID, got[0].ID)
+	assert.Equal(t, bob, got.TurnSender)
+	assert.Equal(t, "in-9", got.TurnInputID)
 
-	require.NoError(t, store.Acknowledge(ctx, intTenant, wrap.ID))
-	got, err = store.PendingJobInputs(ctx, intTenant, later.ID, 100)
+	_, err = store.Close(ctx, intTenant, job.CloseInput{JobID: j.ID, Verdict: job.VerdictAccomplished, Closer: opener()})
 	require.NoError(t, err)
-	assert.Empty(t, got, "an acknowledged input is not pending")
+	require.NoError(t, store.SetTurn(ctx, intTenant, j.ID, opener(), "wrap"), "the wrap-up is a turn of a closed job")
+
+	assert.ErrorIs(t, store.SetTurn(ctx, intTenant, "no-such-job", bob, "x"), job.ErrNotFound)
 }
 
 func TestJobStore_SetStateAndDeliverables(t *testing.T) {
