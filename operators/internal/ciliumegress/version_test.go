@@ -57,6 +57,10 @@ func TestCheckVersion(t *testing.T) {
 	}
 }
 
+// bareImageID is the status image that containerd gave on the kind exit
+// cluster (gibson exit-test run 45097892134): an image ID with no repository.
+const bareImageID = "sha256:e8a7b89d30c0711e31b5ee947e0493786824413ecda8349416155b39663570b3"
+
 func TestImageVersion(t *testing.T) {
 	for image, want := range map[string]string{
 		"quay.io/cilium/cilium:v1.15.10":               "v1.15.10",
@@ -68,7 +72,10 @@ func TestImageVersion(t *testing.T) {
 			t.Errorf("ImageVersion(%q) = %q, %v, want %q", image, got, err, want)
 		}
 	}
-	for _, image := range []string{"quay.io/cilium/cilium", "quay.io/cilium/cilium@sha256:abcdef", "registry:5000/cilium", "cilium:"} {
+	for _, image := range []string{
+		"quay.io/cilium/cilium", "quay.io/cilium/cilium@sha256:abcdef", "registry:5000/cilium", "cilium:",
+		bareImageID,
+	} {
 		if _, err := ImageVersion(image); !errors.Is(err, ErrCiliumVersion) {
 			t.Errorf("ImageVersion(%q) err = %v, want ErrCiliumVersion", image, err)
 		}
@@ -185,6 +192,10 @@ func TestRequireFixedVersion_ReadsTheTagFromThePodSpec(t *testing.T) {
 	err := run(twoContainerDaemonSet(pinned), agentPodWithStatus("old", old, digestOnly))
 	if !errors.Is(err, ErrCiliumVersion) || !strings.Contains(err.Error(), "old") {
 		t.Fatalf("a pod spec with an old tag: err = %v, want a refusal that names the pod", err)
+	}
+	// containerd can give the bare image ID as the status image.
+	if err := run(twoContainerDaemonSet(pinned), agentPodWithStatus("id", pinned, bareImageID)); err != nil {
+		t.Fatalf("a status image that is a bare image ID refused the start: %v", err)
 	}
 	noTag := agentPodWithStatus("bare", digestOnly, digestOnly)
 	if err := run(twoContainerDaemonSet(pinned), noTag); !errors.Is(err, ErrCiliumVersion) {

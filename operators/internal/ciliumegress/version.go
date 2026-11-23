@@ -104,8 +104,13 @@ func CheckVersion(version string) error {
 
 // ImageVersion returns the tag of a container image, for example "v1.15.10"
 // from "quay.io/cilium/cilium:v1.15.10@sha256:abc". An image with a digest
-// and no tag has no version to read.
+// and no tag, and a bare image ID, have no version to read.
 func ImageVersion(image string) (string, error) {
+	// On containerd the status of a container can hold the bare image ID,
+	// "sha256:<hex>", with no repository. Its hex is not a tag.
+	if strings.HasPrefix(image, "sha256:") || strings.HasPrefix(image, "sha512:") {
+		return "", fmt.Errorf("%w: the image %q is an image ID with no tag", ErrCiliumVersion, image)
+	}
 	ref, _, _ := strings.Cut(image, "@")
 	slash := strings.LastIndex(ref, "/")
 	colon := strings.LastIndex(ref, ":")
