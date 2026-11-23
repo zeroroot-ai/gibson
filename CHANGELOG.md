@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.170.0](https://github.com/zeroroot-ai/gibson/compare/v0.169.0...v0.170.0) (2026-11-22)
+
+
+### Features
+
+* **catalog:** add the fix agent and a guard for the agents of each mission ([#1614](https://github.com/zeroroot-ai/gibson/issues/1614)) ([63c3e8d](https://github.com/zeroroot-ai/gibson/commit/63c3e8db4cef23cc4d8a13549454ea8b45b18b51))
+* **fixloop:** carry the file mode of each fix file from the Git host ([#1628](https://github.com/zeroroot-ai/gibson/issues/1628)) ([167c390](https://github.com/zeroroot-ai/gibson/commit/167c390e7711300ab60eaa41c60a8a9d8416eeec))
+* **fixloop:** fix fields to agents, pending Git host link, tool class ([#1603](https://github.com/zeroroot-ai/gibson/issues/1603)) ([2305096](https://github.com/zeroroot-ai/gibson/commit/2305096e0ff652c8de1d8e96387d45deb12c7d1b))
+* **harness:** run a script of an agent skill in its sandbox ([#1595](https://github.com/zeroroot-ai/gibson/issues/1595)) ([2ecc68f](https://github.com/zeroroot-ai/gibson/commit/2ecc68ffb7125e6edacf1fccafc376446c793f33))
+* **harness:** serve the read markers by caller identity and remove the red team RPCs of SDK v0.213.0 ([#1604](https://github.com/zeroroot-ai/gibson/issues/1604)) ([c1450c7](https://github.com/zeroroot-ai/gibson/commit/c1450c7ba24a6796efea0727184b3c302942c45b))
+* **incident:** bounded report read, typed call code, remediation text ([#1602](https://github.com/zeroroot-ai/gibson/issues/1602)) ([56f02f7](https://github.com/zeroroot-ai/gibson/commit/56f02f76ee66779a6772acb630883859fd8c70fa))
+* **operators:** check the Cilium version and deny cluster ranges for plugins ([#1600](https://github.com/zeroroot-ai/gibson/issues/1600)) ([6ec0185](https://github.com/zeroroot-ai/gibson/commit/6ec01855607e9e4a14ee769a32bb9edcf892b066))
+
+
+### Bug Fixes
+
+* **guard:** drop stale proto field verdicts and the dead row_height field ([#1613](https://github.com/zeroroot-ai/gibson/issues/1613)) ([bb7f0d8](https://github.com/zeroroot-ai/gibson/commit/bb7f0d8f9f0c7e63295d600874a7dd83e2172191))
+* **sdk:** serve GetCountermeasures and the fix head for SDK v0.214.0 ([#1619](https://github.com/zeroroot-ai/gibson/issues/1619)) ([429c3ca](https://github.com/zeroroot-ai/gibson/commit/429c3ca0339673c9c0816ead120e316bd201b489))
+
 ## [0.169.0](https://github.com/zeroroot-ai/gibson/compare/v0.168.0...v0.169.0) (2026-11-21)
 
 
