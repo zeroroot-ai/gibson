@@ -1447,12 +1447,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	proj.BeliefModel = beliefVersion
 	// Carry display metadata so the World is the single source of truth for
 	// mission status + identity (ADR-0163/gibson#1118).
-	proj.Name = active.mission.Name
-	proj.Description = active.mission.Description
-	proj.TargetID = active.mission.TargetID.String()
-	proj.TenantID = active.mission.TenantID
-	proj.CreatedBy = active.mission.CreatedBy
-	proj.Catalog = catalogOf(active.mission)
+	carryRecord(&proj, active.mission)
 	// Key the projected mission by the RUN id (missionID) — the same id the
 	// per-mission binding, awaitBrainMission, and the Decider lookup all use.
 	// missionDefinitionToProjected defaults ID to the mission DEFINITION id,
@@ -1892,4 +1887,16 @@ func (m *missionManager) resolveExtraTargets(ctx context.Context, req api.RunMis
 		ids = append(ids, extra.ID)
 	}
 	return ids, nil
+}
+
+// carryRecord copies what the record of a mission holds into the projection of its
+// run: the display metadata, the creator and the marker of a catalog launch. The
+// World then holds the same facts as the record.
+func carryRecord(proj *brain.MissionProjected, rec *mission.Mission) {
+	proj.Name = rec.Name
+	proj.Description = rec.Description
+	proj.TargetID = rec.TargetID.String()
+	proj.TenantID = rec.TenantID
+	proj.CreatedBy = rec.CreatedBy
+	proj.Catalog = catalogOf(rec)
 }

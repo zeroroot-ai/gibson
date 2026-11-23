@@ -425,6 +425,8 @@ func TestCreateMission_ACatalogNameIsReservedAndTheMarkerIsRemoved(t *testing.T)
 	}
 	if _, forged := got.Metadata["catalog_mission"]; forged || got.Metadata["owner"] != "alice" {
 		t.Errorf("metadata = %v, want the marker removed and the rest kept", got.Metadata)
+	}
+}
 
 // A call with no verified identity is refused before the daemon is called.
 func TestRunCatalogMission_RefusesACallerWithNoIdentity(t *testing.T) {

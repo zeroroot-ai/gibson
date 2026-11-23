@@ -114,6 +114,7 @@ func TestCatalogOf(t *testing.T) {
 	// so a catalog marker inside it is data and never the marker of the mission.
 	forged := map[string]any{MetadataTaskData: map[string]any{mission.MetadataCatalogMission: "scan"}}
 	assert.Empty(t, catalogOf(&mission.Mission{Metadata: forged}))
+}
 
 // A mission that cannot be created is returned as an error, and nothing starts or
 // anchors. Here the daemon has no mission store.
@@ -128,4 +129,27 @@ func TestRunCatalogMission_ACreateFailureStartsNothing(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.False(t, started, "a mission that was not created is not started and not anchored")
+}
+
+// The projection of a run carries what the record holds: the display metadata, the
+// creator and the marker of a catalog launch.
+func TestCarryRecord(t *testing.T) {
+	creator := principal.FromIdentity(auth.Identity{Subject: "user:alice"})
+	target := types.NewID()
+	rec := &mission.Mission{
+		Name: "scan", Description: "d", TargetID: target, TenantID: "acme", CreatedBy: creator,
+		Metadata: map[string]any{mission.MetadataCatalogMission: "scan"},
+	}
+	var proj brain.MissionProjected
+	carryRecord(&proj, rec)
+	assert.Equal(t, "scan", proj.Name)
+	assert.Equal(t, "d", proj.Description)
+	assert.Equal(t, target.String(), proj.TargetID)
+	assert.Equal(t, "acme", proj.TenantID)
+	assert.Equal(t, creator, proj.CreatedBy)
+	assert.Equal(t, "scan", proj.Catalog)
+
+	var other brain.MissionProjected
+	carryRecord(&other, &mission.Mission{Name: "mine"})
+	assert.Empty(t, other.Catalog, "a mission that is not a catalog launch has no marker")
 }

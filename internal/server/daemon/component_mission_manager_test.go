@@ -457,3 +457,21 @@ func TestMissionRecord_MetricsAndConstraints(t *testing.T) {
 	require.InDelta(t, 3.25, rec.TotalCostUSD, 0.001)
 	require.Equal(t, int64(400), rec.TotalTokens)
 }
+
+// A graph that an outside agent originates may not take the name of a checked-in
+// mission, in any letter case. The refusal comes before the reservation (gibson#1469).
+func TestOriginateMission_ACatalogNameIsRefused(t *testing.T) {
+	parent := &mission.Mission{ID: types.NewID(), TenantID: "acme"}
+	store := &fakeCMMStore{byID: map[string]*mission.Mission{parent.ID.String(): parent}}
+	mgr := newCMMTest(t, store, &fakeCMMLedger{})
+	for _, name := range []string{"scan", "Scan", " fix "} {
+		def, err := mission.MarshalDefinitionJSON(&missionv1.MissionDefinition{Name: name})
+		require.NoError(t, err)
+		_, err = mgr.OriginateMission(cmmCtx(), component.OriginateMissionRequest{
+			ParentMissionID: parent.ID.String(), DefinitionJSON: def,
+		})
+		require.Equal(t, codes.InvalidArgument, status.Code(err), "name %q", name)
+		require.Contains(t, err.Error(), "checked-in mission")
+	}
+	require.Len(t, store.byID, 1, "a refused origination saves nothing: only the parent is in the store")
+}

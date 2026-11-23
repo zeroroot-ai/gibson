@@ -105,3 +105,17 @@ func TestResolveMissionDefinitionJSON_ReturnsTheCanonicalCatalogName(t *testing.
 	require.NoError(t, err)
 	assert.Empty(t, name, "a graph of the caller has no catalog name")
 }
+
+// A graph that does not parse is not refused by the name check. The creation of the
+// mission refuses it with its own error, and the guard keeps the metadata.
+func TestGuardOrigination_AGraphThatDoesNotParseIsNotAReservedName(t *testing.T) {
+	assert.False(t, reservedMissionName("mine", "{not json"))
+	assert.True(t, reservedMissionName("mine", `{"name":"scan"}`))
+	got, err := guardOrigination(nil, "", "mine", "{not json")
+	require.NoError(t, err)
+	assert.Empty(t, got, "no marker for a graph of the caller")
+	got, err = guardOrigination(map[string]any{"owner": "a"}, "scan", "x", "")
+	require.NoError(t, err)
+	assert.Equal(t, "scan", got[mission.MetadataCatalogMission])
+	assert.Equal(t, "a", got["owner"])
+}
