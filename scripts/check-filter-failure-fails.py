@@ -29,6 +29,8 @@ The rule, for each workflow under .github/workflows that has a job named
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import tempfile
 from pathlib import Path
@@ -156,9 +158,16 @@ jobs:
             failed += not ok
             print(f"  {'ok  ' if ok else 'FAIL'}  {desc} -> {'fail' if got else 'pass'}")
         (wf / "x.yml").unlink()
-        if check(Path(d)) != 1:
+        # The empty case prints an ::error:: annotation. Here the failure is the
+        # expected result, so the output is held back: an annotation in a green
+        # selftest read as a real failure of the gate (gibson#1641).
+        with contextlib.redirect_stdout(io.StringIO()):
+            empty_rc = check(Path(d))
+        if empty_rc != 1:
             print("  FAIL  an empty workflow directory must fail")
             failed += 1
+        else:
+            print("  ok    an empty workflow directory fails -> fail")
     print(f"check-filter-failure-fails --selftest: {len(cases) + 1 - failed} passed, {failed} failed")
     return 1 if failed else 0
 

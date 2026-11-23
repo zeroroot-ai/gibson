@@ -61,9 +61,22 @@ import (
 
 // Values of TenantVariable.Kind.
 const (
-	// VariableKindEndpoint is an https URL. It is the only kind.
+	// VariableKindEndpoint is an https URL.
 	VariableKindEndpoint = "endpoint"
+	// VariableKindCABundle is the name of a secret of the tenant that holds a
+	// PEM bundle of CA certificates (gibson#1517). The pod trusts these CAs
+	// when it calls a server that a private CA signed, such as a GitHub
+	// Enterprise Server. The value is optional. It sets no environment
+	// variable of the manifest and adds no egress host. The operator mounts
+	// the bundle into the pod of this connector only.
+	VariableKindCABundle = "ca_bundle"
 )
+
+// CABundleSecretPrefix is the start of the name of a secret that holds the CA
+// bundle of one connector. The prefix keeps a tenant admin from naming another
+// secret of the tenant, such as a vendor token, as a bundle: the daemon would
+// hand that secret to the pod (the same rule as OAuthClientSecretPrefix).
+func CABundleSecretPrefix(connectorID string) string { return connectorID + "-ca-" }
 
 // maxTenantVariables bounds the number of variables of one connector.
 const maxTenantVariables = 4
@@ -75,7 +88,7 @@ type TenantVariable struct {
 	Name string `yaml:"name"`
 	// Env is the environment variable of the pod that gets the value.
 	Env string `yaml:"env"`
-	// Kind is "endpoint".
+	// Kind is "endpoint" or "ca_bundle".
 	Kind string `yaml:"kind"`
 	// Patterns limit the value. See endpointPatterns for the grammar.
 	Patterns []string `yaml:"patterns"`
@@ -179,6 +192,7 @@ func validateTenantVariables(id string, s ConnectorSpec) error {
 	for k := range s.Env {
 		envs[k] = true
 	}
+	caBundles := 0
 	for _, v := range s.Variables {
 		if !variableNameRE.MatchString(v.Name) {
 			return fmt.Errorf("%s: variable name %q must be lower case letters, digits and _", id, v.Name)
@@ -187,6 +201,16 @@ func validateTenantVariables(id string, s ConnectorSpec) error {
 			return fmt.Errorf("%s: variable %q is declared twice", id, v.Name)
 		}
 		names[v.Name] = true
+		if v.Kind == VariableKindCABundle {
+			if v.Env != "" || len(v.Patterns) > 0 || v.InstallPatterns || v.Default != "" {
+				return fmt.Errorf("%s: variable %q has kind %q, which takes no env, patterns or default", id, v.Name, v.Kind)
+			}
+			caBundles++
+			if caBundles > 1 {
+				return fmt.Errorf("%s: a connector has at most one variable of kind %q", id, VariableKindCABundle)
+			}
+			continue
+		}
 		if !envNameRE.MatchString(v.Env) {
 			return fmt.Errorf("%s: variable %q has env %q, which is not a valid variable name", id, v.Name, v.Env)
 		}
@@ -195,7 +219,8 @@ func validateTenantVariables(id string, s ConnectorSpec) error {
 		}
 		envs[v.Env] = true
 		if v.Kind != VariableKindEndpoint {
-			return fmt.Errorf("%s: variable %q has kind %q, which must be %q", id, v.Name, v.Kind, VariableKindEndpoint)
+			return fmt.Errorf("%s: variable %q has kind %q, which must be %q or %q",
+				id, v.Name, v.Kind, VariableKindEndpoint, VariableKindCABundle)
 		}
 		if len(v.Patterns) == 0 && !v.InstallPatterns {
 			return fmt.Errorf("%s: variable %q has no host pattern: state patterns, or installPatterns for a "+
@@ -279,6 +304,12 @@ func (e ConnectorEntry) ResolveVariables(values map[string]string) (ResolvedVari
 	}
 	seen := map[string]bool{}
 	for _, v := range e.Variables {
+		if v.Kind == VariableKindCABundle {
+			if _, err := e.caBundleSecret(v, values[v.Name]); err != nil {
+				return ResolvedVariables{}, err
+			}
+			continue
+		}
 		raw := values[v.Name]
 		if raw == "" {
 			raw = v.Default
@@ -298,6 +329,34 @@ func (e ConnectorEntry) ResolveVariables(values map[string]string) (ResolvedVari
 	}
 	sort.Strings(out.EgressAllow)
 	return out, nil
+}
+
+// caBundleSecret checks the value of a variable of kind ca_bundle. Empty means
+// that the tenant gives no bundle. A name must be a valid secret name that
+// starts with CABundleSecretPrefix.
+func (e ConnectorEntry) caBundleSecret(v TenantVariable, raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	if !ValidSecretName(raw) {
+		return "", fmt.Errorf("variable %q of connector %q: %q is not a valid secret name", v.Name, e.ID, raw)
+	}
+	if prefix := CABundleSecretPrefix(e.ID); !strings.HasPrefix(raw, prefix) {
+		return "", fmt.Errorf("variable %q of connector %q: the secret name must start with %q", v.Name, e.ID, prefix)
+	}
+	return raw, nil
+}
+
+// CABundleSecret returns the name of the secret of the tenant that holds the CA
+// bundle of the connector, from the values that the tenant gave. Empty means
+// no bundle. It returns an error when the value breaks a rule above.
+func (e ConnectorEntry) CABundleSecret(values map[string]string) (string, error) {
+	for _, v := range e.Variables {
+		if v.Kind == VariableKindCABundle {
+			return e.caBundleSecret(v, values[v.Name])
+		}
+	}
+	return "", nil
 }
 
 func matchesAnyPattern(patterns []string, ep endpointParts) bool {

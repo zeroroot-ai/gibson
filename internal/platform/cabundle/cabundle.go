@@ -11,6 +11,7 @@
 package cabundle
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -26,12 +27,42 @@ const Key = "ca.crt"
 // base_url. An outside agent record keeps it in a column.
 const Field = "ca_bundle_secret"
 
-// Check reports an error when pemData is not a bundle of certificates. It
-// refuses a block of another type, so a private key in the secret is never
-// copied to the gateway. The error never holds the content.
+// Check reports an error when pemData is not a bundle of CA certificates. It
+// is Normalize, and it drops the result. The error never holds the content.
 func Check(pemData []byte) error {
+	_, err := Normalize(pemData)
+	return err
+}
+
+// isTrustAnchor reports whether a certificate can be a trust anchor: a CA with
+// valid BasicConstraints, or a self-signed certificate. A self-signed server
+// certificate (a self-hosted endpoint) and a v1 root with no BasicConstraints
+// are anchors that tenants use. A leaf that another CA signed is not.
+func isTrustAnchor(c *x509.Certificate) bool {
+	if c.IsCA && c.BasicConstraintsValid {
+		return true
+	}
+	if !bytes.Equal(c.RawSubject, c.RawIssuer) {
+		return false
+	}
+	return c.CheckSignature(c.SignatureAlgorithm, c.RawTBSCertificate, c.Signature) == nil
+}
+
+// Normalize returns the trust anchors of pemData as new PEM, and nothing else.
+//
+// A bundle of a real install holds more than certificates: the Mozilla bundle
+// has a name line and a row of "=" before each block, and a full chain has a
+// server certificate beside its CAs. So Normalize accepts any text outside the
+// blocks, and it drops a certificate that is not a trust anchor. None of it
+// reaches the output. The output is built from the parsed certificates, so it
+// holds no header, no comment and no text that the input had.
+//
+// A block of another type (a private key, for example) refuses the whole
+// bundle, as does a certificate that does not parse, and a bundle with no
+// anchor at all. The error never holds the content.
+func Normalize(pemData []byte) ([]byte, error) {
 	rest := pemData
-	certs := 0
+	var out []byte
 	for {
 		var block *pem.Block
 		block, rest = pem.Decode(rest)
@@ -39,22 +70,19 @@ func Check(pemData []byte) error {
 			break
 		}
 		if block.Type != "CERTIFICATE" {
-			return fmt.Errorf("the bundle holds a %q block, and only CERTIFICATE blocks are allowed", block.Type)
+			return nil, fmt.Errorf("the bundle holds a %q block, and only CERTIFICATE blocks are allowed", block.Type)
 		}
-		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
-			return fmt.Errorf("a certificate of the bundle does not parse: %w", err)
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, errors.New("a certificate of the bundle does not parse")
 		}
-		certs++
-	}
-	if certs == 0 {
-		return errors.New("the bundle holds no PEM certificate")
-	}
-	if len(rest) > 0 {
-		for _, b := range rest {
-			if b != ' ' && b != '\n' && b != '\r' && b != '\t' {
-				return errors.New("the bundle holds text that is not PEM after the last certificate")
-			}
+		if !isTrustAnchor(cert) {
+			continue
 		}
+		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})...)
 	}
-	return nil
+	if len(out) == 0 {
+		return nil, errors.New("the bundle holds no CA certificate and no self-signed certificate")
+	}
+	return out, nil
 }

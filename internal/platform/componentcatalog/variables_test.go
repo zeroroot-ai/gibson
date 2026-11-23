@@ -258,3 +258,87 @@ func TestVariables_ADefault(t *testing.T) {
 		t.Fatalf("a default outside the patterns: err = %v", err)
 	}
 }
+
+const caBundleVariable = "    - name: ca_bundle\n      kind: ca_bundle\n"
+
+func aapWithCABundle(t *testing.T) ConnectorEntry {
+	t.Helper()
+	m, err := loadOne(t, hostedWithVariable+caBundleVariable)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	return m.toConnectorEntry()
+}
+
+// The CA bundle is optional. It sets no env and adds no egress host
+// (gibson#1517).
+func TestVariables_CABundleIsOptionalAndSetsNoEnvOrEgress(t *testing.T) {
+	e := aapWithCABundle(t)
+	url := map[string]string{"base_url": "https://aap.example.com"}
+	none, err := e.ResolveVariables(url)
+	if err != nil {
+		t.Fatalf("no bundle: %v", err)
+	}
+	if got, cerr := e.CABundleSecret(url); got != "" || cerr != nil {
+		t.Errorf("CABundleSecret with no value = %q, %v", got, cerr)
+	}
+	withCA := map[string]string{"base_url": "https://aap.example.com", "ca_bundle": "aap-ca-corp"}
+	got, err := e.ResolveVariables(withCA)
+	if err != nil {
+		t.Fatalf("with bundle: %v", err)
+	}
+	if !reflect.DeepEqual(got, none) {
+		t.Errorf("the bundle changed the env or the egress: %+v vs %+v", got, none)
+	}
+	if name, cerr := e.CABundleSecret(withCA); name != "aap-ca-corp" || cerr != nil {
+		t.Errorf("CABundleSecret = %q, %v", name, cerr)
+	}
+}
+
+// The name must start with the prefix of the connector, so a tenant cannot
+// send another secret, such as a vendor token, into the pod as a bundle.
+func TestVariables_CABundleNameIsLimitedToThePrefix(t *testing.T) {
+	e := aapWithCABundle(t)
+	for name, v := range map[string]string{
+		"another secret":     "aap-token",
+		"prefix of another":  "github-fixloop-ca-x",
+		"path escape":        "aap-ca-../token",
+		"bad characters":     "aap-ca- x",
+		"prefix only is not": "aap-ca",
+	} {
+		t.Run(name, func(t *testing.T) {
+			vals := map[string]string{"base_url": "https://aap.example.com", "ca_bundle": v}
+			if _, err := e.ResolveVariables(vals); err == nil {
+				t.Errorf("ResolveVariables accepted %q", v)
+			}
+			if got, err := e.CABundleSecret(vals); err == nil {
+				t.Errorf("CABundleSecret accepted %q as %q", v, got)
+			}
+		})
+	}
+}
+
+func TestVariables_TheLoaderRefusesABadCABundleDeclaration(t *testing.T) {
+	cases := map[string]struct{ body, want string }{
+		"env":      {hostedWithVariable + caBundleVariable + "      env: SSL_CERT_FILE\n", "takes no env"},
+		"default":  {hostedWithVariable + caBundleVariable + "      default: aap-ca-x\n", "takes no env"},
+		"patterns": {hostedWithVariable + caBundleVariable + "      patterns:\n        - https://x.example.com\n", "takes no env"},
+		"twice": {hostedWithVariable + caBundleVariable +
+			"    - name: ca_two\n      kind: ca_bundle\n", "at most one variable of kind"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := loadOne(t, c.body); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("want an error with %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+// A Remote connector takes no variable, so it takes no CA bundle.
+func TestVariables_ARemoteConnectorTakesNoCABundle(t *testing.T) {
+	_, err := loadOne(t, responseConnector+"  variables:\n    - name: ca_bundle\n      kind: ca_bundle\n")
+	if err == nil || !strings.Contains(err.Error(), "need a Hosted connector") {
+		t.Fatalf("want a refusal, got %v", err)
+	}
+}

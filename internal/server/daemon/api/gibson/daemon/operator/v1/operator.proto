@@ -845,6 +845,11 @@ message DesiredConnector {
   // Docker config JSON for the registry of the image. Empty means no pull
   // secret.
   string image_pull_secret = 14;
+  // ca_bundle_secret is the name of the secret of the tenant that holds a PEM
+  // bundle of CA certificates. The operator mounts it into the pod of this
+  // connector only, and the pod trusts these CAs (gibson#1517). Empty means no
+  // bundle.
+  string ca_bundle_secret = 15;
 }
 
 message ListDesiredConnectorsResponse {

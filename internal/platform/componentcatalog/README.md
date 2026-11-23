@@ -191,3 +191,26 @@ The tenant never states a pattern, because the tenant is the party that the rule
 A public name can resolve to a private address. The daemon does not resolve names. The `CiliumNetworkPolicy` of each connector has an `egressDeny` rule (`operators/internal/ciliumegress.DenyRules`). It denies 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 127.0.0.0/8, 100.64.0.0/10, 0.0.0.0/8, fc00::/7, fe80::/10, ::1 and ::, and the pod and the service ranges in `CONNECTOR_CLUSTER_CIDRS` of the connector operator. A Cilium deny rule wins over each allow rule, a `toFQDNs` allow too ([Deny Policies](https://docs.cilium.io/en/stable/security/policy/deny/)). A deny rule cannot name a host, but the address that a `toFQDNs` name resolves to is denied when it is in a denied range. So a server of the customer on a private address cannot be a connector. It needs a public address.
 
 A CIDR rule of Cilium does not select a pod or a node that Cilium manages, so the deny does not block kube-dns or the `kube-apiserver` entity. Cilium before 1.14.16, 1.15.10 and 1.16.3 can drop a CIDR deny when a narrower CIDR allow with a port exists (CVE-2024-47825). Cilium turns each address that a `toFQDNs` allow resolves to into such an allow, so the policy of a connector has that shape on an old Cilium. The install must run a fixed version.
+
+### A server that a private CA signs
+
+A server that the customer hosts often has a certificate from a private CA. The pod must trust that CA (gibson#1517). A manifest declares one variable of kind `ca_bundle`.
+
+```yaml
+variables:
+  - name: ca_bundle
+    kind: ca_bundle       # no env, no patterns and no default
+```
+
+The tenant stores a PEM bundle as a secret of its own with `SetSecret` and no category. This is the way a tenant stores the credentials of the same connector, so the daemon reads both under the name as given. A secret with the category `cred` is a different key and is not read. The name of the secret starts with `<connector id>-ca-`. The tenant gives the name in the `ca_bundle` key of the `EnableConnector` variables. The value is optional.
+
+- The daemon hands the name to the connector operator. The prefix rule keeps a tenant from naming another secret, such as a vendor token.
+- The operator writes a Secret from the bundle in the namespace of the tenant only. The Secret belongs to the `ConnectorInstance`.
+- The operator mounts that Secret into the pod of this connector only, and sets `SSL_CERT_FILE` to the mounted file. A pod of another connector has no mount and no variable.
+- `EnableConnector` reads the secret at once and refuses a missing secret or one that is not a CA bundle.
+- The daemon returns the trust anchors only, as new PEM: a CA with valid BasicConstraints or a self-signed certificate. Text outside the blocks, such as the comments of the Mozilla bundle, and a certificate that is no anchor, such as the leaf of a full chain, are dropped and never reach the pod. A block that is not a certificate (a private key), a certificate that does not parse, and a bundle with no anchor are refused.
+- The operator refuses a Secret that the `ConnectorInstance` does not own, and it never takes one over.
+- A new bundle changes the hash annotation of the pod template, so the pod rolls and reads the new file.
+- When the tenant clears the variable, the operator deletes the CA Secret.
+- The server reads `SSL_CERT_FILE` in addition to the system roots when the image has a system root directory. If the image has none, put the public roots in the bundle too.
+- A connector with no bundle is unchanged.

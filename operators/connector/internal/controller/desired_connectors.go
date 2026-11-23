@@ -229,6 +229,7 @@ func desiredSpec(d *daemonoperatorv1.DesiredConnector) connectorv1alpha1.Connect
 		Args:             d.GetArgs(),
 		Port:             d.GetPort(),
 		ImagePullSecret:  d.GetImagePullSecret(),
+		CABundleSecret:   d.GetCaBundleSecret(),
 	}
 	if len(d.GetEnv()) > 0 {
 		spec.Env = d.GetEnv()
@@ -325,7 +326,8 @@ func needsCredential(ci *connectorv1alpha1.ConnectorInstance) bool {
 	return ci.Spec.Auth == connectorv1alpha1.ConnectorAuthOAuth ||
 		ci.Spec.Auth == connectorv1alpha1.ConnectorAuthSecret ||
 		len(ci.Spec.Credentials) > 0 ||
-		ci.Spec.ImagePullSecret != ""
+		ci.Spec.ImagePullSecret != "" ||
+		ci.Spec.CABundleSecret != ""
 }
 
 // dockerConfigKey is the key of the Docker config JSON in the data of a pull
@@ -345,6 +347,11 @@ func pullSecretName(connector string) string { return connector + "-connector-pu
 func (r *DesiredConnectorsRunnable) syncCredential(
 	ctx context.Context, tenant string, ci *connectorv1alpha1.ConnectorInstance,
 ) error {
+	if ci.Spec.CABundleSecret == "" {
+		if err := r.dropCASecret(ctx, ci); err != nil {
+			return err
+		}
+	}
 	if !needsCredential(ci) {
 		return nil
 	}
@@ -359,9 +366,37 @@ func (r *DesiredConnectorsRunnable) syncCredential(
 			Key: ci.Spec.ImagePullSecret, TargetEnv: dockerConfigKey,
 		})
 	}
+	if ci.Spec.CABundleSecret != "" {
+		// The daemon reads the bundle for the tenant of the request. The
+		// Secret goes to the namespace of that tenant and nowhere else.
+		if want := connectorTenantNamespacePrefix + tenant; ci.Namespace != want {
+			return fmt.Errorf("%w: the CA bundle of tenant %s cannot go to the namespace %s",
+				ErrCABundle, tenant, ci.Namespace)
+		}
+		req.Credentials = append(req.Credentials, &daemonoperatorv1.ConnectorCredentialRef{
+			Key: ci.Spec.CABundleSecret, TargetEnv: caBundleKey,
+		})
+	}
 	resp, err := r.Daemon.ConnectorCredential(ctx, req)
 	if err != nil {
 		return fmt.Errorf("read the credential of %s/%s: %w", ci.Namespace, ci.Name, err)
+	}
+	// The CA bundle goes to its own Secret, which the pod mounts as a file.
+	// It never enters the credential Secret.
+	if ca, ok := resp.GetData()[caBundleKey]; ok {
+		if err := checkCAPEM(ca); err != nil {
+			return fmt.Errorf("the CA bundle %q of %s/%s: %w", ci.Spec.CABundleSecret, ci.Namespace, ci.Name, err)
+		}
+		if err := r.syncCASecret(ctx, ci, ca); err != nil {
+			return err
+		}
+		data := make(map[string][]byte, len(resp.GetData()))
+		for k, v := range resp.GetData() {
+			if k != caBundleKey {
+				data[k] = v
+			}
+		}
+		resp = &daemonoperatorv1.GetConnectorCredentialResponse{Data: data, Withdraw: resp.GetWithdraw()}
 	}
 	// The registry login goes to its own Secret. It never enters the
 	// credential Secret, which ToolHive reads for the pod environment.
@@ -476,6 +511,82 @@ func (r *DesiredConnectorsRunnable) syncPullSecret(
 		return nil
 	}); err != nil {
 		return fmt.Errorf("the audited write of Secret %s/%s: %w", ci.Namespace, name, err)
+	}
+	return nil
+}
+
+// syncCASecret writes the CA Secret of a connector from the bundle that the
+// daemon read from the secret store of the tenant. The Secret has an
+// ownerReference to the ConnectorInstance, so Kubernetes deletes it with the
+// connector. The record names the Secret and never a value.
+func (r *DesiredConnectorsRunnable) syncCASecret(
+	ctx context.Context, ci *connectorv1alpha1.ConnectorInstance, bundle []byte,
+) error {
+	name := caSecretName(ci.Name)
+	owner := metav1.OwnerReference{
+		APIVersion: connectorv1alpha1.GroupVersion.String(),
+		Kind:       "ConnectorInstance",
+		Name:       ci.Name,
+		UID:        ci.UID,
+	}
+	var live corev1.Secret
+	getErr := r.Client.Get(ctx, client.ObjectKey{Namespace: ci.Namespace, Name: name}, &live)
+	if getErr != nil && !apierrors.IsNotFound(getErr) {
+		return fmt.Errorf("read Secret %s/%s: %w", ci.Namespace, name, getErr)
+	}
+	// A Secret with this name that the instance does not own is not taken over:
+	// it is not ours to replace (gibson#1517).
+	if getErr == nil && !ownedByInstance(&live, ci) {
+		return fmt.Errorf("%w: Secret %s/%s exists and the ConnectorInstance does not own it",
+			ErrCABundle, ci.Namespace, name)
+	}
+	if getErr == nil && reflect.DeepEqual(live.Data, map[string][]byte{caBundleKey: bundle}) &&
+		reflect.DeepEqual(live.OwnerReferences, []metav1.OwnerReference{owner}) {
+		return nil
+	}
+	ev := audit.ObjectEvent(audit.ActionConnectorCredentialWrite, ci,
+		map[string]string{"connector": ci.Name, "secret": name, "keys": caBundleKey})
+	if err := r.Audit.Change(ctx, ev, func() error {
+		sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ci.Namespace}}
+		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, sec, func() error {
+			sec.Type = corev1.SecretTypeOpaque
+			sec.Data = map[string][]byte{caBundleKey: bundle}
+			sec.OwnerReferences = []metav1.OwnerReference{owner}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("apply Secret %s/%s: %w", ci.Namespace, name, err)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("the audited write of Secret %s/%s: %w", ci.Namespace, name, err)
+	}
+	return nil
+}
+
+// dropCASecret deletes the CA Secret of a connector that has no bundle any more,
+// so the old bundle does not stay in the namespace. It deletes only a Secret
+// that the instance owns.
+func (r *DesiredConnectorsRunnable) dropCASecret(ctx context.Context, ci *connectorv1alpha1.ConnectorInstance) error {
+	var live corev1.Secret
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: ci.Namespace, Name: caSecretName(ci.Name)}, &live)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read Secret %s/%s: %w", ci.Namespace, caSecretName(ci.Name), err)
+	}
+	if !ownedByInstance(&live, ci) {
+		return nil
+	}
+	ev := audit.ObjectEvent(audit.ActionConnectorCredentialWithdraw, ci,
+		map[string]string{"connector": ci.Name, "secret": live.Name})
+	if err := r.Audit.Change(ctx, ev, func() error {
+		if derr := r.Client.Delete(ctx, &live); derr != nil && !apierrors.IsNotFound(derr) {
+			return fmt.Errorf("delete Secret %s/%s: %w", ci.Namespace, live.Name, derr)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("the audited delete of Secret %s/%s: %w", ci.Namespace, live.Name, err)
 	}
 	return nil
 }

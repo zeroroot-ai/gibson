@@ -225,6 +225,17 @@ type ConnectorInstanceSpec struct {
 	// manifest holds no registry credential (gibson#1536).
 	// +optional
 	ImagePullSecret string `json:"imagePullSecret,omitempty"`
+
+	// CABundleSecret is the name of the secret in the secret store of the
+	// tenant that holds a PEM bundle of CA certificates. Use it for a vendor
+	// server that a private CA signs, such as a GitHub Enterprise Server or a
+	// Puppet Enterprise. The daemon reads the secret and the operator writes
+	// a Secret in the namespace of this tenant from it. The operator mounts
+	// that Secret into the pod of this connector only and sets SSL_CERT_FILE
+	// there. A connector with no bundle is unchanged. Only a Hosted connector
+	// takes a bundle (gibson#1517).
+	// +optional
+	CABundleSecret string `json:"caBundleSecret,omitempty"`
 }
 
 // ConnectorInstancePhase is the scalar lifecycle phase.

@@ -58,6 +58,18 @@ type ConnectorService struct {
 	// platform_enabled tuple is invisible to ListCatalog and refused by
 	// EnableConnector. Required — the service is not registered without it.
 	gate CatalogGate
+
+	// secrets reads the tenant secret of a CA bundle at enable time. Nil means
+	// the daemon has no secret store, and a request that names a bundle is
+	// refused.
+	secrets ConnectorSecretResolver
+}
+
+// WithSecretStore sets the tenant secret store that EnableConnector reads to
+// check the CA bundle of a connector (gibson#1517).
+func (s *ConnectorService) WithSecretStore(r ConnectorSecretResolver) *ConnectorService {
+	s.secrets = r
+	return s
 }
 
 // NewConnectorService constructs the service over the given store and
@@ -152,6 +164,19 @@ func (s *ConnectorService) EnableConnector(
 	cfg, err := tenantChoice(entry, req)
 	if err != nil {
 		return nil, err
+	}
+	// The bundle is read now, so a missing secret or one that is not a CA bundle
+	// shows at once and not as a failed connector later (gibson#1517).
+	if name, cerr := entry.CABundleSecret(cfg.Variables); cerr != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "EnableConnector: %v", cerr)
+	} else if name != "" {
+		if s.secrets == nil {
+			return nil, status_grpc.Error(codes.FailedPrecondition,
+				"EnableConnector: the tenant secret store is not configured, so the CA bundle cannot be checked")
+		}
+		if _, rerr := readCABundleAt(ctx, s.secrets, name, name); rerr != nil {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "EnableConnector: ca_bundle: %v", rerr)
+		}
 	}
 	c, err := s.store.Enable(ctx, tenant, entry.ID, cfg)
 	if err != nil {

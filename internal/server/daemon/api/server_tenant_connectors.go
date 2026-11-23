@@ -186,6 +186,7 @@ func (s *DaemonServer) desiredConnector(
 	// are checked again, like the endpoint (gibson#1508).
 	env := entry.Env
 	egress := res.EgressAllow
+	caBundle := ""
 	if len(entry.Variables) > 0 {
 		vars, verr := entry.ResolveVariables(r.Variables)
 		if verr != nil {
@@ -199,6 +200,9 @@ func (s *DaemonServer) desiredConnector(
 			env[k] = v
 		}
 		egress = append(append([]string{}, egress...), vars.EgressAllow...)
+		// ResolveVariables checked the name of the CA bundle with the rules of the
+		// entry, so this read cannot fail (gibson#1517).
+		caBundle, _ = entry.CABundleSecret(r.Variables)
 	}
 	d := &daemonoperatorv1.DesiredConnector{
 		TenantId:    r.TenantID,
@@ -215,6 +219,7 @@ func (s *DaemonServer) desiredConnector(
 	}
 	d.CredentialHeader = entry.CredentialHeader.Name
 	d.ImagePullSecret = entry.ImagePullSecret
+	d.CaBundleSecret = caBundle
 	for _, c := range entry.Credentials {
 		d.Credentials = append(d.Credentials, &daemonoperatorv1.ConnectorCredentialRef{
 			Key: c.Secret, Property: c.Property, TargetEnv: c.Env,
