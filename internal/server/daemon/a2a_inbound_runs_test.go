@@ -1304,3 +1304,30 @@ func TestInboundRuns_AStartThatFailsGivesTheMessageIdBack(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State, "the retry starts the mission")
 }
+
+func TestInboundRuns_AFailedRecordOfTheMessageIdStartsNoMission(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	r.published.(*fakePublished).takeErr = errors.New("db down")
+
+	_, err := startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1}))
+
+	require.ErrorContains(t, err, "record the message id")
+	assert.Empty(t, starter.started)
+}
+
+func TestInboundRuns_AnAgentThatVanishedGivesTheMessageIdBack(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	pub := r.published.(*fakePublished)
+	pub.reserveErr = inboundmissionstore.ErrNotFound
+
+	task, err := startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1}))
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateRejected, task.Status.State)
+	assert.Equal(t, []string{"acme/webhook:crowdstrike:e1"}, pub.forgotten)
+
+	pub.forgetErr = errors.New("db down")
+	_, err = startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e2", map[string]any{"a": 1}))
+	require.ErrorContains(t, err, "give back the message id")
+}

@@ -602,6 +602,10 @@ func TestWebhookOf(t *testing.T) {
 		{"the webhook", &a2a.Message{Parts: []*a2a.Part{a2a.NewTextPart("note"), obj}}, hook, true, false},
 		{"two webhooks", &a2a.Message{Parts: []*a2a.Part{obj, obj}}, nil, false, true},
 		{"not an object", &a2a.Message{Parts: []*a2a.Part{a2a.NewDataPart(map[string]any{"webhook": "x"})}}, nil, false, true},
+		{"a nil part", &a2a.Message{Parts: []*a2a.Part{nil, obj}}, hook, true, false},
+		{"another key", &a2a.Message{Parts: []*a2a.Part{a2a.NewDataPart(map[string]any{"targets": []any{"t"}}), obj}}, hook, true, false},
+		{"two webhook parts", &a2a.Message{Parts: []*a2a.Part{obj, a2a.NewDataPart(map[string]any{"webhook": map[string]any{"b": 1}})}}, nil, false, true},
+		{"not JSON", &a2a.Message{Parts: []*a2a.Part{a2a.NewDataPart(map[string]any{"webhook": map[string]any{"c": make(chan int)}})}}, nil, false, true},
 		{"too large", &a2a.Message{Parts: []*a2a.Part{a2a.NewDataPart(map[string]any{
 			"webhook": map[string]any{"body": strings.Repeat("a", MaxWebhookBytes)}})}}, nil, false, true},
 	}

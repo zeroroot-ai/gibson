@@ -622,6 +622,18 @@ const (
 	TaskDataUntrusted     = "untrusted"
 )
 
+// copyTaskData gives dst the task data of src and its trust mark. A run with no
+// task data leaves none from an earlier run of the same record.
+func copyTaskData(dst, src map[string]any) {
+	for _, k := range []string{MetadataTaskData, MetadataTaskDataTrust} {
+		if v, ok := src[k]; ok {
+			dst[k] = v
+		} else {
+			delete(dst, k)
+		}
+	}
+}
+
 // newRunTemplate builds the mission record that Run finds or creates. The name
 // is the name of the definition and the suffix of the request. The record holds
 // the target set of the request and the creator of the request. The run
@@ -953,13 +965,7 @@ func (m *missionManager) findOrCreateRecord(ctx context.Context, mStore mission.
 		if vars, ok := missionTemplate.Metadata["variables"]; ok {
 			missionRecord.Metadata["variables"] = vars
 		}
-		for _, k := range []string{MetadataTaskData, MetadataTaskDataTrust} {
-			if v, ok := missionTemplate.Metadata[k]; ok {
-				missionRecord.Metadata[k] = v
-			} else {
-				delete(missionRecord.Metadata, k)
-			}
-		}
+		copyTaskData(missionRecord.Metadata, missionTemplate.Metadata)
 	}
 	return missionRecord, nil
 }

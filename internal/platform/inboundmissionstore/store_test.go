@@ -538,3 +538,28 @@ func TestForgetMessage(t *testing.T) {
 	assert.Contains(t, db.seen[0], "DELETE FROM inbound_messages")
 	require.ErrorIs(t, newStore(&fakeDB{forErr: errBoom}).ForgetMessage(context.Background(), "acme", "k"), errBoom)
 }
+
+func TestTakeMessage_Failures(t *testing.T) {
+	ctx := context.Background()
+	insertFails := &fakeDB{exec: func(sql string) (int64, error) {
+		if strings.HasPrefix(sql, "INSERT") {
+			return 0, errBoom
+		}
+		return 0, nil
+	}}
+	_, err := newStore(insertFails).TakeMessage(ctx, "acme", "k", "m")
+	require.ErrorIs(t, err, errBoom, "the insert fails")
+
+	conflict := func(row func(string) datapool.Row) *fakeDB {
+		return &fakeDB{exec: func(string) (int64, error) { return 0, nil }, queryRow: row}
+	}
+	_, err = newStore(conflict(func(string) datapool.Row { return fakeRow{err: datapool.ErrNoRows} })).
+		TakeMessage(ctx, "acme", "k", "m")
+	require.ErrorIs(t, err, ErrNotFound, "the row vanished between the two statements")
+
+	_, err = newStore(conflict(func(string) datapool.Row { return fakeRow{err: errBoom} })).TakeMessage(ctx, "acme", "k", "m")
+	require.ErrorIs(t, err, errBoom, "the read of the first mission fails")
+
+	err = newStore(&fakeDB{exec: func(string) (int64, error) { return 0, errBoom }}).ForgetMessage(ctx, "acme", "k")
+	require.ErrorIs(t, err, errBoom, "the delete fails")
+}

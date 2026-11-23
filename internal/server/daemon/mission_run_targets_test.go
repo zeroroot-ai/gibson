@@ -189,3 +189,16 @@ func TestNewRunTemplate_TaskDataIsMarkedUntrustedAndStaysOutOfVariables(t *testi
 	none := newRunTemplate(auth.MustNewTenantID("acme"), def, "{}", api.RunMissionData{}, types.NewID(), nil, "")
 	assert.NotContains(t, none.Metadata, MetadataTaskData)
 }
+
+func TestCopyTaskData_TheRunOfARecordKeepsNoTaskDataOfAnEarlierRun(t *testing.T) {
+	dst := map[string]any{MetadataTaskData: "old", MetadataTaskDataTrust: TaskDataUntrusted, "target_ref": "t"}
+
+	copyTaskData(dst, map[string]any{})
+	assert.NotContains(t, dst, MetadataTaskData, "a run with no task data drops the old data")
+	assert.NotContains(t, dst, MetadataTaskDataTrust)
+	assert.Equal(t, "t", dst["target_ref"], "other metadata stays")
+
+	copyTaskData(dst, map[string]any{MetadataTaskData: "new", MetadataTaskDataTrust: TaskDataUntrusted})
+	assert.Equal(t, "new", dst[MetadataTaskData])
+	assert.Equal(t, TaskDataUntrusted, dst[MetadataTaskDataTrust])
+}
