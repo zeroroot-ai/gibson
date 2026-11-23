@@ -110,4 +110,8 @@ func TestCatalogOf(t *testing.T) {
 	assert.Equal(t, "scan", catalogOf(&mission.Mission{Metadata: map[string]any{mission.MetadataCatalogMission: "scan"}}))
 	assert.Empty(t, catalogOf(&mission.Mission{}))
 	assert.Empty(t, catalogOf(&mission.Mission{Metadata: map[string]any{mission.MetadataCatalogMission: 7}}))
+	// Task data of an outside caller (the inbound A2A start) is kept under one key,
+	// so a catalog marker inside it is data and never the marker of the mission.
+	forged := map[string]any{MetadataTaskData: map[string]any{mission.MetadataCatalogMission: "scan"}}
+	assert.Empty(t, catalogOf(&mission.Mission{Metadata: forged}))
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/capname"
 	"github.com/zeroroot-ai/gibson/internal/platform/inboundmissionstore"
+	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -42,6 +43,10 @@ const maxInboundTargets = 100
 type InboundDefinition struct {
 	// ID is the ID of the definition.
 	ID string
+	// Name is the name of the definition. A definition that has the name of a
+	// checked-in mission is never published: a catalog mission starts only through
+	// the catalog (gibson#1469).
+	Name string
 	// Hash is the hash of the whole definition: its nodes, its budget and its
 	// scope. A change of any part changes the hash.
 	Hash string
@@ -289,6 +294,10 @@ func (s *InboundMissionService) PublishInboundMission(
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: read the definition: %v", rpc, err))
 	case def.ID == "" || def.Hash == "":
 		return nil, status_grpc.Error(codes.FailedPrecondition, rpc+": the definition has no ID, so it cannot be pinned")
+	}
+	if missioncatalog.IsCatalogName(def.Name) {
+		return nil, status_grpc.Errorf(codes.InvalidArgument,
+			"%s: the definition is named %q, which is the name of a checked-in mission, so it cannot be published", rpc, def.Name)
 	}
 	if !slices.Contains(def.Agents, req.GetAgent()) {
 		return nil, status_grpc.Errorf(codes.InvalidArgument,

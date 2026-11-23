@@ -23,6 +23,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -496,6 +497,15 @@ func (m *missionManager) Run(ctx context.Context, req api.RunMissionData) (strin
 	// definition that changed after the publication check is refused here.
 	if pinErr := checkDefinitionPin(def, req.PinnedDefinitionHash); pinErr != nil {
 		return "", pinErr
+	}
+
+	// A definition with the name of a checked-in mission never starts here. This is
+	// the sink of every start by definition: RunMission, the inbound A2A start and
+	// the run of a definition that was stored before the name was reserved. A
+	// catalog mission starts only through the catalog (gibson#1469).
+	if missioncatalog.IsCatalogName(def.GetName()) {
+		return "", grpcstatus.Errorf(grpccodes.InvalidArgument,
+			"the definition is named %q, which is the name of a checked-in mission. Run that mission with RunCatalogMission", def.GetName())
 	}
 
 	m.logger.Debug("mission definition loaded",
