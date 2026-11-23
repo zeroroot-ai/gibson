@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.173.0](https://github.com/zeroroot-ai/gibson/compare/v0.172.0...v0.173.0) (2026-11-23)
+
+
+### Features
+
+* **daemon:** run a checked-in mission by name for a person ([#1662](https://github.com/zeroroot-ai/gibson/issues/1662)) ([aa95206](https://github.com/zeroroot-ai/gibson/commit/aa952061f4702b4818f21082da0b006eeff09b6a))
+* **scan:** raise the dependency alerts of the Git host as findings of the scan ([#1648](https://github.com/zeroroot-ai/gibson/issues/1648)) ([757b835](https://github.com/zeroroot-ai/gibson/commit/757b835b7058720e85d68d0bf09a4a669798678f))
+
+
+### Bug Fixes
+
+* **catalog:** pin the fix loop connectors to connectors v0.7.0 ([#1667](https://github.com/zeroroot-ai/gibson/issues/1667)) ([03515bf](https://github.com/zeroroot-ai/gibson/commit/03515bf60deae936f6a07e61a6cced498f3bcc8d))
+* **daemon:** bind an opened merge request to the job of the turn ([#1665](https://github.com/zeroroot-ai/gibson/issues/1665)) ([2494c9e](https://github.com/zeroroot-ai/gibson/commit/2494c9e4d2d426c6da93cb82b162208e1e97076f))
+* **mission:** a child mission inherits the health hold and restart rules of its parent ([#1664](https://github.com/zeroroot-ai/gibson/issues/1664)) ([51682be](https://github.com/zeroroot-ai/gibson/commit/51682bebf462cf65686a46bf88dfcf34e8fa2885))
+* **mission:** give the approval wait the time left of the node timeout ([#1653](https://github.com/zeroroot-ai/gibson/issues/1653)) ([d5d5ce9](https://github.com/zeroroot-ai/gibson/commit/d5d5ce9c3575acb8b2e308d8369689e6b7aefc3e))
+* **mission:** reserve the catalog names and key the scan gates on a catalog marker ([#1666](https://github.com/zeroroot-ai/gibson/issues/1666)) ([d900376](https://github.com/zeroroot-ai/gibson/commit/d90037617418306f03eaf50722fd9b6fe50172b1))
+
 ## [0.172.0](https://github.com/zeroroot-ai/gibson/compare/v0.171.1...v0.172.0) (2026-11-23)
 
 
