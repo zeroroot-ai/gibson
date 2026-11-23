@@ -612,6 +612,28 @@ func checkTargetPin(pins map[string]string, id string, t *types.Target) error {
 	return nil
 }
 
+// The metadata keys of the typed task data of a mission. The data is under
+// MetadataTaskData, keyed by name (for example "webhook"). MetadataTaskDataTrust
+// holds TaskDataUntrusted, so a reader treats the data as data and never as an
+// instruction.
+const (
+	MetadataTaskData      = "task_data"
+	MetadataTaskDataTrust = "task_data_trust"
+	TaskDataUntrusted     = "untrusted"
+)
+
+// copyTaskData gives dst the task data of src and its trust mark. A run with no
+// task data leaves none from an earlier run of the same record.
+func copyTaskData(dst, src map[string]any) {
+	for _, k := range []string{MetadataTaskData, MetadataTaskDataTrust} {
+		if v, ok := src[k]; ok {
+			dst[k] = v
+		} else {
+			delete(dst, k)
+		}
+	}
+}
+
 // newRunTemplate builds the mission record that Run finds or creates. The name
 // is the name of the definition and the suffix of the request. The record holds
 // the target set of the request and the creator of the request. The run
@@ -645,6 +667,12 @@ func newRunTemplate(
 	// Store variables in metadata
 	if len(req.Variables) > 0 {
 		m.Metadata["variables"] = req.Variables
+	}
+	// Typed task data of an outside caller is data. It is marked untrusted, so
+	// a reader never takes it as an instruction.
+	if len(req.TaskData) > 0 {
+		m.Metadata[MetadataTaskData] = req.TaskData
+		m.Metadata[MetadataTaskDataTrust] = TaskDataUntrusted
 	}
 	// Store target URL/reference in metadata for agent context injection
 	// This preserves the original target reference (URL or name) separate from TargetID
@@ -937,6 +965,7 @@ func (m *missionManager) findOrCreateRecord(ctx context.Context, mStore mission.
 		if vars, ok := missionTemplate.Metadata["variables"]; ok {
 			missionRecord.Metadata["variables"] = vars
 		}
+		copyTaskData(missionRecord.Metadata, missionTemplate.Metadata)
 	}
 	return missionRecord, nil
 }
@@ -1396,6 +1425,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		slot:       deciderSlot,
 		deciderPin: deciderSlotFrom(def.GetDeciderSlot()),
 		initiator:  missionInitiatorOf(missionCtx.CreatedBy),
+		taskData:   taskDataOf(active.mission.Metadata),
 	}
 	m.brainExecutor.register(missionID, binding)
 	defer m.brainExecutor.unregister(missionID, binding)

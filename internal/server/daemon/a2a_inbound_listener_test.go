@@ -35,6 +35,54 @@ type fakePublished struct {
 	events          []string
 	owners          map[string]string
 	ownerErr        error
+	// msgs holds the claims by tenant and key, as the per-tenant database does.
+	// The value is the state, "pending" or "started", and msgMission the mission.
+	msgs        map[string]string
+	msgMission  map[string]string
+	forgotten   []string
+	takeErr     error
+	forgetErr   error
+	confirmErr  error
+	confirmGone bool
+}
+
+func (f *fakePublished) ClaimMessage(_ context.Context, tenant, key, missionID string) (inboundmissionstore.MessageClaim, error) {
+	if f.takeErr != nil {
+		return 0, f.takeErr
+	}
+	if f.msgs == nil {
+		f.msgs, f.msgMission = map[string]string{}, map[string]string{}
+	}
+	k := tenant + "/" + key
+	switch f.msgs[k] {
+	case "started":
+		return inboundmissionstore.ClaimDuplicate, nil
+	case "pending":
+		return inboundmissionstore.ClaimInFlight, nil
+	}
+	f.msgs[k], f.msgMission[k] = "pending", missionID
+	return inboundmissionstore.ClaimNew, nil
+}
+
+func (f *fakePublished) ConfirmMessage(_ context.Context, tenant, key, missionID string) error {
+	k := tenant + "/" + key
+	if f.confirmErr != nil {
+		return f.confirmErr
+	}
+	if f.confirmGone || f.msgMission[k] != missionID {
+		return inboundmissionstore.ErrNotFound
+	}
+	f.msgs[k] = "started"
+	return nil
+}
+
+func (f *fakePublished) ForgetMessage(_ context.Context, tenant, key, missionID string) error {
+	f.forgotten = append(f.forgotten, tenant+"/"+key)
+	k := tenant + "/" + key
+	if f.msgs[k] == "pending" && f.msgMission[k] == missionID {
+		delete(f.msgs, k)
+	}
+	return f.forgetErr
 }
 
 func (f *fakePublished) Reserve(_ context.Context, tenant, agent, owner, missionID string) (string, error) {

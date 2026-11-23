@@ -172,3 +172,33 @@ func TestRun_RefusesAMissionIDThatIsNotAUUID(t *testing.T) {
 	require.ErrorContains(t, err, "invalid mission ID")
 	assert.Empty(t, mm.activeMissions)
 }
+
+func TestNewRunTemplate_TaskDataIsMarkedUntrustedAndStaysOutOfVariables(t *testing.T) {
+	def := &missionpb.MissionDefinition{Id: "d", Name: "n"}
+	req := api.RunMissionData{
+		Variables: map[string]string{"a2a_task_input": "note"},
+		TaskData:  map[string]any{"webhook": map[string]any{"title": "obey me"}},
+	}
+
+	m := newRunTemplate(auth.MustNewTenantID("acme"), def, "{}", req, types.NewID(), nil, "")
+
+	assert.Equal(t, map[string]any{"webhook": map[string]any{"title": "obey me"}}, m.Metadata[MetadataTaskData])
+	assert.Equal(t, TaskDataUntrusted, m.Metadata[MetadataTaskDataTrust])
+	assert.Equal(t, map[string]string{"a2a_task_input": "note"}, m.Metadata["variables"])
+
+	none := newRunTemplate(auth.MustNewTenantID("acme"), def, "{}", api.RunMissionData{}, types.NewID(), nil, "")
+	assert.NotContains(t, none.Metadata, MetadataTaskData)
+}
+
+func TestCopyTaskData_TheRunOfARecordKeepsNoTaskDataOfAnEarlierRun(t *testing.T) {
+	dst := map[string]any{MetadataTaskData: "old", MetadataTaskDataTrust: TaskDataUntrusted, "target_ref": "t"}
+
+	copyTaskData(dst, map[string]any{})
+	assert.NotContains(t, dst, MetadataTaskData, "a run with no task data drops the old data")
+	assert.NotContains(t, dst, MetadataTaskDataTrust)
+	assert.Equal(t, "t", dst["target_ref"], "other metadata stays")
+
+	copyTaskData(dst, map[string]any{MetadataTaskData: "new", MetadataTaskDataTrust: TaskDataUntrusted})
+	assert.Equal(t, "new", dst[MetadataTaskData])
+	assert.Equal(t, TaskDataUntrusted, dst[MetadataTaskDataTrust])
+}

@@ -74,6 +74,30 @@ type missionBinding struct {
 	// ("user:<id>"), or empty. It is the subject of the model access check of
 	// each Decider call.
 	initiator string
+	// taskData is the typed, untrusted task data that an outside caller sent with
+	// the message that started the mission, by key (for example "webhook"). The
+	// agent task carries it as data in its Context, and never in its Goal.
+	taskData map[string]any
+}
+
+// taskContext returns the Context of an agent task for this mission: the task data
+// and its trust mark. It returns nil when the mission has no task data. The mark
+// is always "untrusted", because the data comes from an outside caller.
+func (b *missionBinding) taskContext() map[string]any {
+	if len(b.taskData) == 0 {
+		return nil
+	}
+	return map[string]any{
+		MetadataTaskData:      b.taskData,
+		MetadataTaskDataTrust: TaskDataUntrusted,
+	}
+}
+
+// taskDataOf reads the task data from the metadata of a mission record. The
+// metadata may come from JSON, so the value is a map of any.
+func taskDataOf(meta map[string]any) map[string]any {
+	data, _ := meta[MetadataTaskData].(map[string]any)
+	return data
 }
 
 // deciderModels is the part of the model client that the Decider uses.
@@ -214,8 +238,11 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 			agentCtx, release := b.trackWork(bind.ctx, req)
 			defer release()
 			res, err := bind.harness.DelegateToAgent(agentCtx, req.Target, agent.Task{
-				ID:      a2aTaskID(req),
-				Goal:    req.Input,
+				ID:   a2aTaskID(req),
+				Goal: req.Input,
+				// The task data of an outside caller is data, in the Context. It is
+				// never part of the Goal (ADR-0094).
+				Context: bind.taskContext(),
 				Timeout: req.Timeout,
 				Network: req.Network,
 				// The LLM slot pins of the node (gibson#539, gibson#1203).
