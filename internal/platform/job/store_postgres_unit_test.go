@@ -699,6 +699,9 @@ func TestPostgresStore_AnUnreachableTenantIsReported(t *testing.T) {
 	if err := store.Acknowledge(ctx, "acme", "in-1"); err == nil {
 		t.Error("Acknowledge must report an unreachable tenant")
 	}
+	if err := store.SetTurn(ctx, "acme", "j", Principal{Kind: PrincipalUser, ID: "bob"}, "in-1"); err == nil {
+		t.Error("SetTurn must report an unreachable tenant")
+	}
 	if _, err := store.SetState(ctx, "acme", "j", StateWorking, ""); err == nil {
 		t.Error("SetState must report an unreachable tenant")
 	}

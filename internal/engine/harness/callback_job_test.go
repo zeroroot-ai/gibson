@@ -556,6 +556,7 @@ func TestNoBankSurface_EverySeamRefuses(t *testing.T) {
 		"Get":           func() error { _, err := n.Get(ctx, "t", "j"); return err },
 		"PendingInputs": func() error { _, err := n.PendingInputs(ctx, "t", "m", 1); return err },
 		"Acknowledge":   func() error { return n.Acknowledge(ctx, "t", "i") },
+		"SetTurn":       func() error { return n.SetTurn(ctx, "t", "j", job.Principal{}, "i") },
 		"SetState":      func() error { _, err := n.SetState(ctx, "t", "j", job.StateWorking, ""); return err },
 		"AddDeliverable": func() error {
 			_, err := n.AddDeliverable(ctx, "t", "j", &jobpb.Deliverable{})

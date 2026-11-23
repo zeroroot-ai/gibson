@@ -385,3 +385,104 @@ func TestBankMemberLiveness_TurnGrant(t *testing.T) {
 		t.Error("no pool must give an error")
 	}
 }
+
+// getErrJobStore is a job store whose Get fails with a fixed error.
+type getErrJobStore struct {
+	*fakeJobStore
+	err error
+}
+
+func (g getErrJobStore) Get(context.Context, string, string) (*job.Job, error) { return nil, g.err }
+
+// The refusals and errors of the renewal lookup: a store that fails is an error and never an
+// answer, a job in a state that the daemon does not know holds no turn, and a job of the member
+// in another bank is not held.
+func TestBankMemberLiveness_TurnGrantRefusalsAndErrors(t *testing.T) {
+	ctx := context.Background()
+	tenant, err := auth.NewTenantID("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	claims := sdkcg.Claims{Tenant: tenant, MissionID: "bank-1", MissionRunID: "run-1", TaskID: "job-1", Subject: "user:alice"}
+	newBanks := func() *fakeBankStore {
+		b := newFakeBankStore()
+		b.members["bank-1"] = []*bank.Member{{ID: "m-1", BankID: "bank-1", MissionRunID: "run-1", State: bank.MemberIdle}}
+		return b
+	}
+	jobsWith := func(state job.State, bankID string) *fakeJobStore {
+		j := newFakeJobStore()
+		j.jobs["job-1"] = &job.Job{ID: "job-1", BankID: bankID, MemberID: "m-1", State: state, TurnSender: alice}
+		return j
+	}
+	live := func(b bank.Store, j job.Store) *bankMemberLiveness {
+		return &bankMemberLiveness{
+			banks: func() (bank.Store, error) { return b, nil },
+			jobs:  func() (job.Store, error) { return j, nil },
+		}
+	}
+
+	t.Run("the member store fails", func(t *testing.T) {
+		b := newBanks()
+		b.getErr = errors.New("postgres is down")
+		got, err := live(b, jobsWith(job.StateWorking, "bank-1")).IsMemberTurnGrantLive(ctx, claims)
+		if got || err == nil || !errors.Is(err, b.getErr) {
+			t.Fatalf("live = %v, err = %v, want not live and the store error", got, err)
+		}
+	})
+	t.Run("the job store fails", func(t *testing.T) {
+		boom := errors.New("job store is down")
+		got, err := live(newBanks(), getErrJobStore{fakeJobStore: newFakeJobStore(), err: boom}).IsMemberTurnGrantLive(ctx, claims)
+		if got || !errors.Is(err, boom) {
+			t.Fatalf("live = %v, err = %v, want not live and the store error", got, err)
+		}
+	})
+	t.Run("the job does not exist", func(t *testing.T) {
+		got, err := live(newBanks(), newFakeJobStore()).IsMemberTurnGrantLive(ctx, claims)
+		if got || err != nil {
+			t.Fatalf("live = %v, err = %v, want a clean refusal", got, err)
+		}
+	})
+	t.Run("the job belongs to another bank", func(t *testing.T) {
+		got, err := live(newBanks(), jobsWith(job.StateWorking, "bank-2")).IsMemberTurnGrantLive(ctx, claims)
+		if got || err != nil {
+			t.Fatalf("live = %v, err = %v, want a clean refusal", got, err)
+		}
+	})
+	t.Run("a state that the daemon does not know", func(t *testing.T) {
+		got, err := live(newBanks(), jobsWith(job.State("paused"), "bank-1")).IsMemberTurnGrantLive(ctx, claims)
+		if got || err != nil {
+			t.Fatalf("live = %v, err = %v, want a clean refusal", got, err)
+		}
+	})
+	t.Run("the control: the same job is live while it works", func(t *testing.T) {
+		got, err := live(newBanks(), jobsWith(job.StateWorking, "bank-1")).IsMemberTurnGrantLive(ctx, claims)
+		if !got || err != nil {
+			t.Fatalf("live = %v, err = %v, want live", got, err)
+		}
+	})
+}
+
+// The job surface that the harness uses reaches SetTurn of the store, keeps the error of the
+// store, and refuses while no store is up.
+func TestLazyJobSurface_SetTurnReachesTheStore(t *testing.T) {
+	ctx := context.Background()
+	jobs := newFakeJobStore()
+	jobs.jobs["job-1"] = &job.Job{ID: "job-1"}
+	surface := &lazyJobSurface{daemon: &daemonImpl{}, stores: func() (job.Store, error) { return jobs, nil }}
+	bob := job.Principal{Kind: job.PrincipalUser, ID: "bob"}
+
+	if err := surface.SetTurn(ctx, "acme", "job-1", bob, "in-1"); err != nil {
+		t.Fatalf("SetTurn: %v", err)
+	}
+	if got := jobs.jobs["job-1"]; got.TurnSender != bob || got.TurnInputID != "in-1" {
+		t.Errorf("turn = %+v / %q, want bob / in-1", got.TurnSender, got.TurnInputID)
+	}
+	if err := surface.SetTurn(ctx, "acme", "job-9", bob, "in-1"); !errors.Is(err, job.ErrNotFound) {
+		t.Errorf("a missing job must keep the error of the store: %v", err)
+	}
+	down := &lazyJobSurface{daemon: &daemonImpl{}, stores: func() (job.Store, error) { return nil, errors.New("no pool") }}
+	if err := down.SetTurn(ctx, "acme", "job-1", bob, "in-1"); err == nil {
+		t.Error("no store must be reported on SetTurn")
+	}
+}
