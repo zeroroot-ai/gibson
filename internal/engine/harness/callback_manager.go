@@ -530,6 +530,18 @@ func (m *CallbackManager) SetSkillLoadSink(sink SkillLoadSink) {
 	}
 }
 
+// SetScanAnchorSink sets the sink that anchors the findings of a scan mission to
+// its Application (gibson#1469). Call after NewCallbackManager, before Start().
+// Thread-safe.
+func (m *CallbackManager) SetScanAnchorSink(sink ScanAnchorSink) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithScanAnchorSink(sink)(m.server.service)
+		m.logger.Debug("set scan anchor sink on callback service")
+	}
+}
+
 // SetConnectorAudit sets the audit logger that records each connector call of
 // invoke_tool. Call after NewCallbackManager, before Start(). Thread-safe.
 func (m *CallbackManager) SetConnectorAudit(l *audit.AuditLogger) {

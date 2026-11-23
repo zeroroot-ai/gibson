@@ -397,6 +397,22 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 	}
 }
 
+// ingestScanAnchors returns the sink of the scan anchors (gibson#1469): for each
+// scan mission that an agent originates by name, it submits the Application,
+// Repository and Image entities of the mission parameters to the World of the
+// tenant of the parent mission. The events carry the scan mission id and name no
+// other tenant.
+func ingestScanAnchors(reg *brain.Registry) harness.ScanAnchorSink {
+	return func(_ context.Context, tenant, missionID string, params map[string]string) {
+		if reg == nil || tenant == "" {
+			return
+		}
+		for _, ev := range ingest.ScanAnchorEvents(params, missionID) {
+			reg.For(tenant).Submit(ev)
+		}
+	}
+}
+
 // ingestSkillLoad returns the sink of the loads of Agent Skills (epic
 // gibson#1364): it folds each successful load into the Timeline of the tenant
 // of the call as one AgentSkillLoaded event, with the agent, the mission and

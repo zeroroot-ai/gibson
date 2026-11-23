@@ -1574,6 +1574,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// never became part of the Timeline.
 		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
 		d.callback.SetSkillLoadSink(ingestSkillLoad(d.brainRegistry))
+		d.callback.SetScanAnchorSink(ingestScanAnchors(d.brainRegistry))
 		d.callback.SetReadMarkerStore(harness.NewBrainReadMarkerStore(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")
 
