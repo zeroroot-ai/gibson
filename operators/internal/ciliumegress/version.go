@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -102,10 +103,23 @@ func CheckVersion(version string) error {
 	return nil
 }
 
+// imageIDRe is the OCI digest grammar: an algorithm, a colon and an encoded
+// value. A bare image ID has this shape and no repository.
+var imageIDRe = regexp.MustCompile(`^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[a-zA-Z0-9=_-]{32,}$`)
+
+// versionTagRe matches a tag that names a version, such as v1.20.2 or 1.20.2-cee.1.
+var versionTagRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]*)?$`)
+
 // ImageVersion returns the tag of a container image, for example "v1.15.10"
 // from "quay.io/cilium/cilium:v1.15.10@sha256:abc". An image with a digest
-// and no tag has no version to read.
+// and no tag, and a bare image ID, have no version to read.
 func ImageVersion(image string) (string, error) {
+	// On containerd the status of a container can hold the bare image ID,
+	// "sha256:<hex>", with no repository. Its hex is not a tag. The OCI digest
+	// grammar finds an ID of any algorithm.
+	if imageIDRe.MatchString(image) {
+		return "", fmt.Errorf("%w: the image %q is an image ID with no tag", ErrCiliumVersion, image)
+	}
 	ref, _, _ := strings.Cut(image, "@")
 	slash := strings.LastIndex(ref, "/")
 	colon := strings.LastIndex(ref, ":")
@@ -157,8 +171,10 @@ func RequireFixedVersion(ctx context.Context, r client.Reader, ref DaemonSetRef)
 // checkPod checks the cilium-agent container of one running agent pod. The pod
 // spec keeps the image that the DaemonSet wrote when it made the pod, with its
 // tag, so an old pod after a rollout still shows its old version. The status
-// image is checked too when it has a tag. On containerd an image pinned by tag
-// and digest often shows only the digest in the status, and that is no refusal.
+// image adds evidence only: it is checked when its tag names a version. On
+// containerd the status can show only the digest, the bare image ID, or another
+// tag that the node holds for the same image ID (such as latest). None of these
+// is a refusal, because the pod spec tag already decides.
 func checkPod(pod *corev1.Pod) error {
 	found := false
 	for _, c := range pod.Spec.Containers {
@@ -178,10 +194,11 @@ func checkPod(pod *corev1.Pod) error {
 		if st.Name != agentContainer {
 			continue
 		}
-		if _, err := ImageVersion(st.Image); err != nil {
+		v, err := ImageVersion(st.Image)
+		if err != nil || !versionTagRe.MatchString(v) {
 			continue
 		}
-		if err := checkImage(st.Image); err != nil {
+		if err := CheckVersion(v); err != nil {
 			return fmt.Errorf("agent pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	}
