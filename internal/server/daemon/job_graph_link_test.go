@@ -980,13 +980,13 @@ func TestJobGraphLink_NoHeadWhenTheOpenWasInAnotherRun(t *testing.T) {
 // A closed job with no mission run is refused. No call can be bound to it.
 func TestJobGraphLink_NoHeadForAJobWithNoMissionRun(t *testing.T) {
 	l := &jobGraphLink{opened: openedBy("acme", testMRURL, testHeadSHA), logger: testObsLogger().Slog()}
-	job := closedJob([]string{"f-1"}, mrDeliverable)
-	job.MissionRunID = ""
-	if reason := l.headMismatch(job, testMRURL, testHeadSHA); !strings.Contains(reason, "no mission run") {
+	closed := closedJob([]string{"f-1"}, mrDeliverable)
+	closed.MissionRunID = ""
+	if reason := l.headMismatch(closed, testMRURL, testHeadSHA); !strings.Contains(reason, "no mission run") {
 		t.Errorf("reason = %q, want a refusal that names the missing run", reason)
 	}
-	job.MissionRunID = "run-1"
-	if reason := l.headMismatch(job, testMRURL, testHeadSHA); reason != "" {
+	closed.MissionRunID = "run-1"
+	if reason := l.headMismatch(closed, testMRURL, testHeadSHA); reason != "" {
 		t.Errorf("reason = %q, want none for a job in the run of the open", reason)
 	}
 }
