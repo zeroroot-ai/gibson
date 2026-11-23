@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/incidentreport"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
@@ -31,7 +33,10 @@ func (d *daemonImpl) registerIncidentReport(ctx context.Context, srv *grpc.Serve
 	reader, err := incidentreport.NewReader(
 		incidentreport.QuerierGraph{Graph: d.incidentGraph},
 		incidentreport.BrainHistory{Registry: d.brainRegistry},
-		incidentreport.StoreGrants{Source: capabilitygrant.NewCapabilityGrantStore(d.platformDB)},
+		incidentreport.StoreGrants{
+			Source:  capabilitygrant.NewCapabilityGrantStore(d.platformDB),
+			Changes: auditGrantChanges{q: audit.NewQuery(d.platformDB)},
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("daemon: IncidentReportService: %w", err)
@@ -48,4 +53,42 @@ func (d *daemonImpl) incidentGraph() incidentreport.TenantGraph {
 		return g
 	}
 	return nil
+}
+
+// auditGrantChanges reads the audit records of the grant changes of one agent
+// principal (internal/server/admin/grants_admin.go). The person who gave a grant
+// is the actor of its record.
+type auditGrantChanges struct{ q *audit.Query }
+
+var _ incidentreport.GrantChangeSource = auditGrantChanges{}
+
+// GrantChanges returns the records of agent_grant_added and agent_grant_removed
+// whose target is the principal, up to the time until. The tenant is a predicate
+// of the audit read, so a principal of another tenant has no record here. A read
+// that holds more records than the bound is an error, because a missing old
+// record would name the wrong grantor.
+func (a auditGrantChanges) GrantChanges(
+	ctx context.Context, tenant, principal string, until time.Time,
+) ([]audit.PgEntry, error) {
+	var all []audit.PgEntry
+	for _, action := range []string{"agent_grant_added", "agent_grant_removed"} {
+		done := false
+		for page := range auditMaxPages {
+			got, total, err := a.q.List(ctx, tenant,
+				audit.Filters{Action: action, TargetID: principal, Until: &until}, auditPageSize, page*auditPageSize)
+			if err != nil {
+				return nil, fmt.Errorf("audit list of %s: %w", action, err)
+			}
+			all = append(all, got...)
+			if (page+1)*auditPageSize >= total {
+				done = true
+				break
+			}
+		}
+		if !done {
+			return nil, fmt.Errorf("the principal %q has more than %d %s records",
+				principal, auditMaxPages*auditPageSize, action)
+		}
+	}
+	return all, nil
 }

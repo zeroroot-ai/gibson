@@ -22,8 +22,13 @@ const (
 	// the grant, and the target is the principal of the agent.
 	grantAdded   = "agent_grant_added"
 	grantRemoved = "agent_grant_removed"
-	// relationExecute is the relation that lets an agent call a connector.
-	relationExecute = "can_execute"
+	// decisionAllow is the decision of an audit record of a grant change that took
+	// effect. A record with another decision (deny) records a change that failed
+	// after its record was written, so it never names a grantor.
+	decisionAllow = "allow"
+	// decisionDeny is the decision of the record that the grant admin writes when
+	// the FGA write failed after the allow record.
+	decisionDeny = "deny"
 	// resultIntent is the record that comes before the call. Only the result
 	// record counts as an action.
 	resultIntent = "intent"
@@ -31,6 +36,23 @@ const (
 	// errUnauthorized is the error class of a call that the check refused.
 	errUnauthorized = "unauthorized"
 )
+
+// executeTupleRelation is the relation that the grant admin writes for the action
+// can_execute. can_execute is computed in the FGA model and takes no tuple, so
+// the tuple is on direct_execute (internal/platform/authz.GrantTupleRelation).
+var executeTupleRelation = mustExecuteRelation()
+
+func mustExecuteRelation() string {
+	r, ok := authz.GrantTupleRelation("can_execute")
+	if !ok {
+		panic("blueteam: the grant admin has no tuple relation for can_execute")
+	}
+	return r
+}
+
+// relationExecute is the action that lets an agent call a connector. A call is
+// grouped under it, and the grant of it is the tuple on executeTupleRelation.
+const relationExecute = "can_execute"
 
 // Grant names a grant by its object and relation.
 type Grant struct {
@@ -65,22 +87,67 @@ type grantEvent struct {
 	grantor string
 }
 
+// changeKey names one grant change by what the grant admin writes: the action, the
+// actor, the target, the object and the relation.
+type changeKey struct{ action, actor, target, object, relation string }
+
 // grantEvents indexes the grant changes of the execute relation by agent
-// principal and by object.
+// principal and by object. It uses only records with an allow decision. The grant
+// admin writes the allow record before the FGA write, and a failed write adds a
+// deny record and leaves the allow. So each deny record cancels the latest earlier
+// allow record for the same action, actor, target, object and relation. It cancels
+// one allow only, so an older change that took effect stays.
 func grantEvents(changes []audit.PgEntry) map[string]map[string][]grantEvent {
-	byAgent := map[string]map[string][]grantEvent{} // principal -> object -> events
+	type parsed struct {
+		entry     audit.PgEntry
+		key       changeKey
+		cancelled bool
+	}
+	var allowed []*parsed
+	var denied []parsed
 	for _, c := range changes {
 		if c.Action != grantAdded && c.Action != grantRemoved {
 			continue
 		}
 		var md struct{ Object, Relation string }
-		if json.Unmarshal(c.Metadata, &md) != nil || md.Relation != relationExecute {
+		if json.Unmarshal(c.Metadata, &md) != nil || md.Relation != executeTupleRelation {
 			continue
 		}
+		p := parsed{entry: c, key: changeKey{c.Action, c.ActorID, c.TargetID, md.Object, md.Relation}}
+		switch c.Decision {
+		case decisionAllow:
+			allowed = append(allowed, &p)
+		case decisionDeny:
+			denied = append(denied, p)
+		}
+	}
+	// Each deny, oldest first, cancels the latest allow of its key that is not later
+	// than the deny and that no earlier deny cancelled.
+	sort.SliceStable(denied, func(i, j int) bool { return denied[i].entry.CreatedAt.Before(denied[j].entry.CreatedAt) })
+	for _, d := range denied {
+		var latest *parsed
+		for _, a := range allowed {
+			if a.cancelled || a.key != d.key || a.entry.CreatedAt.After(d.entry.CreatedAt) {
+				continue
+			}
+			if latest == nil || !a.entry.CreatedAt.Before(latest.entry.CreatedAt) {
+				latest = a
+			}
+		}
+		if latest != nil {
+			latest.cancelled = true
+		}
+	}
+	byAgent := map[string]map[string][]grantEvent{} // principal -> object -> events
+	for _, p := range allowed {
+		if p.cancelled {
+			continue
+		}
+		c := p.entry
 		if byAgent[c.TargetID] == nil {
 			byAgent[c.TargetID] = map[string][]grantEvent{}
 		}
-		byAgent[c.TargetID][md.Object] = append(byAgent[c.TargetID][md.Object],
+		byAgent[c.TargetID][p.key.object] = append(byAgent[c.TargetID][p.key.object],
 			grantEvent{at: c.CreatedAt, added: c.Action == grantAdded, grantor: c.ActorID})
 	}
 	return byAgent
@@ -179,6 +246,15 @@ func GroupActions(calls, changes []audit.PgEntry, from, to time.Time) []ActionGr
 // last change at or before t decides. A removal ends the grant, so no grantor
 // is in force.
 func grantorAt(events []grantEvent, t time.Time) string {
+	if e, ok := grantEventAt(events, t); ok {
+		return e.grantor
+	}
+	return ""
+}
+
+// grantEventAt returns the change that gave the grant in force at t. ok is false
+// when no change is at or before t, and when the last one removed the grant.
+func grantEventAt(events []grantEvent, t time.Time) (grantEvent, bool) {
 	var last *grantEvent
 	for i := range events {
 		e := &events[i]
@@ -187,9 +263,21 @@ func grantorAt(events []grantEvent, t time.Time) string {
 		}
 	}
 	if last == nil || !last.added {
-		return ""
+		return grantEvent{}, false
 	}
-	return last.grantor
+	return *last, true
+}
+
+// GrantorOf returns the person who gave principal the execute grant on object,
+// in force at t, and the time of that change. changes are the audit records of
+// agent_grant_added and agent_grant_removed. ok is false when no grant is in
+// force at t, or when the records name none.
+func GrantorOf(changes []audit.PgEntry, principal, object string, t time.Time) (grantor string, at time.Time, ok bool) {
+	e, found := grantEventAt(grantEvents(changes)[principal][object], t)
+	if !found {
+		return "", time.Time{}, false
+	}
+	return e.grantor, e.at, true
 }
 
 func sortedKeys(m map[string]bool) []string {

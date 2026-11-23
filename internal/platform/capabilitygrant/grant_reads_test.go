@@ -22,13 +22,14 @@ func TestStore_GrantByID(t *testing.T) {
 		store, mock, _ := newMockedStore(t)
 		mock.ExpectQuery("AND  g.id = $2").
 			WithArgs("acme", "g1").
-			WillReturnRows(sqlmock.NewRows([]string{"id", "agent_id", "capability_name", "component_ref", "status", "granted_at", "user_id"}).
-				AddRow("g1", "a1", "execute:tool:mcp:okta", "component:connector/okta", "active", at, "user-7"))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "agent_id", "capability_name", "component_ref", "status", "granted_at", "user_id", "principal_ref"}).
+				AddRow("g1", "a1", "execute:tool:mcp:okta", "component:connector/okta", "active", at, "user-7", "agent_principal:p1"))
 		got, err := store.GrantByID(ctx, "acme", "g1")
 		require.NoError(t, err)
 		require.NotNil(t, got)
 		assert.Equal(t, "g1", got.ID)
 		assert.Equal(t, "user-7", got.OwnerUserID)
+		assert.Equal(t, "agent_principal:p1", got.PrincipalRef)
 		assert.Equal(t, at, got.GrantedAt)
 		require.NoError(t, mock.ExpectationsWereMet())
 	})

@@ -268,14 +268,14 @@ func containsString(xs []string, s string) bool {
 	return false
 }
 
-// grantTuples builds the FGA tuple of each grant for the target principal.
+// GrantTuples builds the FGA tuple of each grant for the target principal.
 //
 // A request names the action: can_read, can_configure, can_execute or
 // can_invoke. The first three are computed relations in the FGA model, and a
 // computed relation takes no tuple. The tuple goes on the relation that
 // authz.GrantTupleRelation gives, which is the matching direct_ relation.
 // validateGrantTuples runs first, so each action here has a tuple relation.
-func grantTuples(target string, grants []*tenantv1.GrantTuple) []authz.Tuple {
+func GrantTuples(target string, grants []*tenantv1.GrantTuple) []authz.Tuple {
 	tuples := make([]authz.Tuple, 0, len(grants))
 	for _, g := range grants {
 		relation, _ := authz.GrantTupleRelation(g.GetRelation())
@@ -355,7 +355,7 @@ func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *tenantv1.
 
 	// Two-pass idempotency: build the FGA tuples first, dedupe against
 	// already-present via Check, then Write only the missing ones.
-	tuples := grantTuples(target.PrincipalID, req.GetGrants())
+	tuples := GrantTuples(target.PrincipalID, req.GetGrants())
 
 	checks := make([]authz.CheckRequest, len(tuples))
 	for i, t := range tuples {
@@ -425,7 +425,7 @@ func (s *GrantsAdminServer) DeleteAgentGrants(ctx context.Context, req *tenantv1
 
 	// The same tuples that WriteAgentGrants writes: on the direct_ relation
 	// for a component action.
-	tuples := grantTuples(target.PrincipalID, req.GetGrants())
+	tuples := GrantTuples(target.PrincipalID, req.GetGrants())
 
 	checks := make([]authz.CheckRequest, len(tuples))
 	for i, t := range tuples {
@@ -556,8 +556,10 @@ func grantActor(ctx context.Context) (string, bool) {
 	return id.Subject, true
 }
 
-// grantAuditEvents builds one audit event per tuple written or deleted.
-func grantAuditEvents(actor, tenant, target, action, decision string, tuples []authz.Tuple) []audit.Event {
+// GrantAuditEvents builds one audit event per tuple written or deleted. It is exported
+// so that the readers of these records (the incident report and the blue team reads)
+// build their test fixtures from this writer and not from a copy of its rules.
+func GrantAuditEvents(actor, tenant, target, action, decision string, tuples []authz.Tuple) []audit.Event {
 	out := make([]audit.Event, 0, len(tuples))
 	for _, t := range tuples {
 		md, _ := json.Marshal(map[string]any{
@@ -584,7 +586,7 @@ func grantAuditEvents(actor, tenant, target, action, decision string, tuples []a
 // written, so no grant change exists without its record (gibson#676).
 // When the writer is nil, the events are structured-logged instead.
 func (s *GrantsAdminServer) recordGrantAudit(ctx context.Context, actor, tenant, target, action string, tuples []authz.Tuple) error {
-	for _, evt := range grantAuditEvents(actor, tenant, target, action, "allow", tuples) {
+	for _, evt := range GrantAuditEvents(actor, tenant, target, action, "allow", tuples) {
 		if s.auditWriter == nil {
 			s.logger.InfoContext(ctx, "grants admin: audit event (no writer wired)",
 				slog.String("action", action),
@@ -604,7 +606,7 @@ func (s *GrantsAdminServer) recordGrantAudit(ctx context.Context, actor, tenant,
 // record was written.
 func (s *GrantsAdminServer) recordGrantFailure(ctx context.Context, actor, tenant, target, action string, tuples []authz.Tuple) {
 	if s.auditWriter != nil {
-		for _, evt := range grantAuditEvents(actor, tenant, target, action, "deny", tuples) {
+		for _, evt := range GrantAuditEvents(actor, tenant, target, action, "deny", tuples) {
 			if err := s.auditWriter.WriteSync(ctx, evt); err != nil {
 				s.logger.ErrorContext(ctx, "grants admin: the failure record could not be written",
 					slog.String("action", action), slog.String("error", err.Error()))

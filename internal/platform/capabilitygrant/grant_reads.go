@@ -19,6 +19,9 @@ type AgentGrant struct {
 	// OwnerUserID is the person who owns the agent and gave the grant. It is
 	// empty for an autonomous agent with no owner.
 	OwnerUserID string
+	// PrincipalRef is the principal of the agent. The audit record of a change
+	// of its grants names it as the target.
+	PrincipalRef string
 }
 
 // GrantByID returns one grant of the tenant with the owner of its agent, or
@@ -33,7 +36,8 @@ func (s *CapabilityGrantStore) GrantByID(ctx context.Context, tenantID, grantID 
 		return nil, errors.New("capabilitygrant: GrantByID: grant id is required")
 	}
 	const query = `
-SELECT g.id, g.agent_id, g.capability_name, g.component_ref, g.status, g.granted_at, COALESCE(a.user_id, '')
+SELECT g.id, g.agent_id, g.capability_name, g.component_ref, g.status, g.granted_at,
+       COALESCE(a.user_id, ''), a.principal_ref
 FROM   capability_grant_grants g
 JOIN   capability_grant_agents a ON a.id = g.agent_id
 WHERE  a.tenant_id = $1
@@ -41,7 +45,7 @@ WHERE  a.tenant_id = $1
 	var g AgentGrant
 	var grantedAt time.Time
 	err := s.db.QueryRowContext(ctx, query, tenantID, grantID).
-		Scan(&g.ID, &g.AgentID, &g.CapabilityName, &g.ComponentRef, &g.Status, &grantedAt, &g.OwnerUserID)
+		Scan(&g.ID, &g.AgentID, &g.CapabilityName, &g.ComponentRef, &g.Status, &grantedAt, &g.OwnerUserID, &g.PrincipalRef)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, nil //nolint:nilnil // nil means that the tenant holds no grant with the id

@@ -28,11 +28,11 @@ func TestIncidentReportResponse_MapsEachLineWithItsFrame(t *testing.T) {
 		Alerts: []incidentreport.AlertLine{{Key: "a1", Frame: fr}},
 		Actions: []incidentreport.ActionLine{
 			{
-				ToolID: "mcp:okta:suspend_user", Outcome: incidentreport.OutcomeDone,
+				ToolID: "mcp:okta-response:suspend_user", Outcome: incidentreport.OutcomeDone,
 				Controls: []string{"ac-2", "ir-4"}, Frame: fr,
 				Grant: &incidentreport.GrantLine{ID: "g1", GrantedBy: "user-7", GrantedAtUnix: 9},
 			},
-			{ToolID: "mcp:okta:revoke_user_sessions", Outcome: incidentreport.OutcomeRefused, Controls: []string{"ac-12", "ir-4"}},
+			{ToolID: "mcp:okta-response:revoke_user_sessions", Outcome: incidentreport.OutcomeRefused, Controls: []string{"ac-12", "ir-4"}},
 		},
 		Causes: []incidentreport.CauseLine{{
 			FindingKey: "f1", Raised: fr,
@@ -114,8 +114,8 @@ func (h irHistory) HistoryFrom(context.Context, time.Time) ([]brain.Event, uint6
 
 type irGrants struct{}
 
-func (irGrants) GrantByID(_ context.Context, _, id string) (*incidentreport.Grant, error) {
-	return &incidentreport.Grant{ID: id, Capability: "execute:tool:mcp:crowdstrike", GrantedBy: "user-7"}, nil
+func (irGrants) GrantByID(_ context.Context, _, id string, _ time.Time) (*incidentreport.Grant, error) {
+	return &incidentreport.Grant{ID: id, Capability: "execute:tool:mcp:crowdstrike-response", GrantedBy: "user-7"}, nil
 }
 
 func irService(t *testing.T, rows map[string][]map[string]any) *IncidentReportService {
@@ -124,7 +124,7 @@ func irService(t *testing.T, rows map[string][]map[string]any) *IncidentReportSe
 		brain.AgentRunObserved{RunID: "r1", AgentName: "incident-response"},
 		brain.EntityObserved{Label: "Incident", Key: "inc-1", MissionID: "m1"},
 		brain.AgentToolCallObserved{
-			ToolCallID: "c1", MissionID: "m1", RunID: "r1", ToolName: "mcp:okta:suspend_user", GrantID: "g1",
+			ToolCallID: "c1", MissionID: "m1", RunID: "r1", ToolName: "mcp:okta-response:suspend_user", GrantID: "g1",
 		},
 	}}, irGrants{})
 	if err != nil {
