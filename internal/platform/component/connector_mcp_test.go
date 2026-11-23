@@ -6,6 +6,7 @@ package component
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -270,10 +271,11 @@ func connectorAt(url string, client *http.Client) *ConnectorMCP {
 	return c
 }
 
-// TestConnectorMCP_OnlyTemporaryFailuresAreUnavailable: UNAVAILABLE is an allow-list. A 429, a
-// 502, 503 or 504 and a connection that breaks are temporary. A 401, a 403 with no JSON-RPC
-// body, a refusal of the certificate, a failure of the token and a JSON-RPC error body are
-// refusals: a later call gives the same answer, so they stay unmarked.
+// TestConnectorMCP_OnlyTemporaryFailuresAreUnavailable: UNAVAILABLE is an allow-list. The
+// transport of the daemon marks a 502, 503 and 504, and a 429 is rate limited. A connection
+// that breaks is temporary. A 401, a 403, a refusal of the certificate, a failure of the token
+// and each JSON-RPC error body are refusals, also one with the code -32005 that the MCP client
+// uses for its own rejection: a connector can send any code, so no code is a mark.
 func TestConnectorMCP_OnlyTemporaryFailuresAreUnavailable(t *testing.T) {
 	status := func(code int, body string) *httptest.Server {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -283,41 +285,74 @@ func TestConnectorMCP_OnlyTemporaryFailuresAreUnavailable(t *testing.T) {
 		t.Cleanup(srv.Close)
 		return srv
 	}
-	rpcBody := `{"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"no access"}}`
-	plain := func(code int, body string) *ConnectorMCP {
-		return connectorAt(status(code, body).URL, http.DefaultClient)
+	// rpcError answers each request with a JSON-RPC error of the given code and the given status.
+	rpcError := func(httpStatus, rpcCode int) *httptest.Server {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req struct {
+				ID json.RawMessage `json:"id"`
+			}
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &req)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(httpStatus)
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"error":{"code":%d,"message":"no"}}`, req.ID, rpcCode)
+		}))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+	// through is the client of the daemon: the bearer transport wraps the base transport.
+	through := func(base http.RoundTripper, token func(context.Context) (string, error)) *http.Client {
+		return &http.Client{Transport: &bearerTransport{base: base, token: token}}
+	}
+	plain := func(srv *httptest.Server) *ConnectorMCP {
+		return connectorAt(srv.URL, through(http.DefaultTransport, nil))
 	}
 	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(tlsSrv.Close)
+	rpcBody := `{"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"no access"}}`
 
+	type want int
+	const (
+		refusal want = iota
+		unavailable
+		rateLimited
+	)
 	cases := map[string]struct {
-		c           *ConnectorMCP
-		unavailable bool
+		c    *ConnectorMCP
+		want want
 	}{
-		"429":                       {plain(http.StatusTooManyRequests, ""), true},
-		"502":                       {plain(http.StatusBadGateway, ""), true},
-		"503":                       {plain(http.StatusServiceUnavailable, ""), true},
-		"504":                       {plain(http.StatusGatewayTimeout, ""), true},
-		"a connection that breaks":  {connectorAt("http://127.0.0.1:1/mcp", http.DefaultClient), true},
-		"401":                       {plain(http.StatusUnauthorized, "denied"), false},
-		"403 with no JSON-RPC body": {plain(http.StatusForbidden, "forbidden"), false},
-		"403 with a JSON-RPC body":  {plain(http.StatusForbidden, rpcBody), false},
-		"a refused certificate":     {connectorAt(tlsSrv.URL, http.DefaultClient), false},
-		"a failure of the token": {connectorAt("http://connector.invalid/mcp", &http.Client{
-			Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-				return nil, errors.New("the token endpoint refused the client")
-			}),
-		}), false},
+		"429": {plain(status(http.StatusTooManyRequests, "")), rateLimited},
+		"502": {plain(status(http.StatusBadGateway, "")), unavailable},
+		"503": {plain(status(http.StatusServiceUnavailable, "")), unavailable},
+		"504": {plain(status(http.StatusGatewayTimeout, "")), unavailable},
+		"a connection that breaks": {connectorAt("http://127.0.0.1:1/mcp", through(http.DefaultTransport, nil)),
+			unavailable},
+		"401":                       {plain(status(http.StatusUnauthorized, "denied")), refusal},
+		"403 with no JSON-RPC body": {plain(status(http.StatusForbidden, "forbidden")), refusal},
+		"403 with a JSON-RPC body":  {plain(status(http.StatusForbidden, rpcBody)), refusal},
+		"code -32005 in a 200":      {plain(rpcError(http.StatusOK, -32005)), refusal},
+		"code -32005 in a 400":      {plain(rpcError(http.StatusBadRequest, -32005)), refusal},
+		"code -32005 in a 403":      {plain(rpcError(http.StatusForbidden, -32005)), refusal},
+		"a refused certificate":     {connectorAt(tlsSrv.URL, through(http.DefaultTransport, nil)), refusal},
+		"a failure of the token": {connectorAt("http://connector.invalid/mcp",
+			through(http.DefaultTransport, func(context.Context) (string, error) {
+				return "", errors.New("the token endpoint refused the client")
+			})), refusal},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			args := map[string]any{"text": "x"}
-			_, err := tc.c.CallConnectorTool(context.Background(), "acme", "github", "echo", args)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			_, err := tc.c.CallConnectorTool(ctx, "acme", "github", "echo", args)
 			if err == nil {
 				t.Fatal("want an error")
 			}
-			if got := errors.Is(err, metatool.ErrConnectorUnavailable); got != tc.unavailable {
-				t.Fatalf("unavailable = %v, want %v (%v)", got, tc.unavailable, err)
+			if got := errors.Is(err, metatool.ErrConnectorUnavailable); got != (tc.want == unavailable) {
+				t.Fatalf("unavailable = %v, want %v (%v)", got, tc.want == unavailable, err)
+			}
+			if got := errors.Is(err, metatool.ErrConnectorRateLimited); got != (tc.want == rateLimited) {
+				t.Fatalf("rate limited = %v, want %v (%v)", got, tc.want == rateLimited, err)
 			}
 			if errors.Is(err, metatool.ErrConnectorTimeout) {
 				t.Fatalf("a failure with no bound that ended is no timeout: %v", err)

@@ -51,6 +51,10 @@ var ErrConnectorUnavailable = errors.New("metatool: the connector is not reachab
 // daemon. It says nothing about the call: the connector may or may not have done the work.
 var ErrConnectorTimeout = errors.New("metatool: the connector did not answer in time")
 
+// ErrConnectorRateLimited marks a call that the connector refused with HTTP 429. A later call
+// may work after the wait that the vendor names.
+var ErrConnectorRateLimited = errors.New("metatool: the connector is rate limited")
+
 // ErrUnauthorized is returned by Invoke when the caller may not invoke the
 // requested tool. Callers map it to a permission-denied result.
 var ErrUnauthorized = errors.New("metatool: not authorized to invoke tool")

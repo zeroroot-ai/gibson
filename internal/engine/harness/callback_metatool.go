@@ -413,6 +413,9 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		// The connector did not answer in time. The call may have run, so the member reads
 		// the state before it repeats a call that is not idempotent.
 		code = commonpb.ErrorCode_ERROR_CODE_TIMEOUT
+	case errors.Is(err, metatool.ErrConnectorRateLimited):
+		// The vendor limits the rate. The member waits before it calls again.
+		code = commonpb.ErrorCode_ERROR_CODE_RESOURCE_EXHAUSTED
 	case errors.Is(err, metatool.ErrConnectorUnavailable):
 		// The call never reached the connector, or the connection broke. A later call may work.
 		code = commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE

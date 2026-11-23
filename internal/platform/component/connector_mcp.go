@@ -19,7 +19,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
@@ -289,7 +288,38 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connector mcp: %w", err)
 	}
+	if temporaryStatus(resp.StatusCode) {
+		// The proxy or the connector says that a later call may work. The transport marks the
+		// status with an error type of the daemon, so the classifier never reads the codes or
+		// the words that the connector put into its own answer.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		return nil, &temporaryStatusError{Status: resp.StatusCode}
+	}
 	return resp, nil
+}
+
+// temporaryStatus is true for the HTTP statuses that mean a later call may work.
+func temporaryStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// temporaryStatusError is the error of a response with a temporary status. The transport makes
+// it, and nothing that the connector sends can make it.
+type temporaryStatusError struct{ Status int }
+
+func (e *temporaryStatusError) Error() string {
+	return fmt.Sprintf("connector mcp: the connector answered %d %s", e.Status, http.StatusText(e.Status))
+}
+
+// isRateLimited is true for a response with the status 429.
+func isRateLimited(err error) bool {
+	var status *temporaryStatusError
+	return errors.As(err, &status) && status.Status == http.StatusTooManyRequests
 }
 
 // classifyTransport marks an error of the connection to a connector by its type. A bound that
@@ -303,6 +333,8 @@ func classifyTransport(ctx context.Context, err error) error {
 		return fmt.Errorf("%w: %w", metatool.ErrConnectorTimeout, err)
 	case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
 		return err
+	case isRateLimited(err):
+		return fmt.Errorf("%w: %w", metatool.ErrConnectorRateLimited, err)
 	case temporaryTransport(err):
 		return fmt.Errorf("%w: %w", metatool.ErrConnectorUnavailable, err)
 	default:
@@ -310,18 +342,11 @@ func classifyTransport(ctx context.Context, err error) error {
 	}
 }
 
-// rejectedCode is the JSON-RPC code of jsonrpc2.ErrRejected, which the MCP client wraps around
-// a failure that left the session usable: a request that did not reach the server, a 429, 502,
-// 503 or 504, or a refusal that the server sent as a JSON-RPC body. The package is internal to
-// the MCP module, so the code stands for it. WireError matches by code.
-const rejectedCode = -32005
-
 // temporaryTransport is the allow-list of the errors that a later call may not repeat:
 //   - the session that the connector ended (mcp.ErrSessionMissing)
 //   - a failure to dial or a failure of the network (*net.OpError)
 //   - an end of the stream or a reset of the connection
-//   - a rejection of the transport with no other cause, which the client makes for 429, 502, 503
-//     and 504.
+//   - a response with a temporary status, which the transport marks (temporaryStatusError).
 //
 // Every other error is no member of the list. A 401, a 403, a refusal of the certificate, a
 // failure of the token and an error that the connector sent as a JSON-RPC body are refusals:
@@ -337,38 +362,10 @@ func temporaryTransport(err error) bool {
 		errors.As(err, &hostname) || errors.As(err, &verification) {
 		return false
 	}
-	onlyRejected, serverError := true, false
-	leaves(err, func(leaf error) {
-		var w *jsonrpc.Error
-		switch {
-		case !errors.As(leaf, &w):
-			onlyRejected = false
-		case w.Code != rejectedCode:
-			serverError = true // the connector answered with its own JSON-RPC error
-		}
-	})
-	if serverError {
-		return false
-	}
-	var opErr *net.OpError
-	return errors.Is(err, mcp.ErrSessionMissing) || errors.As(err, &opErr) ||
-		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) || onlyRejected
-}
-
-// leaves calls visit for each error at the end of the wrap chains of err.
-func leaves(err error, visit func(error)) {
-	switch e := err.(type) {
-	case interface{ Unwrap() []error }:
-		for _, c := range e.Unwrap() {
-			leaves(c, visit)
-		}
-	case interface{ Unwrap() error }:
-		if c := e.Unwrap(); c != nil {
-			leaves(c, visit)
-			return
-		}
-		visit(err)
-	default:
-		visit(err)
-	}
+	var (
+		opErr  *net.OpError
+		status *temporaryStatusError
+	)
+	return errors.Is(err, mcp.ErrSessionMissing) || errors.As(err, &opErr) || errors.As(err, &status) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET)
 }

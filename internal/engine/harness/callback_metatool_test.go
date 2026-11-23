@@ -825,6 +825,10 @@ func TestMetaInvoke_ConnectorFailuresGetTheCodeOfTheirKind(t *testing.T) {
 			fmt.Errorf("call: %w", fmt.Errorf("%w: %w", metatool.ErrConnectorTimeout, context.DeadlineExceeded)),
 			commonpb.ErrorCode_ERROR_CODE_TIMEOUT,
 		},
+		"a connector that rate limits": {
+			fmt.Errorf("call: %w: %w", metatool.ErrConnectorRateLimited, errors.New("429")),
+			commonpb.ErrorCode_ERROR_CODE_RESOURCE_EXHAUSTED,
+		},
 		"a tool that reports an error (no structured mark)": {
 			errors.New("reported an error: the branch x stays, call the tool again"),
 			commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
