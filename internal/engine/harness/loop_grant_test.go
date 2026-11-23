@@ -498,11 +498,17 @@ func TestMemberSubmitFinding_AGrantedMemberStoresAFindingAsTheMember(t *testing.
 	assert.Equal(t, loopTenantA, store.tenant)
 	assert.Equal(t, loopTenantA, got.TenantID)
 	assert.Equal(t, "member:member-1", got.SubmittedBy)
+	assert.Equal(t, "intake-agent", got.AgentName, "the name of the payload must not win")
+	// The stored row keeps the verified agent name: it rides on EnhancedFinding
+	// and comes back on the base finding through the store read.
+	back := findingFromStore(enhancedForStore(got, ""))
+	assert.Equal(t, "intake-agent", back.AgentName)
+	assert.Equal(t, "member:member-1", back.SubmittedBy)
 	require.Len(t, *raised, 1)
 	assert.Equal(t, "member:member-1", (*raised)[0].SubmittedBy)
 	assert.Equal(t, "intake-agent", (*raised)[0].AgentName, "the name of the payload must not win")
 	text := f.auditText()
-	assert.Contains(t, text, memberFindingAuditAction+" success")
+	assert.Contains(t, text, `"result":"success"`)
 	assert.Contains(t, text, `"loop_grant_id":"lg-1"`)
 }
 
@@ -590,9 +596,9 @@ func TestMemberSubmitFinding_RefusalsAndOutages(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, resp.GetError().GetCode(), "finding store down")
 	// A failed store gets a failure record and no success record.
 	text := f.auditText()
-	assert.Contains(t, text, memberFindingAuditAction+" failure")
+	assert.Contains(t, text, `"result":"failure"`)
 	assert.Contains(t, text, "store_failed")
-	assert.NotContains(t, text, memberFindingAuditAction+" success")
+	assert.NotContains(t, text, `"result":"success"`)
 
 	f = newLoopFixture(t, grants)
 	f.withFindings()

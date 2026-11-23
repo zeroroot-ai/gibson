@@ -78,7 +78,7 @@ func (s *HarnessCallbackService) auditMemberFinding(ctx context.Context, m membe
 // submitMemberFinding serves SubmitFinding for a bank member. The loop grant is
 // read at the time of the call, so a revoked grant stops the next finding and
 // does not wait for the renewal of the token. The finding names the member as its
-// submitter, and the event that raises it names the agent of the verified grant.
+// submitter and the agent of the verified grant as its agent.
 // Nothing of either comes from the payload.
 func (s *HarnessCallbackService) submitMemberFinding(ctx context.Context, req *harnesspb.SubmitFindingRequest, m memberCall) (*harnesspb.SubmitFindingResponse, error) {
 	if !m.ownsContext(req.GetContext()) {
@@ -104,6 +104,7 @@ func (s *HarnessCallbackService) submitMemberFinding(ctx context.Context, req *h
 	if key := req.GetIdempotencyKey(); key != "" {
 		finding.ID = findingpkg.ResultID(m.tenant, memberPrincipal(m), key)
 	}
+	finding.AgentName = m.agent
 	finding.SubmittedBy = memberPrincipal(m)
 	finding.TenantID = m.tenant
 
