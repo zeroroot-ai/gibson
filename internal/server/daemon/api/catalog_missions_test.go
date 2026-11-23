@@ -425,5 +425,19 @@ func TestCreateMission_ACatalogNameIsReservedAndTheMarkerIsRemoved(t *testing.T)
 	}
 	if _, forged := got.Metadata["catalog_mission"]; forged || got.Metadata["owner"] != "alice" {
 		t.Errorf("metadata = %v, want the marker removed and the rest kept", got.Metadata)
+
+// A call with no verified identity is refused before the daemon is called.
+func TestRunCatalogMission_RefusesACallerWithNoIdentity(t *testing.T) {
+	t.Parallel()
+	called := false
+	srv := NewDaemonServer(&mockDaemon{runCatalogMissionFn: func(context.Context, RunCatalogMissionData) (string, error) {
+		called = true
+		return "m", nil
+	}}, nil, nil)
+	_, err := srv.RunCatalogMission(context.Background(), &daemonpb.RunCatalogMissionRequest{
+		Name: "scan", TargetId: "t", Params: map[string]string{"imageRef": "r/i@sha256:abc"},
+	})
+	if status_grpc.Code(err) != codes.Unauthenticated || called {
+		t.Errorf("err = %v, daemon called = %v, want Unauthenticated and no call", err, called)
 	}
 }

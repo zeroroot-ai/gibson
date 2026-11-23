@@ -114,4 +114,18 @@ func TestCatalogOf(t *testing.T) {
 	// so a catalog marker inside it is data and never the marker of the mission.
 	forged := map[string]any{MetadataTaskData: map[string]any{mission.MetadataCatalogMission: "scan"}}
 	assert.Empty(t, catalogOf(&mission.Mission{Metadata: forged}))
+
+// A mission that cannot be created is returned as an error, and nothing starts or
+// anchors. Here the daemon has no mission store.
+func TestRunCatalogMission_ACreateFailureStartsNothing(t *testing.T) {
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	started := false
+	d := &daemonImpl{startMission: func(context.Context, string) error { started = true; return nil }}
+	d.scanAnchors = func(context.Context, string, string, map[string]string) { started = true }
+	_, err := d.RunCatalogMission(ctx, api.RunCatalogMissionData{
+		Name: "scan", TargetID: types.NewID().String(),
+		Params: map[string]string{"repositoryUrl": "https://github.com/acme/shop", "application": "acme/shop", "forgeConnector": "github-fixloop"},
+	})
+	require.Error(t, err)
+	assert.False(t, started, "a mission that was not created is not started and not anchored")
 }
