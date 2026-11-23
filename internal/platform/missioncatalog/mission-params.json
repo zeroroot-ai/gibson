@@ -26,6 +26,17 @@
       "params": [
         "application",
         "commit",
+        "forgeConnector",
+        "imageRef",
+        "pipelineId",
+        "pipelineUrl",
+        "ref",
+        "repositoryUrl"
+      ],
+      "optional": [
+        "application",
+        "commit",
+        "forgeConnector",
         "imageRef",
         "pipelineId",
         "pipelineUrl",

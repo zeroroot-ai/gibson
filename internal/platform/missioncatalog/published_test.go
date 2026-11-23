@@ -36,6 +36,9 @@ type publishedMission struct {
 	Version string `json:"version"`
 	// Params is the closed set of parameter names, sorted.
 	Params []string `json:"params"`
+	// Optional lists the parameters that a caller may leave out, sorted. It is
+	// omitted when the mission has none.
+	Optional []string `json:"optional,omitempty"`
 }
 
 // published is the content of the published file.
@@ -65,7 +68,7 @@ func publishedParams() ([]byte, error) {
 		if params == nil {
 			params = []string{}
 		}
-		out.Missions[e.Name] = publishedMission{Version: e.Version, Params: params}
+		out.Missions[e.Name] = publishedMission{Version: e.Version, Params: params, Optional: e.OptionalParams}
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -169,7 +172,7 @@ func TestPublishedParams_AgreeWithRender(t *testing.T) {
 	for name, m := range doc.Missions {
 		params := make(map[string]string, len(m.Params)+1)
 		for _, p := range m.Params {
-			params[p] = "v-" + p
+			params[p] = placeholderValue(p)
 		}
 		if _, err := Render(t.Context(), name, params); err != nil {
 			t.Errorf("%s: a request built from the published names does not render: %v", name, err)

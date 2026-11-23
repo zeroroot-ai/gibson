@@ -399,6 +399,9 @@ func (b *brainExecutor) dispatchTool(bind *missionBinding, req brain.DispatchReq
 	// tenant on the one governed path of a connector call, the path of
 	// invoke_tool (gibson#1469). Any other name takes the paths below.
 	if tid, err := toolid.Parse(req.Target); err == nil && tid.Source == toolid.SourceMCP {
+		if isScanAlertsNode(bind, req, tid) {
+			return b.dispatchScanAlerts(bind, req, tid)
+		}
 		return b.dispatchConnectorTool(bind, req, tid)
 	}
 	// A for_each instance runs against its OWN target, so the harness it gets

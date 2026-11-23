@@ -1,7 +1,7 @@
 # GitHub fix loop connector. Zero Root builds the MCP server in zeroroot-ai/connectors
-# (github-fixloop/, release v0.5.0), because the vendor publishes no server with these tools.
+# (github-fixloop/, release v0.6.0), because the vendor publishes no server with these tools.
 # The image is public, signed and scanned, and the catalog pins it by digest.
-# Source of the environment: github-fixloop/README.md of zeroroot-ai/connectors at v0.5.0.
+# Source of the environment: github-fixloop/README.md of zeroroot-ai/connectors at v0.6.0.
 # The server speaks streamable HTTP on :8080 at /mcp.
 id: github-fixloop
 kind: connector
@@ -13,7 +13,7 @@ spec:
   vendor: github
   class: git-host
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-github-fixloop@sha256:cbee1d9c8a5e014cd55cd4ca08a32c787f35ae33f5cdb561a1db1d7c116e6de7
+  image: ghcr.io/zeroroot-ai/connectors-github-fixloop@sha256:041dcb41bf8fc61191e48e53623bd3a194169c165ed055c64672ddcd51d8b778
   transport: streamable-http
   port: 8080
   auth: none
@@ -44,13 +44,17 @@ spec:
     # value is optional (gibson#1517).
     - name: ca_bundle
       kind: ca_bundle
-  # The server serves seven tools at v0.5.0: merge_request_state,
+  # The server serves eight tools at v0.6.0: merge_request_state,
   # merge_merge_request, revert_merge_request, deployment_state,
-  # open_merge_request, close_merge_request and read_file. The fix agent opens a
+  # open_merge_request, close_merge_request, read_file and list_dependency_alerts. The fix agent opens a
   # fix with open_merge_request and undoes it with close_merge_request.
   # open_merge_request and close_merge_request never merge. The token needs contents:write and pull_requests:write.
   # The tools that the manifest does not name need only the grant, because the
   # entry has no response actions.
+  # The scan mission calls list_dependency_alerts of this connector, with the
+  # project of the scan, to read the dependency alerts of the Git host as
+  # findings (connectors#29, release v0.6.0).
+  # GitHub: the token needs "Dependabot alerts" read and "Contents" read.
   # The merge tool runs only when the merge request holds its merge slot
   # (gibson#1458). Only the daemon calls the revert tool, after a failed
   # health signal that it read. The other tools need only the grant.

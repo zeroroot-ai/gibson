@@ -592,3 +592,40 @@ func TestRescan_AVerifiedFindingSeenAgainOpens(t *testing.T) {
 		}
 	}
 }
+
+// raiseByTool is raiseInto for a Finding that a read of a tool of the buyer raised
+// (a dependency alert).
+func raiseByTool(w *World, id, missionID string) {
+	Reduce(w, FindingRaised{ID: id, MissionID: missionID, CheckKind: "tool"})
+	walk(w, id, FindingStatusFixed, "mr-"+id)
+	Reduce(w, DeployObserved{MergeRequest: "mr-" + id, At: testDeployTime})
+	Reduce(w, HealthObserved{MergeRequest: "mr-" + id, Held: true, At: testDeployTime})
+}
+
+// The check that raised a Finding is the check that verifies its fix. A Finding
+// that an alert of the buyer's tool raised is not verified because a scan did not
+// re-raise it: the scan saw nothing about the alert (gibson#1469).
+func TestRescan_AToolFindingIsNotVerifiedByAScansSilence(t *testing.T) {
+	w := scanWorld(t, "scan-1", "target-a", MissionWorking)
+	raiseByTool(w, "f1", "scan-1")
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, StartedAt: testScanTime, TargetID: "target-a"})
+	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
+	settleRescan(w)
+	if got := findingByID(t, w, "f1").Status; got != FindingStatusFixed {
+		t.Fatalf("a tool Finding that a scan did not see must stay fixed, got %q", got)
+	}
+}
+
+// The tool that raised the Finding says the alert is fixed: that rerun verifies.
+// It says the alert is open again: the Finding returns to open.
+func TestRescan_AToolRerunVerifiesOrReopens(t *testing.T) {
+	for found, want := range map[bool]string{false: FindingStatusVerified, true: FindingStatusOpen} {
+		w := scanWorld(t, "scan-1", "target-a", MissionWorking)
+		raiseByTool(w, "f1", "scan-1")
+		Reduce(w, CheckRerun{ID: "f1", CheckKind: "tool", Found: found, EvidenceAt: testScanTime, MissionID: "scan-2"})
+		applyAll(w, VerificationSystem(w))
+		if got := findingByID(t, w, "f1").Status; got != want {
+			t.Errorf("rerun found=%v: status = %q, want %q", found, got, want)
+		}
+	}
+}

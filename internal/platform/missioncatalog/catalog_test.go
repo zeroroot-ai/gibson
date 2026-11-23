@@ -47,6 +47,8 @@ var paramsByMission = map[string]map[string]string{
 		"pipelineId":    "8891",
 		"pipelineUrl":   "https://gitlab.com/examplebank/customer-portal/-/pipelines/8891",
 		"imageRef":      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
+		// The dependency alerts of the Git host, read through its connector.
+		"forgeConnector": "gitlab-fixloop",
 	},
 	"fix": {
 		"bank":           "bank/coding",
@@ -158,15 +160,111 @@ func TestSource_UnknownMissionNamesWhatExists(t *testing.T) {
 	}
 }
 
-func TestRender_MissingParametersAreAllReportedAtOnce(t *testing.T) {
-	_, err := Render(context.Background(), "scan", map[string]string{"application": "customer-portal"})
-	if err == nil {
-		t.Fatal("an incomplete render was accepted; an empty commit would scan HEAD")
-	}
-	for _, want := range []string{"commit", "imageRef", "repositoryUrl", "ref", "pipelineId", "pipelineUrl"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error omits %q, so a caller fixes one field per render: %v", want, err)
+// A scan with no branch parameter is refused at launch. application alone starts
+// no branch.
+func TestRender_ScanWithNoBranchIsRefused(t *testing.T) {
+	for name, in := range map[string]map[string]string{
+		"nothing":          nil,
+		"only application": {"application": "customer-portal"},
+		"no branch param":  {"application": "customer-portal", "repositoryUrl": "https://github.com/acme/shop", "ref": "main"},
+	} {
+		if _, err := Render(context.Background(), "scan", in); err == nil {
+			t.Errorf("%s: a scan with no branch was accepted", name)
 		}
+	}
+}
+
+// The seven old parameters render the branches that they rendered on main: image,
+// source, runtime and the join. A caller that does not know the alerts branch
+// keeps what it gets.
+func TestRender_TheSevenOldParametersRenderTheOldBranches(t *testing.T) {
+	in := map[string]string{}
+	for k, v := range paramsFor(t, "scan") {
+		if k != "forgeConnector" {
+			in[k] = v
+		}
+	}
+	def, err := Render(context.Background(), "scan", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(def.GetNodes()))
+	for id := range def.GetNodes() {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	want := []string{"image", "ports", "report", "services", "source", "tls", "web"}
+	if !slices.Equal(ids, want) {
+		t.Errorf("nodes = %v, want %v", ids, want)
+	}
+	if join := def.GetNodes()["report"].GetJoinConfig().GetWaitFor(); !slices.Equal(join, []string{"image", "source", "tls"}) {
+		t.Errorf("the join waits for %v, want image, source and tls", join)
+	}
+	if !slices.Equal(def.GetEntryPoints(), []string{"image", "source", "ports"}) {
+		t.Errorf("entry points = %v", def.GetEntryPoints())
+	}
+}
+
+// The alerts branch needs the Application, or its Findings have no Application
+// anchor. The source branch needs application, repositoryUrl, ref and commit.
+func TestRender_ScanBranchesNeedTheirCompanionParameters(t *testing.T) {
+	alerts := map[string]string{"repositoryUrl": "https://github.com/acme/shop", "application": "acme/shop", "forgeConnector": "github-fixloop"}
+	if _, err := Render(context.Background(), "scan", alerts); err != nil {
+		t.Fatalf("alerts with application and repositoryUrl: %v", err)
+	}
+	for _, drop := range []string{"application", "repositoryUrl"} {
+		in := copyParams(alerts)
+		delete(in, drop)
+		if _, err := Render(context.Background(), "scan", in); err == nil {
+			t.Errorf("the alerts branch rendered without %s", drop)
+		}
+	}
+	source := map[string]string{
+		"application": "acme/shop", "repositoryUrl": "https://github.com/acme/shop", "ref": "main",
+		"commit": "0123456789abcdef0123456789abcdef01234567",
+	}
+	if _, err := Render(context.Background(), "scan", source); err != nil {
+		t.Fatalf("the source branch with its parameters: %v", err)
+	}
+	for _, drop := range []string{"application", "repositoryUrl", "ref"} {
+		in := copyParams(source)
+		delete(in, drop)
+		if _, err := Render(context.Background(), "scan", in); err == nil {
+			t.Errorf("the source branch rendered without %s", drop)
+		}
+	}
+}
+
+// Each branch runs only when its own parameters are present.
+func TestRender_ScanRunsOnlyTheBranchesThatHaveParameters(t *testing.T) {
+	nodesOf := func(in map[string]string) []string {
+		def, err := Render(context.Background(), "scan", in)
+		if err != nil {
+			t.Fatalf("Render(%v): %v", in, err)
+		}
+		ids := make([]string, 0, len(def.GetNodes()))
+		for id := range def.GetNodes() {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		return ids
+	}
+	// A buyer with only a Git host connector: the alerts node and the join.
+	got := nodesOf(map[string]string{
+		"repositoryUrl": "https://github.com/acme/shop", "application": "acme/shop", "forgeConnector": "github-fixloop",
+	})
+	if !slices.Equal(got, []string{"alerts", "report"}) {
+		t.Errorf("only the Git host: nodes = %v, want alerts and report", got)
+	}
+	// A scan with an image only: the image branch, and the runtime branch with it,
+	// as before.
+	got = nodesOf(map[string]string{"imageRef": "registry.example.com/shop@sha256:abc"})
+	if !slices.Equal(got, []string{"image", "ports", "report", "services", "tls", "web"}) {
+		t.Errorf("only an image: nodes = %v, want image, the runtime nodes and report", got)
+	}
+	// The source branch needs its own parameters: a commit with no repository fails.
+	if _, err := Render(context.Background(), "scan", map[string]string{"commit": "0123456789abcdef0123456789abcdef01234567"}); err == nil {
+		t.Error("a source branch with no application was accepted")
 	}
 }
 
@@ -256,7 +354,21 @@ func TestRender_EveryToolItNamesIsInTheCatalog(t *testing.T) {
 			if n.GetType() != missionv1.NodeType_NODE_TYPE_TOOL {
 				continue
 			}
-			if name := n.GetToolConfig().GetToolName(); !shipped[name] {
+			name := n.GetToolConfig().GetToolName()
+			if strings.HasPrefix(name, "mcp:") {
+				// A connector tool (gibson#1469): the connector must be in the
+				// catalog. The manifest lists no tools, so the tool name is not checked.
+				parts := strings.Split(name, ":")
+				if len(parts) != 3 {
+					t.Errorf("mission %q node %q names the connector tool %q, which is not mcp:<connector>:<tool>", mission, id, name)
+					continue
+				}
+				if _, err := componentcatalog.LookupConnector(parts[1]); err != nil {
+					t.Errorf("mission %q node %q names connector %q, which is not in the catalog: %v", mission, id, parts[1], err)
+				}
+				continue
+			}
+			if !shipped[name] {
 				t.Errorf("mission %q node %q names tool %q, which the executor does not ship (it ships %v)",
 					mission, id, name, sortedKeys(shipped))
 			}
@@ -712,5 +824,65 @@ func TestEntries_IsEveryMissionInOrder(t *testing.T) {
 			e.Version != want.Version || !slices.Equal(e.DeclaredParams, want.DeclaredParams) {
 			t.Errorf("entry %d = %+v, want %+v", i, e, want)
 		}
+	}
+}
+
+// The alerts node runs only with forgeConnector (gibson#1469). Without it the
+// scan has no alerts node, and the join waits for the other branches only.
+func TestRender_ScanAlertsNodeIsOptional(t *testing.T) {
+	with := paramsFor(t, "scan")
+	without := map[string]string{}
+	for k, v := range with {
+		if k != "forgeConnector" {
+			without[k] = v
+		}
+	}
+
+	def, err := Render(context.Background(), "scan", without)
+	if err != nil {
+		t.Fatalf("a scan with no forgeConnector must render: %v", err)
+	}
+	if _, ok := def.GetNodes()["alerts"]; ok {
+		t.Error("a scan with no forgeConnector has an alerts node")
+	}
+	join := def.GetNodes()["report"].GetJoinConfig().GetWaitFor()
+	if len(join) != 3 {
+		t.Errorf("the join waits for %v, want the three other branches", join)
+	}
+	for _, e := range def.GetEntryPoints() {
+		if e == "alerts" {
+			t.Error("alerts is an entry point of a scan with no forgeConnector")
+		}
+	}
+
+	def, err = Render(context.Background(), "scan", with)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := def.GetNodes()["alerts"]
+	if node == nil {
+		t.Fatal("a scan with forgeConnector has no alerts node")
+	}
+	if got := node.GetToolConfig().GetToolName(); got != "mcp:gitlab-fixloop:list_dependency_alerts" {
+		t.Errorf("tool = %q", got)
+	}
+	in := node.GetToolConfig().GetInput()
+	if in["repositoryUrl"] != with["repositoryUrl"] || in["state"] != "all" {
+		t.Errorf("input = %v", in)
+	}
+	if _, has := in["project"]; has {
+		t.Error("the node carries a project: the daemon derives it from repositoryUrl")
+	}
+	if got := def.GetNodes()["report"].GetJoinConfig().GetWaitFor(); len(got) != 4 {
+		t.Errorf("the join waits for %v, want four branches", got)
+	}
+}
+
+// forgeConnector is an enum. A caller cannot name another connector.
+func TestRender_ScanForgeConnectorIsAnEnum(t *testing.T) {
+	p := paramsFor(t, "scan")
+	p["forgeConnector"] = "okta"
+	if _, err := Render(context.Background(), "scan", p); err == nil {
+		t.Fatal("a connector outside github-fixloop and gitlab-fixloop must be refused")
 	}
 }

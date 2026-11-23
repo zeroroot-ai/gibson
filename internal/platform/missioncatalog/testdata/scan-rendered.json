@@ -1,8 +1,20 @@
 {
   "name": "scan",
-  "description": "Scan one Application from three sides — its image, its source, and what it is actually running.",
+  "description": "Scan one Application from up to four sides: its image, its source, what it is actually running, and the dependency alerts of its Git host.",
   "version": "1.0.0",
   "nodes": {
+    "alerts": {
+      "id": "alerts",
+      "type": "NODE_TYPE_TOOL",
+      "toolConfig": {
+        "toolName": "mcp:gitlab-fixloop:list_dependency_alerts",
+        "input": {
+          "application": "customer-portal",
+          "repositoryUrl": "https://gitlab.com/examplebank/customer-portal.git",
+          "state": "all"
+        }
+      }
+    },
     "image": {
       "id": "image",
       "type": "NODE_TYPE_TOOL",
@@ -30,14 +42,16 @@
         "waitFor": [
           "image",
           "source",
-          "tls"
+          "tls",
+          "alerts"
         ],
         "strategy": "MERGE_STRATEGY_CONCAT"
       },
       "dependencies": [
         "image",
         "source",
-        "tls"
+        "tls",
+        "alerts"
       ]
     },
     "services": {
@@ -132,12 +146,17 @@
     {
       "from": "tls",
       "to": "report"
+    },
+    {
+      "from": "alerts",
+      "to": "report"
     }
   ],
   "entryPoints": [
     "image",
     "source",
-    "ports"
+    "ports",
+    "alerts"
   ],
   "exitPoints": [
     "report"

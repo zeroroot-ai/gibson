@@ -42,6 +42,9 @@ func catalogParams(t *testing.T, mission string) map[string]string {
 	out := make(map[string]string, len(names))
 	for _, name := range names {
 		out[name] = "v-" + name
+		if name == "forgeConnector" {
+			out[name] = "github-fixloop" // an enum: the connectors that the scan ingests
+		}
 	}
 	return out
 }

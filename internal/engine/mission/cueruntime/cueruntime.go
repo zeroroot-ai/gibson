@@ -551,10 +551,23 @@ func bracedNames() []string {
 // A mission with no `_params` takes no parameters, which is not an error — it is
 // a mission whose graph is fully determined by its target.
 func DeclaredParams(source string) ([]string, error) {
+	names, _, err := declaredParams(source)
+	return names, err
+}
+
+// OptionalParams returns the names of the parameters that the mission marks
+// optional (`name?: type`). A caller may leave them out, and the mission has the
+// branch that needs one only when the caller sends it. The names are sorted.
+func OptionalParams(source string) ([]string, error) {
+	_, optional, err := declaredParams(source)
+	return optional, err
+}
+
+func declaredParams(source string) (all, optional []string, err error) {
 	ctx := cuecontext.New()
 	val, err := loadUserValue(ctx, source)
 	if err != nil {
-		return nil, fmt.Errorf("cueruntime: load the mission source: %w", err)
+		return nil, nil, fmt.Errorf("cueruntime: load the mission source: %w", err)
 	}
 	// `_params` is a CUE HIDDEN field, so it is addressed by cue.Hid and not by
 	// cue.Str, and its package is the one loadUserValue loads under ("_", the
@@ -563,7 +576,7 @@ func DeclaredParams(source string) ([]string, error) {
 	// getting this wrong would silently accept a call that supplied none.
 	params := val.LookupPath(cue.MakePath(cue.Hid("_params", "_")))
 	if !params.Exists() {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// The fields of _params are ordinary (visible) fields of a hidden struct, so
@@ -571,14 +584,18 @@ func DeclaredParams(source string) ([]string, error) {
 	// mission marks optional is still a parameter a caller may send.
 	it, err := params.Fields(cue.Optional(true))
 	if err != nil {
-		return nil, fmt.Errorf("cueruntime: read _params: %w", err)
+		return nil, nil, fmt.Errorf("cueruntime: read _params: %w", err)
 	}
-	var out []string
 	for it.Next() {
-		out = append(out, it.Selector().Unquoted())
+		name := it.Selector().Unquoted()
+		all = append(all, name)
+		if it.IsOptional() {
+			optional = append(optional, name)
+		}
 	}
-	sort.Strings(out)
-	return out, nil
+	sort.Strings(all)
+	sort.Strings(optional)
+	return all, optional, nil
 }
 
 // MissionMeta is a mission's identity, readable WITHOUT its parameters.
