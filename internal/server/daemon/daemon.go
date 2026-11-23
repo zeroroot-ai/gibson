@@ -471,6 +471,10 @@ type daemonImpl struct {
 	// inboundMissions is the store of the mission definitions published for inbound
 	// A2A calls. registerInboundMission sets it.
 	inboundMissions inboundmissionstore.Store
+	// openedHeads holds the head commit that each open_merge_request call returned.
+	// The tool-call sink fills it, and the link of closed fix jobs reads it.
+	openedHeads     *openedHeads
+	openedHeadsOnce sync.Once
 	// sharedAgentSkills is the operator source of Agent Skills. registerAgentSkill
 	// sets it.
 	sharedAgentSkills *SharedAgentSkills
@@ -1574,7 +1578,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// this, a fleet agent's tool calls reached the daemon only as bare
 		// tool.call.* pub/sub metadata with no argument/result text, so they
 		// never became part of the Timeline.
-		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
+		d.callback.SetToolCallSink(d.toolCallSink(ingestToolCall(d.brainRegistry)))
 		d.callback.SetSkillLoadSink(ingestSkillLoad(d.brainRegistry))
 		d.callback.SetReadMarkerStore(harness.NewBrainReadMarkerStore(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")

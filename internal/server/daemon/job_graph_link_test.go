@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/fixloop"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 )
@@ -209,7 +211,7 @@ func TestJobGraphLink_LogsTheInputsItLeftOut(t *testing.T) {
 // them: the submit path and the findings projection both stay unproven.
 func TestNewJobGraphLink_ReadsFindingsFromTheTenantWorld(t *testing.T) {
 	reg := brain.NewRegistry(context.Background(), braintest.StoreFactory())
-	l := newJobGraphLink(reg, jobMR(), testObsLogger().Slog())
+	l := newJobGraphLink(reg, jobMR(), nil, testObsLogger().Slog())
 	if l.submit == nil || l.findings == nil || l.mergeRequests == nil || l.now == nil {
 		t.Fatal("newJobGraphLink left a seam nil")
 	}
@@ -658,7 +660,7 @@ func TestJobGraphLink_ARestartKeepsThePendingLinkAndLinksIt(t *testing.T) {
 		State: fixloop.MROpen, SourceBranch: "job/job-1", CreatedAt: at.Add(10 * time.Second),
 	}}
 	second := brain.NewRegistry(ctx, factory)
-	link := wireFixLink(ctx, second, mrs, testObsLogger().Slog())
+	link := wireFixLink(ctx, second, mrs, nil, testObsLogger().Slog())
 	e2 := second.For("acme") // hydrates and adopts
 
 	// A no-op event that the engine folds proves that the events that the resume
@@ -814,6 +816,7 @@ func TestJobGraphLink_RecordsTheHeadAndTheFilesFromTheHost(t *testing.T) {
 	var evs []brain.Event
 	l := &jobGraphLink{
 		submit:   func(_ string, ev brain.Event) { evs = append(evs, ev) },
+		opened:   openedBy("acme", testMRURL, testHeadSHA),
 		findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: headMR(),
 		now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
 	}
@@ -843,6 +846,7 @@ func TestJobGraphLink_NoHeadWhenTheLinkIsRefusedOrTheHostGivesNone(t *testing.T)
 		var evs []brain.Event
 		l := &jobGraphLink{
 			submit:   func(_ string, ev brain.Event) { evs = append(evs, ev) },
+			opened:   openedBy("acme", testMRURL, testHeadSHA),
 			findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: mrs,
 			now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
 		}
@@ -874,5 +878,113 @@ func TestJobGraphLink_NoHeadWhenTheLinkIsRefusedOrTheHostGivesNone(t *testing.T)
 		if hasHead(run(mrs)) {
 			t.Errorf("%s: the daemon recorded a head", name)
 		}
+	}
+}
+
+// openedBy records one result of open_merge_request in a store of heads, as the
+// tool-call sink does. The branch is the job branch of closedJob.
+func openedBy(tenant, mr, head string) *openedHeads {
+	return openedByBranch(tenant, mr, head, "job/job-1")
+}
+
+func openedByBranch(tenant, mr, head, branch string) *openedHeads {
+	o := newOpenedHeads()
+	res, _ := json.Marshal(openResult{MergeRequest: "!7", URL: mr, SourceBranch: branch, HeadSHA: head})
+	o.Record(tenant, harness.ToolCallRecord{ToolName: "mcp:github-fixloop:open_merge_request", Result: string(res)})
+	return o
+}
+
+func headEventsOf(t *testing.T, opened openedHeadReader) []brain.FixHeadRecorded {
+	t.Helper()
+	var heads []brain.FixHeadRecorded
+	l := &jobGraphLink{
+		submit: func(_ string, ev brain.Event) {
+			if h, ok := ev.(brain.FixHeadRecorded); ok {
+				heads = append(heads, h)
+			}
+		},
+		opened:   opened,
+		findings: heldWorld(map[string]string{"f-1": "s"}), mergeRequests: headMR(),
+		now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
+	}
+	l.JobClosed(context.Background(), closedJob([]string{"f-1"}, mrDeliverable))
+	return heads
+}
+
+// The head of the host must be the commit that the job made. A commit that
+// moved the job branch after open_merge_request records no head.
+func TestJobGraphLink_NoHeadWhenTheBranchMovedAfterTheOpen(t *testing.T) {
+	moved := "4444444444444444444444444444444444444444"
+	if got := headEventsOf(t, openedBy("acme", testMRURL, moved)); len(got) != 0 {
+		t.Errorf("the host head differs from the head of the open, and the link recorded %+v", got)
+	}
+	if got := headEventsOf(t, openedBy("acme", testMRURL, testHeadSHA)); len(got) != 1 {
+		t.Errorf("the host head is the head of the open, and the link recorded %d heads", len(got))
+	}
+}
+
+func TestJobGraphLink_NoHeadWithoutTheResultOfTheOpen(t *testing.T) {
+	if got := headEventsOf(t, nil); len(got) != 0 {
+		t.Errorf("no record of the open, and the link recorded %+v", got)
+	}
+	if got := headEventsOf(t, newOpenedHeads()); len(got) != 0 {
+		t.Errorf("an empty record, and the link recorded %+v", got)
+	}
+}
+
+// The merge request must come from the open of the job branch of this job. The
+// open of another branch does not vouch for the head.
+func TestJobGraphLink_NoHeadWhenTheOpenWasForAnotherBranch(t *testing.T) {
+	if got := headEventsOf(t, openedByBranch("acme", testMRURL, testHeadSHA, "job/job-2")); len(got) != 0 {
+		t.Errorf("the open was for another branch, and the link recorded %+v", got)
+	}
+}
+
+// A head that the daemon saw in one tenant never vouches for a merge request of
+// another tenant.
+func TestJobGraphLink_NoHeadFromTheOpenOfAnotherTenant(t *testing.T) {
+	if got := headEventsOf(t, openedBy("globex", testMRURL, testHeadSHA)); len(got) != 0 {
+		t.Errorf("the open was in another tenant, and the link recorded %+v", got)
+	}
+}
+
+func TestOpenedHeads_RecordsOnlyASuccessfulOpen(t *testing.T) {
+	res := `{"merge_request":"!7","url":"` + testMRURL + `","source_branch":"job/job-1","head_sha":"` + testHeadSHA + `"}`
+	for name, call := range map[string]harness.ToolCallRecord{
+		"another tool": {ToolName: "mcp:github-fixloop:close_merge_request", Result: res},
+		"an error":     {ToolName: "mcp:github-fixloop:open_merge_request", Result: res, Err: "boom"},
+		"no mcp id":    {ToolName: "open_merge_request", Result: res},
+		"no head":      {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{"url":"u","source_branch":"b"}`},
+		"bad result":   {ToolName: "mcp:github-fixloop:open_merge_request", Result: `{not json`},
+	} {
+		o := newOpenedHeads()
+		o.Record("acme", call)
+		if _, ok := o.OpenedHead("acme", testMRURL); ok {
+			t.Errorf("%s: the store kept a head", name)
+		}
+	}
+	o := newOpenedHeads()
+	o.Record("acme", harness.ToolCallRecord{ToolName: "mcp:gitlab-fixloop:open_merge_request", Result: res})
+	for _, key := range []string{testMRURL, "!7"} {
+		if h, ok := o.OpenedHead("acme", key); !ok || h.sha != testHeadSHA || h.sourceBranch != "job/job-1" {
+			t.Errorf("key %q: head = %+v, %v", key, h, ok)
+		}
+	}
+	if _, ok := o.OpenedHead("globex", testMRURL); ok {
+		t.Error("a head of tenant acme is visible to tenant globex")
+	}
+}
+
+func TestOpenedHeads_ForgetsTheOldestHeadAtTheLimit(t *testing.T) {
+	o := newOpenedHeads()
+	for i := 0; i <= openedHeadLimit; i++ {
+		res := fmt.Sprintf(`{"url":"u%d","source_branch":"b","head_sha":"s"}`, i)
+		o.Record("acme", harness.ToolCallRecord{ToolName: "mcp:x:open_merge_request", Result: res})
+	}
+	if _, ok := o.OpenedHead("acme", "u0"); ok {
+		t.Error("the oldest head stayed over the limit")
+	}
+	if _, ok := o.OpenedHead("acme", fmt.Sprintf("u%d", openedHeadLimit)); !ok {
+		t.Error("the newest head is gone")
 	}
 }
