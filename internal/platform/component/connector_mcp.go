@@ -211,11 +211,14 @@ func (c *ConnectorMCP) CallConnectorTool(ctx context.Context, tenant, connector,
 	if err != nil {
 		return nil, fmt.Errorf("connector mcp: call %s on %q: %w", tool, connector, classifyCall(cctx, err))
 	}
-	// A tool that reports an error returns text only: the connector sends no structured mark
-	// that says if the error is temporary, so the error stays unclassified here. The daemon
-	// never reads the words of the text to guess.
 	if res.IsError {
-		return nil, fmt.Errorf("connector mcp: %s on %q reported an error: %s", tool, connector, contentText(res.Content))
+		toolErr := fmt.Errorf("connector mcp: %s on %q reported an error: %s", tool, connector, contentText(res.Content))
+		// The connector says in structuredContent.error.class how the member must treat the
+		// error. The daemon never reads the words of the text to guess.
+		if marker := toolErrorMarker(res.StructuredContent); marker != nil {
+			return nil, fmt.Errorf("%w: %w", marker, toolErr)
+		}
+		return nil, toolErr
 	}
 	if res.StructuredContent != nil {
 		return res.StructuredContent, nil
@@ -425,4 +428,42 @@ func answeredByConnector(err error) bool {
 	}
 	walk(err)
 	return found
+}
+
+// The classes that a connector puts in structuredContent.error.class of a tool error.
+const (
+	classUnavailable    = "unavailable"
+	classTimeout        = "timeout"
+	classRateLimited    = "rate_limited"
+	classOutcomeUnknown = "outcome_unknown"
+)
+
+// toolErrorMarker maps the class of a tool error to the marker that gives the member its code.
+// The connector sets unavailable and timeout only where a repeat is proven safe, so the member
+// retries them. A rate_limited error is a refusal before the tool ran. The class outcome_unknown
+// has the marker that the member never retries. The class refused, an unknown class and a missing
+// or malformed class give no marker, so the error stays INVALID_ARGUMENT. The field
+// retry_after_seconds has no place in the harness error, so it is not passed on.
+func toolErrorMarker(structured any) error {
+	content, ok := structured.(map[string]any)
+	if !ok {
+		return nil
+	}
+	errField, ok := content["error"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	class, _ := errField["class"].(string)
+	switch class {
+	case classUnavailable:
+		return metatool.ErrConnectorUnavailable
+	case classTimeout:
+		return metatool.ErrConnectorTimeout
+	case classRateLimited:
+		return metatool.ErrConnectorRateLimited
+	case classOutcomeUnknown:
+		return metatool.ErrConnectorOutcomeUnknown
+	default:
+		return nil
+	}
 }

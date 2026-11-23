@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -501,6 +502,75 @@ func TestClassifyCall(t *testing.T) {
 			for _, n := range tc.not {
 				if errors.Is(got, n) {
 					t.Errorf("err = %v, must not be %v", got, n)
+				}
+			}
+		})
+	}
+}
+
+// classConnector serves one tool that returns an error result with the given structured content.
+func classConnector(t *testing.T, structured any) *ConnectorMCP {
+	t.Helper()
+	server := mcp.NewServer(&mcp.Implementation{Name: "classes", Version: "v0"}, nil)
+	server.AddTool(&mcp.Tool{Name: "fail", InputSchema: map[string]any{"type": "object"}},
+		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{
+				IsError:           true,
+				Content:           []mcp.Content{&mcp.TextContent{Text: "the connector text: branch x stays"}},
+				StructuredContent: structured,
+			}, nil
+		})
+	srv := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
+	t.Cleanup(srv.Close)
+	return newTestConnectorMCP(srv, "github")
+}
+
+// A tool error maps by structuredContent.error.class. unavailable, timeout, rate_limited and
+// outcome_unknown get their markers. refused, an unknown class, a missing class and a malformed
+// shape get no marker, so they stay INVALID_ARGUMENT. Each error keeps the text of the connector.
+func TestConnectorMCP_ATooErrorMapsByItsClass(t *testing.T) {
+	markers := map[string]error{
+		"unavailable":     metatool.ErrConnectorUnavailable,
+		"timeout":         metatool.ErrConnectorTimeout,
+		"rate_limited":    metatool.ErrConnectorRateLimited,
+		"outcome_unknown": metatool.ErrConnectorOutcomeUnknown,
+	}
+	all := []error{
+		metatool.ErrConnectorUnavailable, metatool.ErrConnectorTimeout,
+		metatool.ErrConnectorRateLimited, metatool.ErrConnectorOutcomeUnknown,
+	}
+	class := func(name string) map[string]any {
+		return map[string]any{"error": map[string]any{"class": name, "retry_after_seconds": 30}}
+	}
+	cases := map[string]struct {
+		structured any
+		want       error // nil: no marker
+	}{
+		"unavailable":                {class("unavailable"), markers["unavailable"]},
+		"timeout":                    {class("timeout"), markers["timeout"]},
+		"rate_limited":               {class("rate_limited"), markers["rate_limited"]},
+		"outcome_unknown":            {class("outcome_unknown"), markers["outcome_unknown"]},
+		"refused":                    {class("refused"), nil},
+		"an unknown class":           {class("brand_new"), nil},
+		"a missing class":            {map[string]any{"error": map[string]any{"retry_after_seconds": 5}}, nil},
+		"no error field":             {map[string]any{"ok": false}, nil},
+		"no structure":               {nil, nil},
+		"a class that is no string":  {map[string]any{"error": map[string]any{"class": 7}}, nil},
+		"an error that is no object": {map[string]any{"error": "unavailable"}, nil},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := classConnector(t, tc.structured)
+			_, err := c.CallConnectorTool(context.Background(), "acme", "github", "fail", map[string]any{})
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			if !strings.Contains(err.Error(), "the connector text: branch x stays") {
+				t.Errorf("the connector text is lost: %v", err)
+			}
+			for _, m := range all {
+				if got := errors.Is(err, m); got != (m == tc.want) {
+					t.Errorf("errors.Is(%v) = %v, want %v", m, got, m == tc.want)
 				}
 			}
 		})
