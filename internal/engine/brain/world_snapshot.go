@@ -668,6 +668,7 @@ func restoreFindingFields(w *World, s FindingSnapshot) {
 			continue
 		}
 		f.ScanScope, f.LastScan = s.ScanScope, s.LastScan
+		f.PlaceBlock = s.PlaceBlock
 		f.MergeRequest, f.MergeRequestState = s.MergeRequest, s.MergeRequestState
 		f.Priority, f.PriorityRule, f.PriorityReason = s.Priority, s.PriorityRule, s.PriorityReason
 		f.FixFacts = s.FixFacts

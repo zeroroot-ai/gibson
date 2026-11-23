@@ -88,6 +88,10 @@ func findingSubject(ev Event) (id, mergeRequest string, ok bool) {
 		return e.ID, e.MergeRequest, true
 	case FixHeadMissing:
 		return e.ID, e.MergeRequest, true
+	case FindingPlaceBlocked:
+		return e.ID, "", true
+	case *FindingPlaceBlocked:
+		return e.ID, "", true
 	case *FixHeadMissing:
 		return e.ID, e.MergeRequest, true
 	case *FixLinkPending:

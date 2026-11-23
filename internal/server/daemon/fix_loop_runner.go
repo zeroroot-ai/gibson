@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -40,10 +42,26 @@ func (p applicationPlacer) Application(ctx context.Context, tenant, findingID st
 	if err != nil {
 		return "", fmt.Errorf("finding places: %w", err)
 	}
+	var apps, hosts []string
 	for _, pl := range places {
-		if pl.Label == component.PlaceApplication {
-			return pl.Key, nil
+		switch pl.Label {
+		case component.PlaceApplication:
+			apps = append(apps, pl.Key)
+		case component.PlaceHost:
+			hosts = append(hosts, pl.Key)
 		}
+	}
+	slices.Sort(apps)
+	slices.Sort(hosts)
+	switch {
+	case len(apps) > 1:
+		// The finding is in more than one Application. Picking one would give it
+		// the merge slot and the health signal of the wrong one.
+		return "", &fixloop.PlaceError{Reason: "this finding affects more than one Application: " + strings.Join(apps, ", ")}
+	case len(apps) == 1:
+		return apps[0], nil
+	case len(hosts) > 0:
+		return "", &fixloop.PlaceError{Reason: "this finding affects a Host and no Application: " + strings.Join(hosts, ", ")}
 	}
 	return "", nil
 }

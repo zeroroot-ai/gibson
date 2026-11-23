@@ -6,6 +6,7 @@ package ingest
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -524,6 +525,17 @@ func findingRaisedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult, add
 // the place is never the Package (gibson#1469).
 func packageImages(d *graphragpb.DiscoveryResult) map[string]string {
 	out := map[string]string{}
+	// The Images of this discovery. A Package that names an Image that this
+	// discovery did not report would place the Finding at a node that no scan
+	// wrote, so it gets no place (gibson#1469).
+	images := map[string]bool{}
+	for _, n := range d.CustomNodes {
+		if label, ok := admittedLabel(n.GetNodeType()); ok && label == "Image" {
+			if key := EntityKey(n.IdProperties); key != "" {
+				images[key] = true
+			}
+		}
+	}
 	for _, n := range d.CustomNodes {
 		if n == nil {
 			continue
@@ -538,6 +550,11 @@ func packageImages(d *graphragpb.DiscoveryResult) map[string]string {
 		image := ""
 		if label, ok := admittedLabel(n.GetParentType()); ok && label == "Image" {
 			image = EntityKey(n.ParentId)
+			if !images[image] {
+				slog.Warn("a Package names an Image that the discovery did not report, so its findings get no place",
+					"package", key, "image", image)
+				image = ""
+			}
 		}
 		out[key] = image
 	}

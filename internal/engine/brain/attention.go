@@ -176,6 +176,9 @@ type FixFacts struct {
 	// for the current fix, and when. They are empty while the fix has a head.
 	FixHeadMissingReason string
 	FixHeadMissingAt     time.Time
+	// PlaceBlock is the wait on a person that the fix loop shows when the finding has
+	// no single Application. It is empty while the finding has one (gibson#1469).
+	PlaceBlock string
 	// VerifiedAt is the time of the change to `verified`. A bounded reader
 	// of the history reads it to leave out an old fix (review M6).
 	VerifiedAt time.Time
@@ -413,6 +416,8 @@ type FindingSnapshot struct {
 	// Places and Packages: see Finding.Places.
 	Places   []FindingPlace
 	Packages []string
+	// PlaceBlock: see Finding.PlaceBlock.
+	PlaceBlock string
 	// ScanScope and LastScan are the rescan provenance (gibson#1686): the
 	// recurring scan responsible for this Finding, and the scan that last saw it.
 	ScanScope string
@@ -487,7 +492,7 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 		out = append(out, FindingSnapshot{
 			ID: f.ID, Title: f.Title, Description: f.Description, ScopeID: f.ScopeID,
 			Address: f.Address, Severity: f.Severity, Status: f.Status, VulnerabilityID: f.VulnerabilityID,
-			Places: append([]FindingPlace(nil), f.Places...), Packages: append([]string(nil), f.Packages...),
+			Places: append([]FindingPlace(nil), f.Places...), Packages: append([]string(nil), f.Packages...), PlaceBlock: f.PlaceBlock,
 			ScanScope: f.ScanScope, LastScan: f.LastScan,
 			MergeRequest: f.MergeRequest, MergeRequestState: f.MergeRequestState,
 			Priority: f.Priority, PriorityRule: f.PriorityRule, PriorityReason: f.PriorityReason,

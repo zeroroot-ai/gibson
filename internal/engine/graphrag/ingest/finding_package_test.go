@@ -92,3 +92,17 @@ func TestFindingRaised_AReRaiseAddsThePlace(t *testing.T) {
 	assert.Equal(t, []brain.FindingPlace{{Label: "Image", Key: "sha256:aa"}, {Label: "Image", Key: "sha256:bb"}}, f.Places)
 	assert.Equal(t, []string{"pkg:x"}, f.Packages)
 }
+
+// A Package that names an Image that the discovery did not report places its
+// Finding nowhere, and the Package stays as data.
+func TestDiscoveryEvents_APackageOfAnUnknownImageGivesNoPlace(t *testing.T) {
+	d := trivyShape("sha256:aa", "pkg:apk/alpine/libx@1.0")
+	d.CustomNodes = d.CustomNodes[1:] // drop the Image node
+	events, _ := discoveryEvents(ExecContext{MissionID: "m1"}, d)
+	for _, e := range events {
+		if f, ok := e.(brain.FindingRaised); ok {
+			assert.Empty(t, f.Places)
+			assert.Equal(t, []string{"pkg:apk/alpine/libx@1.0"}, f.Packages)
+		}
+	}
+}
