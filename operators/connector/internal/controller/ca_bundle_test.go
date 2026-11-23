@@ -239,7 +239,7 @@ func TestCheckCAPEM(t *testing.T) {
 	}
 }
 
-func caWish(tenant string) *daemonoperatorv1.DesiredConnector {
+func caWish(tenant string) *daemonoperatorv1.DesiredConnector { //nolint:gosec // G101: the name of a secret, no value
 	return &daemonoperatorv1.DesiredConnector{
 		TenantId: tenant, ConnectorId: "github-fixloop", Shape: "Hosted", Image: "registry.example/x@sha256:ab",
 		Transport: "streamable-http", Auth: "none", CaBundleSecret: "github-fixloop-ca-mock",
