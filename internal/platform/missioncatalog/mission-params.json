@@ -30,9 +30,11 @@
         "imageRef",
         "pipelineId",
         "pipelineUrl",
-        "project",
         "ref",
         "repositoryUrl"
+      ],
+      "optional": [
+        "forgeConnector"
       ]
     }
   }

@@ -49,7 +49,6 @@ var paramsByMission = map[string]map[string]string{
 		"imageRef":      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
 		// The dependency alerts of the Git host, read through its connector.
 		"forgeConnector": "gitlab-fixloop",
-		"project":        "examplebank/customer-portal",
 	},
 	"fix": {
 		"bank":           "bank/coding",
@@ -729,5 +728,65 @@ func TestEntries_IsEveryMissionInOrder(t *testing.T) {
 			e.Version != want.Version || !slices.Equal(e.DeclaredParams, want.DeclaredParams) {
 			t.Errorf("entry %d = %+v, want %+v", i, e, want)
 		}
+	}
+}
+
+// The alerts node is optional (gibson#1469). Without forgeConnector the scan has
+// no alerts node, and the launch with the seven other parameters works as before.
+func TestRender_ScanAlertsNodeIsOptional(t *testing.T) {
+	with := paramsFor(t, "scan")
+	without := map[string]string{}
+	for k, v := range with {
+		if k != "forgeConnector" {
+			without[k] = v
+		}
+	}
+
+	def, err := Render(context.Background(), "scan", without)
+	if err != nil {
+		t.Fatalf("a scan with seven parameters must render: %v", err)
+	}
+	if _, ok := def.GetNodes()["alerts"]; ok {
+		t.Error("a scan with no forgeConnector has an alerts node")
+	}
+	join := def.GetNodes()["report"].GetJoinConfig().GetWaitFor()
+	if len(join) != 3 {
+		t.Errorf("the join waits for %v, want the three other branches", join)
+	}
+	for _, e := range def.GetEntryPoints() {
+		if e == "alerts" {
+			t.Error("alerts is an entry point of a scan with no forgeConnector")
+		}
+	}
+
+	def, err = Render(context.Background(), "scan", with)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := def.GetNodes()["alerts"]
+	if node == nil {
+		t.Fatal("a scan with forgeConnector has no alerts node")
+	}
+	if got := node.GetToolConfig().GetToolName(); got != "mcp:gitlab-fixloop:list_dependency_alerts" {
+		t.Errorf("tool = %q", got)
+	}
+	in := node.GetToolConfig().GetInput()
+	if in["repositoryUrl"] != with["repositoryUrl"] || in["state"] != "all" {
+		t.Errorf("input = %v", in)
+	}
+	if _, has := in["project"]; has {
+		t.Error("the node carries a project: the daemon derives it from repositoryUrl")
+	}
+	if got := def.GetNodes()["report"].GetJoinConfig().GetWaitFor(); len(got) != 4 {
+		t.Errorf("the join waits for %v, want four branches", got)
+	}
+}
+
+// forgeConnector is an enum. A caller cannot name another connector.
+func TestRender_ScanForgeConnectorIsAnEnum(t *testing.T) {
+	p := paramsFor(t, "scan")
+	p["forgeConnector"] = "okta"
+	if _, err := Render(context.Background(), "scan", p); err == nil {
+		t.Fatal("a connector outside github-fixloop and gitlab-fixloop must be refused")
 	}
 }

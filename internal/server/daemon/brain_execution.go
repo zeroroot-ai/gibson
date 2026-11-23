@@ -35,7 +35,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/agentwire"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
-	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -398,6 +397,9 @@ func (b *brainExecutor) dispatchTool(bind *missionBinding, req brain.DispatchReq
 	// tenant on the one governed path of a connector call, the path of
 	// invoke_tool (gibson#1469). Any other name takes the paths below.
 	if tid, err := toolid.Parse(req.Target); err == nil && tid.Source == toolid.SourceMCP {
+		if isScanAlertsNode(bind, req, tid) {
+			return b.dispatchScanAlerts(bind, req, tid)
+		}
 		return b.dispatchConnectorTool(bind, req, tid)
 	}
 	// A for_each instance runs against its OWN target, so the harness it gets
@@ -890,18 +892,13 @@ func (b *brainExecutor) callConnectorNode(
 
 // nodeResult turns the result of a call into the output of the node. A call that
 // returns nothing is not a result: the node must not succeed with "null".
-func (b *brainExecutor) nodeResult(bind *missionBinding, missionID string, tid toolid.ID, res any) (string, error) {
+func (b *brainExecutor) nodeResult(_ *missionBinding, _ string, tid toolid.ID, res any) (string, error) {
 	if res == nil {
 		return "", fmt.Errorf("tool %q: the connector returned no result", tid.Canonical())
 	}
 	out, err := json.Marshal(res)
 	if err != nil {
 		return "", fmt.Errorf("tool %q: encode the result: %w", tid.Canonical(), err)
-	}
-	if tid.Tool == ingest.DependencyAlertsTool {
-		if ierr := ingestDependencyAlerts(bind, missionID, res, b.logger); ierr != nil {
-			return "", fmt.Errorf("tool %q: %w", tid.Canonical(), ierr)
-		}
 	}
 	return string(out), nil
 }

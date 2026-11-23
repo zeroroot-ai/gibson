@@ -22,7 +22,7 @@ func completeParams(t *testing.T, mission string) map[string]string {
 	names := declaredParams(t, mission)
 	out := make(map[string]string, len(names))
 	for _, n := range names {
-		out[n] = "v-" + n
+		out[n] = placeholderValue(n)
 	}
 	return out
 }
@@ -54,7 +54,7 @@ func TestDeclaredParams_ComesFromTheMissionsOwnDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, n := range names {
-		if !strings.Contains(src, n+":") {
+		if !strings.Contains(src, n+":") && !strings.Contains(src, n+"?:") {
 			t.Errorf("ParamNames reported %q, which scan.cue does not declare", n)
 		}
 	}
@@ -175,4 +175,14 @@ func declaredParams(t *testing.T, mission string) []string {
 		t.Fatalf("DeclaredParams(%s): %v", mission, err)
 	}
 	return names
+}
+
+// placeholderValue is the value that a test gives a parameter when it needs one that
+// renders and cares about nothing else. A parameter that is an enum takes one of
+// its members.
+func placeholderValue(name string) string {
+	if name == "forgeConnector" {
+		return "github-fixloop"
+	}
+	return "v-" + name
 }

@@ -56,7 +56,7 @@ var missionFS embed.FS
 // Unknown keys and missing keys are each reported together, and sorted, so a
 // caller with several typos or several omissions sees them in one answer rather
 // than one per attempt.
-func checkParams(mission string, declared []string, in map[string]string) error {
+func checkParams(mission string, declared, optional []string, in map[string]string) error {
 	known := make(map[string]bool, len(declared))
 	for _, n := range declared {
 		known[n] = true
@@ -74,9 +74,13 @@ func checkParams(mission string, declared []string, in map[string]string) error 
 			mission, strings.Join(unknown, ", "), namesOrNone(declared))
 	}
 
+	isOptional := make(map[string]bool, len(optional))
+	for _, n := range optional {
+		isOptional[n] = true
+	}
 	var missing []string
 	for _, n := range declared {
-		if strings.TrimSpace(in[n]) == "" {
+		if strings.TrimSpace(in[n]) == "" && !isOptional[n] {
 			missing = append(missing, n)
 		}
 	}
@@ -104,6 +108,9 @@ func cueBlock(declared []string, in map[string]string) string {
 	var b strings.Builder
 	b.WriteString("\n_params: {\n")
 	for _, n := range declared {
+		if strings.TrimSpace(in[n]) == "" {
+			continue // an optional parameter that the caller left out
+		}
 		fmt.Fprintf(&b, "\t%s: %q\n", n, in[n])
 	}
 	b.WriteString("}\n")
@@ -156,7 +163,11 @@ func Render(ctx context.Context, name string, params map[string]string) (*missio
 	if err != nil {
 		return nil, fmt.Errorf("missioncatalog: read the parameters of %q: %w", name, err)
 	}
-	if err := checkParams(name, declared, params); err != nil {
+	optional, err := cueruntime.OptionalParams(src)
+	if err != nil {
+		return nil, fmt.Errorf("missioncatalog: read the parameters of %q: %w", name, err)
+	}
+	if err := checkParams(name, declared, optional, params); err != nil {
 		return nil, err
 	}
 	def, err := cueruntime.Export(ctx, src+cueBlock(declared, params))
@@ -176,6 +187,8 @@ type Entry struct {
 	// not here and refuses a render that omits one, so a caller builds its
 	// request from this list.
 	DeclaredParams []string
+	// OptionalParams are the declared parameters that a caller may leave out.
+	OptionalParams []string
 }
 
 // Describe reads one mission's identity and its parameter set.
@@ -198,6 +211,10 @@ func Describe(name string) (Entry, error) {
 		return Entry{}, fmt.Errorf("missioncatalog: read the parameters of %q: %w", name, err)
 	}
 	sort.Strings(declared)
+	optional, err := cueruntime.OptionalParams(src)
+	if err != nil {
+		return Entry{}, fmt.Errorf("missioncatalog: read the parameters of %q: %w", name, err)
+	}
 
 	// The catalog NAME is authoritative, not the name inside the CUE. They
 	// agree today and a test says so; if they ever disagree, the name a caller
@@ -207,6 +224,7 @@ func Describe(name string) (Entry, error) {
 		Description:    meta.Description,
 		Version:        meta.Version,
 		DeclaredParams: declared,
+		OptionalParams: optional,
 	}, nil
 }
 
