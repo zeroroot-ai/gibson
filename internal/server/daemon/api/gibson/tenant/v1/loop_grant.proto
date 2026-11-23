@@ -1,0 +1,117 @@
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
+
+// LoopGrantService manages the loop grants of one tenant (gibson#1612).
+//
+// An always-on member of a bank has no mission turn, so it has no grant of a
+// sender to call a tool of the buyer with. A tenant admin gives the member a
+// loop grant instead. The grant names the tool classes that the member may call
+// and the harness calls that it may make. A class covers every connector of that
+// class that the tenant has enabled, now and later. The grant does not replace
+// the can_execute check on the connector, so the tenant switch of a connector
+// still stops the member.
+//
+// A loop grant is bound to one bank member and to one tenant. It never reaches
+// another member or another tenant. The manifest of the agent of the member
+// limits the classes of the grant.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "buf/validate/validate.proto";
+import "gibson/auth/v1/options.proto";
+import "google/protobuf/timestamp.proto";
+
+service LoopGrantService {
+  // GrantLoop gives one bank member a loop grant. A second call for the same
+  // member replaces the first grant and gives it a new id. The audit record
+  // names the admin who made the call. When the audit record cannot be written,
+  // the daemon restores the prior grant of the member.
+  rpc GrantLoop(GrantLoopRequest) returns (GrantLoopResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // RevokeLoop removes the loop grant of one member. It is idempotent. The
+  // member then has its tool calls refused.
+  rpc RevokeLoop(RevokeLoopRequest) returns (RevokeLoopResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListLoopGrants returns one page of the loop grants of the tenant, in member
+  // id order.
+  rpc ListLoopGrants(ListLoopGrantsRequest) returns (ListLoopGrantsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// LoopGrant is the loop grant of one bank member in the tenant.
+message LoopGrant {
+  // id names the grant. The audit record of each member call holds it.
+  string id = 1;
+  // member_id is the bank member that holds the grant.
+  string member_id = 2;
+  // agent_name is the catalog agent of the member.
+  string agent_name = 3;
+  // tool_classes are the tool classes of the catalog, for example ticket or
+  // paging.
+  repeated string tool_classes = 4;
+  // harness_calls are the harness calls, besides the tool call, that the
+  // member may make. The only value now is SubmitFinding.
+  repeated string harness_calls = 5;
+  // grantor is the subject of the admin who made the grant.
+  string grantor = 6;
+  google.protobuf.Timestamp granted_at = 7;
+}
+
+message GrantLoopRequest {
+  // member_id is the id of a bank member of the tenant.
+  string member_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 128 }];
+  // tool_classes must be tool classes that the catalog manifest of the agent of
+  // the member names in loopGrant.classes.
+  repeated string tool_classes = 2 [(buf.validate.field).repeated = { max_items: 16 }];
+  repeated string harness_calls = 3 [(buf.validate.field).repeated = { max_items: 8 }];
+}
+
+message GrantLoopResponse {
+  LoopGrant grant = 1;
+}
+
+message RevokeLoopRequest {
+  string member_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 128 }];
+}
+
+message RevokeLoopResponse {}
+
+message ListLoopGrantsRequest {
+  // page_size is the largest number of grants on one page. Zero means the
+  // server default. The server also caps it.
+  int32 page_size = 1;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+
+message ListLoopGrantsResponse {
+  repeated LoopGrant grants = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+}

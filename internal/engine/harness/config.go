@@ -108,6 +108,11 @@ type HarnessConfig struct {
 	SkillFiles      func() SkillFileStore
 	MissionDenyList MissionDenyList
 
+	// SkillLoads provides the sink that records each load of an Agent Skill,
+	// including the load that a skill-script call makes. A daemon with none
+	// refuses a skill-script call, because no load goes without its record.
+	SkillLoads func() SkillLoadSink
+
 	// Tracer for distributed tracing (OpenTelemetry).
 	// Used for creating spans around LLM operations, tool execution, etc.
 	// Optional: defaults to no-op tracer if nil.

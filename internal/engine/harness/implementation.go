@@ -138,6 +138,8 @@ type DefaultAgentHarness struct {
 	// because the data plane starts after the harness factory.
 	skillStore      func() SkillFileStore
 	missionDenyList MissionDenyList
+	// skillLoads provides the sink that records each load of an Agent Skill.
+	skillLoads func() SkillLoadSink
 
 	// graphrag serves the knowledge-graph reads. The SAME querier the daemon
 	// hands to ComponentService — one implementation reached two ways, which is
@@ -766,6 +768,11 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 	workCtx := map[string]string{
 		"mission_id": h.missionCtx.ID.String(),
 		"agent":      h.missionCtx.CurrentAgent,
+	}
+	if kind == "agent" {
+		// Enqueue binds the task to the work id with the agent, so a call that
+		// the daemon runs for the agent finds the harness of this node.
+		workCtx[component.WorkTaskContextKey] = grantTask
 	}
 	for k, v := range extraCtx {
 		workCtx[k] = v

@@ -57,6 +57,9 @@ func (f *fakeSkillFiles) ReadFile(_ context.Context, _, _, _, path string) ([]by
 	if f.readErr != nil {
 		return nil, f.readErr
 	}
+	if path == "SKILL.md" {
+		return []byte("---\nname: web-recon\n---\n# web-recon\n"), nil
+	}
 	return []byte(f.files[path]), nil
 }
 
@@ -80,6 +83,24 @@ func scriptRequest(target string) *componentpb.CallToolRequest {
 
 const skillTenant = "acme"
 
+// loadSink records each load that a call makes.
+type loadSink struct {
+	got []SkillLoadRecord
+	err error
+}
+
+func (l *loadSink) sink2() func() SkillLoadSink { return func() SkillLoadSink { return l.sink() } }
+
+func (l *loadSink) sink() SkillLoadSink {
+	return func(_ context.Context, _ string, r SkillLoadRecord) error {
+		if l.err != nil {
+			return l.err
+		}
+		l.got = append(l.got, r)
+		return nil
+	}
+}
+
 func skillHarness(t *testing.T, store *fakeSkillFiles, blocked []string, grantSubject string) (*DefaultAgentHarness, *skillGrantAuthz, string) {
 	t.Helper()
 	missionID := types.NewID()
@@ -96,6 +117,7 @@ func skillHarness(t *testing.T, store *fakeSkillFiles, blocked []string, grantSu
 		componentAuthorizer: a,
 		skillStore:          func() SkillFileStore { return store },
 		missionDenyList:     func(context.Context, string, string) ([]string, error) { return blocked, nil },
+		skillLoads:          (&loadSink{}).sink2(),
 	}
 	return h, a, missionID.String()
 }
@@ -132,7 +154,8 @@ func TestAddSkillFiles_PlacesTheFilesOfThePinnedVersion(t *testing.T) {
 			t.Errorf("%s: mode %o is writable or special", f.Path, f.Mode)
 		}
 	}
-	if len(modes) != 2 || modes["web-recon/scripts/probe.sh"] != 0o555 || modes["web-recon/references/api.md"] != 0o444 {
+	if len(modes) != 3 || modes["web-recon/scripts/probe.sh"] != 0o555 || modes["web-recon/references/api.md"] != 0o444 ||
+		modes["web-recon/SKILL.md"] != 0o444 {
 		t.Fatalf("files = %v", modes)
 	}
 	if len(a.asked) == 0 || !strings.Contains(a.asked[len(a.asked)-1], "can_load") {
@@ -153,6 +176,9 @@ func TestAddSkillFiles_Refusals(t *testing.T) {
 		{"no grant", &fakeSkillFiles{files: webRecon()}, nil, "mission:other", "web-recon/scripts/probe.sh", SkillScriptTool, "may not load"},
 		{"the mission blocks the Agent Skill", &fakeSkillFiles{files: webRecon()}, []string{"skill:web-recon"}, "mission", "web-recon/scripts/probe.sh", SkillScriptTool, "blocked by mission policy"},
 		{"a script that the Agent Skill lacks", &fakeSkillFiles{files: webRecon()}, nil, "mission", "web-recon/scripts/other.sh", SkillScriptTool, "has no file"},
+		{"a file outside scripts", &fakeSkillFiles{files: webRecon()}, nil, "mission", "web-recon/references/api.md", SkillScriptTool, "not a script"},
+		{"the SKILL.md as a target", &fakeSkillFiles{files: webRecon()}, nil, "mission", "web-recon/SKILL.md", SkillScriptTool, "not a script"},
+		{"the folder itself", &fakeSkillFiles{files: webRecon()}, nil, "mission", "web-recon/scripts/", SkillScriptTool, "not a script"},
 		{"a target with no path", &fakeSkillFiles{files: webRecon()}, nil, "mission", "web-recon", SkillScriptTool, "must be <skill>"},
 		{"a bad name", &fakeSkillFiles{files: webRecon()}, nil, "mission", "../etc/scripts/x", SkillScriptTool, "must be <skill>"},
 		{"the store fails", &fakeSkillFiles{files: webRecon(), err: errors.New("db down")}, nil, "mission", "web-recon/scripts/probe.sh", SkillScriptTool, "db down"},
@@ -168,7 +194,8 @@ func TestAddSkillFiles_Refusals(t *testing.T) {
 			if len(spec.Files) != 0 {
 				t.Errorf("a refused call placed %d files", len(spec.Files))
 			}
-			if tc.name == "no grant" || tc.name == "the mission blocks the Agent Skill" {
+			if tc.name == "no grant" || tc.name == "the mission blocks the Agent Skill" ||
+				tc.name == "a file outside scripts" || tc.name == "the SKILL.md as a target" || tc.name == "the folder itself" {
 				if len(tc.store.resolved) != 0 || len(tc.store.reads) != 0 {
 					t.Error("the store was read for a refused call")
 				}
@@ -186,8 +213,8 @@ func TestAddSkillFiles_AnAgentGrantPasses(t *testing.T) {
 	if err := h.addSkillFiles(ctx, SkillScriptTool, scriptRequest("web-recon/scripts/probe.sh"), &spec); err != nil {
 		t.Fatalf("addSkillFiles: %v", err)
 	}
-	if len(spec.Files) != 2 {
-		t.Fatalf("files = %d, want 2", len(spec.Files))
+	if len(spec.Files) != 3 {
+		t.Fatalf("files = %d, want 3", len(spec.Files))
 	}
 }
 
@@ -369,8 +396,8 @@ func TestCallToolProto_SkillScriptLaunchesWithTheFilesAndTheEgressOfTheAgent(t *
 	if err := h.CallToolProto(skillCtx(t), SkillScriptTool, req, &resp); err == nil {
 		t.Fatal("the launch was set to fail")
 	}
-	if len(rec.got.Files) != 2 {
-		t.Fatalf("launch files = %d, want 2", len(rec.got.Files))
+	if len(rec.got.Files) != 3 {
+		t.Fatalf("launch files = %d, want 3", len(rec.got.Files))
 	}
 	want := agentEgressCeiling("cve-triage")
 	if len(want) == 0 {
@@ -391,5 +418,64 @@ func TestCallToolProto_SkillScriptLaunchesWithTheFilesAndTheEgressOfTheAgent(t *
 	}
 	if rec.got.Image != "" {
 		t.Error("a refused call reached the launch")
+	}
+}
+
+// A skill-script call is a load of the Agent Skill, and it leaves the record of
+// a load, with the digest that the mission pinned, the mission and the script.
+func TestAddSkillFiles_RecordsTheLoad(t *testing.T) {
+	store := &fakeSkillFiles{files: webRecon()}
+	h, _, missionID := skillHarness(t, store, nil, "mission")
+	sink := &loadSink{}
+	h.skillLoads = sink.sink2()
+	h.missionCtx.MissionRunID = "run-9"
+	h.missionCtx.CurrentAgent = "scan-agent"
+	var spec sandboxed.ToolSpec
+	if err := h.addSkillFiles(skillCtx(t), SkillScriptTool, scriptRequest("web-recon/scripts/probe.sh"), &spec); err != nil {
+		t.Fatalf("addSkillFiles: %v", err)
+	}
+	if len(sink.got) != 1 {
+		t.Fatalf("records = %d, want 1", len(sink.got))
+	}
+	r := sink.got[0]
+	if r.Name != "web-recon" || r.Digest != "sha256:pinned" || r.File != "scripts/probe.sh" || r.MissionID != missionID ||
+		r.MissionRunID != "run-9" || r.Agent != "scan-agent" || r.RecordedAtUnixNano == 0 {
+		t.Fatalf("record = %+v", r)
+	}
+}
+
+// No load goes without its record: a daemon with no sink, and a sink that
+// fails, each refuse the call before any file is placed. A refused call leaves
+// no record.
+func TestAddSkillFiles_RefusesWhenTheLoadCannotBeRecorded(t *testing.T) {
+	req := scriptRequest("web-recon/scripts/probe.sh")
+	for name, set := range map[string]func(*DefaultAgentHarness){
+		"no sink provider":        func(h *DefaultAgentHarness) { h.skillLoads = nil },
+		"a provider with no sink": func(h *DefaultAgentHarness) { h.skillLoads = func() SkillLoadSink { return nil } },
+		"a sink that fails":       func(h *DefaultAgentHarness) { h.skillLoads = (&loadSink{err: errors.New("timeline down")}).sink2() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, _, _ := skillHarness(t, &fakeSkillFiles{files: webRecon()}, nil, "mission")
+			set(h)
+			var spec sandboxed.ToolSpec
+			err := h.addSkillFiles(skillCtx(t), SkillScriptTool, req, &spec)
+			if err == nil || !strings.Contains(err.Error(), "load") {
+				t.Fatalf("err = %v, want a refusal that names the load", err)
+			}
+			if len(spec.Files) != 0 {
+				t.Errorf("a refused call placed %d files", len(spec.Files))
+			}
+		})
+	}
+	// A call that the check refuses leaves no record.
+	h, _, _ := skillHarness(t, &fakeSkillFiles{files: webRecon()}, nil, "mission:other")
+	sink := &loadSink{}
+	h.skillLoads = sink.sink2()
+	var spec sandboxed.ToolSpec
+	if err := h.addSkillFiles(skillCtx(t), SkillScriptTool, req, &spec); err == nil {
+		t.Fatal("a mission with no grant ran the script")
+	}
+	if len(sink.got) != 0 {
+		t.Errorf("a refused call left %d load records", len(sink.got))
 	}
 }

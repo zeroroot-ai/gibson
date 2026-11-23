@@ -111,6 +111,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// sandbox, and the deny list of the mission that the call checks.
 		SkillFiles:      d.skillFileStore,
 		MissionDenyList: d.storedBlockedTools,
+		SkillLoads:      d.skillLoadSink,
 		WorkQueue:       workQueue,
 
 		// Finding storage: the findings table of the database of the tenant.

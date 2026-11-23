@@ -92,6 +92,15 @@ func (l *memberLauncher) LaunchMember(ctx context.Context, tenantID string, b *b
 	// member callback resolves the member by, and it has to be on the grant
 	// before the sandbox exists.
 	runID := string(types.NewID())
+	// The base grant holds the loop grant of the agent of the bank. A store
+	// that cannot be read gives the base surface only, which is the least a
+	// member can hold. The next renewal adds the loop grant.
+	allowedRPCs, rpcErr := l.daemon.memberGrantRPCs(tctx, tenantID, memberID, b.AgentName)
+	if rpcErr != nil {
+		l.daemon.logger.Warn(ctx, "member launched with the base grant only: the loop grant could not be read",
+			"tenant", tenantID, "agent", b.AgentName, "error", rpcErr)
+		allowedRPCs = harness.MemberBaseGrantRPCs()
+	}
 	grant, err := minter.Mint(capabilitygrant.MintRequest{
 		Subject:        memberBaseGrantSubject(b.AgentName),
 		Tenant:         tenantID,
@@ -99,7 +108,7 @@ func (l *memberLauncher) LaunchMember(ctx context.Context, tenantID string, b *b
 		TaskID:         memberID, // a member serves many tasks, so its grant names the member
 		MissionRunID:   runID,
 		RecipientClass: "agent",
-		AllowedRPCs:    harness.MemberBaseGrantRPCs(),
+		AllowedRPCs:    allowedRPCs,
 	})
 	if err != nil {
 		return bankengine.LaunchedMember{}, fmt.Errorf("mint the base grant of member %s: %w", memberID, err)

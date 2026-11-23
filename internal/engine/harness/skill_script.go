@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agentskill"
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -111,7 +113,36 @@ func (h *DefaultAgentHarness) addSkillFiles(ctx context.Context, toolName string
 	if !hasSkillFile(files, skill+"/"+script) {
 		return deny("the Agent Skill %q has no file %q", skill, script)
 	}
+	// The call is a load of the Agent Skill, and no load goes without its
+	// record. A daemon with no sink, or a sink that fails, refuses the call
+	// before the launch, as it refuses a load by invoke_tool.
+	if err := h.recordSkillLoad(ctx, tenant, missionID, skill, digest, script); err != nil {
+		return deny("%v", err)
+	}
 	spec.Files = files
+	return nil
+}
+
+// recordSkillLoad writes the load that a skill-script call makes, with the
+// agent, the mission and the digest, as invoke_tool does for a load.
+func (h *DefaultAgentHarness) recordSkillLoad(ctx context.Context, tenant, missionID, skill, digest, script string) error {
+	if h.skillLoads == nil {
+		return errors.New("this daemon records no Agent Skill loads")
+	}
+	sink := h.skillLoads()
+	if sink == nil {
+		return errors.New("this daemon records no Agent Skill loads")
+	}
+	runID := h.missionCtx.AgentRunID
+	if runID == "" {
+		runID = h.missionCtx.MissionRunID
+	}
+	if err := sink(ctx, tenant, SkillLoadRecord{
+		MissionID: missionID, MissionRunID: h.missionCtx.MissionRunID, RunID: runID, Agent: h.missionCtx.CurrentAgent,
+		Name: skill, Digest: digest, File: script, RecordedAtUnixNano: time.Now().UnixNano(),
+	}); err != nil {
+		return fmt.Errorf("record the load of the Agent Skill %q: %w", skill, err)
+	}
 	return nil
 }
 
@@ -175,6 +206,10 @@ func skillScriptTarget(request proto.Message) (skill, script string, err error) 
 	if !ok || script == "" || !toolid.ValidSkillName(skill) {
 		return "", "", fmt.Errorf("the target %q must be <skill>/<path of the script>", in.Target)
 	}
+	if !strings.HasPrefix(script, skillScriptDir) || script == skillScriptDir {
+		return "", "", fmt.Errorf("the target %q is not a script: only a file below %s of the Agent Skill runs as a script",
+			in.Target, skillScriptDir)
+	}
 	return skill, script, nil
 }
 
@@ -192,12 +227,19 @@ func inputJSONOf(request proto.Message) string {
 }
 
 // skillSandboxFiles reads each file of the Agent Skill version and returns it
-// as a file of the sandbox below the name of the Agent Skill. A file under
-// scripts/ gets an execute bit. No file is writable.
+// as a file of the sandbox below the name of the Agent Skill. The files are the
+// other files of the version and its SKILL.md, so a script finds the text that
+// describes it next to itself. A file under scripts/ gets an execute bit. No
+// file is writable.
 func skillSandboxFiles(
 	ctx context.Context, store SkillFileStore, tenant, skill, digest string, loaded *agentskillstore.Loaded,
 ) ([]sandboxed.File, error) {
-	files := make([]sandboxed.File, 0, len(loaded.Files))
+	files := make([]sandboxed.File, 0, len(loaded.Files)+1)
+	skillFile, err := store.ReadFile(ctx, tenant, skill, digest, agentskill.SkillFile)
+	if err != nil {
+		return nil, fmt.Errorf("read %s of the Agent Skill %q: %w", agentskill.SkillFile, skill, err)
+	}
+	files = append(files, sandboxed.File{Path: skill + "/" + agentskill.SkillFile, Content: skillFile, Mode: skillFileMode})
 	for _, f := range loaded.Files {
 		content, err := store.ReadFile(ctx, tenant, skill, digest, f.Path)
 		if err != nil {

@@ -236,19 +236,24 @@ func TestBankMemberLiveness(t *testing.T) {
 		"a turn grant that borrows the member as its task": {claims("bank-1", "run-1", "m-1", "user:alice"), false},
 		"the right task and a subject of another agent":    {claims("bank-1", "run-1", "m-1", memberBaseGrantSubject("opencode")), false},
 	} {
-		if got := live.IsMemberBaseGrantLive(ctx, c.claims); got != c.want {
+		got, err := live.IsMemberBaseGrantLive(ctx, c.claims)
+		if err != nil {
+			t.Errorf("%s: a clean answer carries no error: %v", name, err)
+		}
+		if got != c.want {
 			t.Errorf("%s: live = %v, want %v", name, got, c.want)
 		}
 	}
 	broken := &bankMemberLiveness{banks: func() (bank.Store, error) { return nil, errors.New("postgres is down") }}
-	if broken.IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)) {
-		t.Error("a store failure is not live")
+	// A store that is down is an error, not an answer. The renewal then fails.
+	if got, err := broken.IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)); got || err == nil {
+		t.Errorf("a store failure gave live = %v, err = %v, want not live and an error", got, err)
 	}
 	// The member is found but its bank cannot be read: the subject cannot be
 	// checked, so the grant does not renew.
 	banks.getErr = errors.New("bank read failed")
-	if live.IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)) {
-		t.Error("a bank that cannot be read is not live")
+	if got, err := live.IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)); got || err == nil {
+		t.Errorf("a bank that cannot be read gave live = %v, err = %v, want not live and an error", got, err)
 	}
 	// With a pool the lookup reads the Postgres store.
 	store, err := newBankMemberLiveness(&daemonImpl{pool: &mockPool{conn: minimalConn()}}).banks()
@@ -256,7 +261,7 @@ func TestBankMemberLiveness(t *testing.T) {
 		t.Errorf("with a pool the lookup reads the bank store: %v", err)
 	}
 	// While the data-plane pool is down no grant is live.
-	if newBankMemberLiveness(&daemonImpl{}).IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)) {
-		t.Error("a daemon with no pool serves no banks, so no grant is live")
+	if got, err := newBankMemberLiveness(&daemonImpl{}).IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)); got || err == nil {
+		t.Errorf("a daemon with no pool gave live = %v, err = %v, want not live and an error", got, err)
 	}
 }

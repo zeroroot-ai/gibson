@@ -136,7 +136,7 @@ func TestMetaInvoke_ANativeIDInTheFlattenedFormReachesTheNativePath(t *testing.T
 	svc.connectorAudit = newConnectorAudit(t, &audittest.Recorder{})
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"native:test-external-tool": true}}, nil)
 	resp, err := svc.metaInvoke(testCtxWithTenant(), ci, h, harness, catalog.Caller{Subject: "user:u-1", Tenant: "test-tenant"}, metatool.MissionPolicy{},
-		[]byte(`{"id":"native__test-external-tool","args":{}}`))
+		[]byte(`{"id":"native__test-external-tool","args":{}}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}

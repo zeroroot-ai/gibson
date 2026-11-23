@@ -792,6 +792,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// live. Its base grant renews while the member's row says the member lives
 	// (ADR-0119). Read lazily: the data-plane pool is built after this wiring.
 	daemonSvc.WithLiveMemberLookup(newBankMemberLiveness(d))
+	// A member renewal takes its RPCs from the loop grant that holds now.
+	daemonSvc.WithMemberGrantRPCs(memberGrantRPCSource{daemon: d})
 	// platformDB is always non-nil after Start() (gibson#246): initPlatformPostgres
 	// is fatal on failure, so the platform RPCs always have a real pool.
 	daemonSvc.WithPlatformDB(d.platformDB)
@@ -1709,6 +1711,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if err := d.registerInboundMission(ctx, srv, pageKeys); err != nil {
 		return nil, err
 	}
+	if err := d.registerLoopGrant(ctx, srv, auditLogger, pageKeys); err != nil {
+		return nil, err
+	}
 	// The tenant operator pulls the outside agent records and their credential
 	// through the two operator RPCs (gibson#1403).
 	daemonSvc.WithOutsideAgentOperatorSource(d.outsideAgents)
@@ -1962,6 +1967,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				compSvc.WithMissionPolicy(d.callback.MissionPolicyForRun)
 				compSvc.WithToolCallRecorder(d.callback.RecordToolCall)
 				compSvc.WithMetaTools(metaToolAdapter{svc: d.callback})
+				compSvc.WithSandboxTools(sandboxToolAdapter{svc: d.callback})
 			}
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 

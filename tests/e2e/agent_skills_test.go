@@ -581,6 +581,89 @@ func TestAgentSkills(t *testing.T) {
 		t.Logf("the sandbox ran the script of %s against %s:%s; the workflow checks that the network dropped each packet",
 			agentSkillProbe, egressIP, egressPort)
 	})
+
+	t.Run("an agent runs a script with skill-script, and the Timeline holds the load and the call", func(t *testing.T) {
+		// The agent makes the call as an agent in pull mode does: with
+		// ComponentService.CallTool and the work id of its work item. The daemon
+		// runs the tool with the harness of the run. The call needs the grant that
+		// a load needs. The harness of the test is the SVID of the suite, which
+		// is not an agent principal, so the grant is a mission grant here. The
+		// agent grant is covered by the unit test of the check.
+		_, serr := membership.SetCatalogEnabled(ctx, &tenantv1.SetCatalogEnabledRequest{ComponentRef: skillScriptRef, Enabled: true})
+		require.NoError(t, serr, "SetCatalogEnabled(%s)", skillScriptRef)
+		t.Cleanup(func() {
+			c, cancel := context.WithTimeout(auth.ContextWithTenantString(context.Background(), agentSkillTenant), 15*time.Second)
+			defer cancel()
+			_, _ = membership.SetCatalogEnabled(c, &tenantv1.SetCatalogEnabledRequest{ComponentRef: skillScriptRef, Enabled: false})
+		})
+		runF, workF := newMission("agent-skills-exit-f", nil)
+
+		// A call with no grant is refused with a reply that says why, and leaves
+		// no load on the Timeline.
+		script := agentSkillProbe + "/scripts/probe.sh"
+		call := func() *componentpb.CallToolResponse {
+			resp, e := comp.CallTool(ctx, &componentpb.CallToolRequest{
+				WorkId: workF.WorkID, ToolName: skillScriptTool, InputJson: `{"target":"` + script + `"}`,
+			})
+			require.NoError(t, e, "CallTool(%s)", skillScriptTool)
+			return resp
+		}
+		refused := call()
+		require.NotNil(t, refused.GetError(), "a call with no grant must be refused")
+		require.Contains(t, refused.GetError().GetMessage(), "may not load")
+		require.Empty(t, skillLoads(ctx, t, world, workF.MissionID, agentSkillProbe), "a refused call must leave no load")
+
+		// A target outside scripts/ is refused before the launch, with a clear error.
+		grantMission(agentSkillProbe, workF.MissionID)
+		var ran *componentpb.CallToolResponse
+		helpers.Eventually(t, time.Minute, "the granted agent runs the script", func() (bool, string) {
+			ran = call()
+			if ran.GetError() != nil {
+				return false, ran.GetError().GetMessage()
+			}
+			return ran.GetOutputJson() != "", ""
+		})
+		outside, oerr := comp.CallTool(ctx, &componentpb.CallToolRequest{
+			WorkId: workF.WorkID, ToolName: skillScriptTool, InputJson: `{"target":"` + agentSkillProbe + `/SKILL.md"}`,
+		})
+		require.NoError(t, oerr)
+		require.NotNil(t, outside.GetError(), "a target outside scripts/ must be refused")
+		require.Contains(t, outside.GetError().GetMessage(), "not a script")
+
+		// The result is the exit code, stdout and stderr of the script.
+		var result struct {
+			ExitCode *int32 `json:"exit_code"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(ran.GetOutputJson()), &result), "decode the result: %s", ran.GetOutputJson())
+		require.NotNil(t, result.ExitCode, "the result must hold the exit code: %s", ran.GetOutputJson())
+		require.NotEmpty(t, ran.GetToolCallId(), "the reply must carry the id of the flight recorder record")
+
+		// The Timeline holds the load of the Agent Skill with the script, and the
+		// flight recorder record of the call with the same id and the name of the
+		// agent that made it.
+		helpers.Eventually(t, time.Minute, "the Timeline holds the load and the call", func() (bool, string) {
+			loaded := false
+			for _, ev := range skillLoads(ctx, t, world, workF.MissionID, agentSkillProbe) {
+				if strings.Contains(ev.Summary, "scripts/probe.sh") {
+					loaded = true
+				}
+			}
+			events, rerr := helpers.ReadTimeline(ctx, world, workF.MissionID)
+			if rerr != nil {
+				return false, rerr.Error()
+			}
+			recorded := false
+			for _, ev := range helpers.OfKind(events, "agent_tool_call.observed") {
+				if strings.Contains(ev.Summary, ran.GetToolCallId()) && strings.Contains(ev.Summary, skillScriptTool) &&
+					strings.Contains(ev.Summary, agentSkillAgent) {
+					recorded = true
+				}
+			}
+			return loaded && recorded, fmt.Sprintf("load recorded: %t, call recorded: %t", loaded, recorded)
+		})
+		workF.Complete()
+		require.Equal(t, "mission_completed", runF.Wait(t, agentSkillMissionTimeout).EventType)
+	})
 }
 
 func containsString(list []string, want string) bool {
