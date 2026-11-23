@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.171.0](https://github.com/zeroroot-ai/gibson/compare/v0.170.0...v0.171.0) (2026-11-23)
+
+
+### Features
+
+* **bank:** give a bank member a loop grant for its tool calls ([#1625](https://github.com/zeroroot-ai/gibson/issues/1625)) ([69f4eb4](https://github.com/zeroroot-ai/gibson/commit/69f4eb4c5d5a0e549795c4818c70f5fa3b1cb6fa))
+* **harness:** follow up on the skill-script review ([#1607](https://github.com/zeroroot-ai/gibson/issues/1607)) ([3aa654c](https://github.com/zeroroot-ai/gibson/commit/3aa654cae4f88cfaa295ff21b538603e6f4272c5))
+
+
+### Bug Fixes
+
+* **brain:** free a merge slot when the agent run that queued it ends ([#1626](https://github.com/zeroroot-ai/gibson/issues/1626)) ([1dd7593](https://github.com/zeroroot-ai/gibson/commit/1dd75935c8e052024c7499c7cf782b9084b7e171))
+* **harness:** keep the agent name and the tags of a finding ([#1627](https://github.com/zeroroot-ai/gibson/issues/1627)) ([b83fc36](https://github.com/zeroroot-ai/gibson/commit/b83fc364887fb10225a1f1506a8b6aa66637d231))
+
 ## [0.170.0](https://github.com/zeroroot-ai/gibson/compare/v0.169.0...v0.170.0) (2026-11-22)
 
 
