@@ -25,7 +25,8 @@
 //                  `{{target.domain}}` and never a parameter.
 //   forgeConnector the connector of the Git host, by catalog id: github-fixloop
 //                  or gitlab-fixloop. It starts the alerts branch, which also
-//                  needs repositoryUrl.
+//                  needs repositoryUrl and application. Without the application
+//                  the scan anchors have no Application, so the render fails.
 //   application    the Application key every observation hangs off
 //   repositoryUrl  the git remote of the source and the alerts branch
 //   ref            the branch the pipeline built
@@ -107,24 +108,18 @@ if len(_exitIDs) > 0 {
 // key silently — the defect zerocool-plugins#90 fixed on the agent side.
 _context: {
 	"zerocool.task": {stringValue: "source-analysis"}
-	if _params.application != _|_ {
-		"application": {stringValue: _params.application}
-	}
+	// The source branch needs application, repositoryUrl, ref and commit. Each is
+	// read without a guard, so the render fails when one is missing.
+	"application": {stringValue: _params.application}
 	if _params.pipelineId != _|_ {
 		"pipeline.id": {stringValue: _params.pipelineId}
 	}
 	if _params.pipelineUrl != _|_ {
 		"pipeline.url": {stringValue: _params.pipelineUrl}
 	}
-	if _params.repositoryUrl != _|_ {
-		"repository.url": {stringValue: _params.repositoryUrl}
-	}
-	if _params.ref != _|_ {
-		"repository.ref": {stringValue: _params.ref}
-	}
-	if _params.commit != _|_ {
-		"repository.commit": {stringValue: _params.commit}
-	}
+	"repository.url":    {stringValue: _params.repositoryUrl}
+	"repository.ref":    {stringValue: _params.ref}
+	"repository.commit": {stringValue: _params.commit}
 	if _params.imageRef != _|_ {
 		"image.ref": {stringValue: _params.imageRef}
 	}
@@ -150,7 +145,7 @@ mission: missionv1.#MissionDefinition & {
 		}
 
 		// ---- source -----------------------------------------------------
-		// Needs application, commit and repositoryUrl. A missing one fails the
+		// Needs application, commit, repositoryUrl and ref. A missing one fails the
 		// render, so the agent never scans HEAD by default.
 		if _has.source {
 			source: {
@@ -222,7 +217,7 @@ mission: missionv1.#MissionDefinition & {
 				type: missionv1.#NODE_TYPE_TOOL
 				toolConfig: {
 					toolName: "mcp:\(_params.forgeConnector):list_dependency_alerts"
-					input: {repositoryUrl: _params.repositoryUrl, state: "all"}
+					input: {application: _params.application, repositoryUrl: _params.repositoryUrl, state: "all"}
 				}
 			}
 		}

@@ -205,6 +205,36 @@ func TestRender_TheSevenOldParametersRenderTheOldBranches(t *testing.T) {
 	}
 }
 
+// The alerts branch needs the Application, or its Findings have no Application
+// anchor. The source branch needs application, repositoryUrl, ref and commit.
+func TestRender_ScanBranchesNeedTheirCompanionParameters(t *testing.T) {
+	alerts := map[string]string{"repositoryUrl": "https://github.com/acme/shop", "application": "acme/shop", "forgeConnector": "github-fixloop"}
+	if _, err := Render(context.Background(), "scan", alerts); err != nil {
+		t.Fatalf("alerts with application and repositoryUrl: %v", err)
+	}
+	for _, drop := range []string{"application", "repositoryUrl"} {
+		in := copyParams(alerts)
+		delete(in, drop)
+		if _, err := Render(context.Background(), "scan", in); err == nil {
+			t.Errorf("the alerts branch rendered without %s", drop)
+		}
+	}
+	source := map[string]string{
+		"application": "acme/shop", "repositoryUrl": "https://github.com/acme/shop", "ref": "main",
+		"commit": "0123456789abcdef0123456789abcdef01234567",
+	}
+	if _, err := Render(context.Background(), "scan", source); err != nil {
+		t.Fatalf("the source branch with its parameters: %v", err)
+	}
+	for _, drop := range []string{"application", "repositoryUrl", "ref"} {
+		in := copyParams(source)
+		delete(in, drop)
+		if _, err := Render(context.Background(), "scan", in); err == nil {
+			t.Errorf("the source branch rendered without %s", drop)
+		}
+	}
+}
+
 // Each branch runs only when its own parameters are present.
 func TestRender_ScanRunsOnlyTheBranchesThatHaveParameters(t *testing.T) {
 	nodesOf := func(in map[string]string) []string {

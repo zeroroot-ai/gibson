@@ -9,6 +9,7 @@
       "toolConfig": {
         "toolName": "mcp:gitlab-fixloop:list_dependency_alerts",
         "input": {
+          "application": "customer-portal",
           "repositoryUrl": "https://gitlab.com/examplebank/customer-portal.git",
           "state": "all"
         }
