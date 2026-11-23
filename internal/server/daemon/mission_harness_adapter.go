@@ -107,6 +107,26 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 		def = &missionpb.MissionDefinition{}
 	}
 
+	// A child that a mission originates inherits the health hold and the restart
+	// rules of its parent, for each one that it leaves unset. The fix loop reads the
+	// hold of the child that delivered a merge request, and the fix agent builds
+	// that child with no constraints (gibson#1469).
+	if req.ParentMissionID != nil {
+		parent, getErr := store.Get(ctx, *req.ParentMissionID)
+		if getErr != nil {
+			return nil, status.Errorf(codes.Internal, "read the parent mission %s: %v", *req.ParentMissionID, getErr)
+		}
+		parentConstraints, parentErr := mission.ParentConstraints(parent)
+		if parentErr != nil {
+			return nil, status.Errorf(codes.Internal, "%v", parentErr)
+		}
+		inherited, inheritErr := mission.InheritConstraints(def.GetConstraints(), parentConstraints)
+		if inheritErr != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "%v", inheritErr)
+		}
+		def.Constraints = inherited
+	}
+
 	// Overlay explicit name/description from the request.
 	if req.Name != "" {
 		def.Name = req.Name

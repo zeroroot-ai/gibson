@@ -16,9 +16,11 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
@@ -469,4 +471,48 @@ func TestOriginate_ConcurrentChildrenNeverExceedTheParentEnvelope(t *testing.T) 
 	require.NoError(t, err)
 	require.NotNil(t, reserved.CostUSDCents)
 	assert.Equal(t, int64(total*100+0.5), *reserved.CostUSDCents)
+}
+
+// A child that a component originates inherits the health hold and the restart
+// rules of its parent, so the hold reaches every child, whoever originates it
+// (gibson#1469). A child can only make the hold longer.
+func TestOriginate_ChildInheritsTheHealthHoldOfItsParent(t *testing.T) {
+	ctx := context.Background()
+	f := newOriginatorFixture(t)
+	parent := parentWithTargets(10.00, 0)
+	parentDef, err := MarshalDefinitionJSON(&missionv1.MissionDefinition{
+		Name: "parent", Constraints: &missionv1.MissionConstraints{HealthHold: durationpb.New(2 * time.Minute)},
+	})
+	require.NoError(t, err)
+	parent.MissionDefinitionJSON = string(parentDef)
+	parent.Constraints.RestartLimit = durationpb.New(9 * time.Minute) // only on the record
+
+	req := validRequest(parent)
+	req.DefinitionJSON = definitionJSON(t, &missionv1.MissionDefinition{Id: "d1", Name: "child", Constraints: &missionv1.MissionConstraints{MaxCost: 1}})
+	child, err := f.orig.Originate(ctx, req)
+	require.NoError(t, err)
+	stored, err := UnmarshalDefinitionJSON([]byte(child.MissionDefinitionJSON))
+	require.NoError(t, err)
+	assert.Equal(t, 2*time.Minute, stored.GetConstraints().GetHealthHold().AsDuration(), "the hold of the definition of the parent")
+	assert.Equal(t, 9*time.Minute, stored.GetConstraints().GetRestartLimit().AsDuration(), "a rule that only the record of the parent holds")
+
+	own := validRequest(parent)
+	own.DefinitionJSON = definitionJSON(t, &missionv1.MissionDefinition{
+		Id: "d2", Name: "child 2", Constraints: &missionv1.MissionConstraints{MaxCost: 1, HealthHold: durationpb.New(10 * time.Second)},
+	})
+	child, err = f.orig.Originate(ctx, own)
+	require.NoError(t, err)
+	stored, err = UnmarshalDefinitionJSON([]byte(child.MissionDefinitionJSON))
+	require.NoError(t, err)
+	assert.Equal(t, 2*time.Minute, stored.GetConstraints().GetHealthHold().AsDuration(), "a shorter hold of the child loses: the stricter value wins")
+
+	// A parent with a definition that does not parse stops the origination and
+	// reserves nothing.
+	bad := parentWithTargets(10.00, 0)
+	bad.MissionDefinitionJSON = "{not json"
+	badReq := validRequest(bad)
+	badReq.DefinitionJSON = definitionJSON(t, &missionv1.MissionDefinition{Id: "d3", Name: "child 3"})
+	_, err = f.orig.Originate(ctx, badReq)
+	require.Error(t, err)
+	assertNothingReserved(ctx, t, f, bad.ID)
 }

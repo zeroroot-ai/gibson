@@ -228,6 +228,19 @@ func (o *Originator) Originate(ctx context.Context, req OriginateRequest) (*Miss
 		return nil, err
 	}
 
+	// A child inherits the health hold and the restart rules of its parent, for
+	// each one that it leaves unset, whoever originates it (gibson#1469). The fix
+	// loop reads the hold of the child that delivered a merge request.
+	parentConstraints, parentErr := ParentConstraints(req.Parent)
+	if parentErr != nil {
+		return nil, parentErr
+	}
+	inherited, inheritErr := InheritConstraints(def.GetConstraints(), parentConstraints)
+	if inheritErr != nil {
+		return nil, inheritErr
+	}
+	def.Constraints = inherited
+
 	// Budget. The definition's own constraints are the REQUEST; what comes
 	// back from the ledger is the grant, and it is what the child mission
 	// records. A caller that asks for more than the parent has left gets
