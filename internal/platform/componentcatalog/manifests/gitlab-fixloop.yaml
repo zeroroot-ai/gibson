@@ -43,6 +43,11 @@ spec:
   # open_merge_request and close_merge_request never merge. The token needs the api scope.
   # The tools that the manifest does not name need only the grant, because the
   # entry has no response actions.
+  # The scan mission calls list_dependency_alerts of this connector, with the
+  # project of the scan, to read the dependency alerts of the Git host as
+  # findings. The tool is in the release of zeroroot-ai/connectors that follows
+  # v0.5.0 (connectors#29), so the image pin moves with that release.
+  # GitLab: the token needs read_api, and the user of the token needs the Security Dashboard permission on a project of the Ultimate tier (the server reads the vulnerabilities through GraphQL).
   # The merge tool runs only when the merge request holds its merge slot
   # (gibson#1458). Only the daemon calls the revert tool, after a failed
   # health signal that it read. The other tools need only the grant.
