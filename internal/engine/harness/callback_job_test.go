@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1407,5 +1408,58 @@ func TestSubscribeInput_GhostInputsGetNoGrantAndAreNotSent(t *testing.T) {
 		if req.TaskID == "released" || req.TaskID == "taken" {
 			t.Errorf("a grant was minted for the ghost job %s", req.TaskID)
 		}
+	}
+}
+
+// holdsAfter is a job surface whose Get shows a job as held by the member only after held is set.
+type holdsAfter struct {
+	*fakeJobs
+	held atomic.Bool
+}
+
+func (h *holdsAfter) Get(ctx context.Context, tenant, id string) (*job.Job, error) {
+	j, err := h.fakeJobs.Get(ctx, tenant, id)
+	if err != nil {
+		return nil, err
+	}
+	out := *j
+	if !h.held.Load() {
+		out.MemberID = "m-2"
+	}
+	return &out, nil
+}
+
+// A skipped input is not remembered. The member does not hold the job at the first poll, so the
+// input is skipped and gets no grant. The same member claims the job again in the same stream, and
+// the next poll delivers the input with its grant.
+func TestSubscribeInput_ASkippedInputIsDeliveredWhenTheMemberClaimsTheJobAgain(t *testing.T) {
+	base := newFakeJobs()
+	base.jobs["job-1"] = openJob("job-1")
+	base.pending = []*job.Input{{
+		ID: "in-1", JobID: "job-1", Kind: job.InputTurn, Message: "go", SentAt: time.Now(),
+		Sender: job.Principal{Kind: job.PrincipalUser, ID: "alice"},
+	}}
+	jobs := &holdsAfter{fakeJobs: base}
+	minter := &recordingMinter{}
+	s := memberService(t, jobs, liveMembers(), minter)
+
+	ctx, cancel := context.WithCancel(memberCtx("acme"))
+	stream := &recordingInputStream{ctx: ctx, cancel: cancel}
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		jobs.held.Store(true) // the member claims the job again
+		time.Sleep(2500 * time.Millisecond)
+		cancel()
+	}()
+	if err := s.SubscribeInput(&harnesspb.SubscribeInputRequest{Context: memberInfo("run-1")}, stream); err != nil { //nolint:contextcheck // the stream carries the context
+		t.Fatalf("SubscribeInput: %v", err)
+	}
+
+	sent := stream.snapshot()
+	if len(sent) != 1 || sent[0].GetId() != "in-1" || sent[0].GetGrant() == "" {
+		t.Fatalf("delivered %v, want in-1 once with its grant", sent)
+	}
+	if len(minter.reqs) != 1 {
+		t.Errorf("minted %d grants, want one: none for the skip", len(minter.reqs))
 	}
 }

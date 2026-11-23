@@ -383,8 +383,8 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 				return gerr
 			}
 			if wire == nil {
-				// A ghost input: the member no longer holds its job. Nothing was minted.
-				delivered[in.ID] = struct{}{}
+				// The member does not hold the job now. Nothing was minted, and the skip is not
+				// remembered: if the same member claims the job again, the input is live.
 				continue
 			}
 			if serr := stream.Send(&harnesspb.SubscribeInputResponse{Input: wire}); serr != nil {
@@ -395,6 +395,17 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 				"type": "job_input", "job_id": in.JobID, "kind": string(in.Kind),
 				"sender": TurnGrantSubject(in.Sender), "message": firstRunes(in.Message, 200),
 			})
+		}
+		// The map holds only ids that the current read still returns, so it never grows past one
+		// read. An input that left the read is acknowledged or a ghost.
+		inRead := make(map[string]struct{}, len(pending))
+		for _, in := range pending {
+			inRead[in.ID] = struct{}{}
+		}
+		for id := range delivered {
+			if _, ok := inRead[id]; !ok {
+				delete(delivered, id)
+			}
 		}
 		select {
 		case <-ctx.Done():

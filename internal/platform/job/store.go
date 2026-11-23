@@ -42,7 +42,7 @@ type Store interface {
 
 	// PendingInputs returns the inputs of a member's jobs that it has not
 	// acknowledged, oldest first. It leaves out the inputs of a job that the member does not
-	// hold, and the inputs of a closed job except its wrap-up: the member can never run those,
+	// hold, and the inputs of a closed job except its wrap-up of the last 10 minutes: the member can never run those,
 	// and they would fill the window and block the inbox. A member that reconnects reads them again.
 	PendingInputs(ctx context.Context, tenantID, memberID string, limit int32) ([]*Input, error)
 

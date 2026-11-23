@@ -384,6 +384,55 @@ func TestJobStore_GhostInputsDoNotBlockTheInbox(t *testing.T) {
 	}
 }
 
+// TestJobStore_OldWrapUpsLeaveTheWindow: the wrap-up of a closed job is delivered for 10 minutes
+// after the close, the window of the renewal of its grant. Twenty older unacknowledged wrap-ups
+// would fill the read and hide a live input, so they leave it.
+func TestJobStore_OldWrapUpsLeaveTheWindow(t *testing.T) {
+	store, pool, bankID := newJobStore(t)
+	ctx := context.Background()
+
+	var oldIDs []string
+	for i := 0; i < 20; i++ {
+		j, err := store.Open(ctx, intTenant, job.OpenInput{
+			BankID: bankID, MemberID: "m-1", Spec: spec("old"), OpenedBy: opener(),
+		})
+		require.NoError(t, err)
+		_, err = store.Close(ctx, intTenant, job.CloseInput{JobID: j.ID, Verdict: job.VerdictFailed, Closer: opener()})
+		require.NoError(t, err)
+		oldIDs = append(oldIDs, j.ID)
+	}
+	_, err := pool.Exec(ctx, `UPDATE jobs SET closed_at = now() - interval '1 hour' WHERE id = ANY($1)`, oldIDs)
+	require.NoError(t, err)
+	recent, err := store.Open(ctx, intTenant, job.OpenInput{
+		BankID: bankID, MemberID: "m-1", Spec: spec("recent"), OpenedBy: opener(),
+	})
+	require.NoError(t, err)
+	_, err = store.Close(ctx, intTenant, job.CloseInput{JobID: recent.ID, Verdict: job.VerdictFailed, Closer: opener()})
+	require.NoError(t, err)
+	live, err := store.Open(ctx, intTenant, job.OpenInput{
+		BankID: bankID, MemberID: "m-1", Spec: spec("live"), OpenedBy: opener(),
+	})
+	require.NoError(t, err)
+	fresh, err := store.Send(ctx, intTenant, job.SendInput{JobID: live.ID, Message: "new", Sender: opener()})
+	require.NoError(t, err)
+
+	pending, err := store.PendingInputs(ctx, intTenant, "m-1", 20)
+	require.NoError(t, err)
+	got := map[string]bool{}
+	for _, in := range pending {
+		got[in.ID] = true
+		for _, id := range oldIDs {
+			require.NotEqual(t, id, in.JobID, "an old wrap-up must leave the window")
+		}
+	}
+	assert.True(t, got[fresh.ID], "the live input is returned")
+	var recentWrap bool
+	for _, in := range pending {
+		recentWrap = recentWrap || (in.JobID == recent.ID && in.Kind == job.InputWrapUp)
+	}
+	assert.True(t, recentWrap, "a wrap-up of the last 10 minutes is still returned")
+}
+
 func TestJobStore_SetStateAndDeliverables(t *testing.T) {
 	store, _, bankID := newJobStore(t)
 	ctx := context.Background()
