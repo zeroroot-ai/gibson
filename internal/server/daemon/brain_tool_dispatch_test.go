@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
 	"google.golang.org/protobuf/proto"
@@ -292,16 +294,24 @@ func TestDispatchTool_PassesTheNodeNetworkToTheTool(t *testing.T) {
 }
 
 type fakeMissionConnector struct {
-	tenant, mission, run, connector, tool string
-	args                                  map[string]any
-	result                                any
-	err                                   error
+	tenant, mission, run, work, connector, tool string
+	args                                        map[string]any
+	result                                      any
+	err                                         error
+	// errs are the errors of the first calls, in order. The call after the last
+	// one returns result and err.
+	errs  []error
+	calls int
 }
 
 func (f *fakeMissionConnector) CallConnectorForMission(
-	_ context.Context, tenant, missionID, runID, connector, tool string, args map[string]any,
+	_ context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any,
 ) (any, error) {
-	f.tenant, f.mission, f.run, f.connector, f.tool, f.args = tenant, missionID, runID, connector, tool, args
+	f.tenant, f.mission, f.run, f.work, f.connector, f.tool, f.args = tenant, missionID, runID, workID, connector, tool, args
+	f.calls++
+	if f.calls <= len(f.errs) {
+		return nil, f.errs[f.calls-1]
+	}
 	return f.result, f.err
 }
 
@@ -324,6 +334,9 @@ func TestDispatchTool_AConnectorToolTakesTheGovernedPath(t *testing.T) {
 	if out != `{"alerts":[]}` {
 		t.Errorf("out = %q", out)
 	}
+	if conn.work != "w1" {
+		t.Errorf("the call names work %q, want the node w1", conn.work)
+	}
 	if conn.tenant != "acme" || conn.run != "run-9" || conn.mission != "m1" || conn.connector != "github-fixloop" || conn.tool != "read_file" {
 		t.Errorf("call = %+v", conn)
 	}
@@ -345,5 +358,53 @@ func TestDispatchTool_AConnectorToolTakesTheGovernedPath(t *testing.T) {
 	b.connectors = nil
 	if _, err := b.dispatchTool(bind, brain.DispatchRequest{Target: "mcp:github-fixloop:read_file"}); err == nil {
 		t.Error("a daemon with no connector caller must fail the node")
+	}
+}
+
+// A call that returns nothing with no error fails the node. It does not succeed
+// with "null".
+func TestDispatchTool_ANilConnectorResultFailsTheNode(t *testing.T) {
+	conn := &fakeMissionConnector{}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = func() missionConnectorCaller { return conn }
+	bind := &missionBinding{ctx: context.Background(), tenant: "acme", runID: "run-9"}
+	if out, err := b.dispatchTool(bind, brain.DispatchRequest{Target: "mcp:github-fixloop:read_file"}); err == nil {
+		t.Fatalf("a nil result must fail the node, got %q", out)
+	}
+}
+
+// A tool with an approval mark waits for a person: the node moves to
+// input_required with the reason, the same call is made again, and an approval
+// resumes it. A denial fails the node.
+func TestDispatchTool_AMarkedToolWaitsForTheApprovalAndResumes(t *testing.T) {
+	pending := fmt.Errorf("%w: request r1", metatool.ErrApprovalPending)
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
+	conn := &fakeMissionConnector{errs: []error{pending, pending}, result: map[string]any{"ok": true}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = func() missionConnectorCaller { return conn }
+	b.approvalPoll = time.Millisecond
+	bind := &missionBinding{ctx: context.Background(), tenant: "acme", runID: "run-9", eng: eng}
+	out, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w1", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"})
+	if err != nil {
+		t.Fatalf("an approval must resume the node: %v", err)
+	}
+	if out != `{"ok":true}` || conn.calls != 3 {
+		t.Errorf("out = %q after %d calls", out, conn.calls)
+	}
+
+	denied := &fakeMissionConnector{errs: []error{pending, fmt.Errorf("%w: request r1", metatool.ErrApprovalDenied)}}
+	b.connectors = func() missionConnectorCaller { return denied }
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w2", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"}); !errors.Is(err, metatool.ErrApprovalDenied) {
+		t.Fatalf("a denial must fail the node, got %v", err)
+	}
+
+	// A canceled mission ends the wait.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	forever := &fakeMissionConnector{err: pending}
+	b.connectors = func() missionConnectorCaller { return forever }
+	if _, err := b.dispatchTool(&missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng},
+		brain.DispatchRequest{WorkID: "w3", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"}); err == nil {
+		t.Fatal("a canceled mission must end the wait")
 	}
 }

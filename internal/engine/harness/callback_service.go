@@ -545,6 +545,9 @@ type ToolCallRecord struct {
 	// ErrCode is the typed reason of a call that did not succeed (gibson#1575).
 	// It is empty for a call that succeeded, and for a path that has no code.
 	ErrCode string
+	// WorkID is the task of the call: the work item of a TOOL node of a mission,
+	// or the task of an agent. The record of a node call names its node.
+	WorkID string
 	// RecordedAtUnixNano stamps when the daemon observed this call, so a
 	// tenant's retention policy can be swept deterministically later.
 	RecordedAtUnixNano int64
@@ -879,6 +882,7 @@ func (s *HarnessCallbackService) captureGrantedToolCall(
 		Err:                callErr,
 		GrantID:            grantID,
 		ErrCode:            errCode,
+		WorkID:             contextInfo.GetTaskId(),
 		RecordedAtUnixNano: time.Now().UnixNano(),
 	})
 	return toolCallID

@@ -27,6 +27,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
@@ -138,6 +140,9 @@ type brainExecutor struct {
 	// read per dispatch, because the daemon builds the callback manager after
 	// the executor. nil means a tool node cannot name a connector tool.
 	connectors func() missionConnectorCaller
+	// approvalPoll is how long a TOOL node waits between two asks for an
+	// approval. Zero means approvalPollInterval. A test sets it.
+	approvalPoll time.Duration
 	// models sends the model call of the Decider to the model gateway
 	// (gibson#1392). The gateway trace is the one source of the llm_call.observed
 	// and token.used events of that call, so the executor emits neither.
@@ -814,12 +819,22 @@ func agentWorkFailure(workID, runID string, err error) brain.WorkCompleted {
 // missionConnectorCaller makes the connector call of a TOOL node.
 // harness.CallbackManager satisfies it.
 type missionConnectorCaller interface {
-	CallConnectorForMission(ctx context.Context, tenant, missionID, runID, connector, tool string, args map[string]any) (any, error)
+	CallConnectorForMission(ctx context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any) (any, error)
 }
+
+// approvalPollInterval is how long a TOOL node waits before it asks again for
+// the approval of a marked tool.
+const approvalPollInterval = 5 * time.Second
 
 // dispatchConnectorTool runs a TOOL node that names a connector tool. The input
 // of the node is the JSON object of the arguments. The result is the JSON of the
 // tool result, which is the output of the node.
+//
+// A tool with an approval mark waits for a person. The node then moves to
+// input_required and shows the reason, and the same call is made again until the
+// approval is decided: the gate answers the same arguments with the state of the
+// request, as it does for an agent. A denial fails the node. A mission that is
+// canceled ends the wait.
 func (b *brainExecutor) dispatchConnectorTool(bind *missionBinding, req brain.DispatchRequest, tid toolid.ID) (string, error) {
 	if b.connectors == nil || b.connectors() == nil {
 		return "", fmt.Errorf("tool %q: this daemon has no connector caller", tid.Canonical())
@@ -830,14 +845,40 @@ func (b *brainExecutor) dispatchConnectorTool(bind *missionBinding, req brain.Di
 			return "", fmt.Errorf("tool %q: the input of the node is not a JSON object: %w", tid.Canonical(), err)
 		}
 	}
-	missionID := req.MissionID
-	res, err := b.connectors().CallConnectorForMission(bind.ctx, bind.tenant, missionID, bind.runID, tid.Connector, tid.Tool, args)
-	if err != nil {
-		return "", fmt.Errorf("tool %q: %w", tid.Canonical(), err)
+	poll := b.approvalPoll
+	if poll <= 0 {
+		poll = approvalPollInterval
 	}
-	out, err := json.Marshal(res)
-	if err != nil {
-		return "", fmt.Errorf("tool %q: encode the result: %w", tid.Canonical(), err)
+	reported := false
+	for {
+		res, err := b.connectors().CallConnectorForMission(bind.ctx, bind.tenant, req.MissionID, bind.runID, req.WorkID,
+			tid.Connector, tid.Tool, args)
+		if err == nil {
+			if res == nil {
+				// A call that returns nothing is not a result. The node must not
+				// succeed with "null".
+				return "", fmt.Errorf("tool %q: the connector returned no result", tid.Canonical())
+			}
+			out, merr := json.Marshal(res)
+			if merr != nil {
+				return "", fmt.Errorf("tool %q: encode the result: %w", tid.Canonical(), merr)
+			}
+			return string(out), nil
+		}
+		if !errors.Is(err, metatool.ErrApprovalPending) {
+			return "", fmt.Errorf("tool %q: %w", tid.Canonical(), err)
+		}
+		if !reported && bind.eng != nil {
+			reported = true
+			bind.eng.Submit(brain.WorkCompleted{
+				ID: req.WorkID, RunID: req.RunID, State: brain.WorkInputRequired,
+				Err: fmt.Sprintf("waiting for the approval of %s: %v", tid.Canonical(), err),
+			})
+		}
+		select {
+		case <-bind.ctx.Done():
+			return "", fmt.Errorf("tool %q: the wait for the approval ended: %w", tid.Canonical(), bind.ctx.Err())
+		case <-time.After(poll):
+		}
 	}
-	return string(out), nil
 }

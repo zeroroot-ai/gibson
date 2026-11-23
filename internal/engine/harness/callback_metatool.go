@@ -495,7 +495,7 @@ func (s *HarnessCallbackService) MissionPolicyForRun(ctx context.Context, tenant
 // harness callback context, such as a connector call through
 // ComponentService.CallTool. The tenant is on ctx.
 func (s *HarnessCallbackService) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
-	return s.captureGrantedToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID},
+	return s.captureGrantedToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID, TaskId: rec.WorkID},
 		uuid.NewString(), rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText, rec.GrantID, string(rec.ErrCode))
 }
 
@@ -521,51 +521,55 @@ func (s *HarnessCallbackService) CallConnectorForTenant(
 	})
 }
 
-// ErrMissionNodeRole is the refusal of a mission node that calls a tool with a
-// role. A merge needs the merge slot of an agent run, and a revert is the call
-// of the daemon only. A TOOL node does neither.
-var ErrMissionNodeRole = errors.New("a mission node cannot call a tool with the role merge or daemon")
-
 // CallConnectorForMission runs the connector call of a TOOL node of a mission
 // (gibson#1469). It takes the same path as CallConnectorForTenant and
 // invoke_tool, metatool.Handler.Call, so a node gets the same can_execute check,
 // the tenant kill switch, the approval mark, the audit records and the flight
-// recorder as an agent does.
+// recorder as an agent does. The records name the work item of the node.
 //
 // The subject of the can_execute check is TenantGrantSubject, the member set of
 // the tenant. That set holds can_execute on a connector only while the tenant
 // has the connector enabled (catalogEnablePosture), so a connector that the
 // tenant did not enable, or that its kill switch stops, is refused. The call is
-// not a call of the daemon: a tool with the role daemon is refused, and a tool
-// with the role merge is refused here before the handler. The mission policy of
-// the run applies: the deny list of the stored definition and the state of the
-// run. A policy that cannot be read refuses the call.
+// not a call of the daemon, and the handler refuses a tool with the role merge
+// or daemon for a node. The mission policy of the run applies: the deny list of
+// the stored definition and the state of the run. The run must belong to the
+// tenant and to the mission of the node. A policy that cannot be read refuses
+// the call.
 func (s *HarnessCallbackService) CallConnectorForMission(
-	ctx context.Context, tenant, missionID, runID, connector, tool string, args map[string]any,
+	ctx context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any,
 ) (any, error) {
 	if runID == "" {
 		return nil, errors.New("a connector call of a mission node needs the run of the mission")
 	}
-	policy, err := s.MissionPolicyForRun(ctx, tenant, runID)
+	if s.authzStore == nil {
+		return nil, errors.New("the run authz store is not wired")
+	}
+	state, err := s.authzStore.Get(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("read the authz state of run %q: %w", runID, err)
+	}
+	if state.TenantID != tenant {
+		return nil, fmt.Errorf("run %q does not belong to the tenant", runID)
+	}
+	if state.MissionID != missionID {
+		return nil, fmt.Errorf("run %q does not belong to the mission of the node", runID)
+	}
+	policy, err := s.policyFromState(ctx, state)
 	if err != nil {
 		return nil, fmt.Errorf("the mission policy of run %q: %w", runID, err)
 	}
-	if entry, lerr := componentcatalog.LookupConnector(connector); lerr == nil {
-		if mark := entry.ApprovalFor(tool); mark.Merge || mark.DaemonOnly {
-			return nil, fmt.Errorf("%w: %s:%s", ErrMissionNodeRole, connector, tool)
-		}
-	}
 	return s.callConnectorAs(ctx, connectorCallAs{
-		tenant: tenant, missionID: missionID, runID: runID, connector: connector, tool: tool, args: args,
-		policy: policy,
+		tenant: tenant, missionID: missionID, runID: runID, workID: workID, connector: connector, tool: tool,
+		args: args, policy: policy, node: true,
 	})
 }
 
 type connectorCallAs struct {
-	tenant, missionID, runID, connector, tool string
-	args                                      map[string]any
-	policy                                    metatool.MissionPolicy
-	daemon                                    bool
+	tenant, missionID, runID, workID, connector, tool string
+	args                                              map[string]any
+	policy                                            metatool.MissionPolicy
+	daemon, node                                      bool
 }
 
 // callConnectorAs is the one function behind the two calls above.
@@ -594,6 +598,8 @@ func (s *HarnessCallbackService) callConnectorAs(ctx context.Context, c connecto
 		Policy:    c.policy,
 		MissionID: c.missionID,
 		RunID:     c.runID,
+		WorkID:    c.workID,
+		Node:      c.node,
 		Recorder:  s.RecordToolCall,
 		Observer:  &harnessCallObserver{s: s},
 		Daemon:    c.daemon,

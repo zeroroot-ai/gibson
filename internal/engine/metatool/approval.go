@@ -41,6 +41,11 @@ var ErrMergeNotGranted = errors.New("metatool: merge not granted yet: the merge 
 // ErrDaemonOnly means that only the daemon calls the tool (the role "daemon"
 // of the manifest, review M7). It wraps ErrBlocked, so each caller refuses it
 // as a blocked call.
+// ErrNodeRole is the refusal of a mission node that calls a tool with the role
+// merge or daemon. A merge needs the merge slot of an agent run, and a revert is
+// the call of the daemon. A TOOL node does neither.
+var ErrNodeRole = fmt.Errorf("%w: a mission node cannot call a tool with the role merge or daemon", ErrBlocked)
+
 var ErrDaemonOnly = fmt.Errorf("%w: only the daemon calls this tool", ErrBlocked)
 
 // ErrApprovalUnavailable means that the tool needs approval and the daemon has
@@ -124,6 +129,11 @@ func (h *Handler) approvalFor(connector, tool string) componentcatalog.ToolAppro
 // may reach the connector.
 func (h *Handler) gateCall(ctx context.Context, c Call, connector, tool string) error {
 	mark := h.approvalFor(connector, tool)
+	// The role refusal of a node sits here, after the intent record, so the
+	// refusal has its audit records and its flight recorder line.
+	if c.Node && (mark.Merge || mark.DaemonOnly) {
+		return fmt.Errorf("%w: %s:%s", ErrNodeRole, connector, tool)
+	}
 	if mark.DaemonOnly && !c.Daemon {
 		return fmt.Errorf("%w: %s:%s", ErrDaemonOnly, connector, tool)
 	}

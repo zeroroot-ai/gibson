@@ -41,7 +41,7 @@ func missionConnectorSvc(t *testing.T, allow map[string]bool, blocked []string) 
 // the call with the run of the mission.
 func TestCallConnectorForMission_AGrantedNodeCallsTheConnector(t *testing.T) {
 	svc, authzer, called, rec := missionConnectorSvc(t, map[string]bool{"component:connector/github-fixloop": true}, nil)
-	out, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "github-fixloop", "read_file", map[string]any{"path": "go.mod"})
+	out, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "work-1", "github-fixloop", "read_file", map[string]any{"path": "go.mod"})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestCallConnectorForMission_AGrantedNodeCallsTheConnector(t *testing.T) {
 // connector gets no call. The same for a tenant switch that is off.
 func TestCallConnectorForMission_AnUngrantedNodeIsRefused(t *testing.T) {
 	svc, _, called, _ := missionConnectorSvc(t, map[string]bool{}, nil)
-	_, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "github-fixloop", "read_file", nil)
+	_, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "work-1", "github-fixloop", "read_file", nil)
 	if !errors.Is(err, metatool.ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}
@@ -77,7 +77,7 @@ func TestCallConnectorForMission_AnUngrantedNodeIsRefused(t *testing.T) {
 // a tenant with no grant on the connector gets nothing either.
 func TestCallConnectorForMission_AnotherTenantIsRefused(t *testing.T) {
 	svc, _, called, _ := missionConnectorSvc(t, map[string]bool{"component:connector/github-fixloop": true}, nil)
-	if _, err := svc.CallConnectorForMission(context.Background(), "other", "m1", "run-1", "github-fixloop", "read_file", nil); err == nil {
+	if _, err := svc.CallConnectorForMission(context.Background(), "other", "m1", "run-1", "work-1", "github-fixloop", "read_file", nil); err == nil {
 		t.Fatal("a run of acme called a connector as tenant other")
 	}
 	if len(*called) != 0 {
@@ -88,14 +88,14 @@ func TestCallConnectorForMission_AnotherTenantIsRefused(t *testing.T) {
 // The mission deny list applies, and a run that cannot be read refuses the call.
 func TestCallConnectorForMission_TheMissionPolicyApplies(t *testing.T) {
 	svc, _, called, _ := missionConnectorSvc(t, map[string]bool{"component:connector/github-fixloop": true}, []string{"mcp:github-fixloop:read_file"})
-	if _, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "github-fixloop", "read_file", nil); !errors.Is(err, metatool.ErrBlocked) {
+	if _, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "work-1", "github-fixloop", "read_file", nil); !errors.Is(err, metatool.ErrBlocked) {
 		t.Fatalf("err = %v, want ErrBlocked", err)
 	}
 	svc.authzStore = failingAuthzStore{}
-	if _, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "github-fixloop", "other_tool", nil); err == nil {
+	if _, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "work-1", "github-fixloop", "other_tool", nil); err == nil {
 		t.Fatal("a run with no readable policy must refuse")
 	}
-	if _, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "", "github-fixloop", "read_file", nil); err == nil {
+	if _, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "", "work-1", "github-fixloop", "read_file", nil); err == nil {
 		t.Fatal("a call with no run must refuse")
 	}
 	if len(*called) != 0 {
@@ -103,14 +103,43 @@ func TestCallConnectorForMission_TheMissionPolicyApplies(t *testing.T) {
 	}
 }
 
-// A node never calls a merge tool or a daemon-only tool.
-func TestCallConnectorForMission_ARoleToolIsRefused(t *testing.T) {
-	svc, _, called, _ := missionConnectorSvc(t, map[string]bool{"component:connector/github-fixloop": true}, nil)
+// A node never calls a merge tool or a daemon-only tool. The refusal comes from
+// the handler, after the intent record, so it has its audit records and its
+// flight recorder line.
+func TestCallConnectorForMission_ARoleToolIsRefusedByTheHandler(t *testing.T) {
+	svc, _, called, rec := missionConnectorSvc(t, map[string]bool{"component:connector/github-fixloop": true}, nil)
+	var recorded []capturedTool
+	svc.toolCallSink = func(_ context.Context, tn string, call ToolCallRecord) {
+		recorded = append(recorded, capturedTool{tenant: tn, call: call})
+	}
 	for _, tool := range []string{"merge_merge_request", "revert_merge_request"} {
-		_, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "github-fixloop", tool, map[string]any{"merge_request": "a/b#1"})
-		if !errors.Is(err, ErrMissionNodeRole) {
-			t.Errorf("%s: err = %v, want ErrMissionNodeRole", tool, err)
+		before := len(rec.Events())
+		_, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "work-1", "github-fixloop", tool, map[string]any{"merge_request": "a/b#1"})
+		if !errors.Is(err, metatool.ErrNodeRole) {
+			t.Errorf("%s: err = %v, want ErrNodeRole", tool, err)
 		}
+		if got := len(rec.Events()) - before; got != 2 {
+			t.Errorf("%s: audit records = %d, want the intent and the result", tool, got)
+		}
+	}
+	if len(recorded) != 2 {
+		t.Errorf("flight recorder lines = %d, want 2", len(recorded))
+	}
+	for _, r := range recorded {
+		if r.call.WorkID != "work-1" {
+			t.Errorf("the record names task %q, want the work item of the node", r.call.WorkID)
+		}
+	}
+	if len(*called) != 0 {
+		t.Fatalf("the connector got a call: %v", *called)
+	}
+}
+
+// The run must belong to the mission of the node.
+func TestCallConnectorForMission_AnotherMissionIsRefused(t *testing.T) {
+	svc, _, called, _ := missionConnectorSvc(t, map[string]bool{"component:connector/github-fixloop": true}, nil)
+	if _, err := svc.CallConnectorForMission(context.Background(), "acme", "other-mission", "run-1", "work-1", "github-fixloop", "read_file", nil); err == nil {
+		t.Fatal("a node of another mission used the run of m1")
 	}
 	if len(*called) != 0 {
 		t.Fatalf("the connector got a call: %v", *called)
@@ -122,7 +151,7 @@ func TestCallConnectorForMission_ARoleToolIsRefused(t *testing.T) {
 func TestCallConnectorForMission_AMarkedToolWaitsForApproval(t *testing.T) {
 	svc, _, called, _ := missionConnectorSvc(t, map[string]bool{"component:connector/crowdstrike-response": true}, nil)
 	svc.toolApproval = pendingGate{}
-	_, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "crowdstrike-response", "a_tool_the_manifest_does_not_name", map[string]any{"host": "h1"})
+	_, err := svc.CallConnectorForMission(context.Background(), "acme", "m1", "run-1", "work-1", "crowdstrike-response", "a_tool_the_manifest_does_not_name", map[string]any{"host": "h1"})
 	if !errors.Is(err, metatool.ErrApprovalPending) {
 		t.Fatalf("err = %v, want ErrApprovalPending", err)
 	}
