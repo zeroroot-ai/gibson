@@ -56,19 +56,28 @@ func (d *daemonImpl) RunCatalogMission(ctx context.Context, req api.RunCatalogMi
 		Name:                  req.Name,
 		TargetID:              targetID,
 		Metadata:              map[string]any{metadataCatalogMission: req.Name},
+		CreatedBy:             req.CreatedBy,
 	})
 	if err != nil {
 		return "", fmt.Errorf("create the catalog mission %q: %w", req.Name, err)
 	}
 	missionID := info.ID.String()
 
-	// The scan anchors are written before the mission runs, so the alerts node
-	// finds its Application and Repository.
+	d.announceMission(tenant, &mission.Mission{
+		ID: info.ID, Name: req.Name, TargetID: targetID, TenantID: tenant.String(), CreatedBy: req.CreatedBy,
+	})
+	start := adapter.Run
+	if d.startMission != nil {
+		start = d.startMission
+	}
+	if err := start(ctx, missionID); err != nil {
+		return "", fmt.Errorf("start the catalog mission %q: %w", req.Name, err)
+	}
+	// The anchors are written only after the mission started, so a mission that
+	// did not start leaves no anchor behind. The alerts node reads the anchors
+	// when it runs, which is after this point.
 	if d.scanAnchors != nil && strings.TrimSpace(req.Name) == brain.ScanMissionName {
 		d.scanAnchors(ctx, tenant.String(), missionID, req.Params)
-	}
-	if err := adapter.Run(ctx, missionID); err != nil {
-		return "", fmt.Errorf("start the catalog mission %q: %w", req.Name, err)
 	}
 	return missionID, nil
 }

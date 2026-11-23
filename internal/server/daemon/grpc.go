@@ -3070,18 +3070,7 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 	// TenantID MUST be stamped: the ListMissions gRPC handler filters by
 	// m.TenantID == caller tenant, so a mission saved without it is invisible
 	// on the dashboard even though it lives in the tenant's store.
-	m := &mission.Mission{
-		ID:                  types.NewID(),
-		TenantID:            tenantForMission.String(),
-		Name:                req.Name,
-		Description:         req.Description,
-		Status:              mission.MissionStatusSubmitted,
-		TargetID:            targetID,
-		MissionDefinitionID: missionDefinitionID,
-		CreatedBy:           req.CreatedBy,
-		CreatedAt:           mission.NewUnixTimeNow(),
-		UpdatedAt:           mission.NewUnixTimeNow(),
-	}
+	m := newMissionRecord(tenantForMission, req.Name, req.Description, targetID, missionDefinitionID, req.CreatedBy)
 	// Copy string metadata to map[string]any.
 	if req.Metadata != nil {
 		m.Metadata = make(map[string]any, len(req.Metadata))
@@ -3103,16 +3092,7 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 	// The World learns of the mission now, as pending with its creator, so
 	// ListMissions and the dashboard show it before it runs (hosted#205).
 	// MissionStarted moves the same entity to running when it does.
-	if d.brainRegistry != nil {
-		d.brainRegistry.For(tenantForMission.String()).Submit(brain.MissionCreated{
-			ID:          m.ID.String(),
-			Name:        m.Name,
-			Description: m.Description,
-			TargetID:    m.TargetID.String(),
-			TenantID:    m.TenantID,
-			CreatedBy:   m.CreatedBy,
-		})
-	}
+	d.announceMission(tenantForMission, m)
 
 	// Daemon-side Mission node materialization (non-fatal on failure) — spec D6.
 	// After the authoritative Redis state is persisted, mirror the Mission node

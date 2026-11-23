@@ -177,6 +177,10 @@ type daemonImpl struct {
 	// and RunCatalogMission both call it.
 	scanAnchors harness.ScanAnchorSink
 
+	// startMission starts a mission that the store holds. A test sets it. Empty
+	// means the mission manager of the daemon.
+	startMission func(ctx context.Context, missionID string) error
+
 	// missionAuthzStore tracks the owning user per run for component authz callback resolution.
 	// One-code-path slice deploy#195: required; set unconditionally in the
 	// Redis init phase of Start().

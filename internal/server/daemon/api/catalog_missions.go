@@ -132,8 +132,12 @@ func (s *DaemonServer) RunCatalogMission(
 	if err := s.admitMission(ctx); err != nil {
 		return nil, err
 	}
+	creator, err := callerPrincipal(ctx)
+	if err != nil {
+		return nil, err
+	}
 	id, err := s.daemon.RunCatalogMission(ctx, RunCatalogMissionData{
-		Name: name, Params: req.GetParams(), TargetID: req.GetTargetId(),
+		Name: name, Params: req.GetParams(), TargetID: req.GetTargetId(), CreatedBy: creator,
 	})
 	if err != nil {
 		s.logger.Error("failed to run a catalog mission", "mission", name, "error", err)

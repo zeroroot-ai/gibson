@@ -663,6 +663,9 @@ type RunCatalogMissionData struct {
 	// TargetID is a registered target of the tenant. The mission binds its runtime
 	// branch to it.
 	TargetID string
+	// CreatedBy is the caller, stamped by the RPC handler from the identity of the
+	// request.
+	CreatedBy principal.Principal
 }
 
 type RunMissionData struct {
