@@ -13,7 +13,7 @@
 # the source tree it built from (gibson#790). No person edits the image line.
 # The first digest below is the image that workflow built and signed from
 # this tree on main (run 40239580081).
-# plugin-source-tree: 4f2e06064229ecd7c42ee212fa7ff0d57ee9a7d3
+# plugin-source-tree: 6bc7b6fb58c653019baf1a64c546bed2b6cebb3b
 id: gitlab
 kind: plugin
 displayName: GitLab
@@ -24,7 +24,7 @@ egressAllow:
   - gitlab.com:443
 spec:
   runtime: pod
-  image: ghcr.io/zeroroot-ai/gibson-plugin-gitlab@sha256:416f0afffd51f7531abab8b849b65499ee11eef4c719209a5c1efdea90aa1267
+  image: ghcr.io/zeroroot-ai/gibson-plugin-gitlab@sha256:46e942be7e86c756f9f5153a434dd5a2e2ec5d2a4e1514ac7d5470dee1ad64ab
   # Trusted, and four facts make it so. We wrote the code. The image is signed
   # and pinned by digest. The plugin passes the content it handles through and
   # does not execute or interpret it. Its egress is the one host above. An
