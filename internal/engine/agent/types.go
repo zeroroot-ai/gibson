@@ -241,6 +241,13 @@ type Finding struct {
 	Metadata    map[string]any `json:"metadata,omitempty"`
 	CreatedAt   time.Time      `json:"created_at"`
 
+	// AgentName is the name of the agent that authored the finding, as the
+	// agent states it. An incident release reads it to tell which agent found
+	// the flaw (incident-agent#8). SubmittedBy is the verified principal.
+	AgentName string `json:"agent_name,omitempty"`
+	// Tags are the labels that the agent put on the finding.
+	Tags []string `json:"tags,omitempty"`
+
 	// SubmittedBy is the verified principal that submitted the finding over the
 	// component path (gibson#208), as the FGA user ref ext-authz asserted, for
 	// example "agent_principal:<id>". The daemon stamps it from the request
