@@ -44,6 +44,11 @@ type Store interface {
 	// acknowledged, oldest first. A member that reconnects reads them again.
 	PendingInputs(ctx context.Context, tenantID, memberID string, limit int32) ([]*Input, error)
 
+	// PendingJobInputs returns the inputs of ONE job that the member has not
+	// acknowledged, oldest first. It reads only that job, so the inputs of other
+	// jobs of the member never crowd it out.
+	PendingJobInputs(ctx context.Context, tenantID, jobID string, limit int32) ([]*Input, error)
+
 	// Acknowledge marks one input as run, so it is not delivered again.
 	Acknowledge(ctx context.Context, tenantID, inputID string) error
 

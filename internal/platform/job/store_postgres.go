@@ -384,6 +384,38 @@ func (s *postgresStore) PendingInputs(ctx context.Context, tenantID, memberID st
 	return out, nil
 }
 
+func (s *postgresStore) PendingJobInputs(ctx context.Context, tenantID, jobID string, limit int32) ([]*Input, error) {
+	c, err := s.conn(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Release()
+
+	rows, err := c.SQL().Query(ctx,
+		`SELECT id, job_id, seq, kind, message, sender_kind, sender_id, sent_at, acknowledged_at
+		 FROM job_inputs
+		 WHERE job_id = $1 AND acknowledged_at IS NULL
+		 ORDER BY sent_at ASC, seq ASC
+		 LIMIT $2`, jobID, clampPageSize(limit))
+	if err != nil {
+		return nil, fmt.Errorf("job: pending inputs of job %s: %w", jobID, err)
+	}
+	defer rows.Close()
+
+	out := []*Input{}
+	for rows.Next() {
+		in, scanErr := scanInput(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("job: pending job input scan: %w", scanErr)
+		}
+		out = append(out, in)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("job: pending job input rows: %w", rows.Err())
+	}
+	return out, nil
+}
+
 func (s *postgresStore) Acknowledge(ctx context.Context, tenantID, inputID string) error {
 	c, err := s.conn(ctx, tenantID)
 	if err != nil {

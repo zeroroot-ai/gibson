@@ -247,6 +247,45 @@ func TestJobStore_UnacknowledgedInputRedelivers(t *testing.T) {
 	assert.Len(t, pending, 1)
 }
 
+// TestJobStore_PendingJobInputsReadsOneJob: a member with more than 100 inputs on one job
+// still reads the input of another job. PendingInputs reads the oldest inputs of all jobs of
+// the member, so the 100 oldest can hide a later job. PendingJobInputs filters by job, and
+// it never reads a job of another tenant member.
+func TestJobStore_PendingJobInputsReadsOneJob(t *testing.T) {
+	store, _, bankID := newJobStore(t)
+	ctx := context.Background()
+
+	busy, err := store.Open(ctx, intTenant,
+		job.OpenInput{BankID: bankID, MemberID: "m-1", Spec: spec("busy"), OpenedBy: opener()})
+	require.NoError(t, err)
+	for i := 0; i < 105; i++ {
+		_, err = store.Send(ctx, intTenant, job.SendInput{JobID: busy.ID, Message: "turn", Sender: opener()})
+		require.NoError(t, err)
+	}
+	later, err := store.Open(ctx, intTenant,
+		job.OpenInput{BankID: bankID, MemberID: "m-1", Spec: spec("later"), OpenedBy: opener()})
+	require.NoError(t, err)
+	wrap, err := store.Send(ctx, intTenant,
+		job.SendInput{JobID: later.ID, Kind: job.InputWrapUp, Message: "wrap up", Sender: opener()})
+	require.NoError(t, err)
+
+	all, err := store.PendingInputs(ctx, intTenant, "m-1", 100)
+	require.NoError(t, err)
+	for _, in := range all {
+		require.NotEqual(t, later.ID, in.JobID, "the 100 oldest inputs of the member hide the later job")
+	}
+
+	got, err := store.PendingJobInputs(ctx, intTenant, later.ID, 100)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, wrap.ID, got[0].ID)
+
+	require.NoError(t, store.Acknowledge(ctx, intTenant, wrap.ID))
+	got, err = store.PendingJobInputs(ctx, intTenant, later.ID, 100)
+	require.NoError(t, err)
+	assert.Empty(t, got, "an acknowledged input is not pending")
+}
+
 func TestJobStore_SetStateAndDeliverables(t *testing.T) {
 	store, _, bankID := newJobStore(t)
 	ctx := context.Background()

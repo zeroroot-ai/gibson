@@ -154,6 +154,9 @@ func (f *fakeJobStore) Claim(context.Context, string, string, string) (*job.Job,
 func (f *fakeJobStore) PendingInputs(context.Context, string, string, int32) ([]*job.Input, error) {
 	return nil, nil
 }
+func (f *fakeJobStore) PendingJobInputs(context.Context, string, string, int32) ([]*job.Input, error) {
+	return nil, nil
+}
 func (f *fakeJobStore) Acknowledge(context.Context, string, string) error { return nil }
 func (f *fakeJobStore) SetState(context.Context, string, string, job.State, string) (*job.Job, error) {
 	return nil, nil

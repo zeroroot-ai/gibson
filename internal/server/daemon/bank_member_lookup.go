@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -54,6 +55,7 @@ func memberBaseGrantSubject(agentName string) string { return "component:agent:"
 // It is what lets a member's base grant renew: a member has no mission binding,
 // so its liveness is its row in the bank store.
 type bankMemberLiveness struct {
+	now   func() time.Time // the clock, time.Now when nil
 	banks func() (bank.Store, error)
 	jobs  func() (job.Store, error)
 }
@@ -80,18 +82,21 @@ func newBankMemberLiveness(d *daemonImpl) *bankMemberLiveness {
 	}
 }
 
-// pendingTurnInputs bounds the read of the inputs that a member has not finished, when
-// the lookup decides if a closed job still needs its grant.
+// pendingTurnInputs bounds the read of the inputs of one job that a member has not finished.
 const pendingTurnInputs = 100
 
+// wrapUpRenewalWindow is how long after the close of a job the wrap-up may renew its grant.
+// It covers the 5 minute retry of the member with margin.
+const wrapUpRenewalWindow = 10 * time.Minute
+
 // IsMemberTurnGrantLive is true only for the turn grant of a live member for a job that
-// the member holds. The grant must name the bank of the member as its mission and the
-// run of the member as its run, and its task must be a job of that bank that the member
-// holds. The member must not be dead. The job must not be closed, unless the member has
-// an input of that job that it has not finished: the wrap-up that follows the close. A
-// grant that names a job of another member, a closed job with nothing left to do, or
-// the base grant of the member (its task is the member, not a job) is not live. A
-// store error is an error, never an answer.
+// the member holds. The grant must name the bank of the member as its mission and the run
+// of the member as its run, and its task must be a job of that bank that the member holds.
+// The member must not be dead. The grant carries the authority of one sender for one turn,
+// so it is live only while an input of this job from that sender (the subject of the grant)
+// is not acknowledged. A closed job keeps its wrap-up grant for 10 minutes after the close.
+// A grant that names a job of another member, or the base grant of the member (its task is
+// the member, not a job), is not live. A store error is an error, never an answer.
 func (l *bankMemberLiveness) IsMemberTurnGrantLive(ctx context.Context, claims sdkcg.Claims) (bool, error) {
 	banks, err := l.banks()
 	if err != nil {
@@ -122,19 +127,35 @@ func (l *bankMemberLiveness) IsMemberTurnGrantLive(ctx context.Context, claims s
 	if j.BankID != m.BankID || j.MemberID != m.ID {
 		return false, nil // the member does not hold the job
 	}
-	if j.State != job.StateClosed {
-		return true, nil
+	if j.State == job.StateClosed && !l.withinWrapUpWindow(j) {
+		return false, nil
 	}
-	pending, err := jobs.PendingInputs(ctx, tenantID, m.ID, pendingTurnInputs)
+	// A turn grant carries the authority of one sender for one turn. It lives only while an
+	// input of this job from that sender is not acknowledged. A job that waits between turns
+	// holds no live grant.
+	pending, err := jobs.PendingJobInputs(ctx, tenantID, j.ID, pendingTurnInputs)
 	if err != nil {
-		return false, fmt.Errorf("read the inputs of member %s: %w", m.ID, err)
+		return false, fmt.Errorf("read the inputs of job %s: %w", j.ID, err)
 	}
 	for _, in := range pending {
-		if in.JobID == j.ID {
-			return true, nil // the wrap-up of a closed job
+		if harness.TurnGrantSubject(in.Sender) == claims.Subject {
+			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// withinWrapUpWindow is true while the wrap-up of a closed job may still renew its grant.
+// A closed job with no close time is outside the window.
+func (l *bankMemberLiveness) withinWrapUpWindow(j *job.Job) bool {
+	if j.ClosedAt.IsZero() {
+		return false
+	}
+	now := time.Now
+	if l.now != nil {
+		now = l.now
+	}
+	return !now().After(j.ClosedAt.Add(wrapUpRenewalWindow))
 }
 
 // IsMemberBaseGrantLive is true only for the base grant of a member that is not

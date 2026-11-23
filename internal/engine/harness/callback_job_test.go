@@ -490,10 +490,10 @@ func TestReportDeliverable_NeedsADeliverableAndTheMembersOwnJob(t *testing.T) {
 }
 
 func TestTurnGrantSubject(t *testing.T) {
-	if got := turnGrantSubject(job.Principal{Kind: job.PrincipalComponent, ID: "agent_principal:x"}); got != "agent_principal:x" {
+	if got := TurnGrantSubject(job.Principal{Kind: job.PrincipalComponent, ID: "agent_principal:x"}); got != "agent_principal:x" {
 		t.Errorf("a component is already a typed principal, got %q", got)
 	}
-	if got := turnGrantSubject(job.Principal{Kind: job.PrincipalUser, ID: "alice"}); got != "user:alice" {
+	if got := TurnGrantSubject(job.Principal{Kind: job.PrincipalUser, ID: "alice"}); got != "user:alice" {
 		t.Errorf("got %q", got)
 	}
 }
