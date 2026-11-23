@@ -510,6 +510,9 @@ func TestPostgresStore_PendingInputsReadsTheUnacknowledged(t *testing.T) {
 	if !script.ran("acknowledged_at IS NULL") {
 		t.Error("only unacknowledged inputs are redelivered")
 	}
+	if !script.ran("j.member_id = $1") || !script.ran("j.state <> $3 OR i.kind = $4") {
+		t.Error("the inputs of a job the member does not hold, and of a closed job but its wrap-up, must stay out")
+	}
 }
 
 func TestPostgresStore_AcknowledgeIsIdempotent(t *testing.T) {

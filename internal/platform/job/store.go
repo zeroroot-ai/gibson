@@ -41,7 +41,9 @@ type Store interface {
 	Claim(ctx context.Context, tenantID, bankID, memberID string) (*Job, error)
 
 	// PendingInputs returns the inputs of a member's jobs that it has not
-	// acknowledged, oldest first. A member that reconnects reads them again.
+	// acknowledged, oldest first. It leaves out the inputs of a job that the member does not
+	// hold, and the inputs of a closed job except its wrap-up: the member can never run those,
+	// and they would fill the window and block the inbox. A member that reconnects reads them again.
 	PendingInputs(ctx context.Context, tenantID, memberID string, limit int32) ([]*Input, error)
 
 	// SetTurn records the current turn of a job: the sender whose authority the member acts

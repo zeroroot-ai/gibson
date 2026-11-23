@@ -329,6 +329,61 @@ func TestJobStore_AReclaimKeepsTheTurnThatWasRunning(t *testing.T) {
 	assert.Equal(t, bob, got.TurnSender)
 }
 
+// TestJobStore_GhostInputsDoNotBlockTheInbox: the inbox reads the oldest inputs of the member. The
+// inputs of a closed job (never run, never acknowledged) and of a job that a release took away would
+// fill the window of 20 and hide a new input. They stay out of the read, and a wrap-up of a closed job
+// that the member holds stays in.
+func TestJobStore_GhostInputsDoNotBlockTheInbox(t *testing.T) {
+	store, _, bankID := newJobStore(t)
+	ctx := context.Background()
+
+	ghost, err := store.Open(ctx, intTenant, job.OpenInput{
+		BankID: bankID, MemberID: "m-1", Spec: spec("ghost"), OpenedBy: opener(),
+	})
+	require.NoError(t, err)
+	for i := 0; i < 25; i++ {
+		_, err = store.Send(ctx, intTenant, job.SendInput{JobID: ghost.ID, Message: "turn", Sender: opener()})
+		require.NoError(t, err)
+	}
+	closed, err := store.Close(ctx, intTenant, job.CloseInput{
+		JobID: ghost.ID, Verdict: job.VerdictFailed, Closer: opener(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, job.StateClosed, closed.State)
+
+	live, err := store.Open(ctx, intTenant, job.OpenInput{
+		BankID: bankID, MemberID: "m-1", Spec: spec("live"), OpenedBy: opener(),
+	})
+	require.NoError(t, err)
+	fresh, err := store.Send(ctx, intTenant, job.SendInput{JobID: live.ID, Message: "new", Sender: opener()})
+	require.NoError(t, err)
+
+	pending, err := store.PendingInputs(ctx, intTenant, "m-1", 20)
+	require.NoError(t, err)
+	var ids []string
+	for _, in := range pending {
+		require.NotEqual(t, job.InputTurn, in.Kind, "a turn of a closed job is a ghost")
+		ids = append(ids, in.ID)
+	}
+	assert.Contains(t, ids, fresh.ID, "25 ghost inputs must not hide the new input")
+	hasWrapUp := false
+	for _, in := range pending {
+		if in.JobID == ghost.ID && in.Kind == job.InputWrapUp {
+			hasWrapUp = true
+		}
+	}
+	assert.True(t, hasWrapUp, "the wrap-up of a closed job that the member holds is still delivered")
+
+	// A job that a release took away from the member sends no input to the old member.
+	_, err = store.ReleaseMember(ctx, intTenant, "m-1")
+	require.NoError(t, err)
+	after, err := store.PendingInputs(ctx, intTenant, "m-1", 20)
+	require.NoError(t, err)
+	for _, in := range after {
+		assert.NotEqual(t, live.ID, in.JobID, "the old member must not get the inputs of a released job")
+	}
+}
+
 func TestJobStore_SetStateAndDeliverables(t *testing.T) {
 	store, _, bankID := newJobStore(t)
 	ctx := context.Background()

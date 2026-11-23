@@ -372,8 +372,9 @@ func (s *postgresStore) PendingInputs(ctx context.Context, tenantID, memberID st
 		`SELECT i.id, i.job_id, i.seq, i.kind, i.message, i.sender_kind, i.sender_id, i.sent_at, i.acknowledged_at
 		 FROM job_inputs i JOIN jobs j ON j.id = i.job_id
 		 WHERE j.member_id = $1 AND i.acknowledged_at IS NULL
+		   AND (j.state <> $3 OR i.kind = $4)
 		 ORDER BY i.sent_at ASC, i.seq ASC
-		 LIMIT $2`, memberID, clampPageSize(limit))
+		 LIMIT $2`, memberID, clampPageSize(limit), string(StateClosed), string(InputWrapUp))
 	if err != nil {
 		return nil, fmt.Errorf("job: pending inputs for %s: %w", memberID, err)
 	}

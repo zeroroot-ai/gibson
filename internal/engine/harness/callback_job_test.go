@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -1351,5 +1352,60 @@ func TestPullJob_AFailedReleaseIsRetriedOnceThenLoggedWithTheJob(t *testing.T) {
 				t.Errorf("error logs = %v, want none", errLogs)
 			}
 		})
+	}
+}
+
+// A ghost input is the input of a job that the member no longer holds, or of a closed job that is
+// no wrap-up. The member can never acknowledge it, so the daemon sends nothing and mints no grant
+// for it. A real input next to the ghosts is delivered with its grant.
+func TestSubscribeInput_GhostInputsGetNoGrantAndAreNotSent(t *testing.T) {
+	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	jobs := newFakeJobs()
+	jobs.jobs["live"] = openJob("live")
+	released := openJob("released")
+	released.MemberID = "" // a release put the job back in the queue
+	jobs.jobs["released"] = released
+	taken := openJob("taken")
+	taken.MemberID = "m-2" // another member holds it now
+	jobs.jobs["taken"] = taken
+	closed := openJob("closed")
+	closed.State = job.StateClosed
+	jobs.jobs["closed"] = closed
+	in := func(id, jobID string, kind job.InputKind) *job.Input {
+		return &job.Input{ID: id, JobID: jobID, Kind: kind, Message: id, SentAt: time.Now(), Sender: alice}
+	}
+	for i := 0; i < 25; i++ {
+		jobs.pending = append(jobs.pending, in(fmt.Sprintf("ghost-%d", i), "released", job.InputTurn))
+	}
+	jobs.pending = append(jobs.pending,
+		in("taken-1", "taken", job.InputTurn),
+		in("closed-turn", "closed", job.InputTurn),
+		in("closed-wrap", "closed", job.InputWrapUp),
+		in("live-1", "live", job.InputTurn),
+	)
+	minter := &recordingMinter{}
+	s := memberService(t, jobs, liveMembers(), minter)
+
+	ctx, cancel := context.WithCancel(memberCtx("acme"))
+	stream := &recordingInputStream{ctx: ctx, cancel: cancel}
+	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+	if err := s.SubscribeInput(&harnesspb.SubscribeInputRequest{Context: memberInfo("run-1")}, stream); err != nil { //nolint:contextcheck // the stream carries the context
+		t.Fatalf("SubscribeInput: %v", err)
+	}
+
+	var ids []string
+	for _, w := range stream.snapshot() {
+		ids = append(ids, w.GetId())
+	}
+	if len(ids) != 2 || ids[0] != "closed-wrap" || ids[1] != "live-1" {
+		t.Fatalf("delivered %v, want the wrap-up of the closed job and the live input only", ids)
+	}
+	if len(minter.reqs) != 2 {
+		t.Fatalf("minted %d grants, want one for each delivered input", len(minter.reqs))
+	}
+	for _, req := range minter.reqs {
+		if req.TaskID == "released" || req.TaskID == "taken" {
+			t.Errorf("a grant was minted for the ghost job %s", req.TaskID)
+		}
 	}
 }

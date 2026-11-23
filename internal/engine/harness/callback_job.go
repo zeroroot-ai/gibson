@@ -378,9 +378,14 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 			if _, sent := delivered[in.ID]; sent {
 				continue
 			}
-			wire, gerr := s.inputWithTurnGrant(ctx, tenantID, runID, in)
+			wire, gerr := s.inputWithTurnGrant(ctx, tenantID, memberID, runID, in)
 			if gerr != nil {
 				return gerr
+			}
+			if wire == nil {
+				// A ghost input: the member no longer holds its job. Nothing was minted.
+				delivered[in.ID] = struct{}{}
+				continue
 			}
 			if serr := stream.Send(&harnesspb.SubscribeInputResponse{Input: wire}); serr != nil {
 				return status.Errorf(codes.Unavailable, "deliver an input: %v", serr)
@@ -407,7 +412,9 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 // sat in a table between the send and the turn would be a standing credential
 // with a table for a home, and its lifetime would be the queue's depth rather
 // than the turn's.
-func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantID, runID string, in *job.Input) (*jobpb.Input, error) {
+func (s *HarnessCallbackService) inputWithTurnGrant(
+	ctx context.Context, tenantID, memberID, runID string, in *job.Input,
+) (*jobpb.Input, error) {
 	wire := &jobpb.Input{
 		Id: in.ID, JobId: in.JobID, Message: in.Message,
 		Sender: principal.ToProto(in.Sender), SentAt: timestamppb.New(in.SentAt),
@@ -416,6 +423,11 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 	j, err := s.jobs.Get(ctx, tenantID, in.JobID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read the job an input belongs to: %v", err)
+	}
+	// An input of a job that the member no longer holds, or of a closed job that is no wrap-up,
+	// is not delivered, and it gets no grant: the member could never acknowledge it.
+	if j.MemberID != memberID || (j.State == job.StateClosed && in.Kind != job.InputWrapUp) {
+		return nil, nil
 	}
 	grant, err := s.mintTurnGrant(tenantID, runID, j.BankID, in.JobID, in.Sender)
 	if errors.Is(err, ErrNoBankSurface) {
