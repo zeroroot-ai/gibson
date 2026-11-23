@@ -152,8 +152,8 @@ func (m *mockForge) setHealth(value float64) {
 }
 
 // fixLoopSecrets stores the secrets of the two connectors in the tenant secret
-// store, the way a tenant admin does with SetSecret. The CA bundle is a credential
-// of the tenant, and the others have no category, as the manifests name them.
+// store, the way a tenant admin does with SetSecret. The others have no category, as the manifests name them.
+// The CA bundle of a connector is stored like its credentials: with no category.
 func fixLoopSecrets(ctx context.Context, t *testing.T, secrets secretsv1.SecretsServiceClient, ca []byte) (gitCA, metricsCA string) {
 	t.Helper()
 	gitCA = fixLoopGitConnector + "-ca-mock"
@@ -169,8 +169,8 @@ func fixLoopSecrets(ctx context.Context, t *testing.T, secrets secretsv1.Secrets
 			_, _ = secrets.DeleteSecret(c, &secretsv1.DeleteSecretRequest{Name: name})
 		})
 	}
-	set(gitCA, secretsv1.SecretCategory_SECRET_CATEGORY_CRED, ca)
-	set(metricsCA, secretsv1.SecretCategory_SECRET_CATEGORY_CRED, ca)
+	set(gitCA, secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, ca)
+	set(metricsCA, secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, ca)
 	// The mock checks no credential. The values only have to exist.
 	set("github-fixloop-token", secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, []byte("mock-token"))
 	set("prometheus-health-bearer-token", secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, []byte("mock-token"))
@@ -246,25 +246,35 @@ func TestFixLoop(t *testing.T) {
 	run := helpers.StartMission(ctx, t, clients.Daemon, defID, targetID)
 	work := agent.Next(t, fixLoopCallTimeout)
 
-	// call makes one governed connector call and decodes the JSON object.
-	call := func(tool string, args map[string]any) map[string]any {
+	// call makes one governed connector call and decodes the JSON object. It
+	// returns an error and never fails a test, so a caller can retry.
+	call := func(tool string, args map[string]any) (map[string]any, error) {
 		raw, merr := json.Marshal(args)
-		require.NoError(t, merr)
+		if merr != nil {
+			return nil, merr
+		}
 		resp, cerr := comp.CallTool(ctx, &componentpb.CallToolRequest{
 			WorkId: work.WorkID, ToolName: tool, InputJson: string(raw),
 		})
-		require.NoError(t, cerr, "CallTool(%s)", tool)
+		if cerr != nil {
+			return nil, fmt.Errorf("CallTool(%s): %w", tool, cerr)
+		}
 		out := map[string]any{}
-		require.NoError(t, json.Unmarshal([]byte(resp.GetOutputJson()), &out), "decode the result of %s: %s", tool, resp.GetOutputJson())
-		return out
+		if uerr := json.Unmarshal([]byte(resp.GetOutputJson()), &out); uerr != nil {
+			return nil, fmt.Errorf("decode the result of %s: %s: %w", tool, resp.GetOutputJson(), uerr)
+		}
+		return out, nil
 	}
 
 	t.Run("a governed call of the git host reaches the mock over TLS", func(t *testing.T) {
 		key := fmt.Sprintf("%s#%d", fixLoopApp, mrNumber)
 		var got map[string]any
 		helpers.Eventually(t, 3*time.Minute, "merge_request_state answers", func() (bool, string) {
-			defer func() { _ = recover() }()
-			got = call("mcp:"+fixLoopGitConnector+":merge_request_state", map[string]any{"merge_request": key})
+			var cerr error
+			got, cerr = call("mcp:"+fixLoopGitConnector+":merge_request_state", map[string]any{"merge_request": key})
+			if cerr != nil {
+				return false, cerr.Error()
+			}
 			return true, ""
 		})
 		require.Equal(t, "open", got["state"], "the pull request that the mock holds is open: %v", got)
@@ -273,8 +283,16 @@ func TestFixLoop(t *testing.T) {
 
 	t.Run("the health signal of the tenant reads the metrics of the mock", func(t *testing.T) {
 		forge.setHealth(1)
-		got := call("mcp:"+fixLoopMetricsConnector+":health_signal", map[string]any{
-			"application": fixLoopApp, "since": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339), "hold_seconds": 60,
+		var got map[string]any
+		helpers.Eventually(t, 3*time.Minute, "health_signal answers", func() (bool, string) {
+			var cerr error
+			got, cerr = call("mcp:"+fixLoopMetricsConnector+":health_signal", map[string]any{
+				"application": fixLoopApp, "since": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339), "hold_seconds": 60,
+			})
+			if cerr != nil {
+				return false, cerr.Error()
+			}
+			return true, ""
 		})
 		require.Equal(t, true, got["known"], "the tenant stated a query for %s: %v", fixLoopApp, got)
 	})

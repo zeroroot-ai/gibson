@@ -108,6 +108,12 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.secrets.v1.SecretsService/DeleteSecret":                      true,
 			"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls":        true,
 			"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding": true,
+			// The fix loop exit test (gibson#1469, tests/e2e/fix_loop_test.go):
+			// the tenant enables the connector of its Git host and the connector
+			// of its metrics, reads their state, and disables them.
+			"/gibson.tenant.v1.ConnectorService/EnableConnector":  true,
+			"/gibson.tenant.v1.ConnectorService/ListConnectors":   true,
+			"/gibson.tenant.v1.ConnectorService/DisableConnector": true,
 			// The belief training exit test (gibson#616,
 			// tests/e2e/belief_training_test.go): label an item of the review
 			// queue so the tenant has a training row, then read the pinned

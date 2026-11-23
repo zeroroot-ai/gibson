@@ -114,6 +114,18 @@ jobs:
       - name: Raise the inotify limits
         uses: zeroroot-ai/.github/.github/actions/raise-inotify-limits@88cbc77697ff7143c98f29f3c4d80a93a666d601 # v0.23.0
 
+      # The chart must hold the field of the CA bundle in the CRD. With none, the
+      # API server drops the field, and the pod gets no bundle. The check runs
+      # before the bring-up, so a wrong charts-ref fails in seconds with its name.
+      - name: The CRD template of the chart holds caBundleSecret
+        run: |
+          set -euo pipefail
+          crd=charts/helm/gibson-crds/templates/gibson.zeroroot.ai_connectorinstances.yaml
+          if ! grep -q 'caBundleSecret' "$crd"; then
+            echo "::error::$crd has no spec.caBundleSecret. Is charts-ref a chart with the field?"
+            exit 1
+          fi
+
       # The install patterns let the daemon accept the URL of the mock for the two
       # connectors. The platform owner of an install states them, and a tenant
       # never does.
@@ -127,17 +139,6 @@ jobs:
           build-connector-operator: "true"
           connector-install-patterns: '{"github-fixloop/api_url":["https://forge.mock.example.com:8443"],"prometheus-health/base_url":["https://forge.mock.example.com:8443"]}'
           mock-forge-image: ${{ env.MOCK_FORGE_IMAGE }}
-
-      # The CRD must hold the field of the CA bundle. The check fails here, with
-      # its name, and not as a TLS error in the test.
-      - name: The CRD of the connector instance holds caBundleSecret
-        run: |
-          set -euo pipefail
-          kubectl get crd connectorinstances.gibson.zeroroot.ai -o json > "$RUNNER_TEMP/crd.json"
-          if ! jq -e '.spec.versions[].schema.openAPIV3Schema.properties.spec.properties | has("caBundleSecret")' "$RUNNER_TEMP/crd.json" >/dev/null; then
-            echo "::error::the CRD connectorinstances.gibson.zeroroot.ai has no spec.caBundleSecret. Is charts-ref a chart with the field?"
-            exit 1
-          fi
 
       - name: The fix loop exit test
         env:
