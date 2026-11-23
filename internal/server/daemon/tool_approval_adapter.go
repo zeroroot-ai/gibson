@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -72,8 +73,11 @@ func (a *tenantRoutedToolApproval) Acquire(
 }
 
 // MayMerge implements metatool.ApprovalGate. It reads the merge slot of the
-// merge request from the World of the tenant (gibson#1458, gibson#1466).
-func (a *tenantRoutedToolApproval) MayMerge(_ context.Context, tenant, missionID, mergeRequest string) (bool, error) {
+// merge request from the World of the tenant (gibson#1458, gibson#1466). The slot
+// is bound to the merge request and the tenant, and not to a mission. When it
+// allows a call, it records the call, so the fix loop watcher frees no slot that a
+// call is still using (gibson#1609).
+func (a *tenantRoutedToolApproval) MayMerge(_ context.Context, tenant, mergeRequest string) (bool, error) {
 	if tenant == "" {
 		return false, errors.New("merge gate: the call has no tenant")
 	}
@@ -82,6 +86,9 @@ func (a *tenantRoutedToolApproval) MayMerge(_ context.Context, tenant, missionID
 		return false, api.ErrWorldUnavailable
 	}
 	var granted bool
-	eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge(mergeRequest, missionID) })
+	eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge(mergeRequest) })
+	if granted {
+		eng.Submit(brain.MergeCallAllowed{MergeRequest: mergeRequest, At: time.Now().UTC()})
+	}
 	return granted, nil
 }

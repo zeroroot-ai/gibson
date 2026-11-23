@@ -140,10 +140,11 @@ func TestToolApproval_TheMergeGateReadsTheWorld(t *testing.T) {
 		WithApprovalMarks(func(_, tool string) componentcatalog.ToolApproval {
 			return componentcatalog.ToolApproval{Merge: tool == "merge_merge_request"}
 		})
+	mission := "m1"
 	merge := func(tenant string) error {
 		_, err := h.Call(ctx, metatool.Call{
 			Caller: catalog.Caller{Subject: "agent", Tenant: tenant}, ID: "mcp:forge:merge_merge_request",
-			Args: map[string]any{"merge_request": "mr-7"}, MissionID: "m1",
+			Args: map[string]any{"merge_request": "mr-7"}, MissionID: mission,
 			Observer: nopObserver{},
 			Recorder: func(context.Context, metatool.CallRecord, []byte, string) string { return "" },
 		})
@@ -160,7 +161,7 @@ func TestToolApproval_TheMergeGateReadsTheWorld(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		var granted bool
-		eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge("mr-7", "m1") })
+		eng.ReadWorld(func(w *brain.World) { granted = w.MayMerge("mr-7") })
 		if granted {
 			break
 		}
@@ -174,6 +175,32 @@ func TestToolApproval_TheMergeGateReadsTheWorld(t *testing.T) {
 	}
 	if len(conn.calls) != 1 {
 		t.Fatalf("connector calls = %d, want 1", len(conn.calls))
+	}
+	// The slot is bound to the merge request and not to a mission: a new mission
+	// of the fix agent merges a granted merge request that another mission opened
+	// (gibson#1609).
+	mission = "a-later-pass-with-a-new-mission"
+	if err := merge("acme"); err != nil {
+		t.Fatalf("a new mission must merge a granted merge request: %v", err)
+	}
+	if len(conn.calls) != 2 {
+		t.Fatalf("connector calls = %d, want 2", len(conn.calls))
+	}
+	// The gate records the allowed calls, so the watcher frees no slot that a
+	// call is still using.
+	var allowedAt time.Time
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		eng.ReadWorld(func(w *brain.World) {
+			for _, sl := range w.MergeSlots() {
+				allowedAt = sl.LastAllowedAt
+			}
+		})
+		if !allowedAt.IsZero() {
+			break
+		}
+	}
+	if allowedAt.IsZero() {
+		t.Fatal("the gate did not record the allowed merge call")
 	}
 	// The slot of one tenant is not the slot of another.
 	if err := merge("other"); !errors.Is(err, metatool.ErrMergeNotGranted) {

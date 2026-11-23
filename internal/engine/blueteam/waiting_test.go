@@ -73,3 +73,55 @@ func TestWaitingOnPerson_ScanAfterDeployEndsTheWait(t *testing.T) {
 		t.Fatalf("got %+v, want none", got)
 	}
 }
+
+// A refused merge names the reason that the host gave.
+func TestWaitingOnPerson_ARefusalCarriesItsReason(t *testing.T) {
+	findings := []brain.FindingSnapshot{{ID: "f", Status: brain.FindingStatusFixing, MergeRequest: "mr-1"}}
+	history := []brain.Event{
+		brain.MergeRequestObserved{Key: "mr-1", State: brain.MergeRequestRefused, Reason: "review required", At: at(1)},
+	}
+	got := WaitingOnPerson(findings, nil, history, at(3))
+	if len(got) != 1 || got[0].Kind != WaitMergeRefused || got[0].Reason != "review required" {
+		t.Fatalf("got %+v, want one refused item with its reason", got)
+	}
+}
+
+// An unreadable merge request and a merged fix with no verdict wait on a person,
+// each with its reason. A later event ends the wait. A finding with a verdict
+// does not wait (gibson#1609).
+func TestWaitingOnPerson_UnreadableAndNoVerdictWaits(t *testing.T) {
+	findings := []brain.FindingSnapshot{
+		{ID: "unreadable", Status: brain.FindingStatusFixing, MergeRequest: "mr-1"},
+		{ID: "noverdict", Status: brain.FindingStatusFixed, MergeRequest: "mr-2",
+			FixFacts: brain.FixFacts{CheckKind: "scan", DeployedAt: at(1)}},
+		{ID: "verdict", Status: brain.FindingStatusFixed, MergeRequest: "mr-3",
+			FixFacts: brain.FixFacts{CheckKind: "scan", DeployedAt: at(1), Health: brain.HealthHeld}},
+		{ID: "ended", Status: brain.FindingStatusFixing, MergeRequest: "mr-4"},
+	}
+	history := []brain.Event{
+		brain.FixWaiting{MergeRequest: "mr-1", WaitKind: brain.WaitMergeUnreadable, Reason: "the daemon cannot read the merge request on the Git host", Waiting: true, At: at(1)},
+		brain.FixWaiting{MergeRequest: "mr-1", WaitKind: brain.WaitMergeUnreadable, Reason: "again", Waiting: true, At: at(2)},
+		brain.FixWaiting{MergeRequest: "mr-2", WaitKind: brain.WaitNoHealthVerdict, Reason: "no health verdict", Waiting: true, At: at(2)},
+		brain.FixWaiting{MergeRequest: "mr-3", WaitKind: brain.WaitNoHealthVerdict, Reason: "no health verdict", Waiting: true, At: at(2)},
+		brain.FixWaiting{MergeRequest: "mr-4", WaitKind: brain.WaitMergeUnreadable, Reason: "x", Waiting: true, At: at(1)},
+		&brain.FixWaiting{MergeRequest: "mr-4", WaitKind: brain.WaitMergeUnreadable, Waiting: false, At: at(3)},
+	}
+	got := WaitingOnPerson(findings, nil, history, at(5))
+	want := map[string]struct {
+		kind   WaitKind
+		reason string
+		waited time.Duration
+	}{
+		"unreadable": {WaitMergeUnreadable, "the daemon cannot read the merge request on the Git host", 4 * time.Hour},
+		"noverdict":  {WaitNoHealthVerdict, "no health verdict", 3 * time.Hour},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want %d items", got, len(want))
+	}
+	for _, it := range got {
+		w, ok := want[it.ID]
+		if !ok || w.kind != it.Kind || w.reason != it.Reason || w.waited != it.Waited {
+			t.Fatalf("item %+v, want %+v", it, w)
+		}
+	}
+}

@@ -35,6 +35,10 @@ type Watcher struct {
 	// RequeueBackoff of the policy, so a merge request that no agent merges does
 	// not churn the queue (gibson#1609).
 	released map[string]time.Time
+	// waiting holds the waits on a person that the Watcher recorded and has not
+	// ended, so one wait is one Timeline event (gibson#1609). The key is the
+	// merge request and the kind of the wait.
+	waiting map[string]bool
 }
 
 // NewWatcher builds a Watcher. The reader, the reverter and the placer are
@@ -52,7 +56,7 @@ func NewWatcher(r Reader, rv Reverter, p Placer, policy PolicySource, logger *sl
 	return &Watcher{
 		reader: r, reverter: rv, placer: p, policy: policy,
 		now: func() time.Time { return time.Now().UTC() }, logger: logger,
-		refused: map[string]string{}, released: map[string]time.Time{},
+		refused: map[string]string{}, released: map[string]time.Time{}, waiting: map[string]bool{},
 	}, nil
 }
 
@@ -85,8 +89,15 @@ func (w *Watcher) Step(ctx context.Context, tenant string, findings []brain.Find
 		case anyStatus(fs, brain.FindingStatusFixing):
 			slot, hasSlot := slotOf[mr]
 			evs, err = w.stepFixing(ctx, tenant, mr, fs, slot, hasSlot)
+			if err != nil && hasSlot {
+				// The daemon cannot read the merge request, so it cannot know if it
+				// merged. The slot stays, and the wait is visible (gibson#1609).
+				evs = w.beginWait(mr, fs, brain.WaitMergeUnreadable,
+					"the daemon cannot read the merge request on the Git host")
+			}
 		case anyStatus(fs, brain.FindingStatusFixed):
-			evs, err = w.stepFixed(ctx, tenant, mr, fs)
+			slot, hasSlot := slotOf[mr]
+			evs, err = w.stepFixed(ctx, tenant, mr, fs, slot, hasSlot)
 		}
 		if err != nil {
 			w.logger.Warn("fix loop read failed", "tenant", tenant, "merge_request", mr, "error", err)
@@ -132,17 +143,32 @@ func (w *Watcher) stepFixing(
 	if err != nil {
 		return nil, fmt.Errorf("read merge request: %w", err)
 	}
+	// A read that worked ends the wait of an unreadable merge request.
+	ended := w.endWait(mr, fs, brain.WaitMergeUnreadable)
 	switch fact.State {
 	case MRMerged, MRClosed:
 		w.forgetRefusal(mr)
-		return []brain.Event{brain.MergeRequestObserved{Key: mr, State: fact.State, At: w.stampOr(fact.At), MissionID: fixMission(fs)}}, nil
+		return append(ended, brain.MergeRequestObserved{
+			Key: mr, State: fact.State, At: w.stampOr(fact.At), MissionID: fixMission(fs),
+		}), nil
 	case MRRefused:
-		if !w.noteRefusal(mr, fact.Reason) {
-			return nil, nil
+		out := ended
+		if w.noteRefusal(mr, fact.Reason) {
+			out = append(out, brain.MergeRequestObserved{
+				Key: mr, State: brain.MergeRequestRefused, Reason: fact.Reason, At: w.stampOr(fact.At), MissionID: fixMission(fs),
+			})
 		}
-		return []brain.Event{brain.MergeRequestObserved{
-			Key: mr, State: brain.MergeRequestRefused, At: w.stampOr(fact.At), MissionID: fixMission(fs),
-		}}, nil
+		// The host refused the merge and the merge request is still open, for
+		// example by a branch protection rule. The fix waits on a person, and the
+		// slot must not hold the Application, so it is freed and not queued again
+		// (gibson#1609). A call that the gate allowed a moment ago is not cut off.
+		if hasSlot && !w.callInFlight(tenant, slot) {
+			out = append(out, brain.MergeSlotExpired{
+				MergeRequest: mr, Application: slot.Application, At: w.now(), MissionID: fixMission(fs),
+				Reason: "the Git host refused the merge: " + fact.Reason,
+			})
+		}
+		return out, nil
 	}
 	// The merge request is open.
 	if hasSlot {
@@ -151,20 +177,24 @@ func (w *Watcher) stepFixing(
 		// the Application gets its turn. The host is read first: a merge request
 		// that merged is seen above and keeps its slot until its health signal
 		// answers (gibson#1609).
-		if slot.Granted && !slot.GrantedAt.IsZero() && w.now().Sub(slot.GrantedAt) >= w.policy(tenant).grantWindow() {
+		// A merge call that the gate allowed within the call bound may still be on
+		// its way to the host. The Watcher frees nothing then, and the next pass
+		// reads the host again after the bound.
+		if slot.Granted && !slot.GrantedAt.IsZero() && w.now().Sub(slot.GrantedAt) >= w.policy(tenant).grantWindow() &&
+			!w.callInFlight(tenant, slot) {
 			w.noteRelease(mr)
-			return []brain.Event{brain.MergeSlotExpired{
+			return append(ended, brain.MergeSlotExpired{
 				MergeRequest: mr, Application: slot.Application, At: w.now(), MissionID: fixMission(fs),
 				Reason: "no merge used the granted slot within the grant window and the merge request is still open",
-			}}, nil
+			}), nil
 		}
-		return nil, nil
+		return ended, nil
 	}
 	// A green pipeline asks for the slot of its Application. The queue grants
 	// one slot at a time. A slot that the Watcher freed is not asked for again
 	// until the backoff has passed.
 	if !fact.PipelineGreen || w.inBackoff(tenant, mr) {
-		return nil, nil
+		return ended, nil
 	}
 	mission := fixMission(fs)
 	if mission == "" {
@@ -224,10 +254,59 @@ func (w *Watcher) forgetRefusal(mr string) {
 	delete(w.refused, mr)
 }
 
+// callInFlight reports whether the gate allowed a merge call for the slot within
+// the call bound of the policy.
+func (w *Watcher) callInFlight(tenant string, slot brain.MergeSlot) bool {
+	return !slot.LastAllowedAt.IsZero() && w.now().Sub(slot.LastAllowedAt) < w.policy(tenant).callBound()
+}
+
+// beginWait records that the fix waits on a person, once for each wait.
+func (w *Watcher) beginWait(mr string, fs []brain.FindingSnapshot, kind, reason string) []brain.Event {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	key := mr + "\x00" + kind
+	if w.waiting[key] {
+		return nil
+	}
+	w.waiting[key] = true
+	return []brain.Event{brain.FixWaiting{
+		MergeRequest: mr, WaitKind: kind, Reason: reason, Waiting: true, At: w.now(), MissionID: fixMission(fs),
+	}}
+}
+
+// endWait records that a wait ended. It returns nothing for a wait that the
+// Watcher did not record.
+func (w *Watcher) endWait(mr string, fs []brain.FindingSnapshot, kind string) []brain.Event {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	key := mr + "\x00" + kind
+	if !w.waiting[key] {
+		return nil
+	}
+	delete(w.waiting, key)
+	return []brain.Event{brain.FixWaiting{MergeRequest: mr, WaitKind: kind, Waiting: false, At: w.now(), MissionID: fixMission(fs)}}
+}
+
 // stepFixed reads the deploy, then the health signal, of a merged fix. It
-// reverts the merge when the health signal failed.
-func (w *Watcher) stepFixed(ctx context.Context, tenant, mr string, fs []brain.FindingSnapshot) ([]brain.Event, error) {
+// reverts the merge when the health signal failed. A merged fix that has no
+// health verdict after the grant window waits on a person, with no clock to free
+// the slot: the hold time of the health signal is gibson#1463 (gibson#1609).
+func (w *Watcher) stepFixed(
+	ctx context.Context, tenant, mr string, fs []brain.FindingSnapshot, slot brain.MergeSlot, hasSlot bool,
+) ([]brain.Event, error) {
 	f := firstWithStatus(fs, brain.FindingStatusFixed)
+	var wait []brain.Event
+	switch {
+	case f.Health != "":
+		wait = w.endWait(mr, fs, brain.WaitNoHealthVerdict)
+	case hasSlot && slot.Granted && !slot.GrantedAt.IsZero() && w.now().Sub(slot.GrantedAt) >= w.policy(tenant).grantWindow():
+		wait = w.beginWait(mr, fs, brain.WaitNoHealthVerdict, "no health verdict")
+	}
+	evs, err := w.stepFixedFacts(ctx, tenant, mr, f)
+	return append(wait, evs...), err
+}
+
+func (w *Watcher) stepFixedFacts(ctx context.Context, tenant, mr string, f brain.FindingSnapshot) ([]brain.Event, error) {
 	switch {
 	case f.DeployedAt.IsZero():
 		d, err := w.reader.Deploy(ctx, tenant, f.FixMissionID, mr)

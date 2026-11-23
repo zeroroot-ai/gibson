@@ -22,13 +22,16 @@ type Policy struct {
 	// RequeueBackoff is how long the Watcher waits before it queues a merge
 	// request again after it freed the slot of that merge request.
 	RequeueBackoff time.Duration
+	// MergeCallBound is how long a merge call that the gate allowed is on its
+	// way to the host. The Watcher frees no slot within it (gibson#1609).
+	MergeCallBound time.Duration
 }
 
 // DefaultPolicy is the policy of a tenant that states none.
 func DefaultPolicy() Policy {
 	return Policy{
 		HoldTime: 10 * time.Minute, RestartLimit: 15 * time.Minute,
-		MergeGrantWindow: 45 * time.Minute, RequeueBackoff: 10 * time.Minute,
+		MergeGrantWindow: 45 * time.Minute, RequeueBackoff: 10 * time.Minute, MergeCallBound: 2 * time.Minute,
 	}
 }
 
@@ -50,4 +53,12 @@ func (p Policy) requeueBackoff() time.Duration {
 		return DefaultPolicy().RequeueBackoff
 	}
 	return p.RequeueBackoff
+}
+
+// callBound is the bound of a merge call that the gate allowed.
+func (p Policy) callBound() time.Duration {
+	if p.MergeCallBound <= 0 {
+		return DefaultPolicy().MergeCallBound
+	}
+	return p.MergeCallBound
 }

@@ -32,7 +32,7 @@ func TestMergeGate_OneFixAtATimeForOneApplication(t *testing.T) {
 	if len(grants(w)) != 0 {
 		t.Fatal("mr-2 was granted while mr-1 has no health result")
 	}
-	if w.MayMerge("mr-2", "m1") || !w.MayMerge("mr-1", "m1") {
+	if w.MayMerge("mr-2") || !w.MayMerge("mr-1") {
 		t.Fatal("MayMerge must say yes for mr-1 and no for mr-2")
 	}
 
@@ -153,36 +153,11 @@ func TestMergeSlotExpirySystem(t *testing.T) {
 	if len(MergeSlotExpirySystem(w)) != 0 {
 		t.Fatal("not quiescent")
 	}
-	if !w.MayMerge("mr-f-3", "m1") || w.MayMerge("mr-f-1", "m1") {
+	if !w.MayMerge("mr-f-3") || w.MayMerge("mr-f-1") {
 		t.Fatal("the deployed slot must stay and the freed one must go")
 	}
-	if !w.MayMerge("mr-f-2", "m1") {
+	if !w.MayMerge("mr-f-2") {
 		t.Fatal("a granted slot that a Finding carries must stay, whatever the time since the grant")
-	}
-}
-
-// A slot that names its mission lets only a call of that mission merge, and a
-// call with no mission never merges (review m16).
-func TestMergeGate_TheSlotIsBoundToItsMission(t *testing.T) {
-	w := NewWorld("t1")
-	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(0), MissionID: "fix-1"})
-	Reduce(w, grants(w)[0])
-	if !w.MayMerge("mr-1", "fix-1") {
-		t.Fatal("the mission of the fix must merge")
-	}
-	if w.MayMerge("mr-1", "other-mission") || w.MayMerge("mr-1", "") {
-		t.Fatal("another mission or no mission merged with the slot")
-	}
-	// A slot that names no mission lets no call merge (review r2).
-	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "bank", At: at(0)})
-	Reduce(w, MergeGranted{MergeRequest: "mr-2", Application: "bank", At: at(0)})
-	if w.MayMerge("mr-2", "fix-1") {
-		t.Fatal("a slot with no mission let a call merge")
-	}
-	// The mission that originated the fix mission merges too.
-	Reduce(w, MissionOriginated{MissionID: "fix-1", ParentMissionID: "fix-agent-run"})
-	if !w.MayMerge("mr-1", "fix-agent-run") {
-		t.Fatal("the originating mission must merge")
 	}
 }
 
@@ -218,51 +193,61 @@ func TestMergeGate_TheNextFixWaitsUntilTheFirstSlotIsGone(t *testing.T) {
 	}
 }
 
-// A later pass of the fix agent can be a new mission. It merges a granted merge
-// request that an earlier mission opened when it works on the same Application. A
-// mission of another Application, a mission with no target and a call with no
-// mission are refused (gibson#1609).
-func TestMayMerge_AnyMissionOfTheSameApplicationMergesAGrantedSlot(t *testing.T) {
-	w := NewWorld("t1")
-	Reduce(w, MissionStarted{ID: "later-pass", TargetID: "shop"})
-	Reduce(w, MissionStarted{ID: "other-app-pass", TargetID: "bank"})
-	Reduce(w, MissionStarted{ID: "no-target-pass"})
+// The slot is bound to the merge request and to the tenant, and not to a mission.
+// A new mission of the fix agent merges a granted merge request that another
+// mission opened. A merge request with no granted slot, an unknown merge request
+// and a merge request of another tenant are refused (gibson#1609).
+func TestMayMerge_IsBoundToTheMergeRequestAndNotToAMission(t *testing.T) {
+	w := NewWorld("tenant-a")
 	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "shop", At: at(2), MissionID: "fix-2"})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-3", Application: "bank", At: at(2)})
 
-	if w.MayMerge("mr-1", "later-pass") {
+	if w.MayMerge("mr-1") {
 		t.Fatal("a slot that is not granted let a call merge")
 	}
-	Reduce(w, grants(w)[0])
-	if !w.MayMerge("mr-1", "later-pass") {
-		t.Fatal("a new mission of the same Application must merge a granted merge request that an earlier mission opened")
+	Reduce(w, MergeGranted{MergeRequest: "mr-1", Application: "shop", At: at(2)})
+	// The call can come from any mission. The slot names the mission that opened
+	// the merge request, and it does not limit who merges.
+	if !w.MayMerge("mr-1") {
+		t.Fatal("a granted merge request must merge, whatever the mission of the call")
 	}
-	for name, mission := range map[string]string{
-		"a mission of another Application": "other-app-pass",
-		"a mission with no target":         "no-target-pass",
-		"a mission that the World lacks":   "ghost",
-		"no mission":                       "",
-	} {
-		if w.MayMerge("mr-1", mission) {
-			t.Errorf("%s merged with the slot of another Application", name)
-		}
+	// One slot for each Application: only the granted merge request merges.
+	if w.MayMerge("mr-2") {
+		t.Fatal("a second merge request of the Application merged with the slot of the first")
 	}
-	// A slot that names no mission lets no call merge, also of the same Application.
-	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "shop", At: at(2)})
-	Reduce(w, MergeGranted{MergeRequest: "mr-2", Application: "shop", At: at(2)})
-	if w.MayMerge("mr-2", "later-pass") {
-		t.Fatal("a slot with no mission let a call merge")
+	if w.MayMerge("mr-404") || w.MayMerge("") {
+		t.Fatal("an unknown merge request merged")
+	}
+	// A slot that names no mission still merges: it is the merge request that
+	// holds the slot.
+	Reduce(w, MergeGranted{MergeRequest: "mr-3", Application: "bank", At: at(2)})
+	if !w.MayMerge("mr-3") {
+		t.Fatal("a granted merge request with no mission did not merge")
+	}
+
+	// The World of another tenant holds no slot of this tenant.
+	other := NewWorld("tenant-b")
+	if other.MayMerge("mr-1") {
+		t.Fatal("a call of another tenant merged with a slot of tenant A")
 	}
 }
 
-// The World of one tenant knows no mission of another tenant, so a mission of
-// another tenant never merges with a slot of this tenant.
-func TestMayMerge_AMissionOfAnotherTenantIsRefused(t *testing.T) {
-	a, b := NewWorld("tenant-a"), NewWorld("tenant-b")
-	Reduce(a, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
-	Reduce(a, grants(a)[0])
-	Reduce(b, MissionStarted{ID: "pass-of-b", TargetID: "shop"})
-	if a.MayMerge("mr-1", "pass-of-b") {
-		t.Fatal("a mission of tenant B merged with a slot of tenant A")
+// MergeCallAllowed keeps the time of the last allowed call on the slot, and it
+// never moves back. A call for a merge request with no slot changes nothing.
+func TestMergeCallAllowed_KeepsTheLatestTimeOnTheSlot(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, MergeCallAllowed{MergeRequest: "mr-9", At: at(5)})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "fix-1"})
+	Reduce(w, MergeCallAllowed{MergeRequest: "mr-1", At: at(5)})
+	Reduce(w, MergeCallAllowed{MergeRequest: "mr-1", At: at(3)})
+	slots := w.MergeSlots()
+	if len(slots) != 1 || !slots[0].LastAllowedAt.Equal(at(5)) {
+		t.Fatalf("slots = %+v, want the call time at(5)", slots)
+	}
+	Reduce(w, FixWaiting{MergeRequest: "mr-1", WaitKind: WaitMergeUnreadable, Reason: "x", Waiting: true, At: at(6)})
+	if len(w.MergeSlots()) != 1 {
+		t.Fatal("a wait changed the queue")
 	}
 }
 

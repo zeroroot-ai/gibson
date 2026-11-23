@@ -23,7 +23,7 @@ type fakeGate struct {
 	merges  []string
 }
 
-func (g *fakeGate) MayMerge(_ context.Context, tenant, _, mr string) (bool, error) {
+func (g *fakeGate) MayMerge(_ context.Context, tenant, mr string) (bool, error) {
 	g.merges = append(g.merges, tenant+"/"+mr)
 	if g.err != nil {
 		return false, g.err

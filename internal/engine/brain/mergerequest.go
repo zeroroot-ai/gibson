@@ -39,6 +39,9 @@ type MergeRequestObserved struct {
 	Key       string
 	State     string
 	MissionID string
+	// Reason is what the host said when it refused the merge. It is empty for
+	// any other state (gibson#1609).
+	Reason string
 	// At is the time of the report. The exposure window and the revert rate
 	// read it.
 	At time.Time

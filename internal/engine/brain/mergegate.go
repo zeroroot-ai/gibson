@@ -53,9 +53,13 @@ type MergeSlot struct {
 	Granted      bool
 	// GrantedAt is the time of the grant. It is zero until the grant.
 	GrantedAt time.Time
-	// MissionID is the mission of the fix that holds the slot. Only a call
-	// of that mission may merge with it (review m16).
+	// MissionID is the mission of the fix that opened the merge request. It
+	// stays for the record. It does not limit who may merge (gibson#1609).
 	MissionID string
+	// LastAllowedAt is the time of the last merge call that the gate allowed for
+	// this slot. The watcher frees no slot within the call bound of it, because
+	// the call may still be on its way to the host (gibson#1609).
+	LastAllowedAt time.Time
 }
 
 // MergeSlotExpired records that the daemon freed a slot that nothing else
@@ -72,6 +76,49 @@ type MergeSlotExpired struct {
 func (MergeSlotExpired) Kind() string { return "merge_request.slot_expired" }
 
 func applyMergeSlotExpired(w *World, e MergeSlotExpired) { releaseMergeSlot(w, e.MergeRequest) }
+
+// MergeCallAllowed records that the gate allowed a merge call for a merge
+// request. The watcher reads it to free no slot that a call is still using.
+type MergeCallAllowed struct {
+	MergeRequest string
+	At           time.Time
+}
+
+// Kind identifies the merge_request.call_allowed brain event.
+func (MergeCallAllowed) Kind() string { return "merge_request.call_allowed" }
+
+func applyMergeCallAllowed(w *World, e MergeCallAllowed) {
+	if s := findMergeSlot(w, e.MergeRequest); s != nil && e.At.After(s.LastAllowedAt) {
+		s.LastAllowedAt = e.At
+	}
+}
+
+// Kinds of a fix that waits on a person and has no other record (gibson#1609).
+const (
+	// WaitMergeUnreadable is a merge request that the daemon cannot read on the
+	// Git host. The slot stays, because the daemon cannot know if it merged.
+	WaitMergeUnreadable = "merge_unreadable"
+	// WaitNoHealthVerdict is a merged fix with no health verdict after the grant
+	// window. The hold time of the health signal is gibson#1463.
+	WaitNoHealthVerdict = "no_health_verdict"
+)
+
+// FixWaiting records that the fix of a merge request waits on a person, or that
+// the wait ended (gibson#1609). The Timeline holds it, and the list of items
+// that wait on a person reads it from the history.
+type FixWaiting struct {
+	MergeRequest string
+	// WaitKind is WaitMergeUnreadable or WaitNoHealthVerdict.
+	WaitKind string
+	Reason   string
+	// Waiting is false when the wait ended.
+	Waiting   bool
+	At        time.Time
+	MissionID string
+}
+
+// Kind identifies the merge_request.fix_waiting brain event.
+func (FixWaiting) Kind() string { return "merge_request.fix_waiting" }
 
 func findMergeSlot(w *World, mr string) *MergeSlot {
 	for i := range w.mergeSlots {
@@ -111,42 +158,17 @@ func releaseMergeSlot(w *World, mr string) {
 // MergeSlots returns the queue in the order of the Timeline.
 func (w *World) MergeSlots() []MergeSlot { return append([]MergeSlot(nil), w.mergeSlots...) }
 
-// MayMerge reports whether the merge request holds a granted slot for a call
-// of the mission. A call with no mission never merges. The slot lets three
-// missions merge: the mission that it names, the mission that originated that
-// one (the fix agent originates the fix mission and merges from its own mission,
-// review m16), and any mission that works on the same Application. The last rule
-// is for a later pass of the fix agent, which can be a new dispatch with a new
-// mission and merges a merge request that an earlier mission opened (gibson#1609).
-// A mission works on an Application when the World holds the Application as its
-// target. A mission of another Application, and a mission with no target, do not
-// merge. The tenant is the World itself, so a mission of another tenant is never
-// here. One slot for each Application stays the rule of the gate.
-func (w *World) MayMerge(mr, missionID string) bool {
+// MayMerge reports whether the merge request holds a granted slot. The slot is
+// bound to the merge request and to the tenant, and not to a mission: a later
+// pass of the fix agent can be a new dispatch with a new mission, and it merges a
+// merge request that an earlier mission opened (gibson#1609). The World is the
+// World of one tenant, so a call of another tenant never reaches this slot. The
+// gate keeps one slot for each Application and lets only the granted merge
+// request merge. The tenant grant of can_execute on the Git connector limits who
+// may call merge at all.
+func (w *World) MayMerge(mr string) bool {
 	s := findMergeSlot(w, mr)
-	if s == nil || !s.Granted || missionID == "" {
-		return false
-	}
-	if s.MissionID == "" {
-		return false // a slot that names no mission lets no call merge (review r2)
-	}
-	if s.MissionID == missionID {
-		return true
-	}
-	if l, ok := w.MissionLineage(s.MissionID); ok && l.ParentMissionID == missionID {
-		return true
-	}
-	return s.Application != "" && w.missionTarget(missionID) == s.Application
-}
-
-// missionTarget returns the target of the mission, or "" when the World does not
-// know the mission.
-func (w *World) missionTarget(missionID string) string {
-	ent, ok := findMission(w, missionID)
-	if !ok {
-		return ""
-	}
-	return w.missions.Get(ent).TargetID
+	return s != nil && s.Granted
 }
 
 // MergeGateSystem grants the slot of an Application to its oldest queued merge

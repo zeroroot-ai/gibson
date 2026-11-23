@@ -128,7 +128,7 @@ func TestStep_GreenPipelineQueuesTheMergeRequest(t *testing.T) {
 	g := newRig(t, "scan")
 	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
 	g.tick()
-	if !g.w.MayMerge("mr-1", "fix-run-1") {
+	if !g.w.MayMerge("mr-1") {
 		t.Fatalf("slots = %+v, want a granted slot for mr-1", g.w.MergeSlots())
 	}
 }
@@ -555,7 +555,7 @@ func TestStep_ALateMergeCallInsideTheWindowMerges(t *testing.T) {
 	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
 	g.tick()
 	g.now = g.now.Add(DefaultPolicy().MergeGrantWindow - time.Minute)
-	if !g.w.MayMerge("mr-1", "fix-run-1") {
+	if !g.w.MayMerge("mr-1") {
 		t.Fatal("the granted slot refused the merge call inside the window")
 	}
 	g.tick()
@@ -601,5 +601,159 @@ func TestStep_AZeroWindowTakesTheDefault(t *testing.T) {
 	g.tick()
 	if evs := g.tick(); hasEvent[brain.MergeSlotExpired](evs) {
 		t.Fatalf("a slot was freed at the moment of its grant: %+v", evs)
+	}
+}
+
+func eventsOf[T brain.Event](evs []brain.Event) []T {
+	var out []T
+	for _, e := range evs {
+		if v, ok := e.(T); ok {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// B. The host refuses the merge and the merge request is still open. The slot is
+// freed so the other fixes of the Application can go, the merge request is not
+// queued again, and the refusal names its reason. The finding stays fixing.
+func TestStep_ARefusedMergeFreesTheSlotAndIsNotQueuedAgain(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	g.queueSecondFix()
+	g.tick()
+	if !g.granted("mr-1") || g.granted("mr-2") {
+		t.Fatalf("slots = %+v", g.w.MergeSlots())
+	}
+
+	g.r.mr = MergeFact{State: MRRefused, Reason: "branch protection requires a review", PipelineGreen: true, At: g.now}
+	evs := g.tick()
+	obs := eventsOf[brain.MergeRequestObserved](evs)
+	if len(obs) != 1 || obs[0].State != brain.MergeRequestRefused || obs[0].Reason != "branch protection requires a review" {
+		t.Fatalf("observed = %+v, want one refusal with its reason", obs)
+	}
+	if !hasEvent[brain.MergeSlotExpired](evs) || g.hasSlot("mr-1") {
+		t.Fatalf("the slot of a refused merge was not freed: %+v", evs)
+	}
+	if !g.granted("mr-2") {
+		t.Fatal("the other fix of the Application did not get its slot")
+	}
+	if got := g.status(); got != brain.FindingStatusFixing {
+		t.Fatalf("status = %q, want fixing", got)
+	}
+
+	// It is not queued again while the host keeps refusing, whatever the time.
+	g.now = g.now.Add(10 * DefaultPolicy().RequeueBackoff)
+	for range 3 {
+		g.tick()
+	}
+	if g.hasSlot("mr-1") {
+		t.Fatal("a refused merge request was queued again")
+	}
+}
+
+// C. The daemon cannot read the merge request. It fails closed: the slot stays,
+// the wait is visible once, and a later read that works ends the wait and goes on.
+func TestStep_AnUnreadableMergeRequestKeepsTheSlotAndWaitsOnAPerson(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	g.queueSecondFix()
+	g.now = g.now.Add(DefaultPolicy().MergeGrantWindow + time.Hour)
+
+	g.r.err = errors.New("the host is down")
+	first := g.tick()
+	waits := eventsOf[brain.FixWaiting](first)
+	if len(waits) != 1 || !waits[0].Waiting || waits[0].WaitKind != brain.WaitMergeUnreadable ||
+		waits[0].Reason != "the daemon cannot read the merge request on the Git host" {
+		t.Fatalf("waits = %+v, want one visible wait with the reason", waits)
+	}
+	if hasEvent[brain.MergeSlotExpired](first) || !g.hasSlot("mr-1") || g.granted("mr-2") {
+		t.Fatal("the slot was freed or passed on although the daemon cannot read the merge request")
+	}
+	if second := g.tick(); len(eventsOf[brain.FixWaiting](second)) != 0 {
+		t.Fatalf("the wait was recorded twice: %+v", second)
+	}
+
+	// The host answers again, and the merge request is open past the window.
+	g.r.err = nil
+	later := g.tick()
+	ended := eventsOf[brain.FixWaiting](later)
+	if len(ended) != 1 || ended[0].Waiting || ended[0].WaitKind != brain.WaitMergeUnreadable {
+		t.Fatalf("waits = %+v, want the wait ended", ended)
+	}
+	if !hasEvent[brain.MergeSlotExpired](later) {
+		t.Fatalf("events = %+v, want the normal release after a read that works", later)
+	}
+}
+
+// D. A merged fix with no health verdict after the grant window waits on a
+// person. No clock frees the slot: the hold time of the health signal is
+// gibson#1463.
+func TestStep_AMergedFixWithNoVerdictAfterTheWindowWaitsOnAPersonAndKeepsItsSlot(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	g.queueSecondFix()
+	g.merged()
+	if got := g.status(); got != brain.FindingStatusFixed {
+		t.Fatalf("status = %q, want fixed", got)
+	}
+	if evs := g.tick(); len(eventsOf[brain.FixWaiting](evs)) != 0 {
+		t.Fatalf("a wait inside the window: %+v", evs)
+	}
+
+	g.now = g.now.Add(DefaultPolicy().MergeGrantWindow + time.Hour)
+	first := g.tick()
+	waits := eventsOf[brain.FixWaiting](first)
+	if len(waits) != 1 || waits[0].WaitKind != brain.WaitNoHealthVerdict || waits[0].Reason != "no health verdict" || !waits[0].Waiting {
+		t.Fatalf("waits = %+v, want one wait with no health verdict", waits)
+	}
+	if !g.hasSlot("mr-1") || g.granted("mr-2") {
+		t.Fatal("the slot was freed with no verdict")
+	}
+	if second := g.tick(); len(eventsOf[brain.FixWaiting](second)) != 0 {
+		t.Fatalf("the wait was recorded twice: %+v", second)
+	}
+	g.now = g.now.Add(1000 * time.Hour)
+	g.tick()
+	if !g.hasSlot("mr-1") || g.granted("mr-2") {
+		t.Fatal("a clock freed the slot of a merged fix")
+	}
+}
+
+// E. A merge call that the gate allowed a moment ago may still be on its way to
+// the host. The watcher frees no slot within the call bound. After the bound it
+// reads the host again and frees it.
+func TestStep_ASlotWithAnAllowedCallInFlightIsNotFreedUntilAfterTheBound(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	g.now = g.now.Add(DefaultPolicy().MergeGrantWindow + time.Minute)
+	brain.Reduce(g.w, brain.MergeCallAllowed{MergeRequest: "mr-1", At: g.now.Add(-30 * time.Second)})
+
+	if evs := g.tick(); hasEvent[brain.MergeSlotExpired](evs) || !g.hasSlot("mr-1") {
+		t.Fatalf("a slot with a call in flight was freed: %+v", evs)
+	}
+	g.now = g.now.Add(DefaultPolicy().MergeCallBound)
+	if evs := g.tick(); !hasEvent[brain.MergeSlotExpired](evs) || g.hasSlot("mr-1") {
+		t.Fatalf("the slot was not freed after the call bound: %+v", evs)
+	}
+}
+
+// A call in flight also holds back the release of a refused merge.
+func TestStep_AnAllowedCallInFlightHoldsBackTheReleaseOfARefusedMerge(t *testing.T) {
+	g := newRig(t, "scan")
+	g.r.mr = MergeFact{State: MROpen, PipelineGreen: true}
+	g.tick()
+	brain.Reduce(g.w, brain.MergeCallAllowed{MergeRequest: "mr-1", At: g.now})
+	g.r.mr = MergeFact{State: MRRefused, Reason: "review required", At: g.now}
+	if evs := g.tick(); hasEvent[brain.MergeSlotExpired](evs) {
+		t.Fatalf("the slot of a call in flight was freed: %+v", evs)
+	}
+	g.now = g.now.Add(DefaultPolicy().MergeCallBound)
+	if evs := g.tick(); !hasEvent[brain.MergeSlotExpired](evs) {
+		t.Fatalf("the slot of the refused merge was not freed after the bound: %+v", evs)
 	}
 }
