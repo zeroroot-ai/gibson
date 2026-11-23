@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 )
 
@@ -195,5 +197,63 @@ func TestConnectorMCP_RecordsTheToolCountOfEachAnsweringConnector(t *testing.T) 
 	}
 	if len(got) != 1 || got["acme/github"] != 2 {
 		t.Fatalf("recorded counts = %v; want acme/github = 2 only", got)
+	}
+}
+
+// A connector that nothing listens on is a transport failure: the call may work later, so the
+// error carries ErrConnectorUnavailable. A connector that answers with an error from the tool
+// carries no mark, because the connector sends none, and the daemon does not guess from the text.
+func TestConnectorMCP_ATransportFailureIsMarkedUnavailableAndAToolErrorIsNot(t *testing.T) {
+	srv, _ := newFakeConnector(t)
+	down := newTestConnectorMCP(srv, "github")
+	down.proxyURL = func(string, string) string { return "http://127.0.0.1:1/mcp" }
+
+	_, err := down.CallConnectorTool(context.Background(), "acme", "github", "echo", map[string]any{"text": "hi"})
+	if !errors.Is(err, metatool.ErrConnectorUnavailable) || errors.Is(err, metatool.ErrConnectorTimeout) {
+		t.Fatalf("err = %v, want ErrConnectorUnavailable", err)
+	}
+
+	up := newTestConnectorMCP(srv, "github")
+	_, err = up.CallConnectorTool(context.Background(), "acme", "github", "fail", map[string]any{"text": "hi"})
+	if err == nil || errors.Is(err, metatool.ErrConnectorUnavailable) || errors.Is(err, metatool.ErrConnectorTimeout) {
+		t.Fatalf("err = %v, want an unmarked tool error", err)
+	}
+	_, err = up.CallConnectorTool(context.Background(), "acme", "github", "no-such-tool", nil)
+	if err == nil || errors.Is(err, metatool.ErrConnectorUnavailable) {
+		t.Fatalf("err = %v, want a refusal of the protocol that is no transport failure", err)
+	}
+}
+
+// A connector that does not answer within the bound of the daemon gives ErrConnectorTimeout.
+func TestConnectorMCP_ABoundThatEndsIsMarkedTimeout(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "slow-connector", Version: "v0"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "slow", Description: "waits"},
+		func(ctx context.Context, _ *mcp.CallToolRequest, _ echoIn) (*mcp.CallToolResult, echoOut, error) {
+			select {
+			case <-ctx.Done():
+			case <-time.After(3 * time.Second):
+			}
+			return nil, echoOut{}, errors.New("slow tool ended")
+		})
+	srv := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
+	t.Cleanup(srv.Close)
+	t.Cleanup(srv.CloseClientConnections)
+	c := newTestConnectorMCP(srv, "github")
+	c.timeout = 300 * time.Millisecond
+
+	_, err := c.CallConnectorTool(context.Background(), "acme", "github", "slow", map[string]any{"text": "x"})
+
+	if !errors.Is(err, metatool.ErrConnectorTimeout) {
+		t.Fatalf("err = %v, want ErrConnectorTimeout", err)
+	}
+}
+
+// A call that the caller canceled is no failure of the connector.
+func TestClassifyTransport_ACanceledCallStaysAsItIs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := classifyTransport(ctx, context.Canceled)
+	if errors.Is(err, metatool.ErrConnectorUnavailable) || errors.Is(err, metatool.ErrConnectorTimeout) {
+		t.Fatalf("err = %v, want the cancellation unmarked", err)
 	}
 }

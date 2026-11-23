@@ -14,9 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
@@ -123,7 +125,7 @@ func (c *ConnectorMCP) open(ctx context.Context, tenant, connector string) (*mcp
 	}
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
-		return nil, fmt.Errorf("connector mcp: connect to %q: %w", connector, err)
+		return nil, fmt.Errorf("connector mcp: connect to %q: %w", connector, classifyTransport(ctx, err))
 	}
 	return session, nil
 }
@@ -202,8 +204,17 @@ func (c *ConnectorMCP) CallConnectorTool(ctx context.Context, tenant, connector,
 
 	res, err := session.CallTool(cctx, &mcp.CallToolParams{Name: tool, Arguments: args})
 	if err != nil {
-		return nil, fmt.Errorf("connector mcp: call %s on %q: %w", tool, connector, err)
+		var rpcErr *jsonrpc.Error
+		if errors.As(err, &rpcErr) {
+			// The connector answered with a protocol error, for example an unknown tool or
+			// arguments that its schema refuses. It is a refusal and no transport failure.
+			return nil, fmt.Errorf("connector mcp: call %s on %q: %w", tool, connector, err)
+		}
+		return nil, fmt.Errorf("connector mcp: call %s on %q: %w", tool, connector, classifyTransport(cctx, err))
 	}
+	// A tool that reports an error returns text only: the connector sends no structured mark
+	// that says if the error is temporary, so the error stays unclassified here. The daemon
+	// never reads the words of the text to guess.
 	if res.IsError {
 		return nil, fmt.Errorf("connector mcp: %s on %q reported an error: %s", tool, connector, contentText(res.Content))
 	}
@@ -280,4 +291,19 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("connector mcp: %w", err)
 	}
 	return resp, nil
+}
+
+// classifyTransport marks an error of the connection to a connector by its type. A bound that
+// ended gives metatool.ErrConnectorTimeout. A call that the caller canceled stays as it is. Any
+// other failure of the transport gives metatool.ErrConnectorUnavailable. The error keeps its
+// cause.
+func classifyTransport(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return fmt.Errorf("%w: %w", metatool.ErrConnectorTimeout, err)
+	case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
+		return err
+	default:
+		return fmt.Errorf("%w: %w", metatool.ErrConnectorUnavailable, err)
+	}
 }

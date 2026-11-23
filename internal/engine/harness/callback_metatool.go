@@ -406,8 +406,16 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the audit record of the call could not be written"), nil
 	}
 	code := commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT
-	if errors.Is(err, metatool.ErrUnauthorized) {
+	switch {
+	case errors.Is(err, metatool.ErrUnauthorized):
 		code = commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED
+	case errors.Is(err, metatool.ErrConnectorTimeout):
+		// The connector did not answer in time. The call may have run, so the member reads
+		// the state before it repeats a call that is not idempotent.
+		code = commonpb.ErrorCode_ERROR_CODE_TIMEOUT
+	case errors.Is(err, metatool.ErrConnectorUnavailable):
+		// The call never reached the connector, or the connection broke. A later call may work.
+		code = commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE
 	}
 	s.logger.WarnContext(ctx, "meta-tool invoke failed", "id", in.ID, "tenant", caller.Tenant, "err", err)
 	// gibson:no-tool-executed — the observer recorded the failed call.
