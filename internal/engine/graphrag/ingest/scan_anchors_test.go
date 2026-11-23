@@ -82,13 +82,20 @@ func TestScanAnchorEvents_RefuseWhatTheyCannotName(t *testing.T) {
 
 func TestRepositoryKey(t *testing.T) {
 	for in, want := range map[string]string{
-		"git@gitlab.com:Group/Project.git":      "gitlab.com/Group/Project",
-		"https://GitHub.com/Acme/Shop":          "github.com/Acme/Shop",
-		"https://github.com/acme/shop":          "github.com/acme/shop",
-		"https://user:pw@github.com/acme/shop/": "github.com/acme/shop",
-		"https://gitlab.com/a/b/c.git":          "gitlab.com/a/b/c",
-		"":                                      "",
-		"https://x.example":                     "",
+		"https://github.com/acme/shop":            "github.com/acme/shop",
+		"https://github.com:443/acme/shop":        "github.com/acme/shop",
+		"http://github.com:80/acme/shop":          "github.com/acme/shop",
+		"ssh://git@github.com/acme/shop.git":      "github.com/acme/shop",
+		"ssh://git@github.com:22/acme/shop.git":   "github.com/acme/shop",
+		"git@github.com:acme/shop.git":            "github.com/acme/shop",
+		"https://github.com./acme/shop":           "github.com/acme/shop",
+		"https://git.bank.internal:8443/Team/Api": "git.bank.internal:8443/Team/Api",
+		"git@gitlab.com:Group/Project.git":        "gitlab.com/Group/Project",
+		"https://GitHub.com/Acme/Shop":            "github.com/Acme/Shop",
+		"https://user:pw@github.com/acme/shop/":   "github.com/acme/shop",
+		"https://gitlab.com/a/b/c.git":            "gitlab.com/a/b/c",
+		"":                                        "",
+		"https://x.example":                       "",
 	} {
 		assert.Equal(t, want, RepositoryKey(in), in)
 	}

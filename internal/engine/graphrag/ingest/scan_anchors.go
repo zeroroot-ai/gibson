@@ -44,19 +44,34 @@ const (
 // scpForm matches the scp-like form of a git remote, user@host:path.
 var scpForm = regexp.MustCompile(`^[A-Za-z0-9._-]+@([A-Za-z0-9.-]+):(.+)$`)
 
+// defaultPorts are the ports that a scheme uses when the URL names none. A URL
+// that names the default port is the same repository as one that does not.
+var defaultPorts = map[string]string{"https": "443", "http": "80", "ssh": "22", "git": "9418"}
+
 // repositoryParts returns the host and the path of a repository URL, from the
-// https form or the scp-like form. It returns empty strings for any other value.
+// URL form or the scp-like form. The host has no default port of its scheme and
+// no trailing dot, and any other port stays. It returns empty strings for any
+// other value.
 func repositoryParts(rawURL string) (host, path string) {
 	raw := strings.TrimSpace(rawURL)
 	if m := scpForm.FindStringSubmatch(raw); m != nil && !strings.Contains(raw, "://") {
-		return m[1], m[2]
+		return strings.TrimSuffix(m[1], "."), m[2]
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" {
 		return "", ""
 	}
-	// u.Host keeps the port, so two servers of one host name stay two nodes.
-	return u.Host, u.Path
+	name := strings.TrimSuffix(u.Hostname(), ".")
+	if port := u.Port(); port != "" && port != defaultPorts[strings.ToLower(u.Scheme)] {
+		if strings.Contains(name, ":") {
+			name = "[" + name + "]"
+		}
+		return name + ":" + port, u.Path
+	}
+	if strings.Contains(name, ":") {
+		name = "[" + name + "]"
+	}
+	return name, u.Path
 }
 
 // RepositoryKey returns the identity of a repository: its host and its path,
