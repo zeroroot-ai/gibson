@@ -26,7 +26,7 @@ var auditColumns = []string{
 func TestAuditGrantChanges_ReadsTheRecordsOfOnePrincipalInOneTenant(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	until := time.Unix(1700000500, 0)
 	meta := []byte(`{"object":"component:connector/okta-response","relation":"can_execute"}`)
 
@@ -51,7 +51,7 @@ func TestAuditGrantChanges_ReadsTheRecordsOfOnePrincipalInOneTenant(t *testing.T
 func TestAuditGrantChanges_AReadThatFailsIsAnError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	mock.ExpectQuery("SELECT COUNT").WillReturnError(errors.New("db down"))
 
 	_, err = auditGrantChanges{q: audit.NewQuery(db)}.GrantChanges(context.Background(), "acme", "p", time.Now())
@@ -64,7 +64,7 @@ func TestAuditGrantChanges_AReadThatFailsIsAnError(t *testing.T) {
 func TestAuditGrantChanges_MoreRecordsThanTheBoundIsAnError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	for range auditMaxPages {
 		mock.ExpectQuery("SELECT COUNT").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(auditMaxPages * auditPageSize * 2))
 		mock.ExpectQuery("FROM   audit_log").WillReturnRows(sqlmock.NewRows(auditColumns))
@@ -80,7 +80,7 @@ func TestRegisterIncidentReport_WiresTheGrantorRead(t *testing.T) {
 	defer cancel()
 	db, _, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	d := &daemonImpl{
 		logger: testObsLogger(), platformDB: db,
 		brainRegistry: brain.NewRegistry(ctx, braintest.StoreFactory()),
