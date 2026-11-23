@@ -116,7 +116,7 @@ func TestDispatchScanAlerts_AFailureDoesNotFailTheNode(t *testing.T) {
 			b := newBrainExecutor(nil, slog.Default())
 			b.connectors = conn
 			bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-1", eng: eng}
-			out, err := b.dispatchTool(bind, brain.DispatchRequest{
+			out, err := b.dispatchTool(bind, brain.DispatchRequest{ //nolint:contextcheck // the node uses the context of its binding
 				WorkID: brain.WorkID("scan-1", "alerts"), MissionID: "scan-1", Target: "mcp:gitlab-fixloop:list_dependency_alerts", Input: scanAlertsInput,
 			})
 			if err != nil {

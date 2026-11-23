@@ -188,7 +188,7 @@ func TestRender_TheSevenOldParametersRenderTheOldBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ids []string
+	ids := make([]string, 0, len(def.GetNodes()))
 	for id := range def.GetNodes() {
 		ids = append(ids, id)
 	}
@@ -212,7 +212,7 @@ func TestRender_ScanRunsOnlyTheBranchesThatHaveParameters(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render(%v): %v", in, err)
 		}
-		var ids []string
+		ids := make([]string, 0, len(def.GetNodes()))
 		for id := range def.GetNodes() {
 			ids = append(ids, id)
 		}

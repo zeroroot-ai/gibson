@@ -28,7 +28,7 @@ var alertConnectors = map[string]bool{"github-fixloop": true, "gitlab-fixloop": 
 // builds that id and compares it, and it parses nothing. Only that node is ingested: a TOOL node of any other mission that calls
 // the same tool gets the result and no finding (gibson#1469).
 func isScanAlertsNode(bind *missionBinding, req brain.DispatchRequest, tid toolid.ID) bool {
-	if req.WorkID != brain.WorkID(req.MissionID, scanAlertsNodeID) || tid.Tool != ingest.DependencyAlertsTool || !alertConnectors[tid.Connector] || bind.eng == nil {
+	if req.WorkID != brain.WorkID(req.MissionID, scanAlertsNodeID) || tid.Tool != ingest.DependencyAlertsTool || !alertConnectors[tid.Connector] {
 		return false
 	}
 	isScan := false
@@ -92,7 +92,7 @@ func (b *brainExecutor) scanAlerts(bind *missionBinding, req brain.DispatchReque
 	}
 	out, err := ingest.DependencyAlertEvents(res, repoKey, project, req.MissionID, bind.runID, time.Now().UTC())
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("map the dependency alerts: %w", err)
 	}
 	for _, n := range out.Notes {
 		b.logger.Warn("dependency alerts", "mission_id", req.MissionID, "tenant", bind.tenant, "note", n)

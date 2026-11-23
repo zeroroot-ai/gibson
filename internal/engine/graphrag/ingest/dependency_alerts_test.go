@@ -315,7 +315,7 @@ func TestDependencyAlertEvents_DropsAFieldThatFailsItsCheck(t *testing.T) {
 	require.Len(t, raised, 1)
 	assert.LessOrEqual(t, len(raised[0].Description), maxDescriptionLen)
 	assert.LessOrEqual(t, len(raised[0].Title), maxTitleLen)
-	assert.True(t, strings.ToValidUTF8(raised[0].Description, "") == raised[0].Description, "a cut keeps the text valid UTF-8")
+	assert.Equal(t, raised[0].Description, strings.ToValidUTF8(raised[0].Description, ""), "a cut keeps the text valid UTF-8")
 
 	for _, bad := range []string{"GHSA-2222-3333", "GHSA-2222-3333-44445", "ghsa-2222-3333-4444 ", "CVE-2026-1", "CVE-2026-1234; drop"} {
 		assert.Empty(t, advisoryOf([]string{bad}), bad)

@@ -72,7 +72,7 @@ const (
 
 var (
 	ghsaRE = regexp.MustCompile(`^GHSA-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}$`)
-	cveRE  = regexp.MustCompile(`^CVE-[0-9]{4}-[0-9]{4,}$`)
+	cveRE  = regexp.MustCompile(`^CVE-\d{4}-\d{4,}$`)
 	// A purl: pkg:<type>/<name>[@<version>], with a bounded character set.
 	purlRE = regexp.MustCompile(`^pkg:([a-z][a-z0-9.+-]{0,31})/[A-Za-z0-9._~%@/+:-]{1,480}$`)
 )
@@ -190,8 +190,7 @@ func capText(s string, n int) string {
 
 // cleanAlert checks the untrusted fields of an alert. It returns the alert with
 // each failed field dropped, and the notes.
-func cleanAlert(a dependencyAlert) (dependencyAlert, []string) {
-	var notes []string
+func cleanAlert(a dependencyAlert) (clean dependencyAlert, notes []string) {
 	a.groupPackage = capText(strings.TrimSpace(a.Package), maxPackageNameLen*2)
 	drop := func(field string) {
 		notes = append(notes, fmt.Sprintf("alert %s: the field %s failed its check and was dropped", capText(a.ID, 64), field))
@@ -243,27 +242,10 @@ func cleanAlert(a dependencyAlert) (dependencyAlert, []string) {
 // (RepositoryProject). The result must name that project. It returns an error when
 // the result is not the shape of the tool.
 func DependencyAlertEvents(result any, repoKey, project, missionID, runID string, now time.Time) (DependencyAlertOutcome, error) {
-	raw, err := json.Marshal(result)
+	res, err := parseAlertsResult(result, repoKey, project)
 	if err != nil {
-		return DependencyAlertOutcome{}, fmt.Errorf("encode the result of %s: %w", DependencyAlertsTool, err)
+		return DependencyAlertOutcome{}, err
 	}
-	var res dependencyAlertsResult
-	if err := json.Unmarshal(raw, &res); err != nil {
-		return DependencyAlertOutcome{}, fmt.Errorf("the result of %s is not the shape of the tool: %w", DependencyAlertsTool, err)
-	}
-	if res.Alerts == nil {
-		return DependencyAlertOutcome{}, errors.New("the result has no alerts field, which is not an empty list")
-	}
-	if repoKey == "" || project == "" {
-		return DependencyAlertOutcome{}, fmt.Errorf("the scan has no Repository, so a Finding of %s has no place", DependencyAlertsTool)
-	}
-	if !strings.EqualFold(strings.TrimSpace(res.Project), project) {
-		return DependencyAlertOutcome{}, fmt.Errorf("the result names project %q, and the scan asked for %q", res.Project, project)
-	}
-	if len(*res.Alerts) > maxAlerts {
-		return DependencyAlertOutcome{}, fmt.Errorf("the result holds %d alerts, more than the %d that the mapping takes", len(*res.Alerts), maxAlerts)
-	}
-
 	var out DependencyAlertOutcome
 	// A truncated list may miss an alert, and a call with another state than "all"
 	// does not list the fixed alerts. No alert verifies anything then.
@@ -275,101 +257,29 @@ func DependencyAlertEvents(result any, repoKey, project, missionID, runID string
 		out.Notes = append(out.Notes, fmt.Sprintf("the call asked for state %q and not \"all\", so no alert verifies a finding", capText(res.State, 32)))
 	}
 
-	// Pass 1: clean each alert and group it by the key of its Finding and by the
-	// advisory and package alone.
-	type keyed struct {
-		id       string
-		advisory string
-		groups   []string
-		alerts   []dependencyAlert
-	}
-	findings := map[string]*keyed{}
-	var order []string
-	openByPackage := map[string]bool{} // advisory|ecosystem|package, any manifest
-	for _, raw := range *res.Alerts {
-		a, notes := cleanAlert(raw)
-		out.Notes = append(out.Notes, notes...)
-		advisory := advisoryOf(a.AdvisoryIDs)
-		id := DependencyAlertFindingID(repoKey, advisory, a.Ecosystem, a.Package, a.ManifestPath, a.ID)
-		k := findings[id]
-		if k == nil {
-			k = &keyed{id: id, advisory: advisory}
-			findings[id] = k
-			order = append(order, id)
-		}
-		k.alerts = append(k.alerts, a)
-		k.groups = append(k.groups, packageGroups(a)...)
-		k.groups = append(k.groups, packageGroup("*", a))
-		if strings.EqualFold(a.State, "open") {
-			for _, g := range packageGroups(a) {
-				openByPackage[g] = true
-			}
-		}
-	}
-
+	g := groupAlerts(*res.Alerts, repoKey, &out)
 	var packages, raised, reruns []brain.Event
 	seenPackage := map[string]bool{}
-	for _, id := range order {
-		k := findings[id]
-		var open *dependencyAlert
-		allFixed, allVerifiable, anyFixed := true, true, false
-		for i := range k.alerts {
-			a := &k.alerts[i]
-			switch strings.ToLower(a.State) {
-			case "open":
-				if open == nil {
-					open = a
-				}
-				allFixed = false
-			case "fixed":
-				anyFixed = true
-			default:
-				// dismissed, auto_dismissed or a state that this release does not know.
-				allFixed = false
-				out.Notes = append(out.Notes, fmt.Sprintf("alert %s is %s: it verifies nothing and waits for a person", a.ID, capText(a.State, 32)))
+	for _, id := range g.order {
+		k := g.findings[id]
+		st := inspectFinding(k, &out)
+		if st.open != nil {
+			pkgs, pkgEvent := packageOf(*st.open, missionID, runID, seenPackage, &out)
+			if pkgEvent != nil {
+				packages = append(packages, pkgEvent)
 			}
-			if !verifiable(*a, k.advisory) {
-				allVerifiable = false
-				out.Notes = append(out.Notes, notVerifiableReason(*a, k.advisory))
-			}
-		}
-		if open != nil {
-			a := *open
-			var pkgs []string
-			if a.PURL == "" {
-				out.Notes = append(out.Notes, fmt.Sprintf("alert %s has no usable purl, so its Finding has no Package", a.ID))
-			} else {
-				pkgs = []string{a.PURL}
-				if !seenPackage[a.PURL] {
-					seenPackage[a.PURL] = true
-					// No properties: an entity sighting copies its properties onto a node
-					// that exists, and a Package that trivy wrote must keep its own name
-					// and version. The purl holds both.
-					packages = append(packages, brain.EntityObserved{Label: "Package", Key: a.PURL, MissionID: missionID, MissionRunID: runID})
-				}
-			}
-			title := fmt.Sprintf("%s in %s %s", firstNonEmpty(k.advisory, "dependency alert "+a.ID), a.Package, a.Version)
-			raised = append(raised, brain.FindingRaised{
-				ID: id, Title: capText(strings.TrimSpace(title), maxTitleLen), Description: capText(alertDescription(a), maxDescriptionLen),
-				Severity: a.Severity, ScopeID: missionID, MissionID: missionID, MissionRunID: runID,
-				Status: brain.FindingStatusOpen, VulnerabilityID: k.advisory,
-				Places:   []brain.FindingPlace{{Label: "Repository", Key: repoKey}},
-				Packages: pkgs,
-				// The alert is a read of a tool of the buyer. That read verifies the fix.
-				CheckKind: string(finding.CheckTool), CheckRef: DependencyAlertsTool,
-				At: now,
-			})
+			raised = append(raised, raiseAlert(k, *st.open, repoKey, missionID, runID, now, pkgs))
 		}
 		if k.advisory == "" {
 			continue // a Finding with no advisory id is never verified or reopened by this check
 		}
 		switch {
-		case open != nil || anyOpen(openByPackage, k.groups):
+		case st.open != nil || anyOpen(g.openByPackage, k.groups):
 			// An open alert for this advisory and package, here or in another
 			// manifest, proves that the flaw is there. It does not need to be
 			// verifiable.
 			reruns = append(reruns, brain.CheckRerun{ID: id, CheckKind: string(finding.CheckTool), Found: true, EvidenceAt: now, MissionID: missionID})
-		case anyFixed && allFixed && allVerifiable && complete:
+		case st.anyFixed && st.allFixed && st.allVerifiable && complete:
 			reruns = append(reruns, brain.CheckRerun{ID: id, CheckKind: string(finding.CheckTool), Found: false, EvidenceAt: now, MissionID: missionID})
 		}
 	}
@@ -377,6 +287,137 @@ func DependencyAlertEvents(result any, repoKey, project, missionID, runID string
 	out.Notes = dedupeStrings(out.Notes)
 	out.Events = append(append(packages, raised...), reruns...)
 	return out, nil
+}
+
+// parseAlertsResult decodes the result and checks it against the scan.
+func parseAlertsResult(result any, repoKey, project string) (dependencyAlertsResult, error) {
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return dependencyAlertsResult{}, fmt.Errorf("encode the result of %s: %w", DependencyAlertsTool, err)
+	}
+	var res dependencyAlertsResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return dependencyAlertsResult{}, fmt.Errorf("the result of %s is not the shape of the tool: %w", DependencyAlertsTool, err)
+	}
+	switch {
+	case res.Alerts == nil:
+		return dependencyAlertsResult{}, errors.New("the result has no alerts field, which is not an empty list")
+	case repoKey == "" || project == "":
+		return dependencyAlertsResult{}, fmt.Errorf("the scan has no Repository, so a Finding of %s has no place", DependencyAlertsTool)
+	case !strings.EqualFold(strings.TrimSpace(res.Project), project):
+		return dependencyAlertsResult{}, fmt.Errorf("the result names project %q, and the scan asked for %q", res.Project, project)
+	case len(*res.Alerts) > maxAlerts:
+		return dependencyAlertsResult{}, fmt.Errorf("the result holds %d alerts, more than the %d that the mapping takes", len(*res.Alerts), maxAlerts)
+	}
+	return res, nil
+}
+
+// keyed is the alerts of one Finding.
+type keyed struct {
+	id       string
+	advisory string
+	groups   []string
+	alerts   []dependencyAlert
+}
+
+// grouped is the alerts of a result by the key of their Finding, in first-seen
+// order, and the packages that an open alert blocks.
+type grouped struct {
+	findings      map[string]*keyed
+	order         []string
+	openByPackage map[string]bool // advisory and package, any manifest
+}
+
+// groupAlerts cleans each alert and groups it by the key of its Finding and by
+// the advisory and package alone.
+func groupAlerts(alerts []dependencyAlert, repoKey string, out *DependencyAlertOutcome) grouped {
+	g := grouped{findings: map[string]*keyed{}, openByPackage: map[string]bool{}}
+	for _, raw := range alerts {
+		a, notes := cleanAlert(raw)
+		out.Notes = append(out.Notes, notes...)
+		advisory := advisoryOf(a.AdvisoryIDs)
+		id := DependencyAlertFindingID(repoKey, advisory, a.Ecosystem, a.Package, a.ManifestPath, a.ID)
+		k := g.findings[id]
+		if k == nil {
+			k = &keyed{id: id, advisory: advisory}
+			g.findings[id] = k
+			g.order = append(g.order, id)
+		}
+		k.alerts = append(k.alerts, a)
+		k.groups = append(k.groups, packageGroups(a)...)
+		k.groups = append(k.groups, packageGroup("*", a))
+		if strings.EqualFold(a.State, "open") {
+			for _, grp := range packageGroups(a) {
+				g.openByPackage[grp] = true
+			}
+		}
+	}
+	return g
+}
+
+// findingState is what the alerts of one Finding say together.
+type findingState struct {
+	open                              *dependencyAlert
+	allFixed, allVerifiable, anyFixed bool
+}
+
+// inspectFinding reads the states of the alerts of one Finding and adds the
+// notes for the alerts that verify nothing.
+func inspectFinding(k *keyed, out *DependencyAlertOutcome) findingState {
+	st := findingState{allFixed: true, allVerifiable: true}
+	for i := range k.alerts {
+		a := &k.alerts[i]
+		switch strings.ToLower(a.State) {
+		case "open":
+			if st.open == nil {
+				st.open = a
+			}
+			st.allFixed = false
+		case "fixed":
+			st.anyFixed = true
+		default:
+			// dismissed, auto_dismissed or a state that this release does not know.
+			st.allFixed = false
+			out.Notes = append(out.Notes, fmt.Sprintf("alert %s is %s: it verifies nothing and waits for a person", a.ID, capText(a.State, 32)))
+		}
+		if !verifiable(*a, k.advisory) {
+			st.allVerifiable = false
+			out.Notes = append(out.Notes, notVerifiableReason(*a, k.advisory))
+		}
+	}
+	return st
+}
+
+// packageOf returns the Package list of a Finding and the event that makes the
+// Package node, once for each purl.
+func packageOf(a dependencyAlert, missionID, runID string, seen map[string]bool, out *DependencyAlertOutcome) ([]string, brain.Event) {
+	if a.PURL == "" {
+		out.Notes = append(out.Notes, fmt.Sprintf("alert %s has no usable purl, so its Finding has no Package", a.ID))
+		return nil, nil
+	}
+	if seen[a.PURL] {
+		return []string{a.PURL}, nil
+	}
+	seen[a.PURL] = true
+	// No properties: an entity sighting copies its properties onto a node that
+	// exists, and a Package that trivy wrote must keep its own name and version.
+	// The purl holds both.
+	return []string{a.PURL}, brain.EntityObserved{Label: "Package", Key: a.PURL, MissionID: missionID, MissionRunID: runID}
+}
+
+// raiseAlert is the Finding that an open alert raises.
+func raiseAlert(k *keyed, a dependencyAlert, repoKey, missionID, runID string, now time.Time, pkgs []string) brain.Event {
+	title := fmt.Sprintf("%s in %s %s", firstNonEmpty(k.advisory, "dependency alert "+a.ID), a.Package, a.Version)
+	return brain.FindingRaised{
+		ID: k.id, Title: capText(strings.TrimSpace(title), maxTitleLen), Description: capText(alertDescription(a), maxDescriptionLen),
+		Severity: a.Severity, ScopeID: missionID, MissionID: missionID, MissionRunID: runID,
+		Status: brain.FindingStatusOpen, VulnerabilityID: k.advisory,
+		Places:   []brain.FindingPlace{{Label: "Repository", Key: repoKey}},
+		Packages: pkgs,
+		// The alert is a read of a tool of the buyer. That read verifies the fix.
+		CheckKind: string(finding.CheckTool), CheckRef: DependencyAlertsTool,
+		At: now,
+	}
 }
 
 func anyOpen(open map[string]bool, groups []string) bool {
