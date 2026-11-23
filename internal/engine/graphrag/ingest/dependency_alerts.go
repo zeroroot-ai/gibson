@@ -118,6 +118,11 @@ type dependencyAlert struct {
 	// The version and the purl are then empty.
 	VersionAmbiguous bool     `json:"version_ambiguous"`
 	Versions         []string `json:"versions"`
+
+	// groupPackage is the package name as the tool sent it. It is used to group the
+	// alerts of one package and never reaches the graph: a name that fails its check
+	// is dropped from Package, and the alert must not move to another group for it.
+	groupPackage string
 }
 
 // DependencyAlertOutcome is what the mapping made of one result.
@@ -187,6 +192,7 @@ func capText(s string, n int) string {
 // each failed field dropped, and the notes.
 func cleanAlert(a dependencyAlert) (dependencyAlert, []string) {
 	var notes []string
+	a.groupPackage = capText(strings.TrimSpace(a.Package), maxPackageNameLen*2)
 	drop := func(field string) {
 		notes = append(notes, fmt.Sprintf("alert %s: the field %s failed its check and was dropped", capText(a.ID, 64), field))
 	}
@@ -274,7 +280,7 @@ func DependencyAlertEvents(result any, repoKey, project, missionID, runID string
 	type keyed struct {
 		id       string
 		advisory string
-		group    string
+		groups   []string
 		alerts   []dependencyAlert
 	}
 	findings := map[string]*keyed{}
@@ -287,13 +293,16 @@ func DependencyAlertEvents(result any, repoKey, project, missionID, runID string
 		id := DependencyAlertFindingID(repoKey, advisory, a.Ecosystem, a.Package, a.ManifestPath, a.ID)
 		k := findings[id]
 		if k == nil {
-			k = &keyed{id: id, advisory: advisory, group: packageGroup(advisory, a)}
+			k = &keyed{id: id, advisory: advisory}
 			findings[id] = k
 			order = append(order, id)
 		}
 		k.alerts = append(k.alerts, a)
-		if strings.EqualFold(a.State, "open") && advisory != "" {
-			openByPackage[packageGroup(advisory, a)] = true
+		k.groups = append(k.groups, packageGroups(a)...)
+		if strings.EqualFold(a.State, "open") {
+			for _, g := range packageGroups(a) {
+				openByPackage[g] = true
+			}
 		}
 	}
 
@@ -354,7 +363,7 @@ func DependencyAlertEvents(result any, repoKey, project, missionID, runID string
 			continue // a Finding with no advisory id is never verified or reopened by this check
 		}
 		switch {
-		case open != nil || openByPackage[k.group]:
+		case open != nil || anyOpen(openByPackage, k.groups):
 			// An open alert for this advisory and package, here or in another
 			// manifest, proves that the flaw is there. It does not need to be
 			// verifiable.
@@ -369,10 +378,30 @@ func DependencyAlertEvents(result any, repoKey, project, missionID, runID string
 	return out, nil
 }
 
+func anyOpen(open map[string]bool, groups []string) bool {
+	for _, g := range groups {
+		if open[g] {
+			return true
+		}
+	}
+	return false
+}
+
 // packageGroup is the key of an advisory on a package, in any manifest.
 func packageGroup(advisory string, a dependencyAlert) string {
-	raw, _ := json.Marshal([]string{advisory, a.Ecosystem, a.Package})
+	raw, _ := json.Marshal([]string{advisory, a.Ecosystem, a.groupPackage})
 	return string(raw)
+}
+
+// packageGroups returns the group of the alert for each of its valid advisory ids
+// (GHSA and CVE alike), so an open alert that names the advisory by the other id
+// still blocks a verify.
+func packageGroups(a dependencyAlert) []string {
+	var out []string
+	for _, id := range a.AdvisoryIDs {
+		out = append(out, packageGroup(id, a))
+	}
+	return out
 }
 
 func dedupeStrings(in []string) []string {

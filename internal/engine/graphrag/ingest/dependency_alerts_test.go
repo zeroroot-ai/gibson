@@ -368,3 +368,38 @@ func TestRepositoryProject(t *testing.T) {
 		assert.Equal(t, want, RepositoryProject(in), in)
 	}
 }
+
+// An open alert that names the advisory by its CVE id still blocks the verify of a
+// fixed alert that names it by its GHSA id, and the open alert in another group by
+// reason of a bad package name is still in the group of its package.
+func TestDependencyAlertEvents_GroupsOnEveryAdvisoryIdAndKeepsTheRawName(t *testing.T) {
+	fixed := alert("dependabot:1", "fixed", "v1.2.3", ghsaX, "CVE-2026-1234")
+	open := inManifest(alert("dependabot:2", "open", "v1.2.0", "CVE-2026-1234"), "other/go.mod")
+	out := run(t, complete(fixed, open), "m1")
+	raised, reruns, _ := kinds(out.Events)
+	require.Len(t, raised, 1)
+	for _, r := range reruns {
+		assert.True(t, r.Found, "an open alert for the same advisory under another id blocks the verify")
+	}
+
+	// A name that fails its check is dropped from the graph, and the open alert
+	// stays in the group of its package.
+	long := strings.Repeat("x", 300)
+	fixedLong := alert("dependabot:3", "fixed", "v1.2.3", ghsaY)
+	fixedLong["package"] = long
+	openLong := inManifest(alert("dependabot:4", "open", "v1.2.0", ghsaY), "b/go.mod")
+	openLong["package"] = long
+	out = run(t, complete(fixedLong, openLong), "m2")
+	_, reruns, _ = kinds(out.Events)
+	require.NotEmpty(t, reruns)
+	for _, r := range reruns {
+		assert.True(t, r.Found, "the open alert is in the group of its package")
+	}
+	raised, _, entities := kinds(out.Events)
+	for _, f := range raised {
+		assert.NotContains(t, f.Title+f.Description, long, "the raw name never reaches the graph")
+	}
+	for _, e := range entities {
+		assert.NotContains(t, e.Key, long, "the raw name never reaches the graph")
+	}
+}

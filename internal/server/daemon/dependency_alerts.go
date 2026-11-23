@@ -24,10 +24,11 @@ const scanAlertsNodeID = "alerts"
 var alertConnectors = map[string]bool{"github-fixloop": true, "gitlab-fixloop": true}
 
 // isScanAlertsNode reports whether a dispatched node is the alerts node of a scan
-// mission. Only that node is ingested: a TOOL node of any other mission that calls
+// mission. The work id of a node is brain.WorkID(mission, node), so the check
+// builds that id and compares it, and it parses nothing. Only that node is ingested: a TOOL node of any other mission that calls
 // the same tool gets the result and no finding (gibson#1469).
 func isScanAlertsNode(bind *missionBinding, req brain.DispatchRequest, tid toolid.ID) bool {
-	if req.WorkID != scanAlertsNodeID || tid.Tool != ingest.DependencyAlertsTool || !alertConnectors[tid.Connector] || bind.eng == nil {
+	if req.WorkID != brain.WorkID(req.MissionID, scanAlertsNodeID) || tid.Tool != ingest.DependencyAlertsTool || !alertConnectors[tid.Connector] || bind.eng == nil {
 		return false
 	}
 	isScan := false

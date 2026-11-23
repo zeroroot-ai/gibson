@@ -46,11 +46,14 @@ const scanAlertsInput = `{"repositoryUrl":"https://github.com/acme/shop.git","st
 func TestIsScanAlertsNode_OnlyTheAlertsNodeOfAScan(t *testing.T) {
 	_, eng, ctx := scanWorld(t)
 	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-1", eng: eng}
-	ok := func(work, mission, connector string) bool {
-		return isScanAlertsNode(bind, brain.DispatchRequest{WorkID: work, MissionID: mission}, mustToolID(t, "mcp:"+connector+":list_dependency_alerts"))
+	ok := func(node, mission, connector string) bool {
+		return isScanAlertsNode(bind, brain.DispatchRequest{WorkID: brain.WorkID(mission, node), MissionID: mission}, mustToolID(t, "mcp:"+connector+":list_dependency_alerts"))
 	}
 	if !ok("alerts", "scan-1", "github-fixloop") || !ok("alerts", "scan-1", "gitlab-fixloop") {
 		t.Fatal("the alerts node of a scan must be ingested")
+	}
+	if isScanAlertsNode(bind, brain.DispatchRequest{WorkID: "alerts", MissionID: "scan-1"}, mustToolID(t, "mcp:github-fixloop:list_dependency_alerts")) {
+		t.Error("a bare node id is not the work id of a node")
 	}
 	if ok("alerts", "other-1", "github-fixloop") {
 		t.Error("a mission that is not a scan must not be ingested")
@@ -73,7 +76,7 @@ func TestDispatchScanAlerts_RaisesFindingsAtTheRepositoryOfTheURL(t *testing.T) 
 	b.connectors = conn
 	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-1", eng: eng}
 	out, err := b.dispatchTool(bind, brain.DispatchRequest{
-		WorkID: "alerts", MissionID: "scan-1", Target: "mcp:github-fixloop:list_dependency_alerts", Input: scanAlertsInput,
+		WorkID: brain.WorkID("scan-1", "alerts"), MissionID: "scan-1", Target: "mcp:github-fixloop:list_dependency_alerts", Input: scanAlertsInput,
 	})
 	if err != nil || !strings.Contains(out, "dependabot:1") {
 		t.Fatalf("out = %q, err = %v", out, err)
@@ -114,7 +117,7 @@ func TestDispatchScanAlerts_AFailureDoesNotFailTheNode(t *testing.T) {
 			b.connectors = conn
 			bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-1", eng: eng}
 			out, err := b.dispatchTool(bind, brain.DispatchRequest{
-				WorkID: "alerts", MissionID: "scan-1", Target: "mcp:gitlab-fixloop:list_dependency_alerts", Input: scanAlertsInput,
+				WorkID: brain.WorkID("scan-1", "alerts"), MissionID: "scan-1", Target: "mcp:gitlab-fixloop:list_dependency_alerts", Input: scanAlertsInput,
 			})
 			if err != nil {
 				t.Fatalf("the node failed: %v", err)
