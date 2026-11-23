@@ -297,3 +297,113 @@ func TestCodeOf(t *testing.T) {
 		}
 	}
 }
+
+// A member call passes the loop check first. A covered connector goes on to the
+// can_execute check and the dispatch, and the record names the grant, the
+// grantor and the member (gibson#1612).
+func TestCall_LoopCheckCoveredRecordsGrantAndGrantor(t *testing.T) {
+	obs := &seqObserver{}
+	q := &seqQuerier{obs: obs}
+	h := NewHandler(nil, allowAll("mcp:jira:create_issue"), q)
+	_, err := h.Call(context.Background(), Call{
+		Caller: callerAlice, ID: "mcp:jira:create_issue", Observer: obs, Recorder: obs.record,
+		MemberID: "m-1",
+		Loop: func(_ context.Context, connector string) (LoopAllow, error) {
+			if connector != "jira" {
+				t.Errorf("loop check got connector %q", connector)
+			}
+			return LoopAllow{GrantID: "lg-1", Grantor: "user:admin"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if obs.last.LoopGrantID != "lg-1" || obs.last.Grantor != "user:admin" || obs.last.MemberID != "m-1" {
+		t.Errorf("record = %+v, want the grant, the grantor and the member", obs.last)
+	}
+	d := auditDetails(obs.last, nil)
+	if d["loop_grant_id"] != "lg-1" || d["grantor"] != "user:admin" || d["member_id"] != "m-1" {
+		t.Errorf("audit details = %v", d)
+	}
+}
+
+// A refusal by the loop check dispatches nothing, and it is recorded. The
+// record names the grant when one exists.
+func TestCall_LoopCheckRefusalIsRecordedAndDispatchesNothing(t *testing.T) {
+	obs := &seqObserver{}
+	q := &seqQuerier{obs: obs}
+	h := NewHandler(nil, allowAll("mcp:jira:create_issue"), q)
+	_, err := h.Call(context.Background(), Call{
+		Caller: callerAlice, ID: "mcp:jira:create_issue", Observer: obs, Recorder: obs.record,
+		Loop: func(context.Context, string) (LoopAllow, error) {
+			return LoopAllow{GrantID: "lg-1", Grantor: "user:admin"}, fmt.Errorf("%w: class ticket", ErrLoopGrantDenied)
+		},
+	})
+	if !errors.Is(err, ErrLoopGrantDenied) {
+		t.Fatalf("err = %v, want ErrLoopGrantDenied", err)
+	}
+	if q.calls != 0 {
+		t.Fatal("a refused call must not reach the connector")
+	}
+	if len(obs.recorded) != 1 || obs.codes[0] != ErrCodeNotAuthorized {
+		t.Errorf("recorded = %v codes = %v, want one record with not_authorized", obs.recorded, obs.codes)
+	}
+	if got := obs.events; len(got) != 1 || got[0] != "result" {
+		t.Errorf("events = %v, want only the result record", got)
+	}
+	if d := auditDetails(obs.last, obs.resultErr); d["error"] != "no_loop_grant" || d["loop_grant_id"] != "lg-1" {
+		t.Errorf("audit details = %v", d)
+	}
+}
+
+// The loop grant does not replace can_execute: a covered connector that the
+// tenant switched off is still refused.
+func TestCall_LoopCheckDoesNotReplaceCanExecute(t *testing.T) {
+	obs := &seqObserver{}
+	q := &seqQuerier{obs: obs}
+	h := NewHandler(nil, allowAll("mcp:other:tool"), q)
+	_, err := h.Call(context.Background(), Call{
+		Caller: callerAlice, ID: "mcp:jira:create_issue", Observer: obs, Recorder: obs.record,
+		Loop: func(context.Context, string) (LoopAllow, error) { return LoopAllow{GrantID: "lg-1"}, nil },
+	})
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("err = %v, want ErrUnauthorized from can_execute", err)
+	}
+	if q.calls != 0 {
+		t.Fatal("the connector must not be called")
+	}
+}
+
+// A loop grant covers connector tools only.
+func TestCall_LoopCheckRefusesANativeToolAndRecordsTheGrant(t *testing.T) {
+	obs := &seqObserver{}
+	h := NewHandler(nil, allowAll("native:nmap"), &seqQuerier{obs: obs})
+	_, err := h.Call(context.Background(), Call{
+		Caller: callerAlice, ID: "native:nmap", Observer: obs, Recorder: obs.record, MemberID: "m-1",
+		Loop: func(context.Context, string) (LoopAllow, error) {
+			return LoopAllow{GrantID: "lg-1", Grantor: "user:admin"}, nil
+		},
+	})
+	if !errors.Is(err, ErrLoopGrantDenied) {
+		t.Fatalf("err = %v, want ErrLoopGrantDenied", err)
+	}
+	if obs.last.LoopGrantID != "lg-1" || obs.last.Grantor != "user:admin" || obs.last.MemberID != "m-1" {
+		t.Errorf("record = %+v, want the grant, the grantor and the member of the refusal", obs.last)
+	}
+}
+
+// An id that does not decode is refused, and the record still names the member.
+func TestCall_LoopCheckRefusalOfABadIDNamesTheMember(t *testing.T) {
+	obs := &seqObserver{}
+	h := NewHandler(nil, allowAll(), &seqQuerier{obs: obs})
+	_, err := h.Call(context.Background(), Call{
+		Caller: callerAlice, ID: "not-an-id", Observer: obs, Recorder: obs.record, MemberID: "m-1",
+		Loop: func(context.Context, string) (LoopAllow, error) { return LoopAllow{}, nil },
+	})
+	if err == nil {
+		t.Fatal("a bad id was accepted")
+	}
+	if obs.last.MemberID != "m-1" {
+		t.Errorf("record = %+v, want the member on the refusal", obs.last)
+	}
+}

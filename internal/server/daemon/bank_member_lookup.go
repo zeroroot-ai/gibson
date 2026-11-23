@@ -76,22 +76,32 @@ func newBankMemberLiveness(d *daemonImpl) *bankMemberLiveness {
 // task and the bank's agent as its subject. A turn grant of the same member has
 // the same bank and run, but its task is a job and its subject is the sender, so
 // it never matches: a turn grant lives for the turn and must not renew. A store
-// error is not live, and the member's next heartbeat retries.
-func (l *bankMemberLiveness) IsMemberBaseGrantLive(ctx context.Context, claims sdkcg.Claims) bool {
+// error is not live: it is an error, the renewal fails, and the next heartbeat
+// retries.
+func (l *bankMemberLiveness) IsMemberBaseGrantLive(ctx context.Context, claims sdkcg.Claims) (bool, error) {
 	store, err := l.banks()
 	if err != nil {
-		return false
+		return false, err
 	}
 	tenantID := claims.Tenant.String()
 	m, err := store.MemberByRun(ctx, tenantID, claims.MissionRunID)
-	if err != nil || m.State == bank.MemberDead || m.BankID != claims.MissionID || m.ID != claims.TaskID {
-		return false
+	if errors.Is(err, bank.ErrNotFound) {
+		return false, nil // the run backs no member
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the member of run %s: %w", claims.MissionRunID, err)
+	}
+	if m.State == bank.MemberDead || m.BankID != claims.MissionID || m.ID != claims.TaskID {
+		return false, nil
 	}
 	b, err := store.Get(ctx, tenantID, m.BankID)
-	if err != nil {
-		return false
+	if errors.Is(err, bank.ErrNotFound) {
+		return false, nil
 	}
-	return claims.Subject == memberBaseGrantSubject(b.AgentName)
+	if err != nil {
+		return false, fmt.Errorf("read the bank %s: %w", m.BankID, err)
+	}
+	return claims.Subject == memberBaseGrantSubject(b.AgentName), nil
 }
 
 // The three seams below are read lazily.

@@ -1074,3 +1074,38 @@ func TestCatalog_ZeroRootConnectors(t *testing.T) {
 		})
 	}
 }
+
+// TestLoad_AgentLoopGrant: the manifest of a member agent names the tool
+// classes of its loop grant, and the loader refuses a class that is not a known
+// tool class (gibson#1612).
+func TestLoad_AgentLoopGrant(t *testing.T) {
+	const head = "id: intake\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  image: ghcr.io/x/c@sha256:abc\n" +
+		"  dispatchMode: sandboxed\n  command: node /app/one.js\n  memberCommand: node /app/member.js\n"
+
+	got, err := load(manifestFSWith(map[string]string{
+		"intake.yaml": head + "  loopGrant:\n    classes: [ticket, paging, siem]\n",
+	}))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	classes := got[0].toAgentEntry().LoopGrantClasses
+	if len(classes) != 3 || classes[0] != "ticket" || classes[1] != "paging" || classes[2] != "siem" {
+		t.Fatalf("loop grant classes = %v, want ticket, paging, siem", classes)
+	}
+
+	// The failing fixture: each of these manifests must fail to load.
+	for name, spec := range map[string]string{
+		"an unknown class": head + "  loopGrant:\n    classes: [ticket, toaster]\n",
+		"a class twice":    head + "  loopGrant:\n    classes: [ticket, ticket]\n",
+		"an empty class":   head + "  loopGrant:\n    classes: [\"\"]\n",
+		"a class and no member command": "id: intake\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n" +
+			"  image: ghcr.io/x/c@sha256:abc\n  dispatchMode: sandboxed\n  command: node /app/one.js\n" +
+			"  loopGrant:\n    classes: [ticket]\n",
+	} {
+		t.Run("rejects "+name, func(t *testing.T) {
+			if _, err := load(manifestFSWith(map[string]string{"intake.yaml": spec})); err == nil {
+				t.Fatalf("want a load error for %s", name)
+			}
+		})
+	}
+}

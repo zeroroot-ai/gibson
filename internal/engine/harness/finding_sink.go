@@ -24,6 +24,9 @@ type FindingRaised struct {
 	MissionID    string
 	MissionRunID string
 	AgentName    string
+	// SubmittedBy is the verified principal that submitted the finding. A bank
+	// member sets it to the member principal. It is empty for a mission agent.
+	SubmittedBy string
 	// CheckKind and CheckRef name the check that raised the finding
 	// (SubmittedFindingCheck, ADR-0178): the mission run, or the read of a
 	// connector tool.

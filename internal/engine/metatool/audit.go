@@ -63,6 +63,13 @@ func auditDetails(rec CallRecord, callErr error) map[string]any {
 	if rec.MissionID != "" {
 		d["mission_id"] = rec.MissionID
 	}
+	if rec.MemberID != "" {
+		d["member_id"] = rec.MemberID
+	}
+	if rec.LoopGrantID != "" {
+		d["loop_grant_id"] = rec.LoopGrantID
+		d["grantor"] = rec.Grantor
+	}
 	if callErr != nil {
 		d["error"] = errorClass(callErr)
 	}
@@ -77,6 +84,8 @@ func errorClass(err error) string {
 		return "unauthorized"
 	case errors.Is(err, ErrBlocked):
 		return "blocked"
+	case errors.Is(err, ErrLoopGrantDenied):
+		return "no_loop_grant"
 	default:
 		return "failed"
 	}

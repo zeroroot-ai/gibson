@@ -116,7 +116,7 @@ func TestMetaInvoke_DispatchesAndWrapsResult(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
 
 	resp, err := newSvc(t).metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
-		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
+		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnSuccess(t *testing.T) {
 	}
 
 	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
-		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
+		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
 	contextInfo := &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", ToolExecutionId: "tool-exec-meta-2"}
 
 	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
-		[]byte(`{"id":"mcp:github:create_issue"}`))
+		[]byte(`{"id":"mcp:github:create_issue"}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestMetaInvoke_RecordsSuccessEvenWhenResultIsNotJSONMarshalable(t *testing.
 	contextInfo := &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", ToolExecutionId: "tool-exec-meta-3"}
 
 	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
-		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
+		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestMetaInvoke_UnauthorizedIsPermissionDenied(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, q)
 
 	resp, err := newSvc(t).metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
-		[]byte(`{"id":"mcp:github:create_issue"}`))
+		[]byte(`{"id":"mcp:github:create_issue"}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestMetaInvoke_BlockedByMissionPolicy(t *testing.T) {
 
 	resp, err := newSvc(t).metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"},
 		metatool.MissionPolicy{Blocked: []string{"mcp:gitlab:create_issue"}},
-		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
+		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestMatchBlocked(t *testing.T) {
 
 func TestMetaInvoke_MissingIdIsInvalidArgument(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{}, &mtQuerier{})
-	resp, err := newSvc(t).metaInvoke(context.Background(), nil, h, nil, catalog.Caller{}, metatool.MissionPolicy{}, []byte(`{"args":{}}`))
+	resp, err := newSvc(t).metaInvoke(context.Background(), nil, h, nil, catalog.Caller{}, metatool.MissionPolicy{}, []byte(`{"args":{}}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestMetaInvoke_NativeToolRunsThroughTheDirectHandler(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"native:test-external-tool": true}}, &mtQuerier{})
 
 	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
-		[]byte(`{"id":"native:test-external-tool","args":{"query":"q","limit":2}}`))
+		[]byte(`{"id":"native:test-external-tool","args":{"query":"q","limit":2}}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestMetaInvoke_NativeToolNotEnabledIsRefused(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, &mtQuerier{})
 
 	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
-		[]byte(`{"id":"native:test-external-tool","args":{}}`))
+		[]byte(`{"id":"native:test-external-tool","args":{}}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestMetaInvoke_NativeToolFailureIsRecordedOnce(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"native:test-external-tool": true}}, &mtQuerier{})
 
 	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
-		[]byte(`{"id":"native:test-external-tool","args":{}}`))
+		[]byte(`{"id":"native:test-external-tool","args":{}}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -645,7 +645,7 @@ func TestMetaInvoke_AnAuditWriteFailureRefusesTheCall(t *testing.T) {
 	}
 	resp, err := svc.metaInvoke(testCtxWithTenant(), &harnesspb.ContextInfo{MissionId: "m1", MissionRunId: "run-1"}, h, nil,
 		catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
-		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
+		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`), nil)
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}

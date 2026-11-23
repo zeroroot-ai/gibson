@@ -160,6 +160,11 @@ type DaemonServer struct {
 	// WithLiveMemberLookup; nil leaves a member grant unrenewable.
 	liveMembers LiveMemberLookup
 
+	// memberRPCs derives the allowed_rpcs of the base grant of a live bank
+	// member at each renewal, so a change of its loop grant takes effect at the
+	// next renewal (gibson#1612). Nil keeps the RPCs of the grant as they are.
+	memberRPCs MemberGrantRPCSource
+
 	// renewalForks refuses the renewal of the grant of a forked source outside
 	// the source sandbox. Wired via WithRenewalForkGuard.
 	renewalForks RenewalForkGuard

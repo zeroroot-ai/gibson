@@ -75,8 +75,10 @@ type LiveMissionLookup interface {
 // the input and must live for that turn only. Only the base grant may renew.
 type LiveMemberLookup interface {
 	// IsMemberBaseGrantLive reports whether claims are the base grant of a
-	// member that the daemon has not declared dead.
-	IsMemberBaseGrantLive(ctx context.Context, claims sdkcg.Claims) bool
+	// member that the daemon has not declared dead. It returns an error when it
+	// cannot read the answer. The renewal then fails: a store that is down is
+	// not a member that is gone, and it is not a member that is alive.
+	IsMemberBaseGrantLive(ctx context.Context, claims sdkcg.Claims) (bool, error)
 }
 
 // CGJWTVerifier abstracts the verification path. Implementations
@@ -118,6 +120,20 @@ func (s *DaemonServer) WithLiveMissionLookup(l LiveMissionLookup) *DaemonServer 
 // either source says so.
 func (s *DaemonServer) WithLiveMemberLookup(l LiveMemberLookup) *DaemonServer {
 	s.liveMembers = l
+	return s
+}
+
+// MemberGrantRPCSource returns the allowed_rpcs that the base grant of a live
+// bank member holds now: the base surface plus the harness calls of the loop
+// grant of its agent in its tenant.
+type MemberGrantRPCSource interface {
+	MemberGrantRPCs(ctx context.Context, claims sdkcg.Claims) ([]string, error)
+}
+
+// WithMemberGrantRPCs wires the source that derives the allowed_rpcs of a
+// member grant at renewal.
+func (s *DaemonServer) WithMemberGrantRPCs(src MemberGrantRPCSource) *DaemonServer {
+	s.memberRPCs = src
 	return s
 }
 
@@ -217,7 +233,18 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 	}
 	// Every task grant names its run. A grant with none cannot be bound to a
 	// run, so it cannot renew.
-	if !s.liveMissions.IsMissionRunLive(claims.MissionID, claims.MissionRunID) && !s.isLiveMember(ctx, claims) {
+	// The liveness of the member is read once. Its answer decides the renewal and
+	// the RPCs of the new grant.
+	missionLive := s.liveMissions.IsMissionRunLive(claims.MissionID, claims.MissionRunID)
+	memberLive := false
+	if !missionLive && claims.MissionRunID != "" {
+		var lerr error
+		memberLive, lerr = s.liveMembers.IsMemberBaseGrantLive(ctx, claims)
+		if lerr != nil {
+			return nil, status.Errorf(codes.Unavailable, "renewal refused: the liveness of the member could not be read: %s", lerr)
+		}
+	}
+	if !missionLive && !memberLive {
 		return nil, status.Error(codes.FailedPrecondition,
 			"mission run has ended; a task grant cannot be renewed past its run (re-dispatch the task)")
 	}
@@ -229,6 +256,18 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 	}
 	if err := s.renewalForks.CheckGrant(ctx, claims); err != nil {
 		return nil, err //nolint:wrapcheck // a gRPC status
+	}
+
+	// The base grant of a member takes its RPCs from the loop grant that holds
+	// now. A grant that was given or removed since the last mint then changes
+	// at this renewal. Any other grant carries its RPCs over unchanged.
+	allowed := claims.AllowedRPCs
+	if s.memberRPCs != nil && memberLive {
+		derived, derr := s.memberRPCs.MemberGrantRPCs(ctx, claims)
+		if derr != nil {
+			return nil, status.Errorf(codes.Unavailable, "renewal of a member grant: %s", derr)
+		}
+		allowed = derived
 	}
 
 	// Mint the renewal. allowed_rpcs and tenant carry over verbatim;
@@ -246,7 +285,7 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 		TaskID:         claims.TaskID,
 		MissionRunID:   claims.MissionRunID,                  // the renewal keeps the run of the grant
 		Initiator:      capabilitygrant.InitiatorOf(cgToken), // and the initiator of the grant
-		AllowedRPCs:    claims.AllowedRPCs,
+		AllowedRPCs:    allowed,
 		RecipientClass: recipientClassFromSubject(claims.Subject),
 	})
 	if err != nil {
@@ -265,12 +304,6 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 		CapabilityGrant: fresh,
 		ExpiresAtUnix:   expUnix,
 	}, nil
-}
-
-// isLiveMember reports whether the grant is the base grant of a live bank
-// member. The decision belongs to the lookup, which sees every claim.
-func (s *DaemonServer) isLiveMember(ctx context.Context, claims sdkcg.Claims) bool {
-	return claims.MissionRunID != "" && s.liveMembers.IsMemberBaseGrantLive(ctx, claims)
 }
 
 // capabilityGrantHeader pulls the X-Capability-Grant header out of
