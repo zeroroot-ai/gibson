@@ -37,12 +37,13 @@ type fakePublished struct {
 	ownerErr        error
 	// msgs holds the claims by tenant and key, as the per-tenant database does.
 	// The value is the state, "pending" or "started", and msgMission the mission.
-	msgs       map[string]string
-	msgMission map[string]string
-	forgotten  []string
-	takeErr    error
-	forgetErr  error
-	confirmErr error
+	msgs        map[string]string
+	msgMission  map[string]string
+	forgotten   []string
+	takeErr     error
+	forgetErr   error
+	confirmErr  error
+	confirmGone bool
 }
 
 func (f *fakePublished) ClaimMessage(_ context.Context, tenant, key, missionID string) (inboundmissionstore.MessageClaim, error) {
@@ -65,8 +66,11 @@ func (f *fakePublished) ClaimMessage(_ context.Context, tenant, key, missionID s
 
 func (f *fakePublished) ConfirmMessage(_ context.Context, tenant, key, missionID string) error {
 	k := tenant + "/" + key
-	if f.confirmErr != nil || f.msgMission[k] != missionID {
-		return errors.Join(f.confirmErr, inboundmissionstore.ErrNotFound)
+	if f.confirmErr != nil {
+		return f.confirmErr
+	}
+	if f.confirmGone || f.msgMission[k] != missionID {
+		return inboundmissionstore.ErrNotFound
 	}
 	f.msgs[k] = "started"
 	return nil

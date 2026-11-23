@@ -1397,3 +1397,45 @@ func TestInboundRuns_AKeyThatCannotBeConfirmedIsKept(t *testing.T) {
 	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
 	assert.Empty(t, pub.forgotten, "the claim of a started mission is not given back")
 }
+
+// blockingStarter waits for the context, as a start that hangs.
+type blockingStarter struct{ recordingStarter }
+
+func (b *blockingStarter) StartMission(ctx context.Context, _ api.RunMissionData) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+// A start that outlasts its bound ends before the lease of the claim ends. The
+// claim and the task row are given back, so no second call starts a second mission.
+func TestInboundRuns_ASlowStartEndsWithinItsBoundAndGivesBackTheClaim(t *testing.T) {
+	r := newInboundRuns(&recordingStarter{})
+	r.starter = &blockingStarter{}
+	r.startBound = 20 * time.Millisecond
+	pub := r.published.(*fakePublished)
+
+	_, err := startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1}))
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Equal(t, []string{"acme/recon\x00webhook:crowdstrike:e1"}, pub.forgotten)
+	assert.Contains(t, pub.events, "release:slot-1")
+	assert.Less(t, inboundStartBound, inboundmissionstore.MessageLease, "the bound is under the lease")
+}
+
+// A confirm that matches no row means that the claim is gone. The mission ends, the
+// task row is deleted and the call fails.
+func TestInboundRuns_AConfirmThatMatchesNoRowEndsTheMission(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	pub := r.published.(*fakePublished)
+	pub.confirmGone = true
+	var stopped []string
+	r.stop = func(_ context.Context, id string) error { stopped = append(stopped, id); return nil }
+
+	_, err := startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1}))
+
+	require.ErrorContains(t, err, "claim of the message id")
+	require.Len(t, starter.started, 1)
+	assert.Equal(t, []string{starter.started[0].MissionID}, stopped, "the mission ends")
+	assert.Contains(t, pub.events, "release:slot-1", "the task row is deleted")
+}

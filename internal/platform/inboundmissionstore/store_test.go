@@ -496,18 +496,26 @@ func TestClaimMessage(t *testing.T) {
 	assert.Contains(t, fresh.seen[1], "inbound_messages.state = 'pending' AND inbound_messages.lease_until < now()",
 		"only a pending claim whose lease ended can be taken over")
 
-	exists := func(state string) *fakeDB {
+	exists := func(state string, expired, reserved bool) *fakeDB {
 		return &fakeDB{
 			exec:     func(string) (int64, error) { return 0, nil },
-			queryRow: func(string) datapool.Row { return fakeRow{values: []any{state}} },
+			queryRow: func(string) datapool.Row { return fakeRow{values: []any{state, expired, reserved}} },
 		}
 	}
-	got, err = newStore(exists("started")).ClaimMessage(ctx, "acme", "k", "m-2")
+	got, err = newStore(exists("started", false, true)).ClaimMessage(ctx, "acme", "k", "m-2")
 	require.NoError(t, err)
 	assert.Equal(t, ClaimDuplicate, got, "a started key is a duplicate")
-	got, err = newStore(exists("pending")).ClaimMessage(ctx, "acme", "k", "m-2")
+	got, err = newStore(exists("pending", false, true)).ClaimMessage(ctx, "acme", "k", "m-2")
 	require.NoError(t, err)
-	assert.Equal(t, ClaimInFlight, got, "a pending key is in work")
+	assert.Equal(t, ClaimInFlight, got, "a pending key with a live lease is in work")
+	got, err = newStore(exists("pending", true, true)).ClaimMessage(ctx, "acme", "k", "m-2")
+	require.NoError(t, err)
+	assert.Equal(t, ClaimDuplicate, got, "an expired lease with a task row is a duplicate: the mission may run")
+	got, err = newStore(exists("pending", true, false)).ClaimMessage(ctx, "acme", "k", "m-2")
+	require.NoError(t, err)
+	assert.Equal(t, ClaimInFlight, got, "an expired lease with no task row that lost the race is in work")
+	assert.Contains(t, fresh.seen[1], "NOT EXISTS (SELECT 1 FROM inbound_tasks WHERE inbound_tasks.mission_id = inbound_messages.mission_id)",
+		"a lease is taken over only when no task row exists for the old mission")
 }
 
 func TestClaimMessage_Failures(t *testing.T) {

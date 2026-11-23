@@ -32,6 +32,11 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
+// inboundStartBound bounds the claim, the reserve and the start of one message. It
+// is far under inboundmissionstore.MessageLease, so a start that is still in work
+// when the lease ends cannot happen. A second call then never starts a second mission.
+const inboundStartBound = inboundmissionstore.MessageLease / 5
+
 // inboundTaskInputVariable is the mission variable that holds the text of an
 // inbound message. The text is the task input. The daemon never reads a target
 // from it.
@@ -65,6 +70,9 @@ type inboundRuns struct {
 	buildTimeout time.Duration
 	// stop ends a running mission of the tenant on the context.
 	stop func(ctx context.Context, missionID string) error
+	// startBound bounds the claim of the message id, the reserve and the start. Zero
+	// means inboundStartBound. A test sets it.
+	startBound time.Duration
 }
 
 // missionFindingReader reads the findings of one mission with all of their
@@ -262,6 +270,15 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	// in another tenant is a new id. The claim is a lease. A start that fails gives
 	// it back, and a daemon that stops loses it when the lease ends, so no message
 	// is lost for good. The claim is confirmed only after the start succeeded.
+	bound := r.startBound
+	if bound <= 0 {
+		bound = inboundStartBound
+	}
+	// The detached context still ends the claim, the reserve and the start before the
+	// lease of the claim ends. The calls that undo them use a context of their own.
+	baseCtx := ctx
+	ctx, cancelBound := context.WithTimeout(ctx, bound)
+	defer cancelBound()
 	msgKey := ""
 	if k := a2aserver.WebhookMessageKey(req.Message); k != "" {
 		msgKey = req.Agent + "\x00" + k
@@ -282,7 +299,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		if msgKey == "" {
 			return nil
 		}
-		return r.published.ForgetMessage(context.WithoutCancel(ctx), c.Tenant, msgKey, missionID)
+		return r.published.ForgetMessage(context.WithoutCancel(baseCtx), c.Tenant, msgKey, missionID)
 	}
 	slot, err := r.published.Reserve(ctx, c.Tenant, req.Agent, c.Subject, missionID)
 	switch {
@@ -310,7 +327,7 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	})
 	if err != nil {
 		// The client may be gone, and the task row must still be deleted.
-		rerr := errors.Join(r.published.Release(context.WithoutCancel(ctx), c.Tenant, slot), forget())
+		rerr := errors.Join(r.published.Release(context.WithoutCancel(baseCtx), c.Tenant, slot), forget())
 		// A tenant that is suspended, and a pin that does not match, are refusals
 		// of policy. The Task is rejected, as for any other refusal of a well
 		// formed message.
@@ -325,14 +342,25 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	if started != missionID {
 		// The record has an ID that the row does not name. The mission ends, and the
 		// task row is deleted.
-		serr := r.stop(context.WithoutCancel(ctx), started)
-		rerr := errors.Join(r.published.Release(context.WithoutCancel(ctx), c.Tenant, slot), forget())
+		serr := r.stop(context.WithoutCancel(baseCtx), started)
+		rerr := errors.Join(r.published.Release(context.WithoutCancel(baseCtx), c.Tenant, slot), forget())
 		return nil, fmt.Errorf("the mission %s has an ID other than %s: %w", started, missionID, errors.Join(serr, rerr))
 	}
 	if msgKey != "" {
 		// The mission runs. A key that cannot be confirmed stays a lease and is never
 		// given back, so the mission is not started twice within the lease.
-		if cerr := r.published.ConfirmMessage(context.WithoutCancel(ctx), c.Tenant, msgKey, missionID); cerr != nil {
+		cerr := r.published.ConfirmMessage(context.WithoutCancel(baseCtx), c.Tenant, msgKey, missionID)
+		if errors.Is(cerr, inboundmissionstore.ErrNotFound) {
+			// The claim is gone, so another call may have taken it over and may start a
+			// second mission. This mission ends, and its task row is deleted.
+			serr := r.stop(context.WithoutCancel(baseCtx), missionID)
+			rerr := r.published.Release(context.WithoutCancel(baseCtx), c.Tenant, slot)
+			return nil, fmt.Errorf("the claim of the message id of agent %s is gone, so mission %s ended: %w",
+				req.Agent, missionID, errors.Join(cerr, serr, rerr))
+		}
+		if cerr != nil {
+			// The row stays pending. The next claim cannot take it over while the task row
+			// of this mission exists (inboundmissionstore.ClaimMessage).
 			slog.WarnContext(ctx, "the message id of a started mission could not be confirmed",
 				"tenant", c.Tenant, "agent", req.Agent, "mission_id", missionID, "error", cerr)
 		}

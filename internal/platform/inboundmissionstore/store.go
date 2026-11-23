@@ -406,13 +406,17 @@ func (s *postgresStore) ClaimMessage(ctx context.Context, tenant, key, missionID
 		MessageRetention.Seconds()); err != nil {
 		return 0, fmt.Errorf("inboundmissionstore: forget old message ids: %w", err)
 	}
-	// A new key, and a pending key whose lease ended, belong to this call.
+	// A new key belongs to this call. So does a pending key whose lease ended, but only
+	// when no task row exists for its mission: a task row means that the mission was
+	// reserved, and it may run, so a second mission for the same message would be a
+	// duplicate. Both tables are in the database of the tenant.
 	n, err := c.SQL().Exec(ctx,
 		`INSERT INTO inbound_messages (message_key, mission_id, state, lease_until)
 		 VALUES ($1, $2, 'pending', now() + make_interval(secs => $3))
 		 ON CONFLICT (message_key) DO UPDATE
 		   SET mission_id = EXCLUDED.mission_id, lease_until = EXCLUDED.lease_until, created_at = now()
-		   WHERE inbound_messages.state = 'pending' AND inbound_messages.lease_until < now()`,
+		   WHERE inbound_messages.state = 'pending' AND inbound_messages.lease_until < now()
+		     AND NOT EXISTS (SELECT 1 FROM inbound_tasks WHERE inbound_tasks.mission_id = inbound_messages.mission_id)`,
 		key, missionID, MessageLease.Seconds())
 	if err != nil {
 		return 0, fmt.Errorf("inboundmissionstore: claim message id: %w", err)
@@ -421,7 +425,11 @@ func (s *postgresStore) ClaimMessage(ctx context.Context, tenant, key, missionID
 		return ClaimNew, nil
 	}
 	var state string
-	err = c.SQL().QueryRow(ctx, `SELECT state FROM inbound_messages WHERE message_key = $1`, key).Scan(&state)
+	var expired, reserved bool
+	err = c.SQL().QueryRow(ctx,
+		`SELECT m.state, m.lease_until < now(),
+		        EXISTS (SELECT 1 FROM inbound_tasks t WHERE t.mission_id = m.mission_id)
+		 FROM inbound_messages m WHERE m.message_key = $1`, key).Scan(&state, &expired, &reserved)
 	if errors.Is(err, datapool.ErrNoRows) {
 		// The retention delete of another call removed the row between the two statements.
 		return 0, fmt.Errorf("inboundmissionstore: message id vanished: %w", ErrNotFound)
@@ -429,7 +437,9 @@ func (s *postgresStore) ClaimMessage(ctx context.Context, tenant, key, missionID
 	if err != nil {
 		return 0, fmt.Errorf("inboundmissionstore: read message id: %w", err)
 	}
-	if state == messageStarted {
+	// A confirmed key is a duplicate. So is a pending key whose lease ended and whose
+	// mission was reserved: the mission may run, and only its confirm failed.
+	if state == messageStarted || (expired && reserved) {
 		return ClaimDuplicate, nil
 	}
 	return ClaimInFlight, nil
