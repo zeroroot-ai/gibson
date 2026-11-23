@@ -1633,6 +1633,10 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 		return fmt.Errorf("submit finding: %w", err)
 	}
 
+	// The agent name comes from the verified mission context and never from the
+	// payload, so an agent cannot sign a finding as another agent.
+	finding.AgentName = h.missionCtx.CurrentAgent
+
 	// Store original category before classification
 	originalCategory := finding.Category
 
