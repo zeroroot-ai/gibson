@@ -35,31 +35,49 @@ type fakePublished struct {
 	events          []string
 	owners          map[string]string
 	ownerErr        error
-	// msgs holds the message keys by tenant and key, as the per-tenant database does.
-	msgs      map[string]string
-	forgotten []string
-	takeErr   error
-	forgetErr error
+	// msgs holds the claims by tenant and key, as the per-tenant database does.
+	// The value is the state, "pending" or "started", and msgMission the mission.
+	msgs       map[string]string
+	msgMission map[string]string
+	forgotten  []string
+	takeErr    error
+	forgetErr  error
+	confirmErr error
 }
 
-func (f *fakePublished) TakeMessage(_ context.Context, tenant, key, missionID string) (string, error) {
+func (f *fakePublished) ClaimMessage(_ context.Context, tenant, key, missionID string) (inboundmissionstore.MessageClaim, error) {
 	if f.takeErr != nil {
-		return "", f.takeErr
+		return 0, f.takeErr
 	}
 	if f.msgs == nil {
-		f.msgs = map[string]string{}
+		f.msgs, f.msgMission = map[string]string{}, map[string]string{}
 	}
 	k := tenant + "/" + key
-	if taken, ok := f.msgs[k]; ok {
-		return taken, nil
+	switch f.msgs[k] {
+	case "started":
+		return inboundmissionstore.ClaimDuplicate, nil
+	case "pending":
+		return inboundmissionstore.ClaimInFlight, nil
 	}
-	f.msgs[k] = missionID
-	return "", nil
+	f.msgs[k], f.msgMission[k] = "pending", missionID
+	return inboundmissionstore.ClaimNew, nil
 }
 
-func (f *fakePublished) ForgetMessage(_ context.Context, tenant, key string) error {
+func (f *fakePublished) ConfirmMessage(_ context.Context, tenant, key, missionID string) error {
+	k := tenant + "/" + key
+	if f.confirmErr != nil || f.msgMission[k] != missionID {
+		return errors.Join(f.confirmErr, inboundmissionstore.ErrNotFound)
+	}
+	f.msgs[k] = "started"
+	return nil
+}
+
+func (f *fakePublished) ForgetMessage(_ context.Context, tenant, key, missionID string) error {
 	f.forgotten = append(f.forgotten, tenant+"/"+key)
-	delete(f.msgs, tenant+"/"+key)
+	k := tenant + "/" + key
+	if f.msgs[k] == "pending" && f.msgMission[k] == missionID {
+		delete(f.msgs, k)
+	}
 	return f.forgetErr
 }
 

@@ -32,6 +32,10 @@ import (
 // existing constant bounds an A2A message, so this is the limit of the endpoint.
 const MaxInboundRequestBytes = 1 << 20
 
+// ErrInFlight reports that a start of the same message is in work. The caller
+// retries, and the answer is no final refusal.
+var ErrInFlight = errors.New("a2a: a start of this message is in work, retry later")
+
 // ErrBusy reports that the daemon builds or sends as many results as it allows for
 // the tenant or for the caller. The caller retries later. It maps to a server error
 // of JSON-RPC with a message that says retry.

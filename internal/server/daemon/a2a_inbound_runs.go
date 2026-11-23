@@ -256,24 +256,31 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 	// The task row is written before the mission record, and it takes the ID that
 	// the mission record will take. A running mission therefore always has its row.
 	missionID := types.NewID().String()
-	// A message id that the tenant already used starts no second mission. The key
-	// is kept in the database of the tenant, so the same id in another tenant is a
-	// new id. A start that fails gives the key back, so a retry can start the mission.
-	msgKey := a2aserver.WebhookMessageKey(req.Message)
-	if msgKey != "" {
-		taken, terr := r.published.TakeMessage(ctx, c.Tenant, msgKey, missionID)
-		if terr != nil {
-			return nil, fmt.Errorf("record the message id for agent %s: %w", req.Agent, terr)
+	// A message id that this agent of the tenant already started a mission for
+	// starts no second mission. The key holds the agent, so one id sent to two
+	// agents starts both. It is kept in the database of the tenant, so the same id
+	// in another tenant is a new id. The claim is a lease. A start that fails gives
+	// it back, and a daemon that stops loses it when the lease ends, so no message
+	// is lost for good. The claim is confirmed only after the start succeeded.
+	msgKey := ""
+	if k := a2aserver.WebhookMessageKey(req.Message); k != "" {
+		msgKey = req.Agent + "\x00" + k
+		claim, cerr := r.published.ClaimMessage(ctx, c.Tenant, msgKey, missionID)
+		if cerr != nil {
+			return nil, fmt.Errorf("record the message id for agent %s: %w", req.Agent, cerr)
 		}
-		if taken != "" {
-			return a2aserver.RejectedTask("the message id was already used. Mission " + taken + " started from it"), nil
+		switch claim {
+		case inboundmissionstore.ClaimDuplicate:
+			return a2aserver.RejectedTask("duplicate"), nil
+		case inboundmissionstore.ClaimInFlight:
+			return nil, fmt.Errorf("%w: agent %s", a2aserver.ErrInFlight, req.Agent)
 		}
 	}
 	forget := func() error {
 		if msgKey == "" {
 			return nil
 		}
-		return r.published.ForgetMessage(context.WithoutCancel(ctx), c.Tenant, msgKey)
+		return r.published.ForgetMessage(context.WithoutCancel(ctx), c.Tenant, msgKey, missionID)
 	}
 	slot, err := r.published.Reserve(ctx, c.Tenant, req.Agent, c.Subject, missionID)
 	switch {
@@ -319,6 +326,14 @@ func (r *inboundRuns) Start(ctx context.Context, req a2aserver.InboundStart) (*a
 		serr := r.stop(context.WithoutCancel(ctx), started)
 		rerr := errors.Join(r.published.Release(context.WithoutCancel(ctx), c.Tenant, slot), forget())
 		return nil, fmt.Errorf("the mission %s has an ID other than %s: %w", started, missionID, errors.Join(serr, rerr))
+	}
+	if msgKey != "" {
+		// The mission runs. A key that cannot be confirmed stays a lease and is never
+		// given back, so the mission is not started twice within the lease.
+		if cerr := r.published.ConfirmMessage(context.WithoutCancel(ctx), c.Tenant, msgKey, missionID); cerr != nil {
+			slog.WarnContext(ctx, "the message id of a started mission could not be confirmed",
+				"tenant", c.Tenant, "agent", req.Agent, "mission_id", missionID, "error", cerr)
+		}
 	}
 	return &a2a.Task{
 		ID: a2a.TaskID(missionID), ContextID: missionID,

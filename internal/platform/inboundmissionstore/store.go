@@ -85,15 +85,20 @@ type Store interface {
 	// Owner returns the caller that started a mission and the agent of its
 	// publication, or ErrNotFound.
 	Owner(ctx context.Context, tenant, missionID string) (owner, agent string, err error)
-	// TakeMessage records that the message with this key started the mission. It
-	// returns an empty string when the key is new. It returns the mission that
-	// the first message started when the key was already taken. The key is
-	// unique inside the database of the tenant, so the same key in another
-	// tenant is a new key. A key older than MessageRetention is forgotten.
-	TakeMessage(ctx context.Context, tenant, key, missionID string) (taken string, err error)
-	// ForgetMessage deletes the key of a message whose mission did not start, so
-	// that a retry of the message can start it.
-	ForgetMessage(ctx context.Context, tenant, key string) error
+	// ClaimMessage claims the key of a message for the mission that the message
+	// starts. The key is unique inside the database of the tenant, so the same key
+	// in another tenant is a new key. ClaimNew means that the caller may start the
+	// mission. ClaimDuplicate means that a mission started from the key already.
+	// ClaimInFlight means that another call holds the claim and has not finished.
+	// A claim is a lease of MessageLease. A call that stops before it confirms the
+	// claim loses it when the lease ends, so no message is lost for good.
+	ClaimMessage(ctx context.Context, tenant, key, missionID string) (MessageClaim, error)
+	// ConfirmMessage records that the mission of the claim started. A confirmed key
+	// is a duplicate until MessageRetention ends.
+	ConfirmMessage(ctx context.Context, tenant, key, missionID string) error
+	// ForgetMessage gives back the claim of a message whose mission did not start,
+	// so that a retry can start it. It never deletes a confirmed key.
+	ForgetMessage(ctx context.Context, tenant, key, missionID string) error
 	// WithIdentityLock runs fn while it holds a lock on one identity in the database
 	// of the tenant. Two calls for the same identity run one after the other, also
 	// on two replicas. The lock ends when fn returns. fn reads the store through the
@@ -189,6 +194,23 @@ func NewPostgresStore(pool datapool.Pool) Store {
 // MessageRetention is how long the store remembers the id of a message. A sender
 // that retries sends the same id again within this time.
 const MessageRetention = 7 * 24 * time.Hour
+
+// MessageLease is how long a claim of a message id holds before it is confirmed.
+// A start takes seconds, so a claim that is older than this belongs to a call that
+// stopped.
+const MessageLease = 5 * time.Minute
+
+// MessageClaim is the answer to ClaimMessage.
+type MessageClaim int
+
+// The answers to ClaimMessage.
+const (
+	ClaimNew MessageClaim = iota + 1
+	ClaimDuplicate
+	ClaimInFlight
+)
+
+const messageStarted = "started"
 
 var _ Store = (*postgresStore)(nil)
 
@@ -372,46 +394,74 @@ func (s *postgresStore) Release(ctx context.Context, tenant, slot string) error 
 	return nil
 }
 
-func (s *postgresStore) TakeMessage(ctx context.Context, tenant, key, missionID string) (string, error) {
+func (s *postgresStore) ClaimMessage(ctx context.Context, tenant, key, missionID string) (MessageClaim, error) {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
-		return "", fmt.Errorf("inbound mission store: acquire conn: %w", err)
+		return 0, fmt.Errorf("inbound mission store: acquire conn: %w", err)
 	}
 	defer c.Release()
 	// An old key goes first, so the table stays small and an old id can start a mission again.
 	if _, err := c.SQL().Exec(ctx,
 		`DELETE FROM inbound_messages WHERE created_at < now() - make_interval(secs => $1)`,
 		MessageRetention.Seconds()); err != nil {
-		return "", fmt.Errorf("inboundmissionstore: forget old message ids: %w", err)
+		return 0, fmt.Errorf("inboundmissionstore: forget old message ids: %w", err)
 	}
+	// A new key, and a pending key whose lease ended, belong to this call.
 	n, err := c.SQL().Exec(ctx,
-		`INSERT INTO inbound_messages (message_key, mission_id) VALUES ($1, $2) ON CONFLICT (message_key) DO NOTHING`,
-		key, missionID)
+		`INSERT INTO inbound_messages (message_key, mission_id, state, lease_until)
+		 VALUES ($1, $2, 'pending', now() + make_interval(secs => $3))
+		 ON CONFLICT (message_key) DO UPDATE
+		   SET mission_id = EXCLUDED.mission_id, lease_until = EXCLUDED.lease_until, created_at = now()
+		   WHERE inbound_messages.state = 'pending' AND inbound_messages.lease_until < now()`,
+		key, missionID, MessageLease.Seconds())
 	if err != nil {
-		return "", fmt.Errorf("inboundmissionstore: take message id: %w", err)
+		return 0, fmt.Errorf("inboundmissionstore: claim message id: %w", err)
 	}
 	if n > 0 {
-		return "", nil
+		return ClaimNew, nil
 	}
-	var taken string
-	err = c.SQL().QueryRow(ctx, `SELECT mission_id FROM inbound_messages WHERE message_key = $1`, key).Scan(&taken)
+	var state string
+	err = c.SQL().QueryRow(ctx, `SELECT state FROM inbound_messages WHERE message_key = $1`, key).Scan(&state)
 	if errors.Is(err, datapool.ErrNoRows) {
 		// The retention delete of another call removed the row between the two statements.
-		return "", fmt.Errorf("inboundmissionstore: message id vanished: %w", ErrNotFound)
+		return 0, fmt.Errorf("inboundmissionstore: message id vanished: %w", ErrNotFound)
 	}
 	if err != nil {
-		return "", fmt.Errorf("inboundmissionstore: read message id: %w", err)
+		return 0, fmt.Errorf("inboundmissionstore: read message id: %w", err)
 	}
-	return taken, nil
+	if state == messageStarted {
+		return ClaimDuplicate, nil
+	}
+	return ClaimInFlight, nil
 }
 
-func (s *postgresStore) ForgetMessage(ctx context.Context, tenant, key string) error {
+func (s *postgresStore) ConfirmMessage(ctx context.Context, tenant, key, missionID string) error {
 	c, err := s.conns.For(ctx, tenant)
 	if err != nil {
 		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
 	}
 	defer c.Release()
-	if _, err := c.SQL().Exec(ctx, `DELETE FROM inbound_messages WHERE message_key = $1`, key); err != nil {
+	n, err := c.SQL().Exec(ctx,
+		`UPDATE inbound_messages SET state = 'started', created_at = now()
+		 WHERE message_key = $1 AND mission_id = $2`, key, missionID)
+	if err != nil {
+		return fmt.Errorf("inboundmissionstore: confirm message id: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("inboundmissionstore: the claim of the message id is gone: %w", ErrNotFound)
+	}
+	return nil
+}
+
+func (s *postgresStore) ForgetMessage(ctx context.Context, tenant, key, missionID string) error {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	if _, err := c.SQL().Exec(ctx,
+		`DELETE FROM inbound_messages WHERE message_key = $1 AND mission_id = $2 AND state = 'pending'`,
+		key, missionID); err != nil {
 		return fmt.Errorf("inboundmissionstore: forget message id: %w", err)
 	}
 	return nil

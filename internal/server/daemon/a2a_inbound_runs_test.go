@@ -1253,7 +1253,8 @@ func TestInboundRuns_ARepeatedMessageIdInTheSameTenantStartsNoMission(t *testing
 	require.NoError(t, err)
 	assert.Len(t, starter.started, 1, "the replay starts no second mission")
 	assert.Equal(t, a2a.TaskStateRejected, again.Status.State)
-	assert.Contains(t, a2aserver.TextOf(again.Status.Message), string(first.ID), "the reason names the first mission")
+	assert.Equal(t, "duplicate", a2aserver.TextOf(again.Status.Message), "the answer is duplicate and nothing more")
+	assert.NotContains(t, a2aserver.TextOf(again.Status.Message), string(first.ID), "the first mission id is not given")
 }
 
 func TestInboundRuns_ARepeatedWebhookIdInTheMetadataStartsNoMission(t *testing.T) {
@@ -1325,9 +1326,74 @@ func TestInboundRuns_AnAgentThatVanishedGivesTheMessageIdBack(t *testing.T) {
 	task, err := startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1}))
 	require.NoError(t, err)
 	assert.Equal(t, a2a.TaskStateRejected, task.Status.State)
-	assert.Equal(t, []string{"acme/webhook:crowdstrike:e1"}, pub.forgotten)
+	assert.Equal(t, []string{"acme/recon\x00webhook:crowdstrike:e1"}, pub.forgotten)
 
 	pub.forgetErr = errors.New("db down")
 	_, err = startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e2", map[string]any{"a": 1}))
 	require.ErrorContains(t, err, "give back the message id")
+}
+
+// A start of the same message that is in work gets a retryable error. It is no
+// final rejection, so the message is not lost when the first start fails.
+func TestInboundRuns_ASecondRequestWhileTheFirstIsInWorkGetsARetryableAnswer(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	pub := r.published.(*fakePublished)
+	_, err := pub.ClaimMessage(context.Background(), "acme", "recon\x00webhook:crowdstrike:e1", "m-first")
+	require.NoError(t, err)
+
+	task, err := startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1}))
+
+	require.ErrorIs(t, err, a2aserver.ErrInFlight)
+	assert.Nil(t, task, "no rejected Task: a rejection is final")
+	assert.Empty(t, starter.started)
+	assert.ErrorIs(t, a2aserver.MapError(err), a2a.ErrServerError, "the wire error is a server error that a caller retries")
+}
+
+// A failed first start gives the claim back, so the retry that was told to wait
+// starts the mission.
+func TestInboundRuns_TheRetryAfterAFailedFirstStartStartsTheMission(t *testing.T) {
+	starter := &recordingStarter{err: errors.New("db down")}
+	r := newInboundRuns(starter)
+	msg := webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1})
+	_, err := startInbound(r, "recon", msg)
+	require.Error(t, err)
+
+	starter.err = nil
+	_, err = startInbound(r, "recon", msg)
+	require.NoError(t, err)
+	assert.Len(t, starter.started, 1)
+}
+
+// One webhook id that goes to two agents of a tenant starts a mission for each.
+func TestInboundRuns_OneMessageIdForTwoAgentsStartsBoth(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	pub := r.published.(*fakePublished)
+	pub.entries["other"] = pub.entries["recon"]
+	src := r.source.(*fakePinSource)
+	src.def.Agents = append(src.def.Agents, "other")
+	msg := webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1})
+
+	for _, agent := range []string{"recon", "other", "recon"} {
+		_, err := startInbound(r, agent, msg)
+		require.NoError(t, err)
+	}
+
+	assert.Len(t, starter.started, 2, "one mission for each agent, and the replay for recon is dropped")
+}
+
+// A key that cannot be confirmed after a start is never given back, so the
+// mission that runs is not started twice.
+func TestInboundRuns_AKeyThatCannotBeConfirmedIsKept(t *testing.T) {
+	starter := &recordingStarter{}
+	r := newInboundRuns(starter)
+	pub := r.published.(*fakePublished)
+	pub.confirmErr = errors.New("db down")
+
+	task, err := startInbound(r, "recon", webhookMessage("webhook:crowdstrike:e1", map[string]any{"a": 1}))
+
+	require.NoError(t, err)
+	assert.Equal(t, a2a.TaskStateSubmitted, task.Status.State)
+	assert.Empty(t, pub.forgotten, "the claim of a started mission is not given back")
 }

@@ -1425,6 +1425,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		slot:       deciderSlot,
 		deciderPin: deciderSlotFrom(def.GetDeciderSlot()),
 		initiator:  missionInitiatorOf(missionCtx.CreatedBy),
+		taskData:   taskDataOf(active.mission.Metadata),
 	}
 	m.brainExecutor.register(missionID, binding)
 	defer m.brainExecutor.unregister(missionID, binding)
