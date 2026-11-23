@@ -21,6 +21,29 @@
         "project"
       ]
     },
+    "fix-pass": {
+      "version": "1.0.0",
+      "params": [
+        "application",
+        "bank",
+        "baseBranch",
+        "codingTimeout",
+        "finding",
+        "forgeConnector",
+        "mergeWait",
+        "project",
+        "repository",
+        "target"
+      ],
+      "optional": [
+        "baseBranch",
+        "codingTimeout",
+        "finding",
+        "mergeWait",
+        "repository",
+        "target"
+      ]
+    },
     "scan": {
       "version": "1.0.0",
       "params": [

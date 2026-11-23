@@ -1,0 +1,57 @@
+{
+  "name": "fix-pass",
+  "description": "Run one pass of the fix agent over one Application: fix one Finding and open one merge request.",
+  "version": "1.0.0",
+  "nodes": {
+    "pass": {
+      "id": "pass",
+      "type": "NODE_TYPE_AGENT",
+      "agentConfig": {
+        "agentName": "fix-agent",
+        "task": {
+          "id": "pass",
+          "goal": "Fix one open Finding of customer-portal and open one merge request.",
+          "context": {
+            "application": {
+              "stringValue": "customer-portal"
+            },
+            "bank": {
+              "stringValue": "bank/coding"
+            },
+            "base_branch": {
+              "stringValue": "main"
+            },
+            "connector": {
+              "stringValue": "connector/gitlab-fixloop"
+            },
+            "finding": {
+              "stringValue": "finding-42"
+            },
+            "merge_wait": {
+              "stringValue": "30m"
+            },
+            "project": {
+              "stringValue": "examplebank/customer-portal"
+            },
+            "repository": {
+              "stringValue": "customer-portal"
+            },
+            "target": {
+              "stringValue": "target-7"
+            },
+            "timeout": {
+              "stringValue": "45m"
+            }
+          }
+        }
+      },
+      "timeout": "7200s"
+    }
+  },
+  "entryPoints": [
+    "pass"
+  ],
+  "exitPoints": [
+    "pass"
+  ]
+}

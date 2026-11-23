@@ -45,6 +45,9 @@ func catalogParams(t *testing.T, mission string) map[string]string {
 		if name == "forgeConnector" {
 			out[name] = "github-fixloop" // an enum: the connectors that the scan ingests
 		}
+		if name == "codingTimeout" || name == "mergeWait" {
+			out[name] = "40m" // a Go duration: the fix-pass mission derives its node timeout from it
+		}
 	}
 	return out
 }
