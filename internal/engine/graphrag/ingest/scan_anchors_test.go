@@ -80,8 +80,8 @@ func TestScanAnchorEvents_RefuseWhatTheyCannotName(t *testing.T) {
 	}
 }
 
-func TestRepositoryKey(t *testing.T) { //nolint:gosec // G101: the URLs hold fake user info on purpose
-	for in, want := range map[string]string{
+func TestRepositoryKey(t *testing.T) {
+	for in, want := range map[string]string{ //nolint:gosec // fake user info in a URL test
 		"https://github.com/acme/shop":              "github.com/acme/shop",
 		"https://github.com:443/acme/shop":          "github.com/acme/shop",
 		"http://github.com:80/acme/shop":            "github.com/acme/shop",
