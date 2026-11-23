@@ -2,8 +2,9 @@
 //
 // The mission has one agent node. The node runs `fix-agent`. The agent reads
 // the open Findings of the Application, sends the highest priority one that it
-// can fix to a coding job on a bank, and ends after the merge step. The child
-// coding mission is `fix` (fix.cue). The agent originates it by name.
+// can fix to a coding job on a bank, and ends after the merge step. In 0.2.0 the
+// agent builds its own job graph, named "fix <finding id>", and sends it as JSON.
+// It does not start the catalog mission `fix` (fix.cue).
 //
 // # The node timeout
 //
@@ -14,11 +15,22 @@
 //
 // So this mission always sets the node timeout. It derives the value from the
 // two durations the caller can set, so the node timeout can never fall below
-// them:
+// the worst case of fix-agent 0.2.0:
 //
-//   timeout = codingTimeout + 2 x mergeWait + 15 minutes of margin
+//   one merge wait for an older open merge request,
+//   one or three coding jobs, and
+//   one merge wait for the new merge request.
 //
-// With the defaults (45m and 30m) the node timeout is 2 hours.
+// A coding job takes up to codingTimeout plus 30 seconds for the status read.
+// With `finding` set the agent works one Finding with one attempt. Without it
+// the agent can start three coding jobs (MaxAttempts in fix-agent). So:
+//
+//   finding set:     codingTimeout + 30s   + 2 x mergeWait + 15 minutes of margin
+//   finding not set: 3 x (codingTimeout + 30s) + 2 x mergeWait + 15 minutes of margin
+//
+// With the defaults (45m and 30m) the node timeout is 2 hours with `finding`
+// and 3 hours 31 minutes without it. The test guard in fix_pass_mission_test.go
+// holds the same model.
 //
 // Parameters (ADR-0118):
 //
@@ -68,10 +80,19 @@ if _params.mergeWait != _|_ {
 _codingNs: time.ParseDuration(_codingTimeout) & >0
 _mergeNs:  time.ParseDuration(_mergeWait) & >0
 
+// The attempts of one pass: one with a named Finding, three (MaxAttempts of
+// fix-agent) without it. Each coding job takes up to the coding timeout plus 30
+// seconds for the status read.
+_attempts: *3 | int
+if _params.finding != _|_ {
+	_attempts: 1
+}
+_jobNs: _codingNs + 30000000000
+
 // Two merge waits (the agent can wait for a resumed merge and for its own) and
 // 15 minutes of margin for the start and the report.
 _marginSeconds: 900
-_nodeSeconds:   div(_codingNs+2*_mergeNs, 1000000000) + _marginSeconds
+_nodeSeconds:   div(_attempts*_jobNs+2*_mergeNs, 1000000000) + _marginSeconds
 
 // _context is the task context that fix-agent reads. Each value is a
 // TypedValue, so an agent that reads plain strings must read the string form.

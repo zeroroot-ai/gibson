@@ -45,7 +45,7 @@
           }
         }
       },
-      "timeout": "7200s"
+      "timeout": "7230s"
     }
   },
   "entryPoints": [

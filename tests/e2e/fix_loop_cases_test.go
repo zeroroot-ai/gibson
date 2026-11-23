@@ -48,16 +48,19 @@ const (
 	fixLoopFixAgent     = "fix-agent"
 	fixLoopFixAgentRef  = "agent/" + fixLoopFixAgent
 	fixLoopScanInterval = 90 * time.Second
-	// The pass of the fix agent: the coding job and the merge wait. The mission
-	// fix-pass derives its node timeout from them: the coding timeout, two merge
-	// waits and 15 minutes of margin.
+	// The pass of the fix agent: the coding job and the merge wait. This test sets
+	// `finding`, so the agent makes one attempt. The constant mirrors the CUE of
+	// missions/fix-pass.cue for a named finding:
+	//   codingTimeout + 30s + 2 x mergeWait + 15m margin
+	// Keep it in step with that formula. (Without `finding` the CUE uses
+	// 3 x (codingTimeout + 30s).)
 	fixLoopCodingTimeout = 25 * time.Minute
 	fixLoopMergeWait     = 10 * time.Minute
-	fixLoopNodeTimeout   = fixLoopCodingTimeout + 2*fixLoopMergeWait + 15*time.Minute
+	fixLoopNodeTimeout   = fixLoopCodingTimeout + 30*time.Second + 2*fixLoopMergeWait + 15*time.Minute
 	// The waits of the cases. With the waits of TestFixLoop (36 minutes), the sum
-	// of all waits is 221 minutes. The verify loop can overshoot its wait by one
-	// scan interval (90 seconds), so the workflow sets the go test timeout to 240
-	// minutes and the job timeout to 300 minutes (60 minutes of cluster start-up).
+	// of all waits is 222 minutes. The verify loop can overshoot its wait by one
+	// scan interval (90 seconds), so the workflow sets the go test timeout to 250
+	// minutes and the job timeout to 330 minutes (60 minutes of cluster start-up).
 	// A slow run so fails with its "Last state" message and never meets the kill of
 	// the go test timeout. The daemon holds a deploy for 10 minutes (the default
 	// hold of the fix loop policy).

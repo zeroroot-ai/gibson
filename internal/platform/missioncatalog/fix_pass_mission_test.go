@@ -13,17 +13,35 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-// passMargin is the least time that the node timeout must keep above the coding
-// timeout plus the merge wait. It covers the start of the sandbox and the report.
+// passMargin is the least time that the node timeout must keep above the worst
+// pass. It covers the start of the sandbox and the report.
 const passMargin = 10 * time.Minute
 
+// The model of the worst pass of fix-agent 0.2.0. A coding job takes up to the
+// coding timeout plus passStatusRead. The agent starts passMaxAttempts jobs when
+// no Finding is named and one job when it is. It waits passMergeWaits times for
+// the merge slot: once for an older open merge request and once for its own.
+const (
+	passStatusRead  = 30 * time.Second
+	passMaxAttempts = 3
+	passMergeWaits  = 2
+)
+
+// passNeed is the least node timeout that holds the worst pass.
+func passNeed(coding, mergeWait time.Duration, findingSet bool) time.Duration {
+	attempts := time.Duration(passMaxAttempts)
+	if findingSet {
+		attempts = 1
+	}
+	return attempts*(coding+passStatusRead) + passMergeWaits*mergeWait + passMargin
+}
+
 // timeoutProblem says why the node timeout of a fix-pass definition cannot hold
-// one pass. It returns an empty string when the timeout is long enough.
+// the worst pass. It returns an empty string when the timeout is long enough.
 //
-// One pass needs the coding timeout plus the merge wait, and the node timeout
-// must be above that sum by passMargin. A node with no timeout gets the 30
-// minute default of the launcher, which is below the sum for any real pass.
-func timeoutProblem(def *missionpb.MissionDefinition, coding, mergeWait time.Duration) string {
+// A node with no timeout gets the 30 minute default of the launcher, which is
+// below the need for any real pass.
+func timeoutProblem(def *missionpb.MissionDefinition, coding, mergeWait time.Duration, findingSet bool) string {
 	node := def.GetNodes()["pass"]
 	if node == nil {
 		return "the mission has no pass node"
@@ -31,10 +49,10 @@ func timeoutProblem(def *missionpb.MissionDefinition, coding, mergeWait time.Dur
 	if node.GetTimeout() == nil {
 		return "the pass node has no timeout, so the launcher default of 30 minutes applies"
 	}
-	got, need := node.GetTimeout().AsDuration(), coding+mergeWait+passMargin
+	got, need := node.GetTimeout().AsDuration(), passNeed(coding, mergeWait, findingSet)
 	if got < need {
-		return fmt.Sprintf("the node timeout %s is below the coding timeout %s plus the merge wait %s plus the margin %s",
-			got, coding, mergeWait, passMargin)
+		return fmt.Sprintf("the node timeout %s is below %s (coding timeout %s, merge wait %s, finding set %t)",
+			got, need, coding, mergeWait, findingSet)
 	}
 	return ""
 }
@@ -109,14 +127,14 @@ func TestFixPass_OptionalParametersTakeDefaults(t *testing.T) {
 	if ctx["timeout"].GetStringValue() != "45m" || ctx["merge_wait"].GetStringValue() != "30m" {
 		t.Errorf("durations = %q and %q, want 45m and 30m", ctx["timeout"].GetStringValue(), ctx["merge_wait"].GetStringValue())
 	}
-	if p := timeoutProblem(def, 45*time.Minute, 30*time.Minute); p != "" {
+	if p := timeoutProblem(def, 45*time.Minute, 30*time.Minute, false); p != "" {
 		t.Error(p)
 	}
 }
 
-// The node timeout covers the coding timeout plus the merge wait for the
-// defaults and for other values. This is the guard.
-func TestFixPass_NodeTimeoutCoversCodingTimeoutPlusMergeWait(t *testing.T) {
+// The node timeout holds the worst pass for the defaults and for other values,
+// with a named Finding and without one. This is the guard.
+func TestFixPass_NodeTimeoutHoldsTheWorstPass(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ coding, mergeWait string }{
 		{"45m", "30m"},
@@ -126,27 +144,40 @@ func TestFixPass_NodeTimeoutCoversCodingTimeoutPlusMergeWait(t *testing.T) {
 		{"1500ms", "500ms"},
 	}
 	for _, c := range cases {
-		t.Run(c.coding+"+"+c.mergeWait, func(t *testing.T) {
-			t.Parallel()
-			def := renderPass(t, func(p map[string]string) {
-				p["codingTimeout"], p["mergeWait"] = c.coding, c.mergeWait
+		for _, findingSet := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s+%s finding=%t", c.coding, c.mergeWait, findingSet), func(t *testing.T) {
+				t.Parallel()
+				def := renderPass(t, func(p map[string]string) {
+					p["codingTimeout"], p["mergeWait"] = c.coding, c.mergeWait
+					if !findingSet {
+						delete(p, "finding")
+					}
+				})
+				coding, _ := time.ParseDuration(c.coding)
+				mergeWait, _ := time.ParseDuration(c.mergeWait)
+				if p := timeoutProblem(def, coding, mergeWait, findingSet); p != "" {
+					t.Error(p)
+				}
 			})
-			coding, _ := time.ParseDuration(c.coding)
-			mergeWait, _ := time.ParseDuration(c.mergeWait)
-			if p := timeoutProblem(def, coding, mergeWait); p != "" {
-				t.Error(p)
-			}
-		})
+		}
 	}
 }
 
-// The default pass is above the 30 minute launcher default, and above the 105
-// minutes that one pass of the agent can need.
-func TestFixPass_DefaultNodeTimeoutIsAboveTheLongestPass(t *testing.T) {
+// The default pass is above the 30 minute launcher default and above the 105
+// minutes of one attempt. With no finding it holds three attempts.
+func TestFixPass_DefaultNodeTimeouts(t *testing.T) {
 	t.Parallel()
-	got := renderPass(t, nil).GetNodes()["pass"].GetTimeout().AsDuration()
-	if got < 105*time.Minute {
-		t.Errorf("node timeout = %s, want at least 105m", got)
+	with := renderPass(t, nil).GetNodes()["pass"].GetTimeout().AsDuration()
+	without := renderPass(t, func(p map[string]string) {
+		delete(p, "finding")
+		delete(p, "codingTimeout")
+		delete(p, "mergeWait")
+	}).GetNodes()["pass"].GetTimeout().AsDuration()
+	if with < 105*time.Minute {
+		t.Errorf("node timeout with a finding = %s, want at least 105m", with)
+	}
+	if want := 3*(45*time.Minute+passStatusRead) + 60*time.Minute; without < want {
+		t.Errorf("node timeout without a finding = %s, want at least %s", without, want)
 	}
 }
 
@@ -168,8 +199,8 @@ func TestFixPass_BadDurationsRefuseTheRender(t *testing.T) {
 	}
 }
 
-// The failing fixture of the guard. A definition with no timeout, and one with
-// a timeout below the sum, must each be reported.
+// The failing fixtures of the guard. Each timeout below holds a weaker model than
+// the worst pass, so each must be reported.
 func TestTimeoutProblem_ReportsATimeoutThatCannotHoldAPass(t *testing.T) {
 	t.Parallel()
 	node := func(d *time.Duration) *missionpb.MissionDefinition {
@@ -180,21 +211,33 @@ func TestTimeoutProblem_ReportsATimeoutThatCannotHoldAPass(t *testing.T) {
 		return &missionpb.MissionDefinition{Nodes: map[string]*missionpb.MissionNode{"pass": n}}
 	}
 	coding, mergeWait := 45*time.Minute, 30*time.Minute
-	short, exact, enough := 30*time.Minute, coding+mergeWait, coding+mergeWait+passMargin
+	job := coding + passStatusRead
+	short := 30 * time.Minute
+	noMargin := job + 2*mergeWait
+	oneMergeWait := job + mergeWait + passMargin
+	oneAttempt := job + 2*mergeWait + passMargin
+	threeAttempts := 3*job + 2*mergeWait + passMargin
 
-	if timeoutProblem(node(nil), coding, mergeWait) == "" {
-		t.Error("no timeout: want a problem")
+	for name, c := range map[string]struct {
+		def        *missionpb.MissionDefinition
+		findingSet bool
+	}{
+		"no timeout":                  {node(nil), true},
+		"the 30 minute default":       {node(&short), true},
+		"no margin":                   {node(&noMargin), true},
+		"one merge wait, finding set": {node(&oneMergeWait), true},
+		"one merge wait, no finding":  {node(&oneMergeWait), false},
+		"one attempt, no finding":     {node(&oneAttempt), false},
+		"no pass node":                {&missionpb.MissionDefinition{}, true},
+	} {
+		if timeoutProblem(c.def, coding, mergeWait, c.findingSet) == "" {
+			t.Errorf("%s: want a problem", name)
+		}
 	}
-	if timeoutProblem(node(&short), coding, mergeWait) == "" {
-		t.Error("30m timeout: want a problem")
+	if p := timeoutProblem(node(&oneAttempt), coding, mergeWait, true); p != "" {
+		t.Errorf("one attempt with a finding set: got %q", p)
 	}
-	if timeoutProblem(node(&exact), coding, mergeWait) == "" {
-		t.Error("a timeout equal to the sum with no margin: want a problem")
-	}
-	if p := timeoutProblem(node(&enough), coding, mergeWait); p != "" {
-		t.Errorf("a long enough timeout: got %q", p)
-	}
-	if timeoutProblem(&missionpb.MissionDefinition{}, coding, mergeWait) == "" {
-		t.Error("no pass node: want a problem")
+	if p := timeoutProblem(node(&threeAttempts), coding, mergeWait, false); p != "" {
+		t.Errorf("three attempts with no finding: got %q", p)
 	}
 }
