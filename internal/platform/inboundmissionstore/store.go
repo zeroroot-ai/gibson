@@ -85,6 +85,15 @@ type Store interface {
 	// Owner returns the caller that started a mission and the agent of its
 	// publication, or ErrNotFound.
 	Owner(ctx context.Context, tenant, missionID string) (owner, agent string, err error)
+	// TakeMessage records that the message with this key started the mission. It
+	// returns an empty string when the key is new. It returns the mission that
+	// the first message started when the key was already taken. The key is
+	// unique inside the database of the tenant, so the same key in another
+	// tenant is a new key. A key older than MessageRetention is forgotten.
+	TakeMessage(ctx context.Context, tenant, key, missionID string) (taken string, err error)
+	// ForgetMessage deletes the key of a message whose mission did not start, so
+	// that a retry of the message can start it.
+	ForgetMessage(ctx context.Context, tenant, key string) error
 	// WithIdentityLock runs fn while it holds a lock on one identity in the database
 	// of the tenant. Two calls for the same identity run one after the other, also
 	// on two replicas. The lock ends when fn returns. fn reads the store through the
@@ -176,6 +185,10 @@ func NewPostgresStore(pool datapool.Pool) Store {
 	}
 	return &postgresStore{conns: poolConns{pool: pool}}
 }
+
+// MessageRetention is how long the store remembers the id of a message. A sender
+// that retries sends the same id again within this time.
+const MessageRetention = 7 * 24 * time.Hour
 
 var _ Store = (*postgresStore)(nil)
 
@@ -355,6 +368,51 @@ func (s *postgresStore) Release(ctx context.Context, tenant, slot string) error 
 	defer c.Release()
 	if _, err := c.SQL().Exec(ctx, `DELETE FROM inbound_tasks WHERE slot = $1`, slot); err != nil {
 		return fmt.Errorf("inboundmissionstore: release %s: %w", slot, err)
+	}
+	return nil
+}
+
+func (s *postgresStore) TakeMessage(ctx context.Context, tenant, key, missionID string) (string, error) {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return "", fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	// An old key goes first, so the table stays small and an old id can start a mission again.
+	if _, err := c.SQL().Exec(ctx,
+		`DELETE FROM inbound_messages WHERE created_at < now() - make_interval(secs => $1)`,
+		MessageRetention.Seconds()); err != nil {
+		return "", fmt.Errorf("inboundmissionstore: forget old message ids: %w", err)
+	}
+	n, err := c.SQL().Exec(ctx,
+		`INSERT INTO inbound_messages (message_key, mission_id) VALUES ($1, $2) ON CONFLICT (message_key) DO NOTHING`,
+		key, missionID)
+	if err != nil {
+		return "", fmt.Errorf("inboundmissionstore: take message id: %w", err)
+	}
+	if n > 0 {
+		return "", nil
+	}
+	var taken string
+	err = c.SQL().QueryRow(ctx, `SELECT mission_id FROM inbound_messages WHERE message_key = $1`, key).Scan(&taken)
+	if errors.Is(err, datapool.ErrNoRows) {
+		// The retention delete of another call removed the row between the two statements.
+		return "", fmt.Errorf("inboundmissionstore: message id vanished: %w", ErrNotFound)
+	}
+	if err != nil {
+		return "", fmt.Errorf("inboundmissionstore: read message id: %w", err)
+	}
+	return taken, nil
+}
+
+func (s *postgresStore) ForgetMessage(ctx context.Context, tenant, key string) error {
+	c, err := s.conns.For(ctx, tenant)
+	if err != nil {
+		return fmt.Errorf("inbound mission store: acquire conn: %w", err)
+	}
+	defer c.Release()
+	if _, err := c.SQL().Exec(ctx, `DELETE FROM inbound_messages WHERE message_key = $1`, key); err != nil {
+		return fmt.Errorf("inboundmissionstore: forget message id: %w", err)
 	}
 	return nil
 }

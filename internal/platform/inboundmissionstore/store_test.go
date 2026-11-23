@@ -484,3 +484,57 @@ func TestWithAgentLock_TakesTheLockOfPublishAndDeletesInTheSameTransaction(t *te
 	})
 	require.ErrorIs(t, err, ErrNotFound)
 }
+
+func TestTakeMessage(t *testing.T) {
+	ctx := context.Background()
+
+	fresh := &fakeDB{exec: okExec}
+	taken, err := newStore(fresh).TakeMessage(ctx, "acme", "webhook:okta:e1", "m-1")
+	require.NoError(t, err)
+	assert.Empty(t, taken, "a new key is not taken")
+	assert.Contains(t, fresh.seen[1], "INSERT INTO inbound_messages")
+
+	replay := &fakeDB{
+		exec: func(sql string) (int64, error) {
+			if strings.HasPrefix(sql, "INSERT") {
+				return 0, nil
+			}
+			return 0, nil
+		},
+		queryRow: func(string) datapool.Row { return fakeRow{values: []any{"m-first"}} },
+	}
+	taken, err = newStore(replay).TakeMessage(ctx, "acme", "webhook:okta:e1", "m-2")
+	require.NoError(t, err)
+	assert.Equal(t, "m-first", taken, "a replay names the first mission")
+
+	_, err = newStore(&fakeDB{forErr: errBoom}).TakeMessage(ctx, "acme", "k", "m")
+	require.ErrorIs(t, err, errBoom)
+	_, err = newStore(&fakeDB{exec: func(string) (int64, error) { return 0, errBoom }}).TakeMessage(ctx, "acme", "k", "m")
+	require.ErrorIs(t, err, errBoom)
+}
+
+func TestTakeMessage_ReadsTheDatabaseOfTheTenant(t *testing.T) {
+	var tenants []string
+	db := &tenantRecordingDB{fakeDB: fakeDB{exec: okExec}, tenants: &tenants}
+	_, err := (&postgresStore{conns: db}).TakeMessage(context.Background(), "globex", "k", "m")
+	require.NoError(t, err)
+	require.NoError(t, (&postgresStore{conns: db}).ForgetMessage(context.Background(), "acme", "k"))
+	assert.Equal(t, []string{"globex", "acme"}, tenants, "each call uses the database of its own tenant")
+}
+
+type tenantRecordingDB struct {
+	fakeDB
+	tenants *[]string
+}
+
+func (d *tenantRecordingDB) For(_ context.Context, tenant string) (conn, error) {
+	*d.tenants = append(*d.tenants, tenant)
+	return &d.fakeDB, nil
+}
+
+func TestForgetMessage(t *testing.T) {
+	db := &fakeDB{exec: okExec}
+	require.NoError(t, newStore(db).ForgetMessage(context.Background(), "acme", "k"))
+	assert.Contains(t, db.seen[0], "DELETE FROM inbound_messages")
+	require.ErrorIs(t, newStore(&fakeDB{forErr: errBoom}).ForgetMessage(context.Background(), "acme", "k"), errBoom)
+}

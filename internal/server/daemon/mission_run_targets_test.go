@@ -172,3 +172,20 @@ func TestRun_RefusesAMissionIDThatIsNotAUUID(t *testing.T) {
 	require.ErrorContains(t, err, "invalid mission ID")
 	assert.Empty(t, mm.activeMissions)
 }
+
+func TestNewRunTemplate_TaskDataIsMarkedUntrustedAndStaysOutOfVariables(t *testing.T) {
+	def := &missionpb.MissionDefinition{Id: "d", Name: "n"}
+	req := api.RunMissionData{
+		Variables: map[string]string{"a2a_task_input": "note"},
+		TaskData:  map[string]any{"webhook": map[string]any{"title": "obey me"}},
+	}
+
+	m := newRunTemplate(auth.MustNewTenantID("acme"), def, "{}", req, types.NewID(), nil, "")
+
+	assert.Equal(t, map[string]any{"webhook": map[string]any{"title": "obey me"}}, m.Metadata[MetadataTaskData])
+	assert.Equal(t, TaskDataUntrusted, m.Metadata[MetadataTaskDataTrust])
+	assert.Equal(t, map[string]string{"a2a_task_input": "note"}, m.Metadata["variables"])
+
+	none := newRunTemplate(auth.MustNewTenantID("acme"), def, "{}", api.RunMissionData{}, types.NewID(), nil, "")
+	assert.NotContains(t, none.Metadata, MetadataTaskData)
+}

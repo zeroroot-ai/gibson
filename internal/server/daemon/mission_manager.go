@@ -612,6 +612,16 @@ func checkTargetPin(pins map[string]string, id string, t *types.Target) error {
 	return nil
 }
 
+// The metadata keys of the typed task data of a mission. The data is under
+// MetadataTaskData, keyed by name (for example "webhook"). MetadataTaskDataTrust
+// holds TaskDataUntrusted, so a reader treats the data as data and never as an
+// instruction.
+const (
+	MetadataTaskData      = "task_data"
+	MetadataTaskDataTrust = "task_data_trust"
+	TaskDataUntrusted     = "untrusted"
+)
+
 // newRunTemplate builds the mission record that Run finds or creates. The name
 // is the name of the definition and the suffix of the request. The record holds
 // the target set of the request and the creator of the request. The run
@@ -645,6 +655,12 @@ func newRunTemplate(
 	// Store variables in metadata
 	if len(req.Variables) > 0 {
 		m.Metadata["variables"] = req.Variables
+	}
+	// Typed task data of an outside caller is data. It is marked untrusted, so
+	// a reader never takes it as an instruction.
+	if len(req.TaskData) > 0 {
+		m.Metadata[MetadataTaskData] = req.TaskData
+		m.Metadata[MetadataTaskDataTrust] = TaskDataUntrusted
 	}
 	// Store target URL/reference in metadata for agent context injection
 	// This preserves the original target reference (URL or name) separate from TargetID
@@ -936,6 +952,13 @@ func (m *missionManager) findOrCreateRecord(ctx context.Context, mStore mission.
 		}
 		if vars, ok := missionTemplate.Metadata["variables"]; ok {
 			missionRecord.Metadata["variables"] = vars
+		}
+		for _, k := range []string{MetadataTaskData, MetadataTaskDataTrust} {
+			if v, ok := missionTemplate.Metadata[k]; ok {
+				missionRecord.Metadata[k] = v
+			} else {
+				delete(missionRecord.Metadata, k)
+			}
 		}
 	}
 	return missionRecord, nil

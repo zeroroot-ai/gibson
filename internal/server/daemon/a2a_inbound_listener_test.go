@@ -35,6 +35,27 @@ type fakePublished struct {
 	events          []string
 	owners          map[string]string
 	ownerErr        error
+	// msgs holds the message keys by tenant and key, as the per-tenant database does.
+	msgs      map[string]string
+	forgotten []string
+}
+
+func (f *fakePublished) TakeMessage(_ context.Context, tenant, key, missionID string) (string, error) {
+	if f.msgs == nil {
+		f.msgs = map[string]string{}
+	}
+	k := tenant + "/" + key
+	if taken, ok := f.msgs[k]; ok {
+		return taken, nil
+	}
+	f.msgs[k] = missionID
+	return "", nil
+}
+
+func (f *fakePublished) ForgetMessage(_ context.Context, tenant, key string) error {
+	f.forgotten = append(f.forgotten, tenant+"/"+key)
+	delete(f.msgs, tenant+"/"+key)
+	return nil
 }
 
 func (f *fakePublished) Reserve(_ context.Context, tenant, agent, owner, missionID string) (string, error) {
