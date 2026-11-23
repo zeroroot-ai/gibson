@@ -45,6 +45,9 @@ type AgentToolCall struct {
 	// ErrCode is the typed reason of a call that did not succeed (gibson#1575).
 	// Empty means the call succeeded, or the event came before the code.
 	ErrCode string
+	// WorkID is the work item of the TOOL node that made the call. Empty for a
+	// call that no node made (gibson#1469).
+	WorkID string
 	// RecordedAtUnixNano stamps when the daemon observed this call, carried on
 	// the event rather than read from time.Now() during Reduce, so a
 	// retention sweep replays deterministically (gibson#271).
@@ -74,8 +77,10 @@ type AgentToolCallObserved struct {
 	Err       string
 	// GrantID is the capability grant that allowed the call. The incident
 	// report reads it from this event (gibson#1478).
-	GrantID            string
-	ErrCode            string
+	GrantID string
+	ErrCode string
+	// WorkID is the work item of the TOOL node that made the call.
+	WorkID             string
 	RecordedAtUnixNano int64
 }
 
@@ -143,6 +148,7 @@ func applyAgentToolCallObserved(w *World, e AgentToolCallObserved) {
 		Err:                e.Err,
 		GrantID:            e.GrantID,
 		ErrCode:            e.ErrCode,
+		WorkID:             e.WorkID,
 		RecordedAtUnixNano: e.RecordedAtUnixNano,
 	})
 }
@@ -161,6 +167,7 @@ type AgentToolCallSnapshot struct {
 	Err                string
 	GrantID            string
 	ErrCode            string
+	WorkID             string
 	RecordedAtUnixNano int64
 }
 
@@ -182,6 +189,7 @@ func (w *World) AgentToolCallSnapshot() []AgentToolCallSnapshot {
 			Err:                c.Err,
 			GrantID:            c.GrantID,
 			ErrCode:            c.ErrCode,
+			WorkID:             c.WorkID,
 			RecordedAtUnixNano: c.RecordedAtUnixNano,
 		})
 	}

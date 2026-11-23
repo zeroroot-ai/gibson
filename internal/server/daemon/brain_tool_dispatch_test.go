@@ -6,8 +6,10 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
 	"google.golang.org/protobuf/proto"
@@ -288,5 +291,295 @@ func TestDispatchTool_PassesTheNodeNetworkToTheTool(t *testing.T) {
 
 	if h.gotNetwork != network {
 		t.Errorf("the tool call carried network %+v, want %+v", h.gotNetwork, network)
+	}
+}
+
+type fakeMissionConnector struct {
+	tenant, mission, run, work, connector, tool string
+	args                                        map[string]any
+	result                                      any
+	err                                         error
+	// errs are the errors of the first calls, in order. The call after the last
+	// one returns result and err.
+	errs []error
+	// mu guards every field above, because the node calls on its own goroutine
+	// while the test reads the count.
+	mu    sync.Mutex
+	calls int
+}
+
+// callCount returns the number of calls, safe against a running node.
+func (f *fakeMissionConnector) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func (f *fakeMissionConnector) CallConnectorForMission(
+	_ context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any,
+) (any, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tenant, f.mission, f.run, f.work, f.connector, f.tool, f.args = tenant, missionID, runID, workID, connector, tool, args
+	f.calls++
+	if f.calls <= len(f.errs) {
+		return nil, f.errs[f.calls-1]
+	}
+	return f.result, f.err
+}
+
+// A TOOL node that names mcp:<connector>:<tool> calls the connector with the
+// tenant and the run of its binding, and its input is the argument object. The
+// harness tool path is not used (gibson#1469).
+func TestDispatchTool_AConnectorToolTakesTheGovernedPath(t *testing.T) {
+	h := &toolHarness{output: `{"never":"used"}`}
+	conn := &fakeMissionConnector{result: map[string]any{"alerts": []any{}}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = conn
+	bind := &missionBinding{ctx: context.Background(), harness: h, tenant: "acme", runID: "run-9"}
+
+	out, err := b.dispatchTool(bind, brain.DispatchRequest{
+		WorkID: "w1", MissionID: "m1", Kind: "tool", Target: "mcp:github-fixloop:read_file", Input: `{"path":"go.mod"}`,
+	})
+	if err != nil {
+		t.Fatalf("dispatchTool: %v", err)
+	}
+	if out != `{"alerts":[]}` {
+		t.Errorf("out = %q", out)
+	}
+	if conn.work != "w1" {
+		t.Errorf("the call names work %q, want the node w1", conn.work)
+	}
+	if conn.tenant != "acme" || conn.run != "run-9" || conn.mission != "m1" || conn.connector != "github-fixloop" || conn.tool != "read_file" {
+		t.Errorf("call = %+v", conn)
+	}
+	if conn.args["path"] != "go.mod" {
+		t.Errorf("args = %v", conn.args)
+	}
+	if h.gotName != "" {
+		t.Errorf("the harness tool path ran for %q", h.gotName)
+	}
+
+	// A refusal of the governed path ends the node, and a bad input does too.
+	conn.err = errors.New("not allowed")
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{Target: "mcp:github-fixloop:read_file"}); err == nil {
+		t.Error("a refused call must fail the node")
+	}
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{Target: "mcp:github-fixloop:read_file", Input: `[1]`}); err == nil {
+		t.Error("an input that is not an object must fail the node")
+	}
+	b.connectors = nil
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{Target: "mcp:github-fixloop:read_file"}); err == nil {
+		t.Error("a daemon with no connector caller must fail the node")
+	}
+}
+
+// A call that returns nothing with no error fails the node. It does not succeed
+// with "null".
+func TestDispatchTool_ANilConnectorResultFailsTheNode(t *testing.T) {
+	conn := &fakeMissionConnector{}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = conn
+	bind := &missionBinding{ctx: context.Background(), tenant: "acme", runID: "run-9"}
+	if out, err := b.dispatchTool(bind, brain.DispatchRequest{Target: "mcp:github-fixloop:read_file"}); err == nil {
+		t.Fatalf("a nil result must fail the node, got %q", out)
+	}
+}
+
+// requestApproval puts an approval request of a tool call in the World, as the
+// approval queue does when a marked tool is called.
+func requestApproval(t *testing.T, eng *brain.Engine, id string) {
+	t.Helper()
+	if err := eng.SubmitAndWait(context.Background(), brain.DestructiveActionRequested{
+		HypothesisID: id, Tenant: "acme", MissionID: "m1", ActionKind: brain.ActionKindToolCall,
+		Connector: "crowdstrike-response", Tool: "isolate_x", ArgsHash: "h",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func decideApproval(t *testing.T, eng *brain.Engine, id string, approved bool) {
+	t.Helper()
+	if err := eng.SubmitAndWait(context.Background(), brain.DestructiveActionDecided{HypothesisID: id, Approved: approved, UserID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A tool with an approval mark waits for a person. The node records the request
+// id on its work item and moves to input_required once. It calls Handler.Call
+// again only after the request is decided, so a decision costs one intent record
+// and one result record and a poll costs none. A denial fails the node.
+func TestDispatchTool_AMarkedToolWaitsForTheDecisionAndCallsOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-1")
+	conn := &fakeMissionConnector{errs: []error{&metatool.PendingApproval{ID: "req-1"}}, result: map[string]any{"ok": true}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = conn
+	b.approvalPoll = time.Millisecond
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+
+	type outcome struct {
+		out string
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		out, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w1", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"})
+		done <- outcome{out, err}
+	}()
+	// While the request is open, the node does not call again, however long it waits.
+	time.Sleep(60 * time.Millisecond)
+	if conn.callCount() != 1 {
+		t.Fatalf("the node called %d times while the request was open, want 1", conn.callCount())
+	}
+	select {
+	case o := <-done:
+		t.Fatalf("the node ended before the decision: %+v", o)
+	default:
+	}
+	decideApproval(t, eng, "req-1", true)
+	select {
+	case o := <-done:
+		if o.err != nil || o.out != `{"ok":true}` {
+			t.Fatalf("out = %q, err = %v", o.out, o.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the node did not resume after the decision")
+	}
+	if conn.callCount() != 2 {
+		t.Errorf("calls = %d, want the first call and one call after the decision", conn.callCount())
+	}
+}
+
+// A denial reaches the node through the second call, which the gate answers with
+// the denial. The node fails with it.
+func TestDispatchTool_ADeniedApprovalFailsTheNode(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-2")
+	decideApproval(t, eng, "req-2", false)
+	conn := &fakeMissionConnector{errs: []error{
+		&metatool.PendingApproval{ID: "req-2"}, fmt.Errorf("%w: request req-2", metatool.ErrApprovalDenied),
+	}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = conn
+	b.approvalPoll = time.Millisecond
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+	_, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w2", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"})
+	if !errors.Is(err, metatool.ErrApprovalDenied) {
+		t.Fatalf("a denial must fail the node, got %v", err)
+	}
+}
+
+// The wait ends with the bound of the node, with the end of the mission, and with
+// a request that is gone.
+func TestDispatchTool_TheApprovalWaitIsBounded(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-3")
+	pending := &fakeMissionConnector{err: &metatool.PendingApproval{ID: "req-3"}}
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = pending
+	b.approvalPoll = time.Millisecond
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w3", MissionID: "m1", Timeout: 30 * time.Millisecond, Target: "mcp:crowdstrike-response:isolate_x"}); err == nil ||
+		!strings.Contains(err.Error(), "bound of the node") {
+		t.Errorf("the bound of the node must end the wait, got %v", err)
+	}
+	// The request shows as withdrawn, and a verdict after that changes nothing.
+	var withdrawn, decided bool
+	var reason string
+	eng.ReadWorld(func(w *brain.World) {
+		for _, a := range w.DestructiveActionSnapshot() {
+			if a.HypothesisID == "req-3" {
+				withdrawn, decided, reason = a.Withdrawn, a.Decided, a.WithdrawnReason
+			}
+		}
+	})
+	if !withdrawn || !decided || !strings.Contains(reason, "bound of the node") {
+		t.Errorf("the request after the timeout: withdrawn=%v decided=%v reason=%q", withdrawn, decided, reason)
+	}
+	if err := eng.DestructiveAuthorizationQueue().Decide("req-3", "u1", true); err == nil {
+		t.Error("a person approved a request whose node is gone")
+	}
+	eng.Submit(brain.DestructiveActionDecided{HypothesisID: "req-3", Approved: true, UserID: "u1"})
+	time.Sleep(50 * time.Millisecond)
+	eng.ReadWorld(func(w *brain.World) {
+		for _, a := range w.DestructiveActionSnapshot() {
+			if a.HypothesisID == "req-3" && (a.Approved || a.UserID != "") {
+				t.Errorf("an approval after the withdrawal changed the request: %+v", a)
+			}
+		}
+	})
+	gone := &fakeMissionConnector{err: &metatool.PendingApproval{ID: "req-missing"}}
+	b.connectors = gone
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w4", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"}); err == nil ||
+		!strings.Contains(err.Error(), "the request is gone") {
+		t.Errorf("a request that is gone must fail the node, got %v", err)
+	}
+	canceled, stop := context.WithCancel(ctx)
+	stop()
+	b.connectors = pending
+	if _, err := b.dispatchTool(&missionBinding{ctx: canceled, tenant: "acme", runID: "run-9", eng: eng},
+		brain.DispatchRequest{WorkID: "w5", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"}); err == nil {
+		t.Error("a canceled mission must end the wait")
+	}
+}
+
+// A node that declares no timeout waits at most maxApprovalWait. Then it fails
+// and its request is withdrawn.
+func TestDispatchTool_ANodeWithNoTimeoutWaitsAtMostTheCap(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-7")
+	b := newBrainExecutor(nil, slog.Default())
+	b.connectors = &fakeMissionConnector{err: &metatool.PendingApproval{ID: "req-7"}}
+	b.approvalPoll = time.Millisecond
+	b.approvalMaxWait = 30 * time.Millisecond
+	bind := &missionBinding{ctx: ctx, tenant: "acme", runID: "run-9", eng: eng}
+	if maxApprovalWait != 24*time.Hour {
+		t.Fatalf("maxApprovalWait = %v, want 24h", maxApprovalWait)
+	}
+	_, err := b.dispatchTool(bind, brain.DispatchRequest{WorkID: "w7", MissionID: "m1", Target: "mcp:crowdstrike-response:isolate_x"})
+	if err == nil || !strings.Contains(err.Error(), "bound of the node") {
+		t.Fatalf("the cap must end the wait, got %v", err)
+	}
+	var withdrawn bool
+	eng.ReadWorld(func(w *brain.World) {
+		for _, a := range w.DestructiveActionSnapshot() {
+			withdrawn = withdrawn || (a.HypothesisID == "req-7" && a.Withdrawn)
+		}
+	})
+	if !withdrawn {
+		t.Error("the request of a node that stopped waiting is not withdrawn")
+	}
+}
+
+// A binding with no World cannot wait for an approval, and a node with no timeout
+// uses the cap that ends with the mission.
+func TestWaitForApproval_NoWorldAndTheDefaultCap(t *testing.T) {
+	b := newBrainExecutor(nil, slog.Default())
+	if err := b.waitForApproval(&missionBinding{ctx: context.Background()}, "r", time.Second); err == nil {
+		t.Error("a binding with no World waited")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	requestApproval(t, eng, "req-cap")
+	b.approvalPoll = time.Millisecond
+	go func() { time.Sleep(30 * time.Millisecond); cancel() }()
+	if err := b.waitForApproval(&missionBinding{ctx: ctx, tenant: "acme", eng: eng}, "req-cap", 0); err == nil ||
+		!strings.Contains(err.Error(), "ended") {
+		t.Errorf("err = %v, want the end of the mission", err)
 	}
 }

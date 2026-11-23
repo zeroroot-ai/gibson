@@ -286,7 +286,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		case WorkCanceled:
 			Reduce(w, WorkCompleted{ID: wi.ID, State: WorkCanceled, Err: wi.Err})
 		case WorkInputRequired:
-			Reduce(w, WorkCompleted{ID: wi.ID, State: WorkInputRequired, Err: wi.Err})
+			Reduce(w, WorkCompleted{ID: wi.ID, State: WorkInputRequired, Err: wi.Err, ApprovalID: wi.ApprovalID})
 		case WorkPending:
 			// WorkRetried re-arms a failed WorkItem to pending. Use
 			// WorkCompleted(err) first so the retry path applies.
@@ -465,7 +465,10 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Tool:              a.Tool,
 			ArgsHash:          a.ArgsHash,
 		})
-		if a.Decided {
+		switch {
+		case a.Withdrawn:
+			Reduce(w, DestructiveActionWithdrawn{HypothesisID: a.HypothesisID, Reason: a.WithdrawnReason, AtUnixMS: a.WithdrawnAtMS})
+		case a.Decided:
 			Reduce(w, DestructiveActionDecided{
 				HypothesisID:    a.HypothesisID,
 				Approved:        a.Approved,
@@ -574,7 +577,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		Reduce(w, AgentToolCallObserved{
 			ToolCallID: c.ToolCallID, MissionID: c.MissionID, RunID: c.RunID, Agent: c.Agent, ScopeID: c.ScopeID,
 			ToolName: c.ToolName, Arguments: c.Arguments, Result: c.Result, Err: c.Err,
-			GrantID: c.GrantID, ErrCode: c.ErrCode, RecordedAtUnixNano: c.RecordedAtUnixNano,
+			GrantID: c.GrantID, ErrCode: c.ErrCode, WorkID: c.WorkID, RecordedAtUnixNano: c.RecordedAtUnixNano,
 		})
 	}
 

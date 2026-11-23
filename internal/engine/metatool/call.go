@@ -206,6 +206,9 @@ type Call struct {
 	Loop LoopCheck
 	// MemberID names the member behind a call with a Loop.
 	MemberID string
+	// Node is true for the call of a TOOL node of a mission. A node never calls
+	// a tool with the role merge or daemon.
+	Node bool
 	// Daemon is true only for a call that the daemon makes on its own
 	// governed path (CallConnectorForTenant). A tool with the role "daemon"
 	// runs only then. No agent request sets it.

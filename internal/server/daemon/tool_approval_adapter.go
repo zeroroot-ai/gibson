@@ -56,6 +56,8 @@ func (a *tenantRoutedToolApproval) Acquire(
 	}
 	state, id, err := eng.DestructiveAuthorizationQueue().AuthorizeToolCall(ctx, req.Tenant, brain.ToolCallRequest{
 		MissionID:     req.MissionID,
+		RunID:         req.RunID,
+		WorkID:        req.WorkID,
 		Agent:         req.Agent,
 		Connector:     req.Connector,
 		Tool:          req.Tool,

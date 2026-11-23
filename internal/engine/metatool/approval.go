@@ -23,6 +23,21 @@ import (
 // the can_execute check and before the dispatch. It is the one place that
 // dispatches an mcp: id, so an agent cannot skip it.
 
+// PendingApproval is the error of a call that waits for a person. It is an
+// ErrApprovalPending, and it carries the id of the approval request, so a caller
+// can wait on that request and call again once (gibson#1469).
+type PendingApproval struct {
+	ID string
+}
+
+// Error implements error.
+func (e *PendingApproval) Error() string {
+	return fmt.Sprintf("%s: request %s", ErrApprovalPending.Error(), e.ID)
+}
+
+// Is makes a PendingApproval an ErrApprovalPending.
+func (e *PendingApproval) Is(target error) bool { return target == ErrApprovalPending }
+
 // ErrApprovalPending means that a person has not decided yet. The call did not
 // reach the connector. The agent can call again with the same arguments after
 // the approval.
@@ -42,6 +57,11 @@ var ErrMergeNotGranted = errors.New("metatool: merge not granted yet: the merge 
 // of the manifest, review M7). It wraps ErrBlocked, so each caller refuses it
 // as a blocked call.
 var ErrDaemonOnly = fmt.Errorf("%w: only the daemon calls this tool", ErrBlocked)
+
+// ErrNodeRole is the refusal of a mission node that calls a tool with the role
+// merge or daemon. A merge needs the merge slot of an agent run, and a revert is
+// the call of the daemon. A TOOL node does neither.
+var ErrNodeRole = fmt.Errorf("%w: a mission node cannot call a tool with the role merge or daemon", ErrBlocked)
 
 // ErrApprovalUnavailable means that the tool needs approval and the daemon has
 // no approval queue for it. The call does not run (fail closed).
@@ -64,6 +84,10 @@ const (
 type ApprovalRequest struct {
 	Tenant    string
 	MissionID string
+	// RunID and WorkID name the run and the node of the call. The approval key
+	// holds them, so two nodes never share one approval.
+	RunID  string
+	WorkID string
 	// Agent is the identity of the caller (Caller.Subject). The approval key
 	// holds it (review m16).
 	Agent     string
@@ -124,6 +148,11 @@ func (h *Handler) approvalFor(connector, tool string) componentcatalog.ToolAppro
 // may reach the connector.
 func (h *Handler) gateCall(ctx context.Context, c Call, connector, tool string) error {
 	mark := h.approvalFor(connector, tool)
+	// The role refusal of a node sits here, after the intent record, so the
+	// refusal has its audit records and its flight recorder line.
+	if c.Node && (mark.Merge || mark.DaemonOnly) {
+		return fmt.Errorf("%w: %s:%s", ErrNodeRole, connector, tool)
+	}
 	if mark.DaemonOnly && !c.Daemon {
 		return fmt.Errorf("%w: %s:%s", ErrDaemonOnly, connector, tool)
 	}
@@ -143,6 +172,8 @@ func (h *Handler) gateCall(ctx context.Context, c Call, connector, tool string) 
 	state, id, err := h.gate.Acquire(ctx, ApprovalRequest{
 		Tenant:      c.Caller.Tenant,
 		MissionID:   c.MissionID,
+		RunID:       c.RunID,
+		WorkID:      c.WorkID,
 		Agent:       c.Caller.Subject,
 		Connector:   connector,
 		Tool:        tool,
@@ -159,7 +190,7 @@ func (h *Handler) gateCall(ctx context.Context, c Call, connector, tool string) 
 	case ApprovalStateDenied:
 		return fmt.Errorf("%w: request %s", ErrApprovalDenied, id)
 	case ApprovalStatePending:
-		return fmt.Errorf("%w: request %s", ErrApprovalPending, id)
+		return &PendingApproval{ID: id}
 	default:
 		return fmt.Errorf("%w: unknown state %d", ErrApprovalUnavailable, state)
 	}

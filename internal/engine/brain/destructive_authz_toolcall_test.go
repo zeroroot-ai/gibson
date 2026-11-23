@@ -103,16 +103,18 @@ func TestAuthorizeToolCall_AnApprovalDoesNotReleaseAnotherCall(t *testing.T) {
 
 // Another tenant has its own queue, and the key holds the tenant.
 func TestToolCallKey_CoversEachPart(t *testing.T) {
-	base := ToolCallKey("acme", "m1", "agent-a", "edr", "isolate_host", "h1")
+	base := ToolCallKey("acme", "m1", "run-1", "m1/n1", "agent-a", "edr", "isolate_host", "h1")
 	for name, key := range map[string]string{
-		"tenant":    ToolCallKey("other", "m1", "agent-a", "edr", "isolate_host", "h1"),
-		"mission":   ToolCallKey("acme", "m2", "agent-a", "edr", "isolate_host", "h1"),
-		"agent":     ToolCallKey("acme", "m1", "agent-b", "edr", "isolate_host", "h1"), // review m16
-		"connector": ToolCallKey("acme", "m1", "agent-a", "idp", "isolate_host", "h1"),
-		"tool":      ToolCallKey("acme", "m1", "agent-a", "edr", "release_host", "h1"),
-		"args":      ToolCallKey("acme", "m1", "agent-a", "edr", "isolate_host", "h2"),
+		"tenant":    ToolCallKey("other", "m1", "run-1", "m1/n1", "agent-a", "edr", "isolate_host", "h1"),
+		"run":       ToolCallKey("acme", "m1", "run-2", "m1/n1", "agent-a", "edr", "isolate_host", "h1"),
+		"node":      ToolCallKey("acme", "m1", "run-1", "m1/n2", "agent-a", "edr", "isolate_host", "h1"),
+		"mission":   ToolCallKey("acme", "m2", "run-1", "m1/n1", "agent-a", "edr", "isolate_host", "h1"),
+		"agent":     ToolCallKey("acme", "m1", "run-1", "m1/n1", "agent-b", "edr", "isolate_host", "h1"), // review m16
+		"connector": ToolCallKey("acme", "m1", "run-1", "m1/n1", "agent-a", "idp", "isolate_host", "h1"),
+		"tool":      ToolCallKey("acme", "m1", "run-1", "m1/n1", "agent-a", "edr", "release_host", "h1"),
+		"args":      ToolCallKey("acme", "m1", "run-1", "m1/n1", "agent-a", "edr", "isolate_host", "h2"),
 		// A shifted boundary must not give the same key.
-		"boundary": ToolCallKey("acme", "m1e", "agent-a", "dr", "isolate_host", "h1"),
+		"boundary": ToolCallKey("acme", "m1e", "run-1", "m1/n1", "agent-a", "dr", "isolate_host", "h1"),
 	} {
 		if key == base {
 			t.Errorf("the key does not cover the %s", name)
@@ -191,7 +193,7 @@ func TestAuthorizeToolCall_NeedsTheCallParts(t *testing.T) {
 // A restart keeps the request, the decision and the spent approval.
 func TestToolCall_StateSurvivesARestart(t *testing.T) {
 	w := NewWorld("t")
-	key := ToolCallKey("acme", "m1", "agent-a", "edr", "isolate_host", "h1")
+	key := ToolCallKey("acme", "m1", "run-1", "m1/n1", "agent-a", "edr", "isolate_host", "h1")
 	id := toolCallIDPrefix + key + "#0"
 	Reduce(w, DestructiveActionRequested{
 		HypothesisID: id, Tenant: "acme", MissionID: "m1", ActionKind: ActionKindToolCall, CallKey: key,

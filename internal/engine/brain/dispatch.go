@@ -141,6 +141,41 @@ func ResumeFailInFlight(w *World) []Event {
 	return out
 }
 
+// AwaitingApproval returns the TOOL nodes that wait on an approval request, with
+// their request ids. It is the peer of ResumeFailInFlight for a node that is not
+// running but input_required (gibson#1469).
+func AwaitingApproval(w *World) []WorkSnapshot {
+	var out []WorkSnapshot
+	for _, wi := range w.WorkSnapshot() {
+		if wi.State == WorkInputRequired && wi.Kind == "tool" && wi.ApprovalID != "" {
+			out = append(out, wi)
+		}
+	}
+	return out
+}
+
+// RestartApprovalReason is the reason that a TOOL node fails with when the daemon
+// restarts while the node waits for an approval.
+const RestartApprovalReason = "the daemon restarted while the node waited for approval"
+
+// ResumeFailAwaitingApproval returns, for each TOOL node that waits on an approval
+// request in a World that a restart rebuilt, the withdrawal of its request and the
+// failure of the node. No run continues across a restart, so no node is live to
+// call the tool after an approval. A person must not approve a request whose node
+// is gone, and the node must not wait for ever. Call once on resume, after
+// rebuilding the World from the Timeline, like ResumeFailInFlight.
+func ResumeFailAwaitingApproval(w *World, now time.Time) []Event {
+	waiting := AwaitingApproval(w)
+	out := make([]Event, 0, 2*len(waiting))
+	for _, wi := range waiting {
+		out = append(out,
+			DestructiveActionWithdrawn{HypothesisID: wi.ApprovalID, Reason: RestartApprovalReason, AtUnixMS: now.UnixMilli()},
+			WorkCompleted{ID: wi.ID, RunID: wi.RunID, Err: RestartApprovalReason},
+		)
+	}
+	return out
+}
+
 // RetrySystem re-arms failed scripted work for another attempt, up to the node's
 // CUE RetryPolicy.max_retries (count-based, deterministic — backoff delay is a
 // dispatch-layer concern, not part of the replayable core). It must run before

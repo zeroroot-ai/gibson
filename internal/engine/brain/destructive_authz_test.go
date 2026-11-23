@@ -632,3 +632,241 @@ func TestSettleBetTrue_Destructive_VerifyNoDecision_Refused(t *testing.T) {
 		t.Fatalf("an unauthorized destructive proof must never settle, got %+v", got)
 	}
 }
+
+// A node that stops waiting withdraws its request. The request is decided and not
+// approved, it leaves the queue of the people who approve, and a verdict after that
+// changes nothing. A new call of the same arguments starts a new request
+// (gibson#1469).
+func TestDestructiveAuthz_WithdrawnRequestCannotBeApproved(t *testing.T) {
+	eng := newDestructiveAuthzTestEngine(t)
+	q := NewDestructiveAuthorizationQueue(eng)
+	ctx := context.Background()
+	req := ToolCallRequest{MissionID: "m1", Agent: "a", Connector: "c", Tool: "t", ArgsHash: "h"}
+	state, id, err := q.AuthorizeToolCall(ctx, "acme", req)
+	if err != nil || state != ToolCallPending {
+		t.Fatalf("state = %v, err = %v", state, err)
+	}
+	if err := q.Withdraw(ctx, id, "timeout"); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("the request shows as withdrawn", func(t *testing.T) { testWithdrawnShows(t, eng, id) })
+	t.Run("nobody can approve it", func(t *testing.T) { testWithdrawnNotApprovable(t, q, id) })
+	t.Run("a new call starts a new request", func(t *testing.T) { testWithdrawnNewCall(t, eng, q, req, id) })
+	t.Run("a request of another kind is not withdrawn", func(t *testing.T) { testWithdrawnProofKept(t, eng, q) })
+}
+
+func testWithdrawnShows(t *testing.T, eng *Engine, id string) {
+	t.Helper()
+	snap := actionByID(eng, id)
+	if !snap.Withdrawn || !snap.Decided || snap.Approved || snap.WithdrawnReason != "timeout" {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+}
+
+func testWithdrawnNotApprovable(t *testing.T, q *DestructiveAuthorizationQueue, id string) {
+	t.Helper()
+	if err := q.Decide(id, "u1", true); err == nil {
+		t.Error("a withdrawn request was approved")
+	}
+	for _, p := range q.Pending() {
+		if p.HypothesisID == id {
+			t.Error("a withdrawn request is still pending")
+		}
+	}
+}
+
+func testWithdrawnNewCall(t *testing.T, eng *Engine, q *DestructiveAuthorizationQueue, req ToolCallRequest, id string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := q.Withdraw(ctx, id, "again"); err != nil {
+		t.Fatal(err)
+	}
+	state2, id2, err := q.AuthorizeToolCall(ctx, "acme", req)
+	if err != nil || state2 != ToolCallPending || id2 == id {
+		t.Fatalf("state=%v id=%q old=%q err=%v", state2, id2, id, err)
+	}
+	if err := q.Decide(id2, "u1", true); err != nil {
+		t.Fatal(err)
+	}
+	// A withdrawal after a decision changes nothing.
+	if err := q.Withdraw(ctx, id2, "late"); err != nil {
+		t.Fatal(err)
+	}
+	if a := actionByID(eng, id2); a.Withdrawn || !a.Approved {
+		t.Errorf("a withdrawal changed a decided request: %+v", a)
+	}
+}
+
+func testWithdrawnProofKept(t *testing.T, eng *Engine, q *DestructiveAuthorizationQueue) {
+	t.Helper()
+	ctx := context.Background()
+	if err := eng.SubmitAndWait(ctx, DestructiveActionRequested{HypothesisID: "proof-x", Tenant: "acme", MissionID: "m9"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Withdraw(ctx, "proof-x", "stray"); err != nil {
+		t.Fatal(err)
+	}
+	if actionByID(eng, "proof-x").Withdrawn {
+		t.Error("a destructive proof was withdrawn")
+	}
+}
+
+func actionByID(e *Engine, id string) DestructiveActionSnapshot {
+	for _, a := range e.DestructiveActionSnapshot() {
+		if a.HypothesisID == id {
+			return a
+		}
+	}
+	return DestructiveActionSnapshot{}
+}
+
+// The withdrawal survives a snapshot and a restore.
+func TestDestructiveAuthz_WithdrawalSurvivesARestore(t *testing.T) {
+	w := NewWorld("acme")
+	Reduce(w, DestructiveActionRequested{HypothesisID: "r1", Tenant: "acme", MissionID: "m1", ActionKind: ActionKindToolCall})
+	Reduce(w, DestructiveActionWithdrawn{HypothesisID: "r1", Reason: "timeout", AtUnixMS: 5})
+	restored, err := RestoreWorld(SnapshotWorld(w, "0"), "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range restored.DestructiveActionSnapshot() {
+		if a.HypothesisID == "r1" && (!a.Withdrawn || a.Approved || a.WithdrawnReason != "timeout") {
+			t.Errorf("restored = %+v", a)
+		}
+	}
+	Reduce(restored, DestructiveActionDecided{HypothesisID: "r1", Approved: true, UserID: "u"})
+	for _, a := range restored.DestructiveActionSnapshot() {
+		if a.HypothesisID == "r1" && a.Approved {
+			t.Error("an approval after a restore changed a withdrawn request")
+		}
+	}
+}
+
+// No run continues across a restart. A TOOL node that waited on an approval fails
+// with the reason, its request is withdrawn, and a person cannot approve it after
+// that. A node of another state and a request of another kind stay as they are
+// (gibson#1469).
+func TestResumeFailAwaitingApproval_AfterARestart(t *testing.T) {
+	factory := memStoreFactory()
+	first, stop1 := context.WithCancel(context.Background())
+	e1 := NewRegistry(first, factory).For("acme")
+	if err := e1.SubmitAndWait(first, DestructiveActionRequested{
+		HypothesisID: "req-1", Tenant: "acme", MissionID: "m1", ActionKind: ActionKindToolCall, Connector: "c", Tool: "t", ArgsHash: "h",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, wi := range []struct {
+		id    string
+		state WorkState
+		appr  string
+	}{{"m1/wait", WorkInputRequired, "req-1"}, {"m1/done", WorkDone, ""}} {
+		e1.Submit(WorkDispatched{ID: wi.id, MissionID: "m1", RunID: "run-1", ItemKind: "tool", Target: "mcp:c:t"})
+		e1.Submit(WorkCompleted{ID: wi.id, RunID: "run-1", State: wi.state, ApprovalID: wi.appr, Err: "waiting"})
+	}
+	if err := e1.SubmitAndWait(first, DestructiveActionRequested{
+		HypothesisID: "proof-1", Tenant: "acme", MissionID: "m1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // the Engine writes the Timeline
+	stop1()
+
+	// The daemon starts again on the same store.
+	second, stop2 := context.WithCancel(context.Background())
+	defer stop2()
+	e2 := NewRegistry(second, factory).For("acme")
+	deadline := time.Now().Add(3 * time.Second)
+	var wait WorkSnapshot
+	for time.Now().Before(deadline) {
+		e2.ReadWorld(func(w *World) {
+			for _, wi := range w.WorkSnapshot() {
+				if wi.ID == "m1/wait" {
+					wait = wi
+				}
+			}
+		})
+		if wait.State == WorkFailed {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if wait.State != WorkFailed || wait.Err != RestartApprovalReason {
+		t.Fatalf("the waiting node = %+v, want failed with the restart reason", wait)
+	}
+	q := NewDestructiveAuthorizationQueue(e2)
+	for _, a := range e2.DestructiveActionSnapshot() {
+		switch a.HypothesisID {
+		case "req-1":
+			if !a.Withdrawn || a.Approved || a.WithdrawnReason != RestartApprovalReason {
+				t.Errorf("the request = %+v, want withdrawn with the restart reason", a)
+			}
+		case "proof-1":
+			if a.Withdrawn {
+				t.Error("a request of another kind was withdrawn")
+			}
+		}
+	}
+	if err := q.Decide("req-1", "u1", true); err == nil {
+		t.Error("a person approved a request whose node is gone")
+	}
+}
+
+// The function reads the World and returns the two events for each waiting node.
+func TestResumeFailAwaitingApproval_ReturnsTheWithdrawalAndTheFailure(t *testing.T) {
+	w := NewWorld("acme")
+	Reduce(w, WorkDispatched{ID: "m1/n", MissionID: "m1", RunID: "run-1", ItemKind: "tool", Target: "mcp:c:t"})
+	Reduce(w, WorkCompleted{ID: "m1/n", RunID: "run-1", State: WorkInputRequired, ApprovalID: "req-9"})
+	evs := ResumeFailAwaitingApproval(w, time.UnixMilli(5))
+	if len(evs) != 2 {
+		t.Fatalf("events = %+v, want 2", evs)
+	}
+	if wd, ok := evs[0].(DestructiveActionWithdrawn); !ok || wd.HypothesisID != "req-9" || wd.AtUnixMS != 5 {
+		t.Errorf("first = %+v", evs[0])
+	}
+	if f, ok := evs[1].(WorkCompleted); !ok || f.ID != "m1/n" || f.Err != RestartApprovalReason || f.RunID != "run-1" {
+		t.Errorf("second = %+v", evs[1])
+	}
+}
+
+// An empty id withdraws nothing, and the event survives the codec.
+func TestDestructiveActionWithdrawn_EmptyIDAndCodec(t *testing.T) {
+	q := NewDestructiveAuthorizationQueue(newDestructiveAuthzTestEngine(t))
+	if err := q.Withdraw(context.Background(), "", "x"); err == nil {
+		t.Error("an empty id was accepted")
+	}
+	w := NewWorld("acme")
+	Reduce(w, DestructiveActionWithdrawn{Reason: "x"}) // changes nothing
+	if len(w.DestructiveActionSnapshot()) != 0 {
+		t.Error("an event with no id changed the World")
+	}
+	for _, ev := range []Event{
+		DestructiveActionWithdrawn{HypothesisID: "r1", Reason: "timeout", AtUnixMS: 7},
+		&DestructiveActionWithdrawn{HypothesisID: "r2", Reason: "cancel", AtUnixMS: 8},
+	} {
+		raw, err := EncodeEvent(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := DecodeEvent(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := got.(DestructiveActionWithdrawn); !ok {
+			t.Errorf("decoded %T, want DestructiveActionWithdrawn", got)
+		}
+	}
+}
+
+// A withdrawal that the Engine cannot take returns the error.
+func TestDestructiveAuthz_WithdrawFailsWhenTheEngineStopped(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	e := NewRegistry(ctx, memStoreFactory()).For("acme")
+	q := NewDestructiveAuthorizationQueue(e)
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	dead, stop := context.WithCancel(context.Background())
+	stop()
+	if err := q.Withdraw(dead, "r1", "x"); err == nil {
+		t.Error("a withdrawal with a canceled context returned no error")
+	}
+}

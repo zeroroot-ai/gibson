@@ -514,6 +514,11 @@ func (e *Engine) Hydrate(ctx context.Context) error {
 		// events enter the next tick's drain without blocking.
 		e.intake <- failEv
 	}
+	// A TOOL node that waited on an approval ran in the daemon that stopped. It
+	// fails, and its request is withdrawn (gibson#1469).
+	for _, ev := range ResumeFailAwaitingApproval(e.World, time.Now()) {
+		e.intake <- ev
+	}
 	// A claim of a fix job lives only as long as its job node, which ran in the
 	// daemon that stopped (review M3).
 	for _, ev := range ResumeReleaseFixClaims(e.World) {

@@ -516,6 +516,8 @@ func Reduce(w *World, ev Event) {
 		applyDestructiveActionRequested(w, e)
 	case DestructiveActionDecided:
 		applyDestructiveActionDecided(w, e)
+	case DestructiveActionWithdrawn:
+		applyDestructiveActionWithdrawn(w, e)
 	case DestructiveActionConsumed:
 		applyDestructiveActionConsumed(w, e)
 	case LlmCallObserved:

@@ -480,6 +480,7 @@ func ingestToolCall(reg *brain.Registry) harness.ToolCallSink {
 			Err:                call.Err,
 			GrantID:            call.GrantID,
 			ErrCode:            call.ErrCode,
+			WorkID:             call.WorkID,
 			RecordedAtUnixNano: call.RecordedAtUnixNano,
 		})
 		if err != nil {
