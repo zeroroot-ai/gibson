@@ -206,6 +206,7 @@ func jobRow(t *testing.T, id, memberID string, state State) []any {
 		id, "bank-1", memberID, string(state), specJSON(t), "sess-1",
 		"user", "alice", unitNow, unitNow, (*time.Time)(nil),
 		"", 0.0, []byte(`[]`), int32(0), false,
+		"user", "bob", "in-7", // the current turn: kind, sender id, input id
 	}
 }
 
@@ -301,6 +302,43 @@ func TestPostgresStore_GetReadsTheSpecBackWhole(t *testing.T) {
 	}
 	if j.Spec.GetRepositories()[0].GetConnectorRef() != "connector/gitlab" {
 		t.Error("the repository's connector must survive the round trip")
+	}
+}
+
+// A scanned job carries its current turn: the sender and the input that started it.
+func TestPostgresStore_GetCarriesTheCurrentTurn(t *testing.T) {
+	script := newScript()
+	script.rows["SELECT id, bank_id, member_id"] = [][]any{jobRow(t, "job-1", "m-1", StateWorking)}
+	store, _ := scriptedStore(t, script)
+
+	j, err := store.Get(context.Background(), "acme", "job-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if j.TurnSender != (Principal{Kind: PrincipalUser, ID: "bob"}) || j.TurnInputID != "in-7" {
+		t.Fatalf("turn = %+v / %q, want user bob / in-7", j.TurnSender, j.TurnInputID)
+	}
+}
+
+// SetTurn writes the sender and the input of the turn, and a job that does not exist is not found.
+func TestPostgresStore_SetTurnRecordsTheTurn(t *testing.T) {
+	script := newScript()
+	script.affected["UPDATE jobs SET turn_sender_kind"] = 1
+	store, _ := scriptedStore(t, script)
+	bob := Principal{Kind: PrincipalUser, ID: "bob"}
+	if err := store.SetTurn(context.Background(), "acme", "job-1", bob, "in-7"); err != nil {
+		t.Fatalf("SetTurn: %v", err)
+	}
+	if !script.ran("turn_sender_kind = $2") {
+		t.Error("the turn must be written to the job row")
+	}
+
+	missing := newScript()
+	missing.affected["UPDATE jobs SET turn_sender_kind"] = 0
+	store, _ = scriptedStore(t, missing)
+	err := store.SetTurn(context.Background(), "acme", "nope", bob, "in-7")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 
@@ -708,6 +746,7 @@ func TestPostgresStore_ADriverErrorIsWrappedNotSwallowed(t *testing.T) {
 		},
 		"Claim":  func() error { _, err := store.Claim(ctx, "acme", "bank-1", "m-1"); return err },
 		"Ack":    func() error { return store.Acknowledge(ctx, "acme", "in-1") },
+		"Turn":   func() error { return store.SetTurn(ctx, "acme", "j", sender, "in-1") },
 		"Inputs": func() error { _, err := store.PendingInputs(ctx, "acme", "m-1", 10); return err },
 		"State":  func() error { _, err := store.SetState(ctx, "acme", "j", StateWorking, ""); return err },
 		"Deliv": func() error {

@@ -132,8 +132,10 @@ func (l *bankMemberLiveness) IsMemberTurnGrantLive(ctx context.Context, claims s
 		if !l.withinWrapUpWindow(j) {
 			return false, nil
 		}
-	default:
+	case job.StateWaiting:
 		return false, nil // a waiting job has no turn: nothing runs between turns
+	default:
+		return false, nil // a state that this daemon does not know holds no live turn
 	}
 	// A turn grant carries the authority of one sender for one turn. It renews only for the
 	// sender of the current turn. The member acknowledges an input when its turn starts, so the
