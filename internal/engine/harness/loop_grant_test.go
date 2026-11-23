@@ -117,13 +117,13 @@ func newLoopFixture(t *testing.T, grants map[string]*LoopGrant, enabled ...strin
 	return f
 }
 
-func loopMemberCtx(t *testing.T, tenant, agent, bank, member, run string) context.Context {
+func loopMemberCtx(t *testing.T, tenant, agentName, bank, member, run string) context.Context {
 	t.Helper()
 	tid, err := auth.NewTenantID(tenant)
 	require.NoError(t, err)
 	ctx := auth.ContextWithTenantString(context.Background(), tenant)
 	return withTaskGrantClaims(ctx, sdkcg.Claims{
-		Subject: "component:agent:" + agent, Tenant: tid, MissionID: bank, TaskID: member, MissionRunID: run,
+		Subject: "component:agent:" + agentName, Tenant: tid, MissionID: bank, TaskID: member, MissionRunID: run,
 	})
 }
 

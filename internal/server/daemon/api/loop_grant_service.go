@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -140,23 +141,8 @@ func (s *LoopGrantService) GrantLoop(ctx context.Context, req *tenantv1.GrantLoo
 	if len(agent.MemberCommand) == 0 {
 		return nil, status_grpc.Errorf(codes.FailedPrecondition, "%s: agent %q cannot run as a member", rpc, name)
 	}
-	for _, c := range req.GetToolClasses() {
-		if !slices.Contains(componentcatalog.ConnectorClasses, c) {
-			return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: %q is not a tool class", rpc, c)
-		}
-		if !slices.Contains(agent.LoopGrantClasses, c) {
-			return nil, status_grpc.Errorf(codes.PermissionDenied,
-				"%s: the manifest of agent %q does not name the class %q in loopGrant.classes", rpc, name, c)
-		}
-	}
-	for _, c := range req.GetHarnessCalls() {
-		if !slices.Contains(s.harnessCalls, c) {
-			return nil, status_grpc.Errorf(codes.InvalidArgument, "%s: %q is not a grantable harness call (%s)",
-				rpc, c, strings.Join(s.harnessCalls, ", "))
-		}
-	}
-	if len(req.GetToolClasses()) == 0 && len(req.GetHarnessCalls()) == 0 {
-		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": a loop grant names a tool class or a harness call")
+	if err := s.checkGrantRequest(rpc, name, agent, req); err != nil {
+		return nil, err
 	}
 	// The prior grant of the member, so a failed audit write restores it and
 	// does not delete a grant that worked.
@@ -177,18 +163,52 @@ func (s *LoopGrantService) GrantLoop(ctx context.Context, req *tenantv1.GrantLoo
 	}); err != nil {
 		// No grant stands without its record. The prior grant comes back, or the
 		// row goes when there was none.
-		var rerr error
-		if prior != nil {
-			_, rerr = s.store.Put(ctx, tenant, *prior)
-		} else {
-			rerr = s.store.Delete(ctx, tenant, memberID)
-		}
+		rerr := s.restoreGrant(ctx, tenant, memberID, prior)
 		if rerr != nil {
 			return nil, status_grpc.Error(codes.Internal, rpc+": the audit record failed and the grant could not be restored: "+rerr.Error())
 		}
 		return nil, status_grpc.Error(codes.Unavailable, rpc+": the audit record could not be written")
 	}
 	return &tenantv1.GrantLoopResponse{Grant: loopGrantProto(*g)}, nil
+}
+
+// checkGrantRequest checks the classes and the harness calls of a request against
+// the catalog, the manifest of the agent and the grantable calls.
+func (s *LoopGrantService) checkGrantRequest(rpc, agentName string, agent componentcatalog.AgentEntry, req *tenantv1.GrantLoopRequest) error {
+	for _, c := range req.GetToolClasses() {
+		if !slices.Contains(componentcatalog.ConnectorClasses, c) {
+			return status_grpc.Errorf(codes.InvalidArgument, "%s: %q is not a tool class", rpc, c)
+		}
+		if !slices.Contains(agent.LoopGrantClasses, c) {
+			return status_grpc.Errorf(codes.PermissionDenied,
+				"%s: the manifest of agent %q does not name the class %q in loopGrant.classes", rpc, agentName, c)
+		}
+	}
+	for _, c := range req.GetHarnessCalls() {
+		if !slices.Contains(s.harnessCalls, c) {
+			return status_grpc.Errorf(codes.InvalidArgument, "%s: %q is not a grantable harness call (%s)",
+				rpc, c, strings.Join(s.harnessCalls, ", "))
+		}
+	}
+	if len(req.GetToolClasses()) == 0 && len(req.GetHarnessCalls()) == 0 {
+		return status_grpc.Error(codes.InvalidArgument, rpc+": a loop grant names a tool class or a harness call")
+	}
+	return nil
+}
+
+// restoreGrant puts the prior grant of a member back, or removes the row when the
+// member held none.
+func (s *LoopGrantService) restoreGrant(ctx context.Context, tenant, memberID string, prior *loopgrantstore.Grant) error {
+	if prior != nil {
+		if _, err := s.store.Put(ctx, tenant, *prior); err != nil {
+			return fmt.Errorf("restore the prior grant: %w", err)
+		}
+		return nil
+	}
+	if err := s.store.Delete(ctx, tenant, memberID); err != nil {
+		return fmt.Errorf("remove the new grant: %w", err)
+	}
+	return nil
 }
 
 // RevokeLoop removes the loop grant of an agent. It is idempotent.

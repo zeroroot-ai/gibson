@@ -380,7 +380,9 @@ func TestCall_LoopCheckRefusesANativeToolAndRecordsTheGrant(t *testing.T) {
 	h := NewHandler(nil, allowAll("native:nmap"), &seqQuerier{obs: obs})
 	_, err := h.Call(context.Background(), Call{
 		Caller: callerAlice, ID: "native:nmap", Observer: obs, Recorder: obs.record, MemberID: "m-1",
-		Loop: func(context.Context, string) (LoopAllow, error) { return LoopAllow{GrantID: "lg-1", Grantor: "user:admin"}, nil },
+		Loop: func(context.Context, string) (LoopAllow, error) {
+			return LoopAllow{GrantID: "lg-1", Grantor: "user:admin"}, nil
+		},
 	})
 	if !errors.Is(err, ErrLoopGrantDenied) {
 		t.Fatalf("err = %v, want ErrLoopGrantDenied", err)
