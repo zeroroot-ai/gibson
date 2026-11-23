@@ -649,53 +649,66 @@ func TestDestructiveAuthz_WithdrawnRequestCannotBeApproved(t *testing.T) {
 	if err := q.Withdraw(ctx, id, "timeout"); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("the request shows as withdrawn", func(t *testing.T) { testWithdrawnShows(t, eng, id) })
+	t.Run("nobody can approve it", func(t *testing.T) { testWithdrawnNotApprovable(t, q, id) })
+	t.Run("a new call starts a new request", func(t *testing.T) { testWithdrawnNewCall(t, eng, q, req, id) })
+	t.Run("a request of another kind is not withdrawn", func(t *testing.T) { testWithdrawnProofKept(t, eng, q) })
+}
 
-	t.Run("the request shows as withdrawn", func(t *testing.T) {
-		snap := actionByID(eng, id)
-		if !snap.Withdrawn || !snap.Decided || snap.Approved || snap.WithdrawnReason != "timeout" {
-			t.Fatalf("snapshot = %+v", snap)
+func testWithdrawnShows(t *testing.T, eng *Engine, id string) {
+	t.Helper()
+	snap := actionByID(eng, id)
+	if !snap.Withdrawn || !snap.Decided || snap.Approved || snap.WithdrawnReason != "timeout" {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+}
+
+func testWithdrawnNotApprovable(t *testing.T, q *DestructiveAuthorizationQueue, id string) {
+	t.Helper()
+	if err := q.Decide(id, "u1", true); err == nil {
+		t.Error("a withdrawn request was approved")
+	}
+	for _, p := range q.Pending() {
+		if p.HypothesisID == id {
+			t.Error("a withdrawn request is still pending")
 		}
-	})
-	t.Run("nobody can approve it", func(t *testing.T) {
-		if err := q.Decide(id, "u1", true); err == nil {
-			t.Error("a withdrawn request was approved")
-		}
-		for _, p := range q.Pending() {
-			if p.HypothesisID == id {
-				t.Error("a withdrawn request is still pending")
-			}
-		}
-	})
-	t.Run("a new call starts a new request", func(t *testing.T) {
-		if err := q.Withdraw(ctx, id, "again"); err != nil {
-			t.Fatal(err)
-		}
-		state2, id2, err := q.AuthorizeToolCall(ctx, "acme", req)
-		if err != nil || state2 != ToolCallPending || id2 == id {
-			t.Fatalf("state=%v id=%q old=%q err=%v", state2, id2, id, err)
-		}
-		if err := q.Decide(id2, "u1", true); err != nil {
-			t.Fatal(err)
-		}
-		// A withdrawal after a decision changes nothing.
-		if err := q.Withdraw(ctx, id2, "late"); err != nil {
-			t.Fatal(err)
-		}
-		if a := actionByID(eng, id2); a.Withdrawn || !a.Approved {
-			t.Errorf("a withdrawal changed a decided request: %+v", a)
-		}
-	})
-	t.Run("a request of another kind is not withdrawn", func(t *testing.T) {
-		if err := eng.SubmitAndWait(ctx, DestructiveActionRequested{HypothesisID: "proof-x", Tenant: "acme", MissionID: "m9"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := q.Withdraw(ctx, "proof-x", "stray"); err != nil {
-			t.Fatal(err)
-		}
-		if actionByID(eng, "proof-x").Withdrawn {
-			t.Error("a destructive proof was withdrawn")
-		}
-	})
+	}
+}
+
+func testWithdrawnNewCall(t *testing.T, eng *Engine, q *DestructiveAuthorizationQueue, req ToolCallRequest, id string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := q.Withdraw(ctx, id, "again"); err != nil {
+		t.Fatal(err)
+	}
+	state2, id2, err := q.AuthorizeToolCall(ctx, "acme", req)
+	if err != nil || state2 != ToolCallPending || id2 == id {
+		t.Fatalf("state=%v id=%q old=%q err=%v", state2, id2, id, err)
+	}
+	if err := q.Decide(id2, "u1", true); err != nil {
+		t.Fatal(err)
+	}
+	// A withdrawal after a decision changes nothing.
+	if err := q.Withdraw(ctx, id2, "late"); err != nil {
+		t.Fatal(err)
+	}
+	if a := actionByID(eng, id2); a.Withdrawn || !a.Approved {
+		t.Errorf("a withdrawal changed a decided request: %+v", a)
+	}
+}
+
+func testWithdrawnProofKept(t *testing.T, eng *Engine, q *DestructiveAuthorizationQueue) {
+	t.Helper()
+	ctx := context.Background()
+	if err := eng.SubmitAndWait(ctx, DestructiveActionRequested{HypothesisID: "proof-x", Tenant: "acme", MissionID: "m9"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Withdraw(ctx, "proof-x", "stray"); err != nil {
+		t.Fatal(err)
+	}
+	if actionByID(eng, "proof-x").Withdrawn {
+		t.Error("a destructive proof was withdrawn")
+	}
 }
 
 func actionByID(e *Engine, id string) DestructiveActionSnapshot {
