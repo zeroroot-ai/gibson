@@ -57,10 +57,7 @@ func applyMergeRequestOpened(w *World, e MergeRequestOpened) {
 	if e.HeadSHA == "" || e.SourceBranch == "" {
 		return
 	}
-	rec := OpenedMergeRequest{
-		MergeRequest: e.MergeRequest, URL: e.URL, JobID: e.JobID, SourceBranch: e.SourceBranch,
-		HeadSHA: e.HeadSHA, RunID: e.RunID, MissionID: e.MissionID, MissionRunID: e.MissionRunID, At: e.At,
-	}
+	rec := OpenedMergeRequest(e)
 	for _, key := range []string{e.MergeRequest, e.URL} {
 		if key == "" {
 			continue

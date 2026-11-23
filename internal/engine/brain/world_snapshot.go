@@ -324,10 +324,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	}
 	w.mergeSlots = append([]MergeSlot(nil), data.MergeSlots...)
 	for _, r := range data.OpenedMergeRequests {
-		applyMergeRequestOpened(w, MergeRequestOpened{
-			MergeRequest: r.MergeRequest, URL: r.URL, JobID: r.JobID, SourceBranch: r.SourceBranch,
-			HeadSHA: r.HeadSHA, RunID: r.RunID, MissionID: r.MissionID, MissionRunID: r.MissionRunID, At: r.At,
-		})
+		applyMergeRequestOpened(w, MergeRequestOpened(r))
 	}
 
 	// Replay labels.
