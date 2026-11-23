@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1461,5 +1462,76 @@ func TestSubscribeInput_ASkippedInputIsDeliveredWhenTheMemberClaimsTheJobAgain(t
 	}
 	if len(minter.reqs) != 1 {
 		t.Errorf("minted %d grants, want one: none for the skip", len(minter.reqs))
+	}
+}
+
+// windowedInbox is a job surface whose inbox is cut at the limit, oldest first, and that forgets an
+// input once it is acknowledged, as the store does.
+type windowedInbox struct {
+	*fakeJobs
+	mu    sync.Mutex
+	inbox []*job.Input
+}
+
+func (w *windowedInbox) set(in []*job.Input) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.inbox = in
+}
+
+func (w *windowedInbox) PendingInputs(_ context.Context, _, _ string, limit int32) ([]*job.Input, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := append([]*job.Input(nil), w.inbox...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].SentAt.Before(out[j].SentAt) })
+	if int32(len(out)) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// A sent input must not be sent twice when a re-claimed job brings a full window of older inputs
+// that push it out of the oldest-first read. The map is pruned only when the read was not full.
+func TestSubscribeInput_AFullReadDoesNotMakeTheDeliveredInputGoTwice(t *testing.T) {
+	base := newFakeJobs()
+	base.jobs["job-x"] = openJob("job-x")
+	base.jobs["job-old"] = openJob("job-old")
+	jobs := &windowedInbox{fakeJobs: base}
+	alice := job.Principal{Kind: job.PrincipalUser, ID: "alice"}
+	now := time.Now()
+	x := &job.Input{ID: "x", JobID: "job-x", Kind: job.InputTurn, Message: "x", SentAt: now, Sender: alice}
+	jobs.set([]*job.Input{x})
+	s := memberService(t, jobs, liveMembers(), &recordingMinter{})
+
+	ctx, cancel := context.WithCancel(memberCtx("acme"))
+	stream := &recordingInputStream{ctx: ctx, cancel: cancel}
+	go func() {
+		time.Sleep(1 * time.Second) // poll 1 has delivered x
+		older := make([]*job.Input, 0, int(memberInboxBatch)+1)
+		for i := 0; i < int(memberInboxBatch); i++ {
+			older = append(older, &job.Input{
+				ID: fmt.Sprintf("old-%d", i), JobID: "job-old", Kind: job.InputTurn, Message: "old",
+				SentAt: now.Add(-time.Hour + time.Duration(i)*time.Second), Sender: alice,
+			})
+		}
+		jobs.set(append(older, x)) // the read is full of older inputs, and x is past the limit
+		time.Sleep(2 * time.Second)
+		jobs.set([]*job.Input{x}) // the member acknowledged the older inputs
+		time.Sleep(2500 * time.Millisecond)
+		cancel()
+	}()
+	if err := s.SubscribeInput(&harnesspb.SubscribeInputRequest{Context: memberInfo("run-1")}, stream); err != nil { //nolint:contextcheck // the stream carries the context
+		t.Fatalf("SubscribeInput: %v", err)
+	}
+
+	counts := map[string]int{}
+	for _, w := range stream.snapshot() {
+		counts[w.GetId()]++
+	}
+	if counts["x"] != 1 {
+		t.Fatalf("x was sent %d times, want exactly once (counts: %v)", counts["x"], counts)
+	}
+	if len(counts) != 1+int(memberInboxBatch) {
+		t.Errorf("sent %d distinct inputs, want x and the %d older ones", len(counts), memberInboxBatch)
 	}
 }

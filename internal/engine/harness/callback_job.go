@@ -396,15 +396,20 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 				"sender": TurnGrantSubject(in.Sender), "message": firstRunes(in.Message, 200),
 			})
 		}
-		// The map holds only ids that the current read still returns, so it never grows past one
-		// read. An input that left the read is acknowledged or a ghost.
-		inRead := make(map[string]struct{}, len(pending))
-		for _, in := range pending {
-			inRead[in.ID] = struct{}{}
-		}
-		for id := range delivered {
-			if _, ok := inRead[id]; !ok {
-				delete(delivered, id)
+		// Prune the map to the ids of the current read, but only when the read was not full. A
+		// full read is cut at the limit, so an id that is missing may only be past the limit: an
+		// older input of a job that the member claimed again can push a sent input out of the read.
+		// Pruning then would send that input twice. With a short read, a missing id is acknowledged
+		// or a ghost.
+		if len(pending) < int(memberInboxBatch) {
+			inRead := make(map[string]struct{}, len(pending))
+			for _, in := range pending {
+				inRead[in.ID] = struct{}{}
+			}
+			for id := range delivered {
+				if _, ok := inRead[id]; !ok {
+					delete(delivered, id)
+				}
 			}
 		}
 		select {

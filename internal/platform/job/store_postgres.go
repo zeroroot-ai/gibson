@@ -269,10 +269,10 @@ func (s *postgresStore) Close(ctx context.Context, tenantID string, in CloseInpu
 			return fmt.Errorf("%w: %s", ErrClosed, in.JobID)
 		}
 
-		now := time.Now().UTC()
+		// closed_at comes from the clock of the database, as the inbox filter compares it with now().
 		if _, uerr := tx.Exec(ctx,
-			`UPDATE jobs SET state = $2, verdict = $3, score = $4, closed_at = $5, updated_at = now() WHERE id = $1`,
-			in.JobID, string(StateClosed), string(in.Verdict), in.Score, now); uerr != nil {
+			`UPDATE jobs SET state = $2, verdict = $3, score = $4, closed_at = now(), updated_at = now() WHERE id = $1`,
+			in.JobID, string(StateClosed), string(in.Verdict), in.Score); uerr != nil {
 			return fmt.Errorf("job: close %s: %w", in.JobID, uerr)
 		}
 		// The wrap-up turn: commit, push, open the merge request, summarize.
