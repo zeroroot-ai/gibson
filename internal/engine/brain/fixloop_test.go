@@ -243,3 +243,66 @@ func TestDeployObserved_HoldsTheHoldTimeOfTheFixMission(t *testing.T) {
 		t.Errorf("decoded %+v", got)
 	}
 }
+
+// A fix whose health signal failed waits for its revert. A rescan that finds the flaw
+// again must not reopen the finding: the reopen would clear the merge request and
+// free the merge slot, and the next fix of the Application would merge onto the
+// broken service before the revert merges. The slot stays held until the revert
+// merges, and then it frees.
+func TestRevertPending_ARescanDoesNotFreeTheSlot(t *testing.T) {
+	w := NewWorld("t1")
+	w.clock = func() time.Time { return at(10) }
+	Reduce(w, FindingRaised{ID: "f1", CheckKind: "scan", CheckRef: "ref", At: at(0)})
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixing, MergeRequest: "mr-1", MissionID: "m1", At: at(1)})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-1", Application: "shop", At: at(1), MissionID: "m1"})
+	Reduce(w, FindingRaised{ID: "f2", CheckKind: "scan", CheckRef: "ref2", At: at(0)})
+	Reduce(w, FindingStatusChanged{ID: "f2", Status: FindingStatusFixing, MergeRequest: "mr-2", MissionID: "m2", At: at(1)})
+	Reduce(w, MergeRequestQueued{MergeRequest: "mr-2", Application: "shop", At: at(1), MissionID: "m2"})
+	applyAll(w, MergeGateSystem(w)) // mr-1 holds the slot, mr-2 waits
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed, At: at(2)})
+	Reduce(w, DeployObserved{MergeRequest: "mr-1", DeploymentKey: "dep-1", At: at(2)})
+	Reduce(w, HealthObserved{MergeRequest: "mr-1", Held: false, At: at(3)})
+	Reduce(w, RevertRequested{MergeRequest: "mr-1", RevertMergeRequest: "mr-1-revert", At: at(4)})
+
+	holds := func(mr string) bool { return w.MayMerge(mr) }
+	if !holds("mr-1") || holds("mr-2") {
+		t.Fatalf("before the rescan: slots = %+v, want mr-1 granted and mr-2 waiting", w.MergeSlots())
+	}
+
+	// A rescan finds the flaw again, after the deploy.
+	Reduce(w, CheckRerun{ID: "f1", CheckKind: "scan", Found: true, EvidenceAt: at(5)})
+	applyAll(w, VerificationSystem(w))
+	// Another producer also asks to reopen the finding.
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusOpen, At: at(6)})
+	applyAll(w, MergeSlotExpirySystem(w))
+	applyAll(w, MergeGateSystem(w))
+
+	f := findingByID(t, w, "f1")
+	if f.Status != FindingStatusFixed || f.MergeRequest != "mr-1" {
+		t.Fatalf("finding = %q with merge request %q, want fixed and mr-1: the revert is pending", f.Status, f.MergeRequest)
+	}
+	if !holds("mr-1") || holds("mr-2") || len(w.MergeSlots()) != 2 {
+		t.Fatalf("after the rescan: slots = %+v, want mr-1 still granted and mr-2 waiting", w.MergeSlots())
+	}
+
+	// The revert merges. The finding opens and the slot frees, and mr-2 gets its turn.
+	Reduce(w, FixReverted{MergeRequest: "mr-1", At: at(7)})
+	applyAll(w, MergeGateSystem(w))
+	if f := findingByID(t, w, "f1"); f.Status != FindingStatusOpen {
+		t.Errorf("status = %q, want open after the revert merged", f.Status)
+	}
+	if holds("mr-1") || !holds("mr-2") {
+		t.Fatalf("after the revert: slots = %+v, want mr-1 gone and mr-2 granted", w.MergeSlots())
+	}
+}
+
+// A fixed finding whose health held still reopens on a rescan that finds the flaw.
+func TestRescanFound_StillReopensAFixedFindingWhoseHealthHeld(t *testing.T) {
+	w := fixedFinding(t, "scan")
+	Reduce(w, HealthObserved{MergeRequest: "mr-1", Held: true, At: at(3)})
+	Reduce(w, CheckRerun{ID: "f1", CheckKind: "scan", Found: true, EvidenceAt: at(5)})
+	applyAll(w, VerificationSystem(w))
+	if got := status(t, w); got != FindingStatusOpen {
+		t.Errorf("status = %q, want open", got)
+	}
+}
