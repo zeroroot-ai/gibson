@@ -111,11 +111,27 @@ type ConnectorSpec struct {
 	// tool of the buyer. A tool that the manifest does not name then needs
 	// approval. See approval.go (gibson#1474).
 	ResponseActions bool `yaml:"responseActions"`
+	// ErrorClasses states that the connector puts the class of a tool error in
+	// structuredContent.error.class, and that the daemon may trust it. Only an
+	// image of ghcr.io/zeroroot-ai/connectors-* may set it, because a vendor
+	// server could send a class that makes the member repeat a partial write.
+	ErrorClasses bool `yaml:"errorClasses"`
 	// Tools marks tools by name. See approval.go.
 	Tools map[string]ConnectorTool `yaml:"tools"`
 	// Variables declare the values that a tenant gives for a Hosted
 	// connector (gibson#1508). See variables.go.
 	Variables []TenantVariable `yaml:"variables"`
+}
+
+// errorClassImagePrefix is the registry path of the Zero Root connectors. Only these images may
+// declare errorClasses, so no vendor connector can claim the protocol.
+const errorClassImagePrefix = "ghcr.io/zeroroot-ai/connectors-"
+
+// HonorsErrorClasses is true when the catalog connector id declares errorClasses. The daemon
+// reads error.class of a tool error only for such a connector. An unknown id is false.
+func HonorsErrorClasses(id string) bool {
+	e, err := LookupConnector(id)
+	return err == nil && e.ErrorClasses
 }
 
 // ConnectorClasses is the closed list of tool classes of a connector
@@ -619,6 +635,11 @@ func validateConnector(id string, s ConnectorSpec, egress []string) error {
 	default:
 		return fmt.Errorf("%s: auth %q must be none, secret, or oauth", id, s.Auth)
 	}
+	if s.ErrorClasses && !(s.Shape == connectorv1alpha1.ConnectorShapeHosted &&
+		strings.HasPrefix(s.Image, errorClassImagePrefix)) {
+		return fmt.Errorf("%s: errorClasses is only for a Hosted connector image of %s*, got %q",
+			id, errorClassImagePrefix, s.Image)
+	}
 	if !slices.Contains(ConnectorClasses, s.Class) {
 		return fmt.Errorf("%s: class %q must be one of %s", id, s.Class, strings.Join(ConnectorClasses, ", "))
 	}
@@ -775,6 +796,8 @@ type ConnectorEntry struct {
 	// ResponseActions and Tools carry the approval marks. See ApprovalFor.
 	ResponseActions bool
 	Tools           map[string]ConnectorTool
+	// ErrorClasses is true when the daemon honors error.class of this connector.
+	ErrorClasses bool
 	// Variables are the values that a tenant gives. See ResolveVariables.
 	Variables []TenantVariable
 }
@@ -804,6 +827,7 @@ func (m Manifest) toConnectorEntry() ConnectorEntry {
 		Port:               s.Port,
 		ImagePullSecret:    s.ImagePullSecret,
 		ResponseActions:    s.ResponseActions,
+		ErrorClasses:       s.ErrorClasses,
 		Tools:              s.Tools,
 		Variables:          s.Variables,
 	}

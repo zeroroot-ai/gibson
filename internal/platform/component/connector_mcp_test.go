@@ -522,7 +522,9 @@ func classConnector(t *testing.T, structured any) *ConnectorMCP {
 		})
 	srv := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
 	t.Cleanup(srv.Close)
-	return newTestConnectorMCP(srv, "github")
+	c := newTestConnectorMCP(srv, "github")
+	c.errorClasses = func(connector string) bool { return connector == "github" } // the manifest declares it
+	return c
 }
 
 // A tool error maps by structuredContent.error.class. unavailable, timeout, rate_limited and
@@ -572,6 +574,39 @@ func TestConnectorMCP_ATooErrorMapsByItsClass(t *testing.T) {
 				if got := errors.Is(err, m); got != (m == tc.want) {
 					t.Errorf("errors.Is(%v) = %v, want %v", m, got, m == tc.want)
 				}
+			}
+		})
+	}
+}
+
+// The daemon honors error.class only for a connector whose manifest declares errorClasses. A
+// vendor server that sends the class unavailable for a partial write is not UNAVAILABLE: the error
+// stays INVALID_ARGUMENT with the text of the connector. A connector that the lookup does not
+// know, and a client with no lookup, ignore the class too.
+func TestConnectorMCP_AConnectorWithoutErrorClassesIsNotTrusted(t *testing.T) {
+	class := map[string]any{"error": map[string]any{"class": "unavailable", "retry_after_seconds": 1}}
+	for name, honors := range map[string]func(string) bool{
+		"the manifest does not declare it":   func(string) bool { return false },
+		"the lookup names another connector": func(c string) bool { return c == "gitlab" },
+		"no lookup":                          nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := classConnector(t, class)
+			c.errorClasses = honors
+			_, err := c.CallConnectorTool(context.Background(), "acme", "github", "fail", map[string]any{})
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			for _, m := range []error{
+				metatool.ErrConnectorUnavailable, metatool.ErrConnectorTimeout,
+				metatool.ErrConnectorRateLimited, metatool.ErrConnectorOutcomeUnknown,
+			} {
+				if errors.Is(err, m) {
+					t.Errorf("the class of an untrusted connector marked the error: %v", m)
+				}
+			}
+			if !strings.Contains(err.Error(), "the connector text: branch x stays") {
+				t.Errorf("the connector text is lost: %v", err)
 			}
 		})
 	}

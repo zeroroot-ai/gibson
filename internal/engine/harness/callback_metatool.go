@@ -410,7 +410,9 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 	case errors.Is(err, metatool.ErrUnauthorized):
 		code = commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED
 	case errors.Is(err, metatool.ErrConnectorTimeout):
-		// The connector set the class timeout, and it does so only where a repeat is proven safe.
+		// Two sources: a connector that declared errorClasses set the class timeout, and it does
+		// so only where a repeat is proven safe. The daemon also sets it when its own bound ends
+		// the connect step, before any tool ran.
 		code = commonpb.ErrorCode_ERROR_CODE_TIMEOUT
 	case errors.Is(err, metatool.ErrConnectorRateLimited):
 		// The vendor limits the rate. The member waits before it calls again.

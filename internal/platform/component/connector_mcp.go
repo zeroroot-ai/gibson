@@ -44,6 +44,8 @@ type ConnectorMCP struct {
 	httpClient *http.Client
 	logger     *slog.Logger
 	timeout    time.Duration
+	// errorClasses says if the daemon reads error.class of the tool errors of a connector.
+	errorClasses func(connector string) bool
 
 	// connectors returns the catalog connector ids. Tests replace it.
 	connectors func() []string
@@ -82,11 +84,12 @@ func NewConnectorMCP(httpClient *http.Client, logger *slog.Logger) *ConnectorMCP
 		logger = slog.Default()
 	}
 	return &ConnectorMCP{
-		httpClient: httpClient,
-		logger:     logger.With("component", "connector_mcp"),
-		timeout:    connectorCallTimeout,
-		connectors: catalogConnectorIDs,
-		proxyURL:   connectorv1alpha1.ProxyURL,
+		httpClient:   httpClient,
+		logger:       logger.With("component", "connector_mcp"),
+		timeout:      connectorCallTimeout,
+		connectors:   catalogConnectorIDs,
+		proxyURL:     connectorv1alpha1.ProxyURL,
+		errorClasses: componentcatalog.HonorsErrorClasses,
 	}
 }
 
@@ -215,8 +218,12 @@ func (c *ConnectorMCP) CallConnectorTool(ctx context.Context, tenant, connector,
 		toolErr := fmt.Errorf("connector mcp: %s on %q reported an error: %s", tool, connector, contentText(res.Content))
 		// The connector says in structuredContent.error.class how the member must treat the
 		// error. The daemon never reads the words of the text to guess.
-		if marker := toolErrorMarker(res.StructuredContent); marker != nil {
-			return nil, fmt.Errorf("%w: %w", marker, toolErr)
+		// Only a connector that declares errorClasses in its manifest is trusted: a vendor server
+		// could send a class that makes the member repeat a partial write.
+		if c.honorsErrorClasses(connector) {
+			if marker := toolErrorMarker(res.StructuredContent); marker != nil {
+				return nil, fmt.Errorf("%w: %w", marker, toolErr)
+			}
 		}
 		return nil, toolErr
 	}
@@ -466,4 +473,9 @@ func toolErrorMarker(structured any) error {
 	default:
 		return nil
 	}
+}
+
+// honorsErrorClasses is true when the manifest of the connector declares errorClasses.
+func (c *ConnectorMCP) honorsErrorClasses(connector string) bool {
+	return c.errorClasses != nil && c.errorClasses(connector)
 }
