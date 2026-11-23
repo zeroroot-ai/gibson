@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.171.1](https://github.com/zeroroot-ai/gibson/compare/v0.171.0...v0.171.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **rework:** skip a Cilium status image that is a bare image ID ([#1634](https://github.com/zeroroot-ai/gibson/issues/1634)) ([7c61cd1](https://github.com/zeroroot-ai/gibson/commit/7c61cd115fce5aa992b4f3eb15bc6c20c9d4688d))
+
 ## [0.171.0](https://github.com/zeroroot-ai/gibson/compare/v0.170.0...v0.171.0) (2026-11-23)
 
 
