@@ -272,10 +272,7 @@ func (s *HarnessCallbackService) PullJob(ctx context.Context, req *harnesspb.Pul
 	if err != nil {
 		// The minter was ready and still failed. The job goes back to the queue with its turn
 		// and its session, and it is never closed for a fault of the daemon.
-		if rerr := s.jobs.ReleaseJob(context.WithoutCancel(ctx), tenantID, claimed.ID, memberID); rerr != nil {
-			s.logger.ErrorContext(ctx, "the claimed job could not go back to the queue",
-				"job_id", claimed.ID, "member_id", memberID, "err", rerr)
-		}
+		s.releaseClaimed(ctx, tenantID, claimed.ID, memberID)
 		s.logger.WarnContext(ctx, "pull refused: no grant for the first turn", "job_id", claimed.ID, "err", err)
 		return nil, status.Error(codes.Unavailable,
 			"the daemon could not mint the turn grant, so the job went back to the queue")
@@ -295,11 +292,37 @@ func (s *HarnessCallbackService) PullJob(ctx context.Context, req *harnesspb.Pul
 func (s *HarnessCallbackService) firstTurnGrant(
 	ctx context.Context, tenantID string, info *harnesspb.ContextInfo, j *job.Job,
 ) (string, error) {
-	sender := j.TurnSender
-	if sender.ID == "" {
-		sender = j.OpenedBy // a job from before the turn was stored
+	if j.TurnSender.ID == "" {
+		// A job always has a turn sender: Open records the opener, and Claim keeps or resets it.
+		// A job with none has no authority to act with, so it gets no grant.
+		return "", errNoTurnSender
 	}
-	return s.mintTurnGrant(tenantID, callerRun(ctx, info), j.BankID, j.ID, sender)
+	return s.mintTurnGrant(tenantID, callerRun(ctx, info), j.BankID, j.ID, j.TurnSender)
+}
+
+// errNoTurnSender is the error of a claimed job that records no sender for its current turn.
+var errNoTurnSender = errors.New("the job records no sender for its current turn")
+
+// releaseRetryBackoff is the wait before the one retry of a release that failed.
+var releaseRetryBackoff = 250 * time.Millisecond
+
+// releaseClaimed sends a job that PullJob claimed back to the queue. The context does not cancel,
+// so a pull that the member dropped does not leave the job claimed. A release that fails is tried
+// once more after a short backoff. If it fails again, the log names the job at error level, and
+// the stale limit of the bank or the timeout of the node ends the claim.
+func (s *HarnessCallbackService) releaseClaimed(ctx context.Context, tenantID, jobID, memberID string) {
+	detached := context.WithoutCancel(ctx)
+	err := s.jobs.ReleaseJob(detached, tenantID, jobID, memberID)
+	if err == nil {
+		return
+	}
+	s.logger.WarnContext(ctx, "the claimed job did not go back to the queue, one retry",
+		"job_id", jobID, "member_id", memberID, "err", err)
+	time.Sleep(releaseRetryBackoff)
+	if err = s.jobs.ReleaseJob(detached, tenantID, jobID, memberID); err != nil {
+		s.logger.ErrorContext(ctx, "the claimed job could not go back to the queue",
+			"job_id", jobID, "member_id", memberID, "err", err)
+	}
 }
 
 // SubscribeInput streams the calling member's unacknowledged inputs, each with
