@@ -60,9 +60,9 @@ const (
 
 	// caBundleHashAnnotation is the annotation of the pod template that holds
 	// the hash of the bundle. The server reads the file at start, so a new
-	// bundle must roll the pod. ToolHive v0.12.1 copies the annotations of
-	// podTemplateSpec.metadata to the pod template of the StatefulSet
-	// (pkg/container/kubernetes/client.go, applyPodTemplatePatch), so a new
+	// bundle must roll the pod. Upstream ToolHive v0.12.1 copies the
+	// annotations of podTemplateSpec.metadata to the pod template of the
+	// StatefulSet (applyPodTemplatePatch in its container runtime), so a new
 	// hash changes the template and rolls the pod.
 	caBundleHashAnnotation = "gibson.zeroroot.ai/ca-bundle-sha256"
 )

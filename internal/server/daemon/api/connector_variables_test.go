@@ -161,7 +161,13 @@ func TestGetConnectorCredential_ReadsTheCABundleOfTheTenant(t *testing.T) {
 	assert.Equal(t, bundle, resp.GetData()["ca.crt"])
 	assert.Equal(t, "tok", string(resp.GetData()["GITHUB_TOKEN"]))
 
-	for _, name := range []string{"github-fixloop-ca-key", "github-fixloop-ca-token", "github-fixloop-ca-prefixed"} {
+	// Text before the certificates is dropped, and it never reaches the pod.
+	resp, err = get("github-fixloop-ca-token")
+	require.NoError(t, err)
+	assert.Equal(t, bundle, resp.GetData()["ca.crt"], "only the certificates come out")
+	assert.NotContains(t, string(resp.GetData()["ca.crt"]), "ghp_secrettoken")
+
+	for _, name := range []string{"github-fixloop-ca-key", "github-fixloop-ca-prefixed"} {
 		_, err = get(name)
 		require.Error(t, err, name)
 		assert.NotContains(t, err.Error(), "AAAA")
@@ -175,7 +181,7 @@ func TestEnableConnector_ChecksTheCABundleAtEnableTime(t *testing.T) {
 	bundle := testCABundle(t)
 	store := &fakeCredStore{data: map[string][]byte{
 		"github-fixloop-ca-ok":  bundle,
-		"github-fixloop-ca-bad": append([]byte("ghp_secrettoken\n"), bundle...),
+		"github-fixloop-ca-bad": []byte("-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"),
 	}}
 	enable := func(svc *ConnectorService, name string) error {
 		_, err := svc.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{

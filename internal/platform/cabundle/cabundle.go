@@ -48,39 +48,26 @@ func isTrustAnchor(c *x509.Certificate) bool {
 	return c.CheckSignature(c.SignatureAlgorithm, c.RawTBSCertificate, c.Signature) == nil
 }
 
-// Normalize returns the CA certificates of pemData as new PEM, and nothing else.
+// Normalize returns the trust anchors of pemData as new PEM, and nothing else.
 //
-// The input must hold CERTIFICATE blocks and white space only. pem.Decode skips
-// text before and between blocks, so a secret such as "token\n-----BEGIN ..."
-// would pass a plain decode and its text would reach the pod. Normalize refuses
-// any other byte outside the blocks, refuses a block of another type, and
-// refuses a certificate that is not a CA (BasicConstraints CA true). The output
-// is built from the parsed certificates, so it holds no header and no text that
-// the input had. The error never holds the content.
+// A bundle of a real install holds more than certificates: the Mozilla bundle
+// has a name line and a row of "=" before each block, and a full chain has a
+// server certificate beside its CAs. So Normalize accepts any text outside the
+// blocks, and it drops a certificate that is not a trust anchor. None of it
+// reaches the output. The output is built from the parsed certificates, so it
+// holds no header, no comment and no text that the input had.
+//
+// A block of another type (a private key, for example) refuses the whole
+// bundle, as does a certificate that does not parse, and a bundle with no
+// anchor at all. The error never holds the content.
 func Normalize(pemData []byte) ([]byte, error) {
 	rest := pemData
 	var out []byte
 	for {
-		idx := bytes.Index(rest, []byte("-----BEGIN "))
-		if idx < 0 {
-			if len(bytes.TrimSpace(rest)) > 0 {
-				return nil, errors.New("the bundle holds text that is not PEM outside the certificates")
-			}
-			break
-		}
-		if len(bytes.TrimSpace(rest[:idx])) > 0 {
-			return nil, errors.New("the bundle holds text that is not PEM outside the certificates")
-		}
-		block, after := pem.Decode(rest[idx:])
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
 		if block == nil {
-			return nil, errors.New("the bundle holds a PEM block that does not decode")
-		}
-		// pem.Decode skips a block that is malformed and returns the next one.
-		// The block that it returned must start where the text starts, so the
-		// skipped text cannot hide before a certificate.
-		consumed := rest[idx : len(rest)-len(after)]
-		if !bytes.HasPrefix(consumed, []byte("-----BEGIN "+block.Type+"-----")) {
-			return nil, errors.New("the bundle holds text that is not PEM outside the certificates")
+			break
 		}
 		if block.Type != "CERTIFICATE" {
 			return nil, fmt.Errorf("the bundle holds a %q block, and only CERTIFICATE blocks are allowed", block.Type)
@@ -90,13 +77,12 @@ func Normalize(pemData []byte) ([]byte, error) {
 			return nil, errors.New("a certificate of the bundle does not parse")
 		}
 		if !isTrustAnchor(cert) {
-			return nil, errors.New("a certificate of the bundle is neither a CA certificate nor self-signed")
+			continue
 		}
 		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})...)
-		rest = after
 	}
 	if len(out) == 0 {
-		return nil, errors.New("the bundle holds no PEM certificate")
+		return nil, errors.New("the bundle holds no CA certificate and no self-signed certificate")
 	}
 	return out, nil
 }

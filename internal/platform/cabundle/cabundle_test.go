@@ -48,12 +48,11 @@ func TestCheck_Refuses(t *testing.T) {
 	key := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("secret-key-bytes")})
 	bad := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("not a certificate")})
 	cases := map[string][]byte{
-		"empty":                 {},
-		"plain text":            []byte("hello"),
-		"a private key":         key,
-		"a certificate+a key":   append(certPEM(t, "c"), key...),
-		"a broken certificate":  bad,
-		"text after the bundle": append(certPEM(t, "c"), []byte("junk")...),
+		"empty":                {},
+		"plain text":           []byte("hello"),
+		"a private key":        key,
+		"a certificate+a key":  append(certPEM(t, "c"), key...),
+		"a broken certificate": bad,
 	}
 	for name, data := range cases {
 		err := Check(data)
@@ -84,46 +83,6 @@ func leafPEM(t *testing.T) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
-// Text before or between the blocks is skipped by pem.Decode. Normalize refuses
-// it, so a token in the secret never reaches the pod.
-func TestNormalize_RefusesTextOutsideTheBlocks(t *testing.T) {
-	c := certPEM(t, "c")
-	cases := map[string][]byte{
-		"text before":                   append([]byte("ghp_secrettoken\n"), c...),
-		"text between":                  append(append(append([]byte{}, c...), []byte("ghp_secrettoken\n")...), certPEM(t, "d")...),
-		"text after":                    append(append([]byte{}, c...), []byte("ghp_secrettoken")...),
-		"a leaf that another CA signed": leafSignedByAnotherCA(t),
-	}
-	for name, data := range cases {
-		out, err := Normalize(data)
-		if err == nil {
-			t.Errorf("%s: want an error", name)
-		}
-		if err != nil && strings.Contains(err.Error(), "ghp_secrettoken") {
-			t.Errorf("%s: the error holds the content", name)
-		}
-		if len(out) != 0 {
-			t.Errorf("%s: output = %q", name, out)
-		}
-	}
-}
-
-// The output is built from the parsed certificates: headers of the input are
-// gone, and white space between the blocks is not kept.
-func TestNormalize_ReEncodesTheCertificates(t *testing.T) {
-	c1, c2 := certPEM(t, "one"), certPEM(t, "two")
-	in := append(append(append([]byte("\n  "), c1...), []byte("\n\n   ")...), c2...)
-	out, err := Normalize(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(out) != string(c1)+string(c2) {
-		t.Errorf("output = %q", out)
-	}
-}
-
-// leafSignedByAnotherCA is a server certificate with no CA flag that a CA
-// signed. It is not a trust anchor.
 func leafSignedByAnotherCA(t *testing.T) []byte {
 	t.Helper()
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -186,8 +145,7 @@ func intermediatePEM(t *testing.T) []byte {
 
 // A bundle of a model provider or an outside agent worked with a self-signed
 // server certificate that has no CA flag, with a root that has no
-// BasicConstraints and with an intermediate. All three stay accepted. A leaf that
-// another CA signed is refused.
+// BasicConstraints and with an intermediate. All stay accepted.
 func TestNormalize_AcceptsTheAnchorsThatTenantsUse(t *testing.T) {
 	for name, data := range map[string][]byte{
 		"a self-signed leaf": leafPEM(t),
@@ -198,20 +156,55 @@ func TestNormalize_AcceptsTheAnchorsThatTenantsUse(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	if _, err := Normalize(leafSignedByAnotherCA(t)); err == nil {
-		t.Error("a leaf that another CA signed must be refused")
+}
+
+// The Mozilla bundle (certifi cacert.pem) has a name line and a row of "="
+// before each block. The text is accepted and never reaches the output.
+func TestNormalize_AcceptsTheShapeOfTheMozillaBundle(t *testing.T) {
+	a, b := certPEM(t, "a"), certPEM(t, "b")
+	in := "# Issuer: CN=A\n# Subject: CN=A\n# Label: \"A\"\n# MD5 Fingerprint: 00:11\n" +
+		"# SHA256 Fingerprint: ghp_secrettoken\n" + string(a) +
+		"\n# Issuer: CN=B\n=========\n" + string(b) + "\ntrailing ghp_secrettoken\n"
+	out, err := Normalize([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(a)+string(b) {
+		t.Errorf("output = %q", out)
 	}
 }
 
-// A BEGIN line with no END line is skipped by pem.Decode, and the next block is
-// returned. Normalize refuses the skipped text.
-func TestNormalize_RefusesAMalformedBlockBeforeACertificate(t *testing.T) {
+// A full chain holds the server certificate beside its CAs. Only the anchors come
+// out. A bundle with only a leaf that another CA signed has no anchor and is refused.
+func TestNormalize_DropsACertificateThatIsNoAnchor(t *testing.T) {
+	leaf := leafSignedByAnotherCA(t)
+	inter := intermediatePEM(t)
+	root := certPEM(t, "root")
+	out, err := Normalize(append(append(append([]byte{}, leaf...), inter...), root...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(inter)+string(root) {
+		t.Errorf("only the anchors must come out: %q", out)
+	}
+	if _, err := Normalize(leaf); err == nil {
+		t.Error("a bundle with no anchor must be refused")
+	}
+}
+
+// A block that is not a certificate refuses the bundle, with or without text
+// around it. A malformed BEGIN line before a certificate does not leak.
+func TestNormalize_RefusesABlockThatIsNotACertificate(t *testing.T) {
+	key := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("secret-key-bytes")})
+	if _, err := Normalize(append(certPEM(t, "c"), key...)); err == nil {
+		t.Error("a key block must refuse the bundle")
+	}
 	in := append([]byte("-----BEGIN junk\nghp_secrettoken\n"), certPEM(t, "c")...)
 	out, err := Normalize(in)
-	if err == nil {
-		t.Fatal("want an error")
+	if err != nil {
+		t.Fatalf("a malformed line before a certificate: %v", err)
 	}
-	if len(out) != 0 || strings.Contains(err.Error(), "ghp_secrettoken") {
-		t.Errorf("out = %q, err = %v", out, err)
+	if strings.Contains(string(out), "ghp_secrettoken") {
+		t.Error("the text reached the output")
 	}
 }
