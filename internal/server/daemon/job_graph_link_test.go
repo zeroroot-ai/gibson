@@ -51,6 +51,19 @@ type fakeMRReader struct {
 	err      error
 	failures int
 	calls    []string
+	// closes holds each close as "key: comment". closeFailures is the number of
+	// closes that fail before the closes succeed.
+	closes        []string
+	closeFailures int
+}
+
+func (f *fakeMRReader) CloseMergeRequest(_ context.Context, _, _, mergeRequest, comment string) error {
+	if f.closeFailures > 0 {
+		f.closeFailures--
+		return errors.New("the connector refused the close")
+	}
+	f.closes = append(f.closes, mergeRequest+": "+comment)
+	return nil
 }
 
 func (f *fakeMRReader) MergeRequest(_ context.Context, tenant, missionID, key string) (fixloop.MergeFact, error) {
@@ -788,6 +801,10 @@ type perTenantReader struct {
 	hungTenant string
 	good       fixloop.MergeFact
 	hungSeen   atomic.Bool
+}
+
+func (r *perTenantReader) CloseMergeRequest(context.Context, string, string, string, string) error {
+	return nil
 }
 
 func (r *perTenantReader) MergeRequest(ctx context.Context, tenant, _, _ string) (fixloop.MergeFact, error) {

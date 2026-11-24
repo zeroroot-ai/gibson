@@ -90,6 +90,14 @@ func findingSubject(ev Event) (id, mergeRequest string, ok bool) {
 		return e.ID, e.MergeRequest, true
 	case FindingPlaceBlocked:
 		return e.ID, "", true
+	case FixAttemptFailed:
+		return e.ID, "", true
+	case *FixAttemptFailed:
+		return e.ID, "", true
+	case FixCloseWaiting:
+		return e.ID, e.MergeRequest, true
+	case *FixCloseWaiting:
+		return e.ID, e.MergeRequest, true
 	case *FindingPlaceBlocked:
 		return e.ID, "", true
 	case *FixHeadMissing:

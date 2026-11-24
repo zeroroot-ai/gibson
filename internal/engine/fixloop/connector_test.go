@@ -102,6 +102,7 @@ func TestConnectorReader_NoGovernedCallerNoCall(t *testing.T) {
 
 type fakeTenantCaller struct {
 	calls  []string
+	args   []map[string]any
 	result any
 }
 
@@ -110,6 +111,7 @@ func (f *fakeTenantCaller) CallConnectorForTenant(
 ) (any, error) {
 	mr, _ := args["merge_request"].(string)
 	f.calls = append(f.calls, tenant+"/"+missionID+"/"+connector+"/"+tool+"/"+mr)
+	f.args = append(f.args, args)
 	return f.result, nil
 }
 
@@ -130,6 +132,35 @@ func TestConnectorReader_RevertTakesTheGovernedPath(t *testing.T) {
 		t.Fatalf("governed calls = %v", w.calls)
 	}
 	if _, err := NewConnectorReader(mcp, nil).Revert(context.Background(), "t1", "g/p!12", ""); err == nil {
+		t.Fatal("want an error with no governed caller")
+	}
+}
+
+// The close goes through the governed caller with the comment (gibson#1674). A
+// tool answer with a state other than closed is an error.
+func TestConnectorReader_CloseMergeRequestTakesTheGovernedPath(t *testing.T) {
+	mcp := &fakeMCP{tools: []catalog.ToolEntry{{Connector: "gitlab-fixloop", Tool: ToolCloseMergeRequest}}}
+	w := &fakeTenantCaller{result: map[string]any{"state": "closed", "closed": true}}
+	r := NewConnectorReader(mcp, w)
+	if err := r.CloseMergeRequest(context.Background(), "t1", "run-9", "g/p!12", "job j1 failed"); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.calls) != 1 || w.calls[0] != "t1/run-9/gitlab-fixloop/close_merge_request/g/p!12" {
+		t.Fatalf("governed calls = %v", w.calls)
+	}
+	if w.args[0]["comment"] != "job j1 failed" {
+		t.Errorf("args = %v, want the comment", w.args[0])
+	}
+	// A merge request that was closed already is a success.
+	w.result = map[string]any{"state": "closed", "closed": false}
+	if err := r.CloseMergeRequest(context.Background(), "t1", "run-9", "g/p!12", "c"); err != nil {
+		t.Errorf("closed already: %v", err)
+	}
+	w.result = map[string]any{"state": "open"}
+	if err := r.CloseMergeRequest(context.Background(), "t1", "run-9", "g/p!12", "c"); err == nil {
+		t.Error("an answer with state open was taken for a close")
+	}
+	if err := NewConnectorReader(mcp, nil).CloseMergeRequest(context.Background(), "t1", "", "g/p!12", ""); err == nil {
 		t.Fatal("want an error with no governed caller")
 	}
 }

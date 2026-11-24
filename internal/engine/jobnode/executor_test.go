@@ -39,9 +39,23 @@ type scriptedJobs struct {
 }
 
 // recordingObserver keeps what the node reported.
-type recordingObserver struct{ got []ClosedJob }
+type recordingObserver struct {
+	got    []ClosedJob
+	failed []FailedJob
+	// claims, when set, is read at the failed report: the claim of the job must
+	// still stand then.
+	claims         *recordingClaims
+	releasedAtFail int
+}
 
 func (r *recordingObserver) JobClosed(_ context.Context, c ClosedJob) { r.got = append(r.got, c) }
+
+func (r *recordingObserver) JobFailed(_ context.Context, f FailedJob) {
+	r.failed = append(r.failed, f)
+	if r.claims != nil {
+		r.releasedAtFail = len(r.claims.released)
+	}
+}
 
 func (s *scriptedJobs) Open(_ context.Context, _ string, in job.OpenInput) (*job.Job, error) {
 	if s.openErr != nil {
@@ -461,11 +475,21 @@ func TestRun_AFailedJobWithAMergeRequestReleasesItsClaimAndLinksNothing(t *testi
 	in.Closed = obs
 	claims := &recordingClaims{}
 	in.Claims = claims
+	obs.claims = claims
 
 	out, err := Run(context.Background(), in)
 
 	if err != nil || out.Result.Verdict != job.VerdictFailed {
 		t.Fatalf("outcome = %+v, err = %v, want a failed verdict", out.Result, err)
+	}
+	// The observer hears about the failed job and its merge request before the
+	// claim ends, so it can close the merge request and record the attempt.
+	if len(obs.failed) != 1 || obs.failed[0].Reason != "the delivery was refused" ||
+		!hasMergeRequest(obs.failed[0].Deliverables) {
+		t.Errorf("failed reports = %+v, want one with the merge request and the reason", obs.failed)
+	}
+	if obs.releasedAtFail != 0 {
+		t.Errorf("%d claims ended before the failed report", obs.releasedAtFail)
 	}
 	if len(claims.released) != 1 || claims.released[0] != "run-1/fix" {
 		t.Errorf("releases = %v, want the claim of the failed job", claims.released)

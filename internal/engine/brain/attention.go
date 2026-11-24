@@ -179,6 +179,15 @@ type FixFacts struct {
 	// PlaceBlock is the wait on a person that the fix loop shows when the finding has
 	// no single Application. It is empty while the finding has one (gibson#1469).
 	PlaceBlock string
+	// FixAttempts are the fix jobs that failed in a row on this finding, oldest
+	// first. A linked fix empties the list. FixBlockedAt is the time of the
+	// failed attempt that made the count reach MaxFixAttempts. While it is set,
+	// no new fix job takes the finding (gibson#1674).
+	FixAttempts  []FixAttempt
+	FixBlockedAt time.Time
+	// FixCloseWait is the failed job whose merge request the daemon could not
+	// close. It is the zero value when no close waits (gibson#1674).
+	FixCloseWait FixCloseWait
 
 	// LinkedAt is the time of the status change that set the merge request of the
 	// current fix, which is the time of the link. It is zero for a finding that was
@@ -405,6 +414,8 @@ func applyFindingStatusChanged(w *World, e FindingStatusChanged) {
 				f.MergeRequestState = ""
 				f.FixMissionID = e.MissionID
 				f.LinkedAt = e.At
+				// A linked fix is a success, so the failures in a row end.
+				f.FixAttempts, f.FixBlockedAt = nil, time.Time{}
 			}
 			if e.Status == FindingStatusOpen {
 				resetFix(f)
@@ -513,7 +524,7 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 			ScanScope: f.ScanScope, LastScan: f.LastScan,
 			MergeRequest: f.MergeRequest, MergeRequestState: f.MergeRequestState,
 			Priority: f.Priority, PriorityRule: f.PriorityRule, PriorityReason: f.PriorityReason,
-			FixFacts:     f.FixFacts,
+			FixFacts:     f.FixFacts.clone(),
 			RefusedMoves: f.RefusedMoves, LastRefusedMove: f.LastRefusedMove,
 			SubmittedBy: f.SubmittedBy, AgentName: f.AgentName, EnrolledBy: f.EnrolledBy,
 		})

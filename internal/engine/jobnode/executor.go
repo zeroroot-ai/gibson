@@ -50,6 +50,26 @@ type ClosedJob struct {
 	Countermeasure string
 }
 
+// FailedJob is what the node reports when it closes a job as failed: the job,
+// the work it started from and what it delivered before the verifier refused
+// it. The observer decides what a failed job leaves behind, such as an open
+// merge request (gibson#1674).
+type FailedJob struct {
+	TenantID     string
+	MissionRunID string
+	NodeID       string
+	JobID        string
+	// Inputs are the ids the spec started from (JobSpec.inputs), verbatim.
+	Inputs       []string
+	Deliverables []job.Deliverable
+	// Reason is the last report of the verifier.
+	Reason string
+}
+
+// ErrFindingBlocked means that a Finding that the spec names has too many failed
+// fix jobs in a row, and waits on a person. The node opens no job.
+var ErrFindingBlocked = errors.New("jobnode: this finding waits on a person after repeated failed fix jobs")
+
 // ErrFindingClaimed means that another fix job holds a Finding that the spec
 // names. The node opens no job.
 var ErrFindingClaimed = errors.New("jobnode: another fix job works on this finding")
@@ -65,11 +85,15 @@ type FixClaims interface {
 	Release(ctx context.Context, tenantID, claim, missionRunID string, inputs []string)
 }
 
-// CloseObserver is told once for each job the node closes as accomplished.
-// The daemon backs it with the graph link. It is required, so a daemon that
-// forgets to wire it fails at the first job and not silently at the graph.
+// CloseObserver is told once for each job the node closes as accomplished, and
+// once for each job it closes as failed. The daemon backs it with the graph
+// link. It is required, so a daemon that forgets to wire it fails at the first
+// job and not silently at the graph.
 type CloseObserver interface {
 	JobClosed(ctx context.Context, closed ClosedJob)
+	// JobFailed runs before the node releases the claims of the job, so the
+	// observer can still tell which findings the job held.
+	JobFailed(ctx context.Context, failed FailedJob)
 }
 
 // Report is the verifier's structured answer.
@@ -330,6 +354,14 @@ func closeWith(ctx context.Context, in Input, jobID string, verdict job.Verdict,
 	result, err := job.ResultOf(closed)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("jobnode: %w", err)
+	}
+	// A failed job is reported before its claims end, so the observer knows the
+	// findings that it held (gibson#1674).
+	if verdict == job.VerdictFailed {
+		in.Closed.JobFailed(ctx, FailedJob{
+			TenantID: in.TenantID, MissionRunID: in.MissionRunID, NodeID: in.NodeID,
+			JobID: jobID, Inputs: in.Spec.GetInputs(), Deliverables: result.Deliverables, Reason: report,
+		})
 	}
 	// A job that ends with no merge request leaves its findings to the next
 	// job. A merge request moves them to `fixing`, and the claim ends with the

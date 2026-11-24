@@ -31,6 +31,10 @@ const (
 	// ToolRevertMergeRequest takes {merge_request}. It opens a revert merge
 	// request and merges it.
 	ToolRevertMergeRequest = "revert_merge_request"
+	// ToolCloseMergeRequest takes {merge_request, comment} and returns {state,
+	// closed}. It posts the comment, closes the merge request with no merge, and
+	// succeeds when the merge request is closed already (gibson#1674).
+	ToolCloseMergeRequest = "close_merge_request"
 )
 
 // ErrNoConnector means that the tenant has no connector that serves the tool.
@@ -184,6 +188,27 @@ func (r *ConnectorReader) Revert(ctx context.Context, tenant, mergeRequest, miss
 		return RevertFact{}, err
 	}
 	return RevertFact{Merged: boolean(m, "merged"), RevertMergeRequest: str(m, "revert_merge_request")}, nil
+}
+
+// CloseMergeRequest closes the merge request through the governed connector
+// path and posts the comment on it first. It succeeds when the merge request
+// is closed already. It fails when the tool answers any other state, so the
+// caller never takes a refused close for a closed merge request.
+func (r *ConnectorReader) CloseMergeRequest(
+	ctx context.Context, tenant, missionID, mergeRequest, comment string,
+) error {
+	args := map[string]any{"merge_request": mergeRequest}
+	if comment != "" {
+		args["comment"] = comment
+	}
+	m, err := r.call(ctx, tenant, missionID, ToolCloseMergeRequest, args)
+	if err != nil {
+		return err
+	}
+	if s := str(m, "state"); s != MRClosed {
+		return fmt.Errorf("call %s: the merge request state is %q, not closed", ToolCloseMergeRequest, s)
+	}
+	return nil
 }
 
 func str(m map[string]any, k string) string { s, _ := m[k].(string); return s }
