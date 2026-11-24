@@ -47,7 +47,11 @@ var _ Authorizer = (*TenantAuthorizer)(nil)
 // CanExecute implements [Authorizer].
 func (a *TenantAuthorizer) CanExecute(ctx context.Context, caller Caller, id toolid.ID) (bool, error) {
 	if id.Source != toolid.SourceMCP {
-		return a.base.CanExecute(ctx, caller, id)
+		ok, err := a.base.CanExecute(ctx, caller, id)
+		if err != nil {
+			return false, fmt.Errorf("catalog: tenant authorizer: %w", err)
+		}
+		return ok, nil
 	}
 	if caller.Tenant == "" || strings.ContainsAny(caller.Tenant, ":# \t\n") || caller.Subject != TenantSetSubject(caller.Tenant) {
 		return false, fmt.Errorf("catalog: authz check for %q: the caller is not the tenant set of tenant %q", id.Canonical(), caller.Tenant)
