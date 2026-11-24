@@ -34,7 +34,6 @@
 # Directives are validated (the named compensating guard or test must
 # resolve); a bare opt-out is itself a diagnostic.
 #
-constant-verdict-double|github.com/zeroroot-ai/gibson/internal/engine/harness|fakeSearchAuthz.Check
 constant-verdict-double|github.com/zeroroot-ai/gibson/internal/infra/reconciler|recordingAuthorizer.ListUsersOfType
 constant-verdict-double|github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant|mockAuthorizer.ListUsers
 constant-verdict-double|github.com/zeroroot-ai/gibson/internal/platform/component|mockAuthorizer.Check

@@ -83,7 +83,7 @@ func (b *brainExecutor) scanAlerts(bind *missionBinding, req brain.DispatchReque
 	if state == "" {
 		state = "all"
 	}
-	res, err := b.callConnectorNode(bind, req.MissionID, req.WorkID, tid, map[string]any{"project": project, "state": state})
+	res, err := b.callConnectorDaemon(bind, req.MissionID, req.WorkID, tid, map[string]any{"project": project, "state": state})
 	if err != nil {
 		return "", err
 	}

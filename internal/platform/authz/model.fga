@@ -266,6 +266,23 @@ type component
     # means legacy Check(subject, can_read, component) call sites pick up the
     # deny-wins composition automatically.
     define can_execute: (direct_execute and in_tenant_catalog) but not any_execute_deny
+    # tenant_can_execute — "may the TENANT run this component for itself". The
+    # daemon asks it with the plain tenant as the subject, for a call that it
+    # makes with no person or agent behind it: the read of a scan, the revert of
+    # a fix, a bank member. A userset subject (tenant:<id>#member) cannot ask
+    # can_execute, because both halves of can_execute walk `member from` the
+    # tenant and a userset is a member of nothing.
+    #
+    # The rule is owner + enablement - kill switch. Owner stands for
+    # direct_execute here: `member from owner` is how every member of the tenant
+    # holds direct_execute on a connector (ADR-0067), and the tenant operator
+    # writes owner and tenant_enabled together for each enabled connector. A
+    # component that has no owner tuple, such as an agent or a tool that the
+    # tenant enabled with a member grant, is false here, so the rule fails closed.
+    # The rule has no user or team deny: a call of the daemon has no person.
+    # Every tuple it reads names the asking tenant, so another tenant's
+    # tenant_enabled or owner changes nothing.
+    define tenant_can_execute: (owner and tenant_enabled) but not tenant_execute_disabled
     # can_use is the relation every HarnessCallbackService RPC is annotated
     # with (authz.rpc relation "can_use", object component:_system via the
     # system_tenant deriver): "may this principal use the platform backplane".

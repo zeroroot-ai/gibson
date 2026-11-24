@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -33,8 +34,8 @@ func TestCallConnectorForTenant_TakesTheGovernedPath(t *testing.T) {
 	if m, ok := out.(map[string]any); !ok || m["merged"] != true {
 		t.Fatalf("result = %#v", out)
 	}
-	if authzer.lastUser != "tenant:acme#member" || authzer.lastObject != "component:connector/gitlab" {
-		t.Fatalf("can_execute was checked for %q on %q", authzer.lastUser, authzer.lastObject)
+	if authzer.lastUser != "tenant:acme" || authzer.lastRelation != "tenant_can_execute" || authzer.lastObject != "component:connector/gitlab" {
+		t.Fatalf("%s was checked for %q on %q, want tenant_can_execute for the tenant", authzer.lastRelation, authzer.lastUser, authzer.lastObject)
 	}
 	if len(called) != 1 || called[0] != "acme/gitlab/revert_merge_request" {
 		t.Fatalf("connector calls = %v", called)
@@ -63,6 +64,25 @@ func TestCallConnectorForTenant_TakesTheGovernedPath(t *testing.T) {
 	}
 	if len(called) != 1 {
 		t.Fatalf("the connector got a call with no grant: %v", called)
+	}
+	// The tenant enabled the connector and then switched its execute off. The
+	// call of the daemon stops with it.
+	authzer.allow = map[string]bool{"component:connector/gitlab": true}
+	authzer.killed = map[string]bool{"component:connector/gitlab": true}
+	if _, err := svc.CallConnectorForTenant(context.Background(), "acme", "fix-run-1", "gitlab",
+		"revert_merge_request", map[string]any{"merge_request": "g/p!12"}); err == nil {
+		t.Fatal("a call of a connector with its kill switch on must fail")
+	}
+	// A check that errors is no answer, and the call fails closed.
+	authzer.killed = nil
+	authzer.err = errors.New("fga down")
+	if _, err := svc.CallConnectorForTenant(context.Background(), "acme", "fix-run-1", "gitlab",
+		"revert_merge_request", map[string]any{"merge_request": "g/p!12"}); err == nil {
+		t.Fatal("a check error must fail the call")
+	}
+	authzer.err = nil
+	if len(called) != 1 {
+		t.Fatalf("the connector got a call it must not get: %v", called)
 	}
 	if _, err := svc.CallConnectorForTenant(context.Background(), "", "m", "c", "t", nil); err == nil ||
 		!strings.Contains(err.Error(), "tenant") {

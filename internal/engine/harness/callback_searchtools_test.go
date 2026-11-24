@@ -33,14 +33,25 @@ func (f fakeSearchReg) ListTenantComponents(context.Context, string) ([]componen
 
 type fakeSearchAuthz struct {
 	authz.Authorizer
-	allow      map[string]bool
-	lastUser   string
-	lastObject string
+	allow map[string]bool
+	// killed lists the objects whose tenant execute kill switch is on. It stops
+	// every check of the object, as the model does.
+	killed map[string]bool
+	// denied lists the users with a user or team execute deny.
+	denied map[string]bool
+	// err is the error of every check.
+	err                                error
+	lastUser, lastRelation, lastObject string
 }
 
-func (f *fakeSearchAuthz) Check(_ context.Context, user, _, object string) (bool, error) {
-	f.lastUser = user
-	f.lastObject = object
+func (f *fakeSearchAuthz) Check(_ context.Context, user, relation, object string) (bool, error) {
+	f.lastUser, f.lastRelation, f.lastObject = user, relation, object
+	if f.err != nil {
+		return false, f.err
+	}
+	if f.denied[user] || f.killed[object] {
+		return false, nil
+	}
 	return f.allow[object], nil
 }
 

@@ -84,6 +84,10 @@ func TestDispatchScanAlerts_RaisesFindingsAtTheRepositoryOfTheURL(t *testing.T) 
 	if conn.args["project"] != "acme/shop" || conn.args["state"] != "all" {
 		t.Errorf("the connector was called with %v, want the project of the URL", conn.args)
 	}
+	// The daemon reads the alerts for itself, so the call asks the tenant.
+	if !conn.asTenant {
+		t.Error("the read of the alerts must run as the tenant")
+	}
 	if _, has := conn.args["repositoryUrl"]; has {
 		t.Error("the URL must not reach the connector")
 	}

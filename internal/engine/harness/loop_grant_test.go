@@ -162,7 +162,8 @@ func TestMemberInvoke_AGrantedClassRunsAndTheRecordNamesGrantAndGrantor(t *testi
 	assert.Contains(t, text, `"grantor":"user:admin"`)
 	assert.Contains(t, text, `"member_id":"member-1"`)
 	// can_execute is checked beside the grant, for the member set of the tenant.
-	assert.Equal(t, "tenant:tenant-a#member", f.authz.lastUser)
+	assert.Equal(t, "tenant:tenant-a", f.authz.lastUser)
+	assert.Equal(t, "tenant_can_execute", f.authz.lastRelation)
 	assert.NotContains(t, f.authz.lastUser, "must-not-be-read")
 }
 
