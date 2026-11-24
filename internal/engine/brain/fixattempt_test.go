@@ -142,9 +142,12 @@ func TestFixCloseWait_APersonEndsTheWaits(t *testing.T) {
 	if s := snapshotOf(w, "f1"); len(s.FixCloseWaits) != 2 || len(s.FixAttempts) != 0 {
 		t.Fatalf("after retry: %+v", s.FixFacts)
 	}
-	Reduce(w, FixAttemptsResolved{ID: "f1", Action: FixActionMergeRequestClosed, UserID: "u", At: attemptAt(3)})
-	if len(snapshotOf(w, "f1").FixCloseWaits) != 0 {
-		t.Fatal("the waits stand after the action")
+	Reduce(w, FixAttemptsResolved{
+		ID: "f1", Action: FixActionMergeRequestClosed, UserID: "u", At: attemptAt(3),
+		CloseWaits: []FixCloseWaitKey{{JobID: "j1", MergeRequest: "a"}},
+	})
+	if got := snapshotOf(w, "f1").FixCloseWaits; len(got) != 1 || got[0].JobID != "j2" {
+		t.Fatalf("waits = %+v, want only the wait that the event does not name", got)
 	}
 }
 

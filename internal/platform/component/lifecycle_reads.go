@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
@@ -199,11 +200,12 @@ func applicationFindingsParams(application string, statuses []string, limit int)
 		"application": application,
 		"statuses":    statuses,
 		"limit":       int64(limit),
-		// A read of the open findings is the work list of an agent. A finding with three
-		// failed fix jobs in a row is not work until a person acts, so the list leaves it
-		// out (gibson#1674). A read of any other status set keeps it. The dashboard reads
-		// the findings through the World, which lists it.
-		"exclude_blocked": len(statuses) == 1 && statuses[0] == "open",
+		// A finding with three failed fix jobs in a row is not work until a person acts
+		// (gibson#1674), and its status is open. So every read whose status set includes
+		// open leaves it out: the rule is the status, with no other condition. A read of
+		// the other statuses, such as fixing, is not affected. The dashboard reads the
+		// findings through the World, which lists it.
+		"exclude_blocked": slices.Contains(statuses, "open"),
 	}
 }
 

@@ -3,7 +3,10 @@
 
 package brain
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // fixattempt.go records the fix jobs that fail on a Finding (gibson#1674).
 //
@@ -73,15 +76,25 @@ func applyFixAttemptFailed(w *World, e FixAttemptFailed) {
 // merge request that the daemon could not close, after the person closed it.
 // UserID is the person that the daemon read from the identity of the call.
 type FixAttemptsResolved struct {
-	ID        string
-	Action    string
-	UserID    string
-	MissionID string
-	At        time.Time
+	ID     string
+	Action string
+	UserID string
+	// CloseWaits are the waits that the person closed and the daemon confirmed, for
+	// the action merge_request_closed. The reducer ends these and no other, so a
+	// wait that lands during the confirmation stays.
+	CloseWaits []FixCloseWaitKey
+	MissionID  string
+	At         time.Time
 }
 
 // Kind identifies the finding.fix_attempts_resolved brain event.
 func (FixAttemptsResolved) Kind() string { return "finding.fix_attempts_resolved" }
+
+// FixCloseWaitKey names one close wait: the failed job and the merge request.
+type FixCloseWaitKey struct {
+	JobID        string
+	MergeRequest string
+}
 
 // The actions of a person on the waits of a failed fix job.
 const (
@@ -98,7 +111,13 @@ func applyFixAttemptsResolved(w *World, e FixAttemptsResolved) {
 		case FixActionRetry:
 			f.FixAttempts, f.FixBlockedAt = nil, time.Time{}
 		case FixActionMergeRequestClosed:
-			f.FixCloseWaits = nil
+			kept := make([]FixCloseWait, 0, len(f.FixCloseWaits))
+			for _, c := range f.FixCloseWaits {
+				if !slices.Contains(e.CloseWaits, FixCloseWaitKey{JobID: c.JobID, MergeRequest: c.MergeRequest}) {
+					kept = append(kept, c)
+				}
+			}
+			f.FixCloseWaits = kept
 		}
 	})
 }

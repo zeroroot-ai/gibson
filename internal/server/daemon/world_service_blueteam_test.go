@@ -486,3 +486,33 @@ func TestResolveFixAttempts_MergeRequestClosed(t *testing.T) {
 		require.Equal(t, 2, waits(reg))
 	})
 }
+
+// A wait that lands while the daemon reads the Git host is not in the list that the
+// person closed. It survives the action, and the finding still shows it.
+func TestResolveFixAttempts_AWaitThatLandsDuringTheConfirmationSurvives(t *testing.T) {
+	srv, reg := newBlueServer(t, blueAt(10))
+	submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"},
+		brain.FixCloseWaiting{ID: "f1", JobID: "j1", MergeRequest: "g/p!7", Waiting: true, Reason: "down", At: blueAt(1)})
+	srv.WithMergeOpen(func(_ context.Context, _, _, mr string) (bool, bool, error) {
+		// A second failed job leaves its wait while the first read runs.
+		if mr == "g/p!7" {
+			submit(t, reg, "acme", brain.FixCloseWaiting{
+				ID: "f1", JobID: "j2", MergeRequest: "g/p!8", Waiting: true, Reason: "down", At: blueAt(2),
+			})
+		}
+		return false, true, nil
+	})
+	ctx := auth.ContextWithActingUser(worldTenantCtx("acme"), "person-1")
+	resp, err := srv.ResolveFixAttempts(ctx, &worldpb.ResolveFixAttemptsRequest{
+		FindingId: "f1", Action: "merge_request_closed",
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, resp.EndedWaits)
+	var left []brain.FixCloseWait
+	for _, f := range reg.For("acme").Findings() {
+		left = f.FixCloseWaits
+	}
+	require.Len(t, left, 1)
+	require.Equal(t, "j2", left[0].JobID)
+	require.Equal(t, "g/p!8", left[0].MergeRequest)
+}

@@ -435,6 +435,7 @@ func (s *worldServer) ResolveFixAttempts(
 		return nil, status.Errorf(codes.NotFound, "finding %q not found", req.GetFindingId())
 	}
 	resp := &worldpb.ResolveFixAttemptsResponse{}
+	var closeWaits []brain.FixCloseWaitKey
 	switch action {
 	case brain.FixActionRetry:
 		if !found.FixAttemptsBlocked() {
@@ -448,9 +449,16 @@ func (s *worldServer) ResolveFixAttempts(
 		if err := s.confirmClosed(ctx, found.FixCloseWaits); err != nil {
 			return nil, err
 		}
-		resp.EndedWaits = pagetoken.Int32(len(found.FixCloseWaits))
+		// The event names the waits that the daemon confirmed. A wait that lands
+		// during the reads of the host is not in the list, so it stays.
+		for _, w := range found.FixCloseWaits {
+			closeWaits = append(closeWaits, brain.FixCloseWaitKey{JobID: w.JobID, MergeRequest: w.MergeRequest})
+		}
+		resp.EndedWaits = pagetoken.Int32(len(closeWaits))
 	}
-	ev := brain.FixAttemptsResolved{ID: found.ID, Action: action, UserID: userID, At: s.clockNow()}
+	ev := brain.FixAttemptsResolved{
+		ID: found.ID, Action: action, UserID: userID, CloseWaits: closeWaits, At: s.clockNow(),
+	}
 	if err := e.SubmitAndWait(ctx, ev); err != nil {
 		return nil, status.Errorf(codes.Internal, "record the action: %v", err)
 	}
