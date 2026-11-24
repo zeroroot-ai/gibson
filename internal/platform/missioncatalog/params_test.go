@@ -184,5 +184,8 @@ func placeholderValue(name string) string {
 	if name == "forgeConnector" {
 		return "github-fixloop"
 	}
+	if name == "codingTimeout" || name == "mergeWait" {
+		return "40m"
+	}
 	return "v-" + name
 }

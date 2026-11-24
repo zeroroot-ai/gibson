@@ -74,9 +74,9 @@ jobs:
   fix-loop:
     name: the connectors of the fix loop trust the CA of the mock forge
     runs-on: ubuntu-latest
-    # The go test timeout is 210 minutes. The cluster start-up and the steps after
+    # The go test timeout is 250 minutes. The cluster start-up and the steps after
     # the test need up to 60 minutes more, so the job never ends before the test.
-    timeout-minutes: 270
+    timeout-minutes: 330
     env:
       EXIT_TEST_ANTHROPIC_API_KEY: ${{ secrets.EXIT_TEST_ANTHROPIC_API_KEY }}
       EXIT_TEST_ANTHROPIC_WORKSPACE_ID: ${{ vars.EXIT_TEST_ANTHROPIC_WORKSPACE_ID }}
@@ -181,7 +181,7 @@ jobs:
             printf 'EXIT_TEST_ANTHROPIC_API_KEY=%s\n' "$EXIT_TEST_ANTHROPIC_API_KEY"
             printf 'EXIT_TEST_ANTHROPIC_WORKSPACE_ID=%s\n' "$EXIT_TEST_ANTHROPIC_WORKSPACE_ID"
           } > "$E2E_RUNNER_ENV_FILE"
-          gibson/.github/scripts/run-e2e-job.sh gibson-e2e-fix-loop 'TestFixLoop$' 210m \
+          gibson/.github/scripts/run-e2e-job.sh gibson-e2e-fix-loop 'TestFixLoop$' 250m \
             2>&1 | tee "$E2E_OUT/fix-loop.log"
 
       - name: Upload the logs

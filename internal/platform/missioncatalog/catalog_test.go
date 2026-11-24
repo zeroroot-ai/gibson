@@ -58,6 +58,17 @@ var paramsByMission = map[string]map[string]string{
 		"baseBranch":     "main",
 		"brief":          "Finding: \"finding-42\"\nWeakness: \"CVE-2025-1234\"",
 	},
+	"fix-pass": {
+		"application":    "customer-portal",
+		"bank":           "bank/coding",
+		"forgeConnector": "gitlab-fixloop",
+		"project":        "examplebank/customer-portal",
+		"finding":        "finding-42",
+		"baseBranch":     "main",
+		"repository":     "customer-portal",
+		"codingTimeout":  "45m",
+		"mergeWait":      "30m",
+	},
 	"cluster-assessment": {
 		// kubeconfigParam rather than the literal: gosec's G101 matches an
 		// identifier or a map key against passwd|pass|secret|token|cred and
