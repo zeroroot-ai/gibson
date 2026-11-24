@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-package daemon
+// Package grpcvalidate runs the protovalidate rules of a request message on a
+// gRPC server. The daemon API server and the harness callback server share it,
+// so one rule set has one enforcement path (gibson#1668).
+package grpcvalidate
 
 import (
 	"context"
@@ -17,7 +20,7 @@ import (
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 )
 
-// newProtovalidateUnaryInterceptor returns a gRPC unary interceptor
+// UnaryInterceptor returns a gRPC unary interceptor
 // that runs the configured protovalidate Validator against every
 // incoming request message that carries `(buf.validate.field).*`
 // annotations. Violations are surfaced as
@@ -29,7 +32,7 @@ import (
 // programs internally).
 //
 // Spec: mission-verb-noun-registry Requirement 10.
-func newProtovalidateUnaryInterceptor(v protovalidate.Validator) grpc.UnaryServerInterceptor {
+func UnaryInterceptor(v protovalidate.Validator) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		// Many internal RPC types are not proto.Message (auth probes,
 		// debug pings). Skip those cleanly — only proto messages can
@@ -52,10 +55,10 @@ func newProtovalidateUnaryInterceptor(v protovalidate.Validator) grpc.UnaryServe
 	}
 }
 
-// newProtovalidateStreamInterceptor returns the streaming
-// equivalent. Validates the first message of each stream by
-// wrapping the ServerStream's RecvMsg.
-func newProtovalidateStreamInterceptor(v protovalidate.Validator) grpc.StreamServerInterceptor {
+// StreamInterceptor returns the streaming
+// equivalent. It validates every message that the handler receives from a
+// stream, by wrapping the RecvMsg of the ServerStream.
+func StreamInterceptor(v protovalidate.Validator) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		wrapped := &validatingServerStream{ServerStream: ss, validator: v}
 		return handler(srv, wrapped)
@@ -83,11 +86,11 @@ func (s *validatingServerStream) RecvMsg(m any) error {
 	return nil
 }
 
-// buildProtovalidateValidator constructs the singleton validator
+// NewValidator constructs the singleton validator
 // used by the interceptors. Errors here are programming-time
 // (proto descriptors are malformed); they fail server startup
 // fail-closed.
-func buildProtovalidateValidator() (protovalidate.Validator, error) {
+func NewValidator() (protovalidate.Validator, error) {
 	v, err := protovalidate.New()
 	if err != nil {
 		return nil, fmt.Errorf("protovalidate.New: %w", err)
@@ -112,5 +115,16 @@ func validationStatus(verr *protovalidate.ValidationError) error {
 		})
 	}
 	st := grpcstatus.New(grpccodes.InvalidArgument, verr.Error())
-	return attachDetail(grpcstatus.ErrorProto(st.Proto()), st, detail)
+	return AttachDetail(grpcstatus.ErrorProto(st.Proto()), st, detail)
+}
+
+// AttachDetail returns st with detail in its details. When the detail cannot
+// be attached (st has the code OK, or the detail does not marshal), it
+// returns err as it was: the status is still correct without the detail.
+func AttachDetail(err error, st *grpcstatus.Status, detail *commonpb.ErrorDetail) error {
+	withDetail, derr := st.WithDetails(detail)
+	if derr != nil {
+		return err
+	}
+	return grpcstatus.ErrorProto(withDetail.Proto())
 }

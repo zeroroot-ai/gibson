@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/grpcvalidate"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"google.golang.org/grpc"
@@ -47,11 +48,11 @@ func errorDetailOf(t *testing.T, err error) *commonpb.ErrorDetail {
 // An invalid request gets InvalidArgument, and the client reads each field
 // error from the status details (gibson#847).
 func TestErrorDetail_InvalidRequestNamesTheField(t *testing.T) {
-	v, err := buildProtovalidateValidator()
+	v, err := grpcvalidate.NewValidator()
 	if err != nil {
-		t.Fatalf("buildProtovalidateValidator: %v", err)
+		t.Fatalf("grpcvalidate.NewValidator: %v", err)
 	}
-	validate := newProtovalidateUnaryInterceptor(v)
+	validate := grpcvalidate.UnaryInterceptor(v)
 	unary, _ := withErrorDetailInterceptors(passUnary, passStream)
 	req := &missionv1.AgentNodeConfig{AgentName: "test", MaxTokensPerCall: ptrInt32(-1)}
 
@@ -185,7 +186,7 @@ func TestErrorCodeFor_EachCode(t *testing.T) {
 // A status that cannot take a detail passes as it was.
 func TestAttachDetail_KeepsTheErrorWhenTheDetailCannotAttach(t *testing.T) {
 	err := errors.New("boom")
-	got := attachDetail(err, status.New(codes.OK, ""), &commonpb.ErrorDetail{})
+	got := grpcvalidate.AttachDetail(err, status.New(codes.OK, ""), &commonpb.ErrorDetail{})
 	if !errors.Is(got, err) {
 		t.Fatalf("attachDetail = %v, want the error unchanged", got)
 	}
@@ -216,11 +217,11 @@ func (s *fakeRecvStream) RecvMsg(m any) error {
 
 // An invalid message on a stream gets the field errors as well.
 func TestErrorDetail_InvalidStreamMessageNamesTheField(t *testing.T) {
-	v, err := buildProtovalidateValidator()
+	v, err := grpcvalidate.NewValidator()
 	if err != nil {
-		t.Fatalf("buildProtovalidateValidator: %v", err)
+		t.Fatalf("grpcvalidate.NewValidator: %v", err)
 	}
-	intercept := newProtovalidateStreamInterceptor(v)
+	intercept := grpcvalidate.StreamInterceptor(v)
 	inner := &fakeRecvStream{msg: &missionv1.AgentNodeConfig{AgentName: "test", MaxTokensPerCall: ptrInt32(-1)}}
 	err = intercept(nil, inner, &grpc.StreamServerInfo{FullMethod: "/test.Stream"},
 		func(_ any, ss grpc.ServerStream) error { return ss.RecvMsg(&missionv1.AgentNodeConfig{}) })

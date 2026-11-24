@@ -30,7 +30,7 @@ func claimChainClient(t *testing.T, s *HarnessCallbackService) harnesspb.Harness
 	t.Helper()
 	grantUnary, _ := taskGrantScopeInterceptors(getter(&fakeGrantVerifier{}),
 		&forkGuard{ledger: s.forkLedger, identity: s.sandboxIdentity}, slog.Default())
-	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(s.identityUnaryChain(grantUnary)...))
+	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(s.identityUnaryChain(grantUnary, claimChainValidator(t))...))
 	harnesspb.RegisterHarnessCallbackServiceServer(srv, s)
 	lis := bufconn.Listen(1 << 20)
 	go func() { _ = srv.Serve(lis) }()

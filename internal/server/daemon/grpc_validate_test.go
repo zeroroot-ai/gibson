@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/grpcvalidate"
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -16,9 +17,9 @@ import (
 // mission-schema-canonicalization. Spec:
 // mission-verb-noun-registry Requirement 10 AC 4.
 func TestProtovalidate_negativeMaxTokensPerCall(t *testing.T) {
-	v, err := buildProtovalidateValidator()
+	v, err := grpcvalidate.NewValidator()
 	if err != nil {
-		t.Fatalf("buildProtovalidateValidator: %v", err)
+		t.Fatalf("grpcvalidate.NewValidator: %v", err)
 	}
 
 	cases := []struct {
@@ -60,9 +61,9 @@ func TestProtovalidate_negativeMaxTokensPerCall(t *testing.T) {
 }
 
 func TestProtovalidate_zeroMaxTokensPerCall_passes(t *testing.T) {
-	v, err := buildProtovalidateValidator()
+	v, err := grpcvalidate.NewValidator()
 	if err != nil {
-		t.Fatalf("buildProtovalidateValidator: %v", err)
+		t.Fatalf("grpcvalidate.NewValidator: %v", err)
 	}
 	cases := []proto.Message{
 		&missionv1.AgentNodeConfig{AgentName: "a", MaxTokensPerCall: ptrInt32(0)},
@@ -77,9 +78,9 @@ func TestProtovalidate_zeroMaxTokensPerCall_passes(t *testing.T) {
 }
 
 func TestProtovalidate_unsetMaxTokensPerCall_passes(t *testing.T) {
-	v, err := buildProtovalidateValidator()
+	v, err := grpcvalidate.NewValidator()
 	if err != nil {
-		t.Fatalf("buildProtovalidateValidator: %v", err)
+		t.Fatalf("grpcvalidate.NewValidator: %v", err)
 	}
 	// Unset (optional) field: validation should not fire. Cascade
 	// from mission-level cap kicks in at runtime, not validation.
@@ -100,9 +101,9 @@ func TestProtovalidate_unsetMaxTokensPerCall_passes(t *testing.T) {
 // JoinNodeConfig.wait_for. Spec: mission-verb-noun-registry
 // Requirement 10 AC 4 + Requirement 7 AC 5.
 func TestProtovalidate_emptyJoinWaitFor(t *testing.T) {
-	v, err := buildProtovalidateValidator()
+	v, err := grpcvalidate.NewValidator()
 	if err != nil {
-		t.Fatalf("buildProtovalidateValidator: %v", err)
+		t.Fatalf("grpcvalidate.NewValidator: %v", err)
 	}
 	msg := &missionv1.JoinNodeConfig{} // empty wait_for
 	if err := v.Validate(msg); err == nil {
@@ -113,9 +114,9 @@ func TestProtovalidate_emptyJoinWaitFor(t *testing.T) {
 }
 
 func TestProtovalidate_nonEmptyJoinWaitFor_passes(t *testing.T) {
-	v, err := buildProtovalidateValidator()
+	v, err := grpcvalidate.NewValidator()
 	if err != nil {
-		t.Fatalf("buildProtovalidateValidator: %v", err)
+		t.Fatalf("grpcvalidate.NewValidator: %v", err)
 	}
 	msg := &missionv1.JoinNodeConfig{
 		WaitFor:  []string{"upstream-1"},

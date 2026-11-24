@@ -20,6 +20,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/infra/grpckeepalive"
+	"github.com/zeroroot-ai/gibson/internal/infra/grpcvalidate"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -160,6 +161,14 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 		return errors.New("callback server has no component registry; call SetComponentRegistry")
 	}
 
+	// The same protovalidate interceptor as the daemon API server. The callback
+	// service has no other check of the buf.validate rules of its requests
+	// (gibson#1668).
+	pv, err := grpcvalidate.NewValidator()
+	if err != nil {
+		return fmt.Errorf("callback server: %w", err)
+	}
+
 	// Create TCP listener
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
@@ -201,8 +210,8 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 		// cap could speak.
 		grpc.MaxRecvMsgSize(16 * 1024 * 1024),
 		grpc.MaxSendMsgSize(16 * 1024 * 1024),
-		grpc.ChainUnaryInterceptor(append([]grpc.UnaryServerInterceptor{peerAuthzUnary}, s.service.identityUnaryChain(grantUnary)...)...),
-		grpc.ChainStreamInterceptor(peerAuthzStream, auth.StreamServerInterceptor(), grantStream),
+		grpc.ChainUnaryInterceptor(append([]grpc.UnaryServerInterceptor{peerAuthzUnary}, s.service.identityUnaryChain(grantUnary, pv)...)...),
+		grpc.ChainStreamInterceptor(peerAuthzStream, auth.StreamServerInterceptor(), grantStream, grpcvalidate.StreamInterceptor(pv)),
 		// Shared with the main daemon listener; see internal/infra/grpckeepalive.
 		grpckeepalive.Params(),
 		grpckeepalive.Enforcement(),
