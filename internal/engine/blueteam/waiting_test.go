@@ -4,6 +4,7 @@
 package blueteam
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -286,5 +287,54 @@ func TestWaitingOnPerson_NoFixHeadFallsBackWhenTheHistoryIsGone(t *testing.T) {
 	}
 	if it := byID["nothing"]; it.Kind != WaitNoFixHead || !it.Since.Equal(at(5)) || it.Waited != 0 {
 		t.Errorf("nothing = %+v, want since now", it)
+	}
+}
+
+// Three failed fix jobs in a row show a fix_attempts_failed wait on an open
+// finding, since the third failure. Two failures show none (gibson#1674).
+func TestWaitingOnPerson_FixAttemptsFailed(t *testing.T) {
+	attempts := func(n int) []brain.FixAttempt {
+		out := make([]brain.FixAttempt, 0, n)
+		for i := range n {
+			out = append(out, brain.FixAttempt{
+				JobID: "job-" + string(rune('1'+i)), Verdict: "failed", Reason: "refused", At: at(i + 1),
+			})
+		}
+		return out
+	}
+	findings := []brain.FindingSnapshot{
+		{ID: "blocked", Status: brain.FindingStatusOpen, FixFacts: brain.FixFacts{
+			FixAttempts: attempts(3), FixBlockedAt: at(3),
+		}},
+		{ID: "two", Status: brain.FindingStatusOpen, FixFacts: brain.FixFacts{FixAttempts: attempts(2)}},
+	}
+	var got []WaitItem
+	for _, it := range WaitingOnPerson(findings, nil, nil, at(5)) {
+		if it.Kind == WaitFixAttemptsFailed {
+			got = append(got, it)
+		}
+	}
+	if len(got) != 1 || got[0].ID != "blocked" || !got[0].Since.Equal(at(3)) || got[0].Waited != 2*time.Hour ||
+		!strings.Contains(got[0].Reason, "3 fix jobs failed in a row") ||
+		!strings.Contains(got[0].Reason, "job-3: refused") {
+		t.Fatalf("got %+v, want one item for the blocked finding", got)
+	}
+}
+
+// Each failed close shows in one item per finding that names each merge request
+// that stays open, with the earliest start.
+func TestWaitingOnPerson_MergeRequestCloseFailed(t *testing.T) {
+	findings := []brain.FindingSnapshot{{
+		ID: "f1", Status: brain.FindingStatusOpen,
+		FixFacts: brain.FixFacts{FixCloseWaits: []brain.FixCloseWait{
+			{JobID: "job-1", MergeRequest: "g/p!7", Reason: "down", Since: at(2)},
+			{JobID: "job-2", MergeRequest: "g/p!8", Reason: "refused", Since: at(1), GaveUp: true},
+		}},
+	}}
+	got := WaitingOnPerson(findings, nil, nil, at(3))
+	if len(got) != 1 || got[0].Kind != WaitMergeCloseFailed || got[0].ID != "f1" || !got[0].Since.Equal(at(1)) ||
+		!strings.Contains(got[0].Reason, "g/p!7") || !strings.Contains(got[0].Reason, "job-1") ||
+		!strings.Contains(got[0].Reason, "g/p!8") || !strings.Contains(got[0].Reason, "stopped the retries") {
+		t.Fatalf("got %+v", got)
 	}
 }

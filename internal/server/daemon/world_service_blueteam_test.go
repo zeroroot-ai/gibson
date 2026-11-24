@@ -22,6 +22,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 var blueT0 = time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
@@ -343,4 +344,175 @@ func TestBlueTeamViews_TheReadIsBoundedWhateverTheOldestFinding(t *testing.T) {
 	require.NoError(t, err)
 	floor := now.Add(-brain.MaxViewLookback).UTC().Format(time.RFC3339)
 	require.Equal(t, []string{floor, floor}, ranges)
+}
+
+// Three failed fix jobs in a row show a fix_attempts_failed wait. A retry of a
+// person ends it, records the person, and lets a job claim the finding again
+// (gibson#1674).
+func TestResolveFixAttempts_RetryEndsTheWait(t *testing.T) {
+	srv, reg := newBlueServer(t, blueAt(10))
+	submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"})
+	for i, j := range []string{"j1", "j2", "j3"} {
+		submit(t, reg, "acme", brain.FixAttemptFailed{ID: "f1", JobID: j, Verdict: "failed", Reason: "no", At: blueAt(i + 1)})
+	}
+	ctx := auth.ContextWithActingUser(worldTenantCtx("acme"), "person-1")
+
+	waits, err := srv.ListWaitingOnPerson(ctx, &worldpb.ListWaitingOnPersonRequest{})
+	require.NoError(t, err)
+	require.Len(t, waits.Items, 1)
+	require.Equal(t, "fix_attempts_failed", waits.Items[0].Kind)
+
+	resp, err := srv.ResolveFixAttempts(ctx, &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "retry"})
+	require.NoError(t, err)
+	require.EqualValues(t, 3, resp.ClearedAttempts)
+
+	waits, err = srv.ListWaitingOnPerson(ctx, &worldpb.ListWaitingOnPersonRequest{})
+	require.NoError(t, err)
+	require.Empty(t, waits.Items)
+	submit(t, reg, "acme", brain.FixClaimed{ID: "f1", Claim: "run-9/fix", At: blueAt(11)})
+	var holder string
+	reg.For("acme").ReadWorld(func(w *brain.World) { holder = w.FixClaimOf("f1") })
+	require.Equal(t, "run-9/fix", holder)
+
+	// A second retry has no wait to end.
+	_, err = srv.ResolveFixAttempts(ctx, &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "retry"})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+// The call acts only on a finding of the tenant of the caller, needs an acting
+// user, and knows one action.
+func TestResolveFixAttempts_Refusals(t *testing.T) {
+	srv, reg := newBlueServer(t, blueAt(10))
+	submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"})
+	for i, j := range []string{"j1", "j2", "j3"} {
+		submit(t, reg, "acme", brain.FixAttemptFailed{ID: "f1", JobID: j, Verdict: "failed", Reason: "no", At: blueAt(i + 1)})
+	}
+	req := &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "retry"}
+
+	// Another tenant does not see the finding.
+	_, err := srv.ResolveFixAttempts(auth.ContextWithActingUser(worldTenantCtx("other"), "person-1"), req)
+	require.Equal(t, codes.NotFound, status.Code(err))
+	// No acting user.
+	_, err = srv.ResolveFixAttempts(worldTenantCtx("acme"), req)
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+	// An action that does not exist.
+	_, err = srv.ResolveFixAttempts(auth.ContextWithActingUser(worldTenantCtx("acme"), "person-1"),
+		&worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "dismiss"})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	// The wait still stands.
+	var blocked bool
+	for _, f := range reg.For("acme").Findings() {
+		blocked = blocked || f.FixAttemptsBlocked()
+	}
+	require.True(t, blocked)
+}
+
+// A person ends the merge_request_close_failed waits with the action
+// merge_request_closed. The daemon reads each merge request on the Git host first.
+// It refuses while one is open and when the read fails. It trusts the person only
+// when the tenant has no connector to read with.
+func TestResolveFixAttempts_MergeRequestClosed(t *testing.T) {
+	seed := func(t *testing.T) (*worldServer, *brain.Registry) {
+		t.Helper()
+		srv, reg := newBlueServer(t, blueAt(10))
+		submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"},
+			brain.FixCloseWaiting{ID: "f1", JobID: "j1", MergeRequest: "g/p!7", Waiting: true, Reason: "down", At: blueAt(1)},
+			brain.FixCloseWaiting{ID: "f1", JobID: "j2", MergeRequest: "g/p!8", Waiting: true, Reason: "down", At: blueAt(2)})
+		return srv, reg
+	}
+	actor := func() context.Context { return auth.ContextWithActingUser(worldTenantCtx("acme"), "person-1") }
+	req := &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "merge_request_closed"}
+	waits := func(reg *brain.Registry) int {
+		for _, f := range reg.For("acme").Findings() {
+			return len(f.FixCloseWaits)
+		}
+		return -1
+	}
+	host := func(open, known bool, err error, seen *[]string) MergeOpenFunc {
+		return func(_ context.Context, tenant, _, mr string) (bool, bool, error) {
+			require.Equal(t, "acme", tenant)
+			*seen = append(*seen, mr)
+			return open, known, err
+		}
+	}
+
+	t.Run("an open merge request refuses", func(t *testing.T) {
+		srv, reg := seed(t)
+		var seen []string
+		_, err := srv.WithMergeOpen(host(true, true, nil, &seen)).ResolveFixAttempts(actor(), req)
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		require.Equal(t, 2, waits(reg))
+	})
+	t.Run("a failed read refuses", func(t *testing.T) {
+		srv, reg := seed(t)
+		var seen []string
+		_, err := srv.WithMergeOpen(host(false, true, errors.New("down"), &seen)).ResolveFixAttempts(actor(), req)
+		require.Equal(t, codes.Unavailable, status.Code(err))
+		require.Equal(t, 2, waits(reg))
+	})
+	t.Run("closed on the host ends both waits", func(t *testing.T) {
+		srv, reg := seed(t)
+		var seen []string
+		resp, err := srv.WithMergeOpen(host(false, true, nil, &seen)).ResolveFixAttempts(actor(), req)
+		require.NoError(t, err)
+		require.EqualValues(t, 2, resp.EndedWaits)
+		require.ElementsMatch(t, []string{"g/p!7", "g/p!8"}, seen)
+		require.Zero(t, waits(reg))
+		waitsNow, err := srv.ListWaitingOnPerson(actor(), &worldpb.ListWaitingOnPersonRequest{})
+		require.NoError(t, err)
+		require.Empty(t, waitsNow.Items)
+	})
+	t.Run("no connector trusts the person", func(t *testing.T) {
+		srv, reg := seed(t)
+		var seen []string
+		_, err := srv.WithMergeOpen(host(false, false, nil, &seen)).ResolveFixAttempts(actor(), req)
+		require.NoError(t, err)
+		require.Zero(t, waits(reg))
+	})
+	t.Run("no wait is a failed precondition", func(t *testing.T) {
+		srv, reg := newBlueServer(t, blueAt(10))
+		submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"})
+		_, err := srv.ResolveFixAttempts(actor(), req)
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	})
+	t.Run("a retry leaves the close waits", func(t *testing.T) {
+		srv, reg := seed(t)
+		for i, j := range []string{"a", "b", "c"} {
+			submit(t, reg, "acme", brain.FixAttemptFailed{ID: "f1", JobID: j, Verdict: "failed", At: blueAt(3 + i)})
+		}
+		resp, err := srv.ResolveFixAttempts(actor(), &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "retry"})
+		require.NoError(t, err)
+		require.EqualValues(t, 3, resp.ClearedAttempts)
+		require.Equal(t, 2, waits(reg))
+	})
+}
+
+// A wait that lands while the daemon reads the Git host is not in the list that the
+// person closed. It survives the action, and the finding still shows it.
+func TestResolveFixAttempts_AWaitThatLandsDuringTheConfirmationSurvives(t *testing.T) {
+	srv, reg := newBlueServer(t, blueAt(10))
+	submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"},
+		brain.FixCloseWaiting{ID: "f1", JobID: "j1", MergeRequest: "g/p!7", Waiting: true, Reason: "down", At: blueAt(1)})
+	srv.WithMergeOpen(func(ctx context.Context, _, _, mr string) (bool, bool, error) {
+		// A second failed job leaves its wait while the first read runs.
+		if mr == "g/p!7" {
+			require.NoError(t, reg.For("acme").SubmitAndWait(ctx, brain.FixCloseWaiting{
+				ID: "f1", JobID: "j2", MergeRequest: "g/p!8", Waiting: true, Reason: "down", At: blueAt(2),
+			}))
+		}
+		return false, true, nil
+	})
+	ctx := auth.ContextWithActingUser(worldTenantCtx("acme"), "person-1")
+	resp, err := srv.ResolveFixAttempts(ctx, &worldpb.ResolveFixAttemptsRequest{
+		FindingId: "f1", Action: "merge_request_closed",
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, resp.EndedWaits)
+	var left []brain.FixCloseWait
+	for _, f := range reg.For("acme").Findings() {
+		left = f.FixCloseWaits
+	}
+	require.Len(t, left, 1)
+	require.Equal(t, "j2", left[0].JobID)
+	require.Equal(t, "g/p!8", left[0].MergeRequest)
 }

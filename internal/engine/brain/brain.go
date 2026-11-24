@@ -560,6 +560,12 @@ func Reduce(w *World, ev Event) {
 		applyFixHeadMissing(w, e)
 	case FindingPlaceBlocked:
 		applyFindingPlaceBlocked(w, e)
+	case FixAttemptFailed:
+		applyFixAttemptFailed(w, e)
+	case FixCloseWaiting:
+		applyFixCloseWaiting(w, e)
+	case FixAttemptsResolved:
+		applyFixAttemptsResolved(w, e)
 	case MergeRequestOpened:
 		applyMergeRequestOpened(w, e)
 	case FixLinkRefused:

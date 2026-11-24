@@ -4130,6 +4130,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.world.v1.WorldService/ResolveFixAttempts": {
+    method: "/gibson.world.v1.WorldService/ResolveFixAttempts",
+    service: "gibson.world.v1.WorldService",
+    relation: "writer",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.world.v1.WorldService/SettleBetByHITL": {
     method: "/gibson.world.v1.WorldService/SettleBetByHITL",
     service: "gibson.world.v1.WorldService",

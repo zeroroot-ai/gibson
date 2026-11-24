@@ -112,6 +112,9 @@ func init() {
 	registerEvent("finding.fix_head_recorded", func() Event { return &FixHeadRecorded{} })
 	registerEvent("finding.fix_head_missing", func() Event { return &FixHeadMissing{} })
 	registerEvent("finding.place_blocked", func() Event { return &FindingPlaceBlocked{} })
+	registerEvent("finding.fix_attempt_failed", func() Event { return &FixAttemptFailed{} })
+	registerEvent("finding.fix_close_waiting", func() Event { return &FixCloseWaiting{} })
+	registerEvent("finding.fix_attempts_resolved", func() Event { return &FixAttemptsResolved{} })
 	registerEvent("merge_request.opened", func() Event { return &MergeRequestOpened{} })
 	registerEvent("finding.fix_claim_expired", func() Event { return &FixClaimExpired{} })
 	registerEvent("fix.reverted", func() Event { return &FixReverted{} })
@@ -326,6 +329,12 @@ func dereferenceEvent(ev Event) Event {
 	case *FixHeadMissing:
 		return *v
 	case *FindingPlaceBlocked:
+		return *v
+	case *FixAttemptFailed:
+		return *v
+	case *FixCloseWaiting:
+		return *v
+	case *FixAttemptsResolved:
 		return *v
 	case *MergeRequestOpened:
 		return *v

@@ -34,3 +34,7 @@ gibson.world.v1.TimelineEvent.replay_seq | #1497 | hold until 2027-01-31: the bl
 gibson.tenant.v1.LoopGrant.granted_at | #1630 | hold until 2027-01-31: the loop grant page of the dashboard reads it; not built yet
 gibson.tenant.v1.LoopGrant.harness_calls | #1630 | hold until 2027-01-31: the loop grant page of the dashboard reads it; not built yet
 gibson.tenant.v1.LoopGrant.tool_classes | #1630 | hold until 2027-01-31: the loop grant page of the dashboard reads it; not built yet
+gibson.world.v1.ResolveFixAttemptsRequest.finding_id | #1674 | hold until 2027-01-31: the retry and merge_request_closed actions of the blue team console call it, and zeroroot-ai/dashboard#420 builds them
+gibson.world.v1.ResolveFixAttemptsRequest.action | #1674 | hold until 2027-01-31: the retry and merge_request_closed actions of the blue team console call it, and zeroroot-ai/dashboard#420 builds them
+gibson.world.v1.ResolveFixAttemptsResponse.cleared_attempts | #1674 | hold until 2027-01-31: the retry and merge_request_closed actions of the blue team console call it, and zeroroot-ai/dashboard#420 builds them
+gibson.world.v1.ResolveFixAttemptsResponse.ended_waits | #1674 | hold until 2027-01-31: the retry and merge_request_closed actions of the blue team console call it, and zeroroot-ai/dashboard#420 builds them

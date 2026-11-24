@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -37,6 +38,11 @@ type openedHeadReader interface {
 	// key, for the job. ok is false when the Timeline of the tenant holds no result
 	// of a turn of that job.
 	OpenedHead(tenant, mergeRequest, jobID string) (openedHead, bool)
+	// OpenedBy returns each merge request that open_merge_request opened in a turn
+	// of the job, once each. The daemon records the result at the tool gate, and the
+	// job comes from the verified turn grant, so an agent cannot add or remove an
+	// entry. A failed job closes these merge requests and no other.
+	OpenedBy(tenant, jobID string) []string
 }
 
 // worldOpenedHeads reads the heads from the World of the tenant. The Timeline is
@@ -58,6 +64,25 @@ func (w worldOpenedHeads) OpenedHead(tenant, mergeRequest, jobID string) (opened
 		return openedHead{}, false
 	}
 	return openedHead{sha: rec.HeadSHA, sourceBranch: rec.SourceBranch, jobID: rec.JobID}, true
+}
+
+// OpenedBy implements openedHeadReader.
+func (w worldOpenedHeads) OpenedBy(tenant, jobID string) []string {
+	if jobID == "" {
+		return nil
+	}
+	var out []string
+	w.reg.For(tenant).ReadWorld(func(world *brain.World) {
+		for _, r := range world.OpenedMergeRequests() {
+			if r.JobID != jobID {
+				continue
+			}
+			if key := firstNonEmpty(r.MergeRequest, r.URL); key != "" && !slices.Contains(out, key) {
+				out = append(out, key)
+			}
+		}
+	})
+	return out
 }
 
 // openResult is the part of the result of open_merge_request that the daemon reads.

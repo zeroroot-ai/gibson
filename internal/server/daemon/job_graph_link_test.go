@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -51,6 +52,19 @@ type fakeMRReader struct {
 	err      error
 	failures int
 	calls    []string
+	// closes holds each close as "key: comment". closeFailures is the number of
+	// closes that fail before the closes succeed.
+	closes        []string
+	closeFailures int
+}
+
+func (f *fakeMRReader) CloseMergeRequest(_ context.Context, _, _, mergeRequest, comment string) error {
+	if f.closeFailures > 0 {
+		f.closeFailures--
+		return errors.New("the connector refused the close")
+	}
+	f.closes = append(f.closes, mergeRequest+": "+comment)
+	return nil
 }
 
 func (f *fakeMRReader) MergeRequest(_ context.Context, tenant, missionID, key string) (fixloop.MergeFact, error) {
@@ -790,6 +804,10 @@ type perTenantReader struct {
 	hungSeen   atomic.Bool
 }
 
+func (r *perTenantReader) CloseMergeRequest(context.Context, string, string, string, string) error {
+	return nil
+}
+
 func (r *perTenantReader) MergeRequest(ctx context.Context, tenant, _, _ string) (fixloop.MergeFact, error) {
 	if tenant == r.hungTenant {
 		r.hungSeen.Store(true)
@@ -889,6 +907,19 @@ type mapHeads map[string]openedHead
 func (m mapHeads) OpenedHead(tenant, mr, run string) (openedHead, bool) {
 	h, ok := m[tenant+"\x00"+mr+"\x00"+run]
 	return h, ok
+}
+
+// OpenedBy returns each merge request that the store holds for the tenant and the job.
+func (m mapHeads) OpenedBy(tenant, jobID string) []string {
+	var out []string
+	for k, h := range m {
+		parts := strings.Split(k, "\x00")
+		if len(parts) == 3 && parts[0] == tenant && h.jobID == jobID {
+			out = append(out, parts[1])
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // openedBy is the head that open_merge_request returned for the merge request of the

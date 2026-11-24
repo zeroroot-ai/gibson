@@ -52,7 +52,9 @@ func applyFixClaimed(w *World, e FixClaimed) {
 		return
 	}
 	forFinding(w, e.ID, func(f *Finding) {
-		if f.Status == FindingStatusOpen && f.FixClaim == "" {
+		// A Finding with MaxFixAttempts failed jobs in a row takes no claim, so
+		// the World itself refuses a new job (gibson#1674).
+		if f.Status == FindingStatusOpen && f.FixClaim == "" && !f.FixAttemptsBlocked() {
 			f.FixClaim, f.FixClaimedAt = e.Claim, e.At
 		}
 	})

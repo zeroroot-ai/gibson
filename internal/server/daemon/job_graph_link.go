@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,6 +57,10 @@ type jobGraphLink struct {
 	// again. The close path never waits for a retry.
 	mu      sync.Mutex
 	pending map[string]*pendingLink
+	// closes holds the merge requests of failed jobs that the daemon could not
+	// close, keyed by closeKey (gibson#1674). RetryPending tries them again, with a
+	// back off, up to closeMaxTries.
+	closes map[string]*pendingClose
 	// running is true while Run loops. A test reads it.
 	running atomic.Bool
 	// readTimeout bounds one read of a merge request. Zero means
@@ -99,6 +104,10 @@ const (
 // path. fixloop.ConnectorReader satisfies it.
 type mergeRequestReader interface {
 	MergeRequest(ctx context.Context, tenant, missionID, key string) (fixloop.MergeFact, error)
+	// CloseMergeRequest closes a merge request with a comment through the same
+	// governed path. A merge request that is closed already is a success
+	// (gibson#1674).
+	CloseMergeRequest(ctx context.Context, tenant, missionID, mergeRequest, comment string) error
 }
 
 // findingRef is what the link needs to know about a finding in the World.
@@ -107,6 +116,9 @@ type findingRef struct {
 	status    string
 	claim     string
 	claimedAt time.Time
+	// closeWaits holds the close waits of the finding, by closeKey of the failed
+	// job and the merge request (gibson#1674).
+	closeWaits map[string]bool
 }
 
 var _ jobnode.CloseObserver = (*jobGraphLink)(nil)
@@ -119,7 +131,13 @@ func newJobGraphLink(
 		findings: func(tenant string) map[string]findingRef {
 			out := map[string]findingRef{}
 			for _, f := range reg.For(tenant).Findings() {
-				out[f.ID] = findingRef{scope: f.ScopeID, status: f.Status, claim: f.FixClaim, claimedAt: f.FixClaimedAt}
+				waits := make(map[string]bool, len(f.FixCloseWaits))
+				for _, w := range f.FixCloseWaits {
+					waits[closeKey(w.JobID, w.MergeRequest)] = true
+				}
+				out[f.ID] = findingRef{
+					scope: f.ScopeID, status: f.Status, claim: f.FixClaim, claimedAt: f.FixClaimedAt, closeWaits: waits,
+				}
 			}
 			return out
 		},
@@ -369,6 +387,7 @@ func (l *jobGraphLink) RetryPending(ctx context.Context) {
 		}
 		l.dropPending(c.JobID)
 	}
+	l.retryCloses(ctx)
 }
 
 func (l *jobGraphLink) dropPending(jobID string) {
@@ -583,7 +602,9 @@ func openFindingsResolver(reg *brain.Registry) jobnode.FindingsResolver {
 		var ids []string
 		for _, f := range w.Findings() {
 			// A Finding that another fix job holds is not open work.
-			if f.ScopeID == scope && f.Status == brain.FindingStatusOpen && f.FixClaim == "" {
+			// A Finding with repeated failed jobs waits on a person (gibson#1674).
+			open := f.Status == brain.FindingStatusOpen && f.FixClaim == "" && !f.FixAttemptsBlocked()
+			if f.ScopeID == scope && open {
 				ids = append(ids, f.ID)
 			}
 		}
@@ -624,6 +645,17 @@ func findingInputs(eng *brain.Engine, inputs []string) []string {
 	return out
 }
 
+// blockedFindings returns the ids that have too many failed fix jobs in a row.
+func blockedFindings(eng *brain.Engine, ids []string) []string {
+	var out []string
+	for _, f := range eng.Findings() {
+		if f.FixAttemptsBlocked() && slices.Contains(ids, f.ID) {
+			out = append(out, f.ID)
+		}
+	}
+	return out
+}
+
 // Claim implements jobnode.FixClaims.
 func (c fixClaims) Claim(ctx context.Context, tenantID, claim, missionRunID string, inputs []string) error {
 	eng := c.engine(tenantID)
@@ -645,6 +677,11 @@ func (c fixClaims) Claim(ctx context.Context, tenantID, claim, missionRunID stri
 	})
 	if len(held) > 0 {
 		c.Release(ctx, tenantID, claim, missionRunID, ids)
+		// The claim above ran after each earlier event of the World, so the
+		// snapshot shows a block that a failed job just set.
+		if blocked := blockedFindings(eng, ids); len(blocked) > 0 {
+			return fmt.Errorf("findings %v: %w", blocked, jobnode.ErrFindingBlocked)
+		}
 		return fmt.Errorf("findings %v: %w", held, jobnode.ErrFindingClaimed)
 	}
 	return nil
@@ -683,6 +720,7 @@ func (l *jobGraphLink) Adopt(tenant string, findings []brain.FindingSnapshot) {
 		}
 		p.closed.Inputs = append(p.closed.Inputs, f.ID)
 	}
+	l.adoptCloses(tenant, findings)
 	if len(jobs) == 0 {
 		return
 	}

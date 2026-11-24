@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
@@ -126,6 +127,7 @@ const applicationFindingsCypher = `
 MATCH (app:Application {key: $application})
 MATCH (f:Finding)-[:AFFECTS]->(place)
 WHERE ($statuses = [] OR f.status IN $statuses)
+  AND (NOT $exclude_blocked OR coalesce(f.fix_attempts_blocked, false) = false)
   AND (` + applicationReachesPlace + `)
 WITH app, f, place
 OPTIONAL MATCH (f)-[:FIXED_BY]->(mr:MergeRequest)
@@ -183,16 +185,28 @@ func (q *PoolGraphRAGQuerier) ApplicationFindings(
 		statuses = []string{}
 	}
 
-	rows, err := q.readGraph(ctx, tenant, applicationFindingsCypher, map[string]any{
-		"application": application,
-		"statuses":    statuses,
-		"limit":       int64(limit),
-	})
+	rows, err := q.readGraph(
+		ctx, tenant, applicationFindingsCypher, applicationFindingsParams(application, statuses, limit))
 	if err != nil {
 		return nil, err
 	}
 
 	return encodeApplicationFindings(rows)
+}
+
+// applicationFindingsParams builds the parameters of applicationFindingsCypher.
+func applicationFindingsParams(application string, statuses []string, limit int) map[string]any {
+	return map[string]any{
+		"application": application,
+		"statuses":    statuses,
+		"limit":       int64(limit),
+		// A finding with three failed fix jobs in a row is not work until a person acts
+		// (gibson#1674), and its status is open. So every read whose status set includes
+		// open leaves it out: the rule is the status, with no other condition. A read of
+		// the other statuses, such as fixing, is not affected. The dashboard reads the
+		// findings through the World, which lists it.
+		"exclude_blocked": slices.Contains(statuses, "open"),
+	}
 }
 
 // encodeApplicationFindings maps graph rows onto the wire shape.

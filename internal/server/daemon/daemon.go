@@ -104,6 +104,11 @@ type AgentRuntimeState struct {
 //   - Callback manager (harness callback server for agents)
 //   - Redis daemon registration for client discovery
 type daemonImpl struct {
+	// mergeHost reads merge requests on the Git host of a tenant, through the
+	// governed connector path. It is set when the fix loop starts, and a person's
+	// merge_request_closed action reads it to confirm (gibson#1674).
+	mergeHost mergeRequestReader
+
 	// publicGateways are the gateways that ResolveModel and ResolveAgent return.
 	publicGateways publicGateways
 
@@ -1134,6 +1139,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// ADR-0065).
 	connectors := fixloop.NewConnectorReader(d.connectorMCPClient(),
 		governedConnector{callback: func() *harness.CallbackManager { return d.callback }})
+	d.mergeHost = connectors
 	fixWatcher, err := fixloop.NewWatcher(
 		connectors, connectors,
 		applicationPlacer{querier: func() any { return d.graphragQuerier }},

@@ -4,7 +4,9 @@
 package blueteam
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -51,6 +53,14 @@ const (
 	WaitNoSingleApplication WaitKind = "no_single_application"
 	// WaitRevertFailed is the same finding when the revert call failed.
 	WaitRevertFailed WaitKind = brain.WaitRevertFailed
+	// WaitFixAttemptsFailed is an open finding with brain.MaxFixAttempts failed fix
+	// jobs in a row. The finding takes no new fix job until a person acts
+	// (gibson#1674).
+	WaitFixAttemptsFailed WaitKind = "fix_attempts_failed"
+	// WaitMergeCloseFailed is a finding whose failed fix job left a merge request
+	// that the daemon could not close. The reason names the merge request
+	// (gibson#1674).
+	WaitMergeCloseFailed WaitKind = "merge_request_close_failed"
 )
 
 // WaitItem is one item that waits on a person.
@@ -109,6 +119,13 @@ func WaitingOnPerson(
 			}
 			add(WaitNoSingleApplication, f.ID, since, f.PlaceBlock)
 		}
+		if f.Status == brain.FindingStatusOpen && f.FixAttemptsBlocked() {
+			add(WaitFixAttemptsFailed, f.ID, f.FixBlockedAt, fixAttemptsReason(f))
+		}
+		if len(f.FixCloseWaits) > 0 {
+			since, reason := closeWaitReason(f.FixCloseWaits)
+			add(WaitMergeCloseFailed, f.ID, since, reason)
+		}
 		switch f.Status {
 		case brain.FindingStatusFixing:
 			r := refusals[f.MergeRequest]
@@ -163,6 +180,35 @@ func WaitingOnPerson(
 		return out[i].ID < out[j].ID
 	})
 	return out
+}
+
+// fixAttemptsReason says how many fix jobs failed in a row and why the last one
+// failed.
+func fixAttemptsReason(f brain.FindingSnapshot) string {
+	n := len(f.FixAttempts)
+	reason := fmt.Sprintf("%d fix jobs failed in a row.", n)
+	if n == 0 {
+		return reason
+	}
+	last := f.FixAttempts[n-1]
+	return fmt.Sprintf("%s The last is job %s: %s", reason, last.JobID, last.Reason)
+}
+
+// closeWaitReason joins the close waits of a finding into one item: the earliest
+// start, and the merge requests that stay open with the job and the reason of each.
+func closeWaitReason(waits []brain.FixCloseWait) (since time.Time, reason string) {
+	parts := make([]string, 0, len(waits))
+	for _, w := range waits {
+		if since.IsZero() || (!w.Since.IsZero() && w.Since.Before(since)) {
+			since = w.Since
+		}
+		part := fmt.Sprintf("merge request %s of the failed job %s is still open: %s", w.MergeRequest, w.JobID, w.Reason)
+		if w.GaveUp {
+			part += " (the daemon stopped the retries)"
+		}
+		parts = append(parts, part)
+	}
+	return since, strings.Join(parts, ". ")
 }
 
 func rerunAfterDeploy(f brain.FindingSnapshot) bool {
