@@ -212,11 +212,17 @@ func TestFixLoop(t *testing.T) {
 	gitCA, metricsCA := fixLoopSecrets(ctx, t, secrets, ca)
 	mockURL := forge.url
 
+	// The connectors stay enabled until the whole test ends. A cleanup that a
+	// subtest registers runs when that subtest ends, and the connector operator
+	// then removes the grants of the tenant while the cases still need them
+	// (run 45370230562: the scan of case 1 was refused after the connectors were
+	// disabled). So the cleanup goes on the test and not on the subtest.
+	top := t
 	require.True(t, t.Run("both connectors run with the CA bundle of the tenant", func(t *testing.T) {
 		enable := func(id string, vars map[string]string) {
 			_, eerr := connectors.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{CatalogId: id, Variables: vars})
 			require.NoError(t, eerr, "EnableConnector(%s)", id)
-			t.Cleanup(func() {
+			top.Cleanup(func() {
 				c, cancel := context.WithTimeout(auth.ContextWithTenantString(context.Background(), fixLoopTenant), 30*time.Second)
 				defer cancel()
 				_, _ = connectors.DisableConnector(c, &tenantv1.DisableConnectorRequest{Connector: id})
