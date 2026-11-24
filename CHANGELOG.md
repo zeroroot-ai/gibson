@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.175.0](https://github.com/zeroroot-ai/gibson/compare/v0.174.0...v0.175.0) (2026-11-24)
+
+
+### Features
+
+* **catalog:** add the fix-pass mission for one pass of the fix agent ([#1689](https://github.com/zeroroot-ai/gibson/issues/1689)) ([3090f1b](https://github.com/zeroroot-ai/gibson/commit/3090f1ba69c2894c03b82e666f53ab5766fef56f))
+* **fix-loop:** close a failed job's merge request and show repeated fix failures ([#1699](https://github.com/zeroroot-ai/gibson/issues/1699)) ([1a80a16](https://github.com/zeroroot-ai/gibson/commit/1a80a1613a6d14791c58307216e6069fe37ff171))
+
+
+### Bug Fixes
+
+* **catalog:** pin connectors 0.9.0 ([#1704](https://github.com/zeroroot-ai/gibson/issues/1704)) ([587ce53](https://github.com/zeroroot-ai/gibson/commit/587ce53009a7ba910a5ac51edd21a496ae17227f))
+* **component:** type the FGA subject of a connector call and map a failed check to a status ([#1700](https://github.com/zeroroot-ai/gibson/issues/1700)) ([3b1c792](https://github.com/zeroroot-ai/gibson/commit/3b1c792a44a610469091dbad5612df1e8c34b277))
+* **connector-operator:** the egress deny of a connector no longer selects its proxy ([#1696](https://github.com/zeroroot-ai/gibson/issues/1696)) ([6e1f7bd](https://github.com/zeroroot-ai/gibson/commit/6e1f7bdc9f2d9bd8b8ab65311aa2d673ee41b06f))
+* **exit-test:** keep the connectors of the fix loop test enabled until the test ends ([#1707](https://github.com/zeroroot-ai/gibson/issues/1707)) ([2d37ed9](https://github.com/zeroroot-ai/gibson/commit/2d37ed98cbf79787309e8d17e73b262524ace411))
+* **exit-test:** let the agent sandbox class reach the platform on the kvm exit tests ([#1705](https://github.com/zeroroot-ai/gibson/issues/1705)) ([59b04df](https://github.com/zeroroot-ai/gibson/commit/59b04df3e74af32aeb1acc6a9f8caa2f67af431d))
+* **harness:** validate harness callback requests with protovalidate ([#1693](https://github.com/zeroroot-ai/gibson/issues/1693)) ([0395460](https://github.com/zeroroot-ai/gibson/commit/0395460c3da8eaab6e19e7a743c0aa920c21ef35))
+* **missioncatalog:** one source for the example value of a catalog mission parameter ([#1698](https://github.com/zeroroot-ai/gibson/issues/1698)) ([7b75bd7](https://github.com/zeroroot-ai/gibson/commit/7b75bd748ef15b7f5650533cadb7c6fad5194b5d))
+* **rework:** read the secrets of a connector under the stored name of SetSecret ([#1690](https://github.com/zeroroot-ai/gibson/issues/1690)) ([b2e9cd6](https://github.com/zeroroot-ai/gibson/commit/b2e9cd6692b6e3956a5728295b87b5650df1406c))
+
 ## [0.174.0](https://github.com/zeroroot-ai/gibson/compare/v0.173.0...v0.174.0) (2026-11-23)
 
 
