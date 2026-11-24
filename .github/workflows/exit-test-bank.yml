@@ -48,6 +48,7 @@ on:
       - 'tests/e2e/helpers/**'
       - '.github/scripts/agent-class-reaches-api.sh'
       - '.github/workflows/exit-test-bank.yml'
+      - '.github/scripts/record-sandboxes.sh'
   workflow_dispatch:
     inputs:
       charts-ref:
@@ -479,20 +480,12 @@ jobs:
           fi
           # The suite's last step scales the bank to zero, which removes the
           # member sandboxes before the diagnostics step runs, so a member
-          # that never reported left no log behind (run 35455428214). Collect
-          # every sandbox pod's log while the suite runs; diagnostics prints
-          # the files.
+          # that never reported left no log behind (run 35455428214). Record
+          # the sandboxes while the suite runs. The recorder keeps only the
+          # member diagnostic lines, never the transcript. Diagnostics prints
+          # the file.
           mkdir -p /tmp/sbx-logs
-          (
-            while true; do
-              for p in $(kubectl -n setec-sandboxes get pods -o name 2>/dev/null); do
-                n=${p#pod/}
-                kubectl -n setec-sandboxes logs "$p" --all-containers --tail=-1 > "/tmp/sbx-logs/$n.log" 2>/dev/null || true
-                kubectl -n setec-sandboxes describe "$p" 2>/dev/null | grep -A20 '^Events' > "/tmp/sbx-logs/$n.events" || true
-              done
-              sleep 15
-            done
-          ) &
+          INTERVAL=15 "${GITHUB_WORKSPACE}/gibson/.github/scripts/record-sandboxes.sh" watch /tmp/sbx-logs/sandbox-watch.log &
           echo $! > /tmp/sbx-logs/.collector.pid
           kubectl -n "$NS" logs -f job/gibson-e2e-bank --tail=-1 || true
 
@@ -522,10 +515,8 @@ jobs:
           kubectl -n setec-sandboxes get pods || true
           # A member that never reported: its pod's events and log say why.
           # The suite step collected them while the pods lived.
-          [ -f /tmp/sbx-logs/.collector.pid ] && kill "$(cat /tmp/sbx-logs/.collector.pid)" 2>/dev/null || true
-          for f in /tmp/sbx-logs/*.events /tmp/sbx-logs/*.log; do
-            [ -f "$f" ] || continue
-            echo "--- $f"
-            tail -n 120 "$f"
-          done
+          if [ -f /tmp/sbx-logs/.collector.pid ]; then
+            kill "$(cat /tmp/sbx-logs/.collector.pid)" 2>/dev/null || true
+          fi
+          tail -n 400 /tmp/sbx-logs/sandbox-watch.log || true
           kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=1500 || true

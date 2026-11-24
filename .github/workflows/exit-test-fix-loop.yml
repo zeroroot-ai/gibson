@@ -45,6 +45,7 @@ on:
       - '.github/scripts/agent-class-reaches-api.sh'
       - '.github/scripts/run-e2e-job.sh'
       - '.github/workflows/exit-test-fix-loop.yml'
+      - '.github/scripts/record-sandboxes.sh'
   workflow_dispatch:
     inputs:
       charts-ref:
@@ -207,9 +208,15 @@ jobs:
               } >> "$E2E_OUT/tenant-watch.log" 2>&1 || true
             done
           }
+          # A bank member runs in a sandbox of setec. The recorder writes the
+          # sandboxes, the pods, the events and the member diagnostic lines to
+          # sandbox-watch.log every 20 seconds. It never records a spec or the
+          # transcript of a member. See the header of the script.
           watch_tenant &
           watcher=$!
-          trap 'kill "$watcher" 2>/dev/null || true' EXIT
+          "${GITHUB_WORKSPACE}/gibson/.github/scripts/record-sandboxes.sh" watch "$E2E_OUT/sandbox-watch.log" &
+          sandbox_watcher=$!
+          trap 'kill "$watcher" "$sandbox_watcher" 2>/dev/null || true' EXIT
           gibson/.github/scripts/run-e2e-job.sh gibson-e2e-fix-loop 'TestFixLoop$' 250m \
             2>&1 | tee "$E2E_OUT/fix-loop.log"
 
@@ -238,3 +245,4 @@ jobs:
             kubectl -n toolhive-system logs "$d" --tail=200 || true
           done
           tail -n 400 "$E2E_OUT/tenant-watch.log" || true
+          tail -n 400 "$E2E_OUT/sandbox-watch.log" || true
