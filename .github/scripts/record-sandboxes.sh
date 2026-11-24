@@ -33,11 +33,21 @@ MEMBER_TAG='[zerocool-claude-member]'
 # Hide a key that reaches a line that the filter keeps. This is a second layer.
 # The first layer is that the filter keeps only the member own lines.
 redact() {
+  # One rule for each shape. The selftest has one fixture line for each rule.
+  # A Bearer value must hold a digit or have 24 characters or more, so the
+  # text "no bearer token" stays as it is.
+  local v='[A-Za-z0-9._~+/=-]'
   sed -E \
     -e 's/sk-ant-[A-Za-z0-9_-]+/sk-ant-HIDDEN/g' \
+    -e 's/sk-[A-Za-z0-9_-]{16,}/sk-HIDDEN/g' \
     -e 's/(gh[pousr]_|github_pat_|glpat-)[A-Za-z0-9_-]+/\1HIDDEN/g' \
-    -e 's/([Bb]earer )[A-Za-z0-9._~+\/=-]+/\1HIDDEN/g' \
-    -e 's/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/JWT-HIDDEN/g'
+    -e "s/([Bb]earer )${v}*[0-9]${v}*/\\1HIDDEN/g" \
+    -e "s/([Bb]earer )${v}{24,}/\\1HIDDEN/g" \
+    -e 's/(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*)/JWT-HIDDEN/g' \
+    -e 's/([Aa]uthorization: *Basic )[A-Za-z0-9+\/=]+/\1HIDDEN/g' \
+    -e 's/([Xx]-[Aa]pi-[Kk]ey"? *[:=] *"?)[^" ,}]+/\1HIDDEN/g' \
+    -e 's#(://[^/:@[:space:]]+):[^@/[:space:]]+@#\1:HIDDEN@#g' \
+    -e 's/\b(AKIA|ASIA)[0-9A-Z]{16}\b/\1HIDDEN/g'
 }
 
 filter() {
@@ -97,9 +107,30 @@ watch_loop() {
   done
 }
 
+# The fixture holds placeholders, so the repo holds no string that looks like a
+# secret. The selftest builds the values here.
+fixture_text() {
+  local rep20 rep36
+  rep20=$(printf 'Q%.0s' $(seq 1 20))
+  rep36=$(printf 'Q%.0s' $(seq 1 36))
+  sed \
+    -e "s/@GHP@/ghp_${rep36}/g" \
+    -e "s/@GHPAT@/github_pat_${rep36}/g" \
+    -e "s/@GLPAT@/glpat-${rep20}/g" \
+    -e "s/@BEARER@/Bearer ${rep20}7/g" \
+    -e "s/@BEARERLONG@/Bearer ${rep20}${rep20}/g" \
+    -e "s/@JWT@/eyJ${rep20}.${rep20}.${rep20}/g" \
+    -e "s/@SKPROJ@/sk-proj-${rep36}/g" \
+    -e "s/@AKIA@/AKIA${rep20:0:16}/g" \
+    -e "s/@BASIC@/${rep20}==/g" \
+    -e "s/@XKEY@/${rep20}/g" \
+    -e "s/@USERPASS@/${rep20}/g" \
+    "$1"
+}
+
 selftest() {
-  local fixture="${SCRIPT_DIR}/testdata/sandbox-transcript.txt" out tmp fail=0
-  out=$(filter < "${fixture}")
+  local fixture="${SCRIPT_DIR}/testdata/sandbox-transcript.txt" out tmp fail=0 s
+  out=$(fixture_text "${fixture}" | filter)
   if printf '%s\n' "${out}" | grep -q 'fixture-forge-token'; then
     echo "selftest FAIL: a transcript line with a token passed the filter" >&2; fail=1
   fi
@@ -109,11 +140,23 @@ selftest() {
   if ! printf '%s\n' "${out}" | grep -q 'heartbeat: \[unavailable\] getaddrinfo ENOTFOUND'; then
     echo "selftest FAIL: the ENOTFOUND heartbeat line did not pass the filter" >&2; fail=1
   fi
-  if printf '%s\n' "${out}" | grep -q 'sk-ant-FIXTUREKEY'; then
-    echo "selftest FAIL: a key in a kept line was not hidden" >&2; fail=1
-  fi
-  if [ "$(printf '%s\n' "${out}" | wc -l)" -ne 2 ]; then
-    echo "selftest FAIL: the filter must keep exactly 2 lines of the fixture" >&2; fail=1
+  # Each rule has a kept line. The secret part of each must not reach the output.
+  for s in sk-ant-FIXTUREKEY123 QQQQQQQQQQ; do
+    if printf '%s\n' "${out}" | grep -q "${s}"; then
+      echo "selftest FAIL: a secret value ('${s}') was not hidden" >&2; fail=1
+    fi
+  done
+  # Each rule must show its marker, so a deleted rule fails here.
+  for s in 'sk-ant-HIDDEN' 'sk-HIDDEN' 'ghp_HIDDEN' 'github_pat_HIDDEN' 'glpat-HIDDEN' \
+           'Bearer HIDDEN' 'JWT-HIDDEN' 'Basic HIDDEN' 'x-api-key: HIDDEN' \
+           'user:HIDDEN@' 'AKIAHIDDEN'; do
+    if ! printf '%s\n' "${out}" | grep -qF -- "${s}"; then
+      echo "selftest FAIL: no line shows the marker '${s}', so a rule is missing" >&2; fail=1
+    fi
+  done
+  # The cosmetic case: text with no secret stays as it is.
+  if ! printf '%s\n' "${out}" | grep -qF 'the member has no bearer token and no basic auth'; then
+    echo "selftest FAIL: the filter changed a line with no secret" >&2; fail=1
   fi
   # The size limit: the file stops at MAX_BYTES and says so one time.
   tmp=$(mktemp -d)

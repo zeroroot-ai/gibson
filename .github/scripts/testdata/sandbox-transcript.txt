@@ -5,3 +5,15 @@
 [pod/sbx-aaaaa-vm/agent] {"type":"user","message":"Authorization: Bearer fixture-forge-token"}
 [pod/sbx-aaaaa-vm/member] a plain line that holds [zerocool-claude-member] in its middle fixture-forge-token
 fixture-forge-token line with no prefix
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: GitHub token @GHP@ refused
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: fine-grained @GHPAT@ refused
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: GitLab @GLPAT@ refused
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: header Authorization: @BEARER@ refused
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: long header Authorization: @BEARERLONG@ refused
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: jwt @JWT@ refused
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: openai @SKPROJ@ refused
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: aws @AKIA@ refused
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: Authorization: Basic @BASIC@
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: x-api-key: @XKEY@ refused
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: clone https://user:@USERPASS@@forge.example/x.git failed
+[pod/sbx-aaaaa-vm/member] [zerocool-claude-member] job j2: the member has no bearer token and no basic auth
