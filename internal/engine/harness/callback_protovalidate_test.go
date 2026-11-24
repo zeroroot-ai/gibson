@@ -89,7 +89,7 @@ func agentCallCtx() context.Context {
 	return metadata.NewOutgoingContext(context.Background(), md)
 }
 
-func catalogParams(n int) map[string]string {
+func pairsOf(n int) map[string]string {
 	m := make(map[string]string, n)
 	for i := 0; i < n; i++ {
 		m[fmt.Sprintf("p%d", i)] = "v"
@@ -107,8 +107,8 @@ func TestCallbackChain_CreateMissionCatalogParamsCap(t *testing.T) {
 		want      codes.Code
 		wantReach int
 	}{
-		{"64 pairs pass", catalogParams(64), codes.OK, 1},
-		{"65 pairs are refused", catalogParams(65), codes.InvalidArgument, 0},
+		{"64 pairs pass", pairsOf(64), codes.OK, 1},
+		{"65 pairs are refused", pairsOf(65), codes.InvalidArgument, 0},
 		{"a bad key is refused", map[string]string{"1bad": "v"}, codes.InvalidArgument, 0},
 	}
 	for _, tc := range cases {
