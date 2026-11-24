@@ -524,7 +524,7 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 			ScanScope: f.ScanScope, LastScan: f.LastScan,
 			MergeRequest: f.MergeRequest, MergeRequestState: f.MergeRequestState,
 			Priority: f.Priority, PriorityRule: f.PriorityRule, PriorityReason: f.PriorityReason,
-			FixFacts:     f.FixFacts.clone(),
+			FixFacts:     f.copyFacts(),
 			RefusedMoves: f.RefusedMoves, LastRefusedMove: f.LastRefusedMove,
 			SubmittedBy: f.SubmittedBy, AgentName: f.AgentName, EnrolledBy: f.EnrolledBy,
 		})

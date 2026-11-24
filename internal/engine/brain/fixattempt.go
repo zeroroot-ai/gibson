@@ -121,9 +121,9 @@ func applyFixCloseWaiting(w *World, e FixCloseWaiting) {
 	})
 }
 
-// clone copies the slices of the facts, so a snapshot shares no memory with
+// copyFacts copies the slices of the facts, so a snapshot shares no memory with
 // the World.
-func (ff FixFacts) clone() FixFacts {
-	ff.FixAttempts = append([]FixAttempt(nil), ff.FixAttempts...)
-	return ff
+func (f FixFacts) copyFacts() FixFacts {
+	f.FixAttempts = append([]FixAttempt(nil), f.FixAttempts...)
+	return f
 }
