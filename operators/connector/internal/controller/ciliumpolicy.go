@@ -32,6 +32,9 @@ import (
 // connector with an empty list therefore reaches no public host. This policy
 // is the one layer that limits egress, because ToolHive v0.12.1 reads no
 // per-connector host list.
+//
+// The deny rule of this policy never selects the ToolHive proxy pod of a
+// connector (gibson#1694). See desiredCiliumEgressPolicy.
 
 // ciliumEgressPolicyName is the name of the egress policy of a connector.
 func ciliumEgressPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {
@@ -39,17 +42,40 @@ func ciliumEgressPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {
 }
 
 // desiredCiliumEgressPolicy is the egress policy of a connector with a
-// non-empty host list. The allow rules name each host. The deny rule refuses
-// the private, link-local, loopback and CGNAT ranges and the cluster ranges,
-// so a host name that resolves to one of them is refused (review B3).
+// non-empty host list. The allow rules name each host.
+//
+// A Cilium deny rule wins over every allow rule. So the deny rule must never
+// select a pod that has to reach a private address, and the ToolHive proxy
+// pod has to reach three: the kube-apiserver, the SPIRE OIDC provider and the
+// MCP server pod (gibson#1694). The shape of the connector decides the
+// selector:
+//
+//   - Hosted: the policy selects the MCP server pod, which runs the
+//     third-party code. It carries the allow rules and the deny rule. The deny
+//     rule refuses the private, link-local, loopback and CGNAT ranges and the
+//     cluster ranges, so a host name that resolves to one of them is refused
+//     (review B3).
+//   - Remote: no MCP server pod exists, because the runner of ToolHive v0.12.1
+//     deploys no workload for a remote URL. The proxy pod itself calls the
+//     vendor host. The policy selects the proxy pod and carries the allow
+//     rules only. A deny rule here would block the kube-apiserver and the
+//     issuer again. The proxy runs the code of ToolHive and not third-party
+//     code, and the vendor host comes from the catalog.
 func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance, clusterCIDRs []string) (*unstructured.Unstructured, error) {
 	egress, err := ciliumegress.Rules(ci.Spec.EgressAllow)
 	if err != nil {
 		return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
 	}
-	deny, err := ciliumegress.DenyRules(clusterCIDRs)
-	if err != nil {
-		return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
+	spec := map[string]interface{}{"egress": egress}
+	if ci.Spec.Shape == connectorv1alpha1.ConnectorShapeRemote {
+		spec["endpointSelector"] = proxyPodSelector(ci)
+	} else {
+		deny, err := ciliumegress.DenyRules(clusterCIDRs)
+		if err != nil {
+			return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
+		}
+		spec["endpointSelector"] = serverPodSelector(ci)
+		spec["egressDeny"] = deny
 	}
 	u := ciliumegress.NewPolicy()
 	u.SetName(ciliumEgressPolicyName(ci))
@@ -58,13 +84,7 @@ func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance, clusterC
 		"app.kubernetes.io/managed-by": "gibson-connector-operator",
 		"gibson.zeroroot.ai/connector": ci.Spec.Connector,
 	})
-	u.Object["spec"] = map[string]interface{}{
-		"endpointSelector": map[string]interface{}{
-			"matchLabels": map[string]interface{}{"toolhive-name": ci.Name},
-		},
-		"egress":     egress,
-		"egressDeny": deny,
-	}
+	u.Object["spec"] = spec
 	return u, nil
 }
 
@@ -146,6 +166,23 @@ func desiredProxyAPIServerPolicy(ci *connectorv1alpha1.ConnectorInstance) *unstr
 		}},
 	}
 	return u
+}
+
+// serverPodSelector selects the MCP server pod of a Hosted connector, which
+// runs the third-party code, and not the ToolHive proxy pod. The server pod
+// has the label toolhive-name and has no app.kubernetes.io/name label
+// (ToolHive v0.12.1, pkg/labels and the Kubernetes runtime). The proxy pod
+// has that label with a value of toolhiveProxyNames. NotIn also matches a pod
+// with no such label.
+func serverPodSelector(ci *connectorv1alpha1.ConnectorInstance) map[string]interface{} {
+	return map[string]interface{}{
+		"matchLabels": map[string]interface{}{"toolhive-name": ci.Name},
+		"matchExpressions": []interface{}{map[string]interface{}{
+			"key":      "app.kubernetes.io/name",
+			"operator": "NotIn",
+			"values":   toolhiveProxyNames,
+		}},
+	}
 }
 
 // proxyPodSelector selects the ToolHive proxy pod of a connector, and not its
