@@ -171,7 +171,7 @@ func desiredProxyAPIServerPolicy(ci *connectorv1alpha1.ConnectorInstance) *unstr
 // serverPodSelector selects the MCP server pod of a Hosted connector, which
 // runs the third-party code, and not the ToolHive proxy pod. The server pod
 // has the label toolhive-name and has no app.kubernetes.io/name label
-// (ToolHive v0.12.1, pkg/labels and the Kubernetes runtime). The proxy pod
+// (upstream ToolHive v0.12.1, in the labels and the Kubernetes runtime). The proxy pod
 // has that label with a value of toolhiveProxyNames. NotIn also matches a pod
 // with no such label.
 func serverPodSelector(ci *connectorv1alpha1.ConnectorInstance) map[string]interface{} {

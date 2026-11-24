@@ -19,8 +19,8 @@ import (
 // writes them. The proxy pod gets labelsForMCPServer or
 // labelsForMCPRemoteProxy (cmd/thv-operator/controllers). The MCP server pod
 // gets the labels of the runner: app, toolhive, toolhive-name,
-// toolhive-basename, toolhive-transport and toolhive-port (pkg/labels and
-// pkg/container/kubernetes). It has no app.kubernetes.io label.
+// toolhive-basename, toolhive-transport and toolhive-port (upstream pkg/labels and
+// the Kubernetes runtime). It has no app.kubernetes.io label.
 type podLabels struct {
 	role   string
 	labels labels.Set
@@ -54,7 +54,7 @@ func serverPod(ci *connectorv1alpha1.ConnectorInstance) podLabels {
 
 // podsOf returns the pods that a connector of this shape runs. A Remote
 // connector has no server pod, because the runner deploys no workload for a
-// remote URL (ToolHive v0.12.1, pkg/runner/runner.go).
+// remote URL (upstream ToolHive v0.12.1, in the runner source).
 func podsOf(ci *connectorv1alpha1.ConnectorInstance) []podLabels {
 	if ci.Spec.Shape == connectorv1alpha1.ConnectorShapeRemote {
 		return []podLabels{proxyPod(ci)}
