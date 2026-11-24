@@ -27,6 +27,7 @@
 package catalogtest
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -60,7 +61,7 @@ func ExampleParams(source string) (map[string]string, error) {
 		}
 		body, ok := decl.Value.(*ast.StructLit)
 		if !ok {
-			return nil, fmt.Errorf("catalogtest: _params is not a struct")
+			return nil, errors.New("catalogtest: _params is not a struct")
 		}
 		for _, elt := range body.Elts {
 			param, ok := elt.(*ast.Field)
@@ -115,14 +116,14 @@ func fieldName(f *ast.Field) string {
 }
 
 // exampleAttribute reads the `@example("...")` attribute of a field.
-func exampleAttribute(f *ast.Field) (string, bool, error) {
+func exampleAttribute(f *ast.Field) (value string, found bool, err error) {
 	for _, attr := range f.Attrs {
 		name, contents := attr.Split()
 		if name != exampleAttr {
 			continue
 		}
 		body := strings.TrimSpace(contents)
-		value, err := strconv.Unquote(body)
+		value, err = strconv.Unquote(body)
 		if err != nil {
 			return "", false, fmt.Errorf("@%s must hold one quoted string, got %s", exampleAttr, body)
 		}
