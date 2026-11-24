@@ -11,6 +11,9 @@ import (
 
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
 // passMargin is the least time that the node timeout must keep above the worst
@@ -163,7 +166,7 @@ func TestFixPass_NodeTimeoutHoldsTheWorstPass(t *testing.T) {
 	}
 }
 
-// The default pass is above the 30 minute launcher default and above the 105
+// The default pass is above the 30 minute launcher default and above the 105.5
 // minutes of one attempt. With no finding it holds three attempts.
 func TestFixPass_DefaultNodeTimeouts(t *testing.T) {
 	t.Parallel()
@@ -181,7 +184,8 @@ func TestFixPass_DefaultNodeTimeouts(t *testing.T) {
 	}
 }
 
-// A duration that is not a duration, or that is not above zero, refuses the render.
+// A duration that is not a duration, that is not above zero, or that is above 8
+// hours refuses the render.
 func TestFixPass_BadDurationsRefuseTheRender(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ key, val string }{
@@ -190,6 +194,8 @@ func TestFixPass_BadDurationsRefuseTheRender(t *testing.T) {
 		{"codingTimeout", "-5m"},
 		{"mergeWait", "soon"},
 		{"mergeWait", "0"},
+		{"codingTimeout", "8h1s"},
+		{"mergeWait", "2000000h"},
 	} {
 		p := paramsFor(t, "fix-pass")
 		p[c.key] = c.val
@@ -239,5 +245,35 @@ func TestTimeoutProblem_ReportsATimeoutThatCannotHoldAPass(t *testing.T) {
 	}
 	if p := timeoutProblem(node(&threeAttempts), coding, mergeWait, false); p != "" {
 		t.Errorf("three attempts with no finding: got %q", p)
+	}
+}
+
+// An 8 hour duration is the largest that renders.
+func TestFixPass_EightHourDurationsRender(t *testing.T) {
+	t.Parallel()
+	renderPass(t, func(p map[string]string) {
+		p["codingTimeout"] = "8h"
+		p["mergeWait"] = "8h"
+	})
+}
+
+// The daemon binds {{target.id}} inside the task context of the agent node.
+// fix-pass is the first catalog mission with a placeholder in a task context, so
+// this test holds the walk of targetbind over that path.
+func TestFixPass_BindsTheTargetInTheTaskContext(t *testing.T) {
+	t.Parallel()
+	def := renderPass(t, nil)
+	tgt := types.NewTarget("customer-portal", "https://portal.internal", types.TargetTypeCustom)
+
+	bound, err := targetbind.Bind(def, tgt)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if left := targetbind.UnboundTarget(bound); len(left) > 0 {
+		t.Fatalf("placeholders survived binding: %v", left)
+	}
+	got := bound.GetNodes()["pass"].GetAgentConfig().GetTask().GetContext()["target"].GetStringValue()
+	if got != tgt.ID.String() {
+		t.Errorf("context target = %q, want the target id %q", got, tgt.ID.String())
 	}
 }

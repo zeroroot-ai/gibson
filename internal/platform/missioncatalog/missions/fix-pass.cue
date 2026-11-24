@@ -28,9 +28,9 @@
 //   finding set:     codingTimeout + 30s   + 2 x mergeWait + 15 minutes of margin
 //   finding not set: 3 x (codingTimeout + 30s) + 2 x mergeWait + 15 minutes of margin
 //
-// With the defaults (45m and 30m) the node timeout is 2 hours with `finding`
-// and 3 hours 31 minutes without it. The test guard in fix_pass_mission_test.go
-// holds the same model.
+// With the defaults (45m and 30m) the node timeout is 2h0m30s with `finding`
+// and 3h31m30s without it. The test guard in fix_pass_mission_test.go holds the
+// same model of the pass, with a smaller margin of 10 minutes.
 //
 // Parameters (ADR-0118):
 //
@@ -73,10 +73,12 @@ if _params.mergeWait != _|_ {
 	_mergeWait: _params.mergeWait
 }
 
-// time.ParseDuration returns nanoseconds. A value that is not a duration, or
-// that is not above zero, fails the render.
-_codingNs: time.ParseDuration(_codingTimeout) & >0
-_mergeNs:  time.ParseDuration(_mergeWait) & >0
+// time.ParseDuration returns nanoseconds. A value that is not a duration, that
+// is not above zero, or that is above 8 hours fails the render. The cap keeps a
+// caller from holding a sandbox slot for days.
+_maxDurationNs: 28800000000000
+_codingNs:      time.ParseDuration(_codingTimeout) & >0 & <=_maxDurationNs
+_mergeNs:       time.ParseDuration(_mergeWait) & >0 & <=_maxDurationNs
 
 // The attempts of one pass: one with a named Finding, three (MaxAttempts of
 // fix-agent) without it. Each coding job takes up to the coding timeout plus 30
@@ -100,9 +102,9 @@ _context: {
 	"connector":   {stringValue: "connector/\(_params.forgeConnector)"}
 	"project":     {stringValue: _params.project}
 	// The target of the coding mission is the target of this run. The daemon
-	// binds the placeholder at submit, from the target that the caller owns. No
-	// parameter can name a target (gibson#497).
-	"target": {stringValue: "{{target.id}}"}
+	// binds the placeholder when the run starts, from the target that the
+	// caller owns. No parameter can name a target (gibson#497).
+	"target":      {stringValue: "{{target.id}}"}
 	"timeout":     {stringValue: _codingTimeout}
 	"merge_wait":  {stringValue: _mergeWait}
 	if _params.finding != _|_ {
