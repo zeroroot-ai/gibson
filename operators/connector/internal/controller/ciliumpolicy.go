@@ -44,11 +44,15 @@ func ciliumEgressPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {
 // desiredCiliumEgressPolicy is the egress policy of a connector with a
 // non-empty host list. The allow rules name each host.
 //
-// A Cilium deny rule wins over every allow rule. So a deny rule must never
-// cover an address that the ToolHive proxy pod has to reach: the
-// kube-apiserver, the SPIRE OIDC provider and the MCP server pod
-// (gibson#1694). The shape of the connector decides the selector and the
-// deny rule:
+// A Cilium deny rule wins over every allow rule. A CIDR rule does not select a
+// pod, and a toFQDNs rule acts like a CIDR rule, so the deny rule never
+// blocks the issuer pod or the MCP server pod. The cluster sets
+// policyCIDRMatchMode to nodes (Cilium 1.20.2, Documentation/security/policy/
+// layer3.rst upstream), so a CIDR rule also matches the address of a node. The
+// kube-apiserver of a kind cluster runs on a node address, and the deny rule
+// blocked it (gibson#1694). The ToolHive proxy pod of a Hosted connector calls
+// that API, so it gets no deny rule. The shape of the connector decides the
+// selector:
 //
 //   - Hosted: the policy selects the MCP server pod, which runs the
 //     third-party code. It carries the allow rules and the deny rule. The deny
@@ -57,15 +61,9 @@ func ciliumEgressPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {
 //     (review B3).
 //   - Remote: no MCP server pod exists, because the runner of ToolHive v0.12.1
 //     deploys no workload for a remote URL. The proxy pod itself calls the
-//     vendor host. The policy selects the proxy pod. It keeps the deny rule
-//     of review B3 with the pod and the service ranges carved out
-//     (ciliumegress.ProxyDenyRules). So the cloud metadata address, loopback
-//     and private hosts outside the cluster stay denied. Inside the cluster
-//     ranges, the proxy reaches only what an allow rule names: the issuer
-//     policy and the owned NetworkPolicy. The remaining gap is a vendor host
-//     name that resolves to a cluster address. The toFQDNs rule allows the
-//     address that Cilium resolved for an allowed name, and the carve-out
-//     does not deny it.
+//     vendor host. The runner makes no Kubernetes API call for a remote URL.
+//     The policy selects the proxy pod and carries the same deny rule as the
+//     Hosted server pod.
 func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance, clusterCIDRs []string) (*unstructured.Unstructured, error) {
 	egress, err := ciliumegress.Rules(ci.Spec.EgressAllow)
 	if err != nil {
@@ -73,20 +71,15 @@ func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance, clusterC
 	}
 	spec := map[string]interface{}{"egress": egress}
 	if ci.Spec.Shape == connectorv1alpha1.ConnectorShapeRemote {
-		deny, err := ciliumegress.ProxyDenyRules(clusterCIDRs)
-		if err != nil {
-			return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
-		}
 		spec["endpointSelector"] = proxyPodSelector(ci)
-		spec["egressDeny"] = deny
 	} else {
-		deny, err := ciliumegress.DenyRules(clusterCIDRs)
-		if err != nil {
-			return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
-		}
 		spec["endpointSelector"] = serverPodSelector(ci)
-		spec["egressDeny"] = deny
 	}
+	deny, err := ciliumegress.DenyRules(clusterCIDRs)
+	if err != nil {
+		return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
+	}
+	spec["egressDeny"] = deny
 	u := ciliumegress.NewPolicy()
 	u.SetName(ciliumEgressPolicyName(ci))
 	u.SetNamespace(ci.Namespace)
@@ -138,7 +131,7 @@ func (r *ConnectorInstanceReconciler) reconcileCiliumEgressPolicy(
 	return nil
 }
 
-// The ToolHive proxy of a connector creates the MCP server StatefulSet and
+// The ToolHive proxy of a Hosted connector creates the MCP server StatefulSet and
 // attaches to it through the Kubernetes API (ToolHive v0.12.1, Kubernetes
 // runtime). The tenant namespace is default-deny, and the owned NetworkPolicy
 // opens no path to the kube-apiserver, so the first API call of the proxy
@@ -148,7 +141,9 @@ func (r *ConnectorInstanceReconciler) reconcileCiliumEgressPolicy(
 // app.kubernetes.io/name=mcpserver (MCPServer) or mcpremoteproxy
 // (MCPRemoteProxy). The MCP server pod, which runs the third-party code, has
 // neither label, so it gets no API access. The entity kube-apiserver names the
-// API server on every cluster, so the operator needs no address of it.
+// API server on every cluster, so the operator needs no address of it. A
+// Remote connector has no policy of this kind, because its proxy makes no API
+// call (gibson#1694).
 
 // proxyAPIServerPolicyName is the name of the API server policy of a connector.
 func proxyAPIServerPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {
@@ -213,6 +208,18 @@ func proxyPodSelector(ci *connectorv1alpha1.ConnectorInstance) map[string]interf
 func (r *ConnectorInstanceReconciler) reconcileProxyAPIServerPolicy(
 	ctx context.Context, ci *connectorv1alpha1.ConnectorInstance,
 ) error {
+	if ci.Spec.Shape == connectorv1alpha1.ConnectorShapeRemote {
+		// The proxy runner makes no Kubernetes API call for a remote URL, so
+		// a Remote connector has no API server policy. Delete one that an
+		// earlier version wrote.
+		stale := ciliumegress.NewPolicy()
+		stale.SetName(proxyAPIServerPolicyName(ci))
+		stale.SetNamespace(ci.Namespace)
+		if err := r.Delete(ctx, stale); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete proxy api server policy: %w", err)
+		}
+		return nil
+	}
 	desired := desiredProxyAPIServerPolicy(ci)
 	if err := controllerutil.SetControllerReference(ci, desired, r.Scheme); err != nil {
 		return fmt.Errorf("proxy api server policy owner ref: %w", err)
