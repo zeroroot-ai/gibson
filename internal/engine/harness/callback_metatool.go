@@ -410,7 +410,7 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		// is UNAVAILABLE, so a member retries it. The cause goes to the log only.
 		s.logger.WarnContext(ctx, "meta-tool invoke refused: the authorization check failed", "id", in.ID, "tenant", caller.Tenant, "err", err)
 		// gibson:no-tool-executed — the check failed before any dispatch.
-		return metaToolErr(authzFaultCode(err), authzFaultText(err)), nil
+		return withToolCallID(metaToolErr(authzFaultCode(err), authzFaultText(err)), callID), nil
 	}
 	code := commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT
 	switch {
@@ -769,6 +769,8 @@ func authzFaultCode(err error) commonpb.ErrorCode {
 		return commonpb.ErrorCode_ERROR_CODE_TIMEOUT
 	case metatool.AuthzFaultUnavailable:
 		return commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE
+	case metatool.AuthzFaultNotSetUp:
+		return commonpb.ErrorCode_ERROR_CODE_CONFIG_ERROR
 	default:
 		return commonpb.ErrorCode_ERROR_CODE_INTERNAL
 	}

@@ -886,14 +886,18 @@ func TestMetaInvoke_AFailedAuthorizationCheckGetsTheCodeOfItsClass(t *testing.T)
 			"the authorization check failed",
 		},
 		"a store that is not set up": {
-			fmt.Errorf("check: %w", authz.ErrFgaUnauthenticated), commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+			fmt.Errorf("check: %w", authz.ErrFgaUnauthenticated), commonpb.ErrorCode_ERROR_CODE_CONFIG_ERROR,
 			"the authorization service is not set up for this call",
 		},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			h := metatool.NewHandler(nil, errAuthz{err: c.err}, errConnectors{err: errors.New("never called")})
-			resp, err := newSvc(t).metaInvoke(testCtxWithTenant(), &harnesspb.ContextInfo{MissionId: "m1"}, h, nil,
+			svc := newSvc(t)
+			// A sink records the call, so the flight recorder gives it an id.
+			svc.toolCallSink = func(context.Context, string, ToolCallRecord) {}
+			contextInfo := &harnesspb.ContextInfo{MissionId: "m1", MissionRunId: "run-1"}
+			resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil,
 				catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
 				[]byte(`{"id":"mcp:gitlab:create_issue","args":{}}`), nil)
 			if err != nil {
@@ -904,6 +908,10 @@ func TestMetaInvoke_AFailedAuthorizationCheckGetsTheCodeOfItsClass(t *testing.T)
 			}
 			if got := resp.GetError().GetMessage(); got != c.wantText {
 				t.Fatalf("message = %q, want %q", got, c.wantText)
+			}
+			// The flight recorder records the call, so the reply carries its id.
+			if resp.GetToolCallId() == "" {
+				t.Fatal("the reply has no tool_call_id")
 			}
 		})
 	}
