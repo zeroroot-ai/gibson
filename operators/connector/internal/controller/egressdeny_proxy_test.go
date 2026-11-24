@@ -15,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
@@ -158,7 +160,11 @@ func ciliumPoliciesOf(t *testing.T, ci *connectorv1alpha1.ConnectorInstance) []*
 func TestReconcileProxyAPIServerPolicy_RemoteHasNone(t *testing.T) {
 	ctx := context.Background()
 	ci := remoteInstance("gl", "tenant-acme")
+	ci.UID = "uid-gl"
 	stale := desiredProxyAPIServerPolicy(ci)
+	if err := controllerutil.SetControllerReference(ci, stale, newReconciler(t).Scheme); err != nil {
+		t.Fatal(err)
+	}
 	r := newReconciler(t, stale)
 	if err := r.reconcileProxyAPIServerPolicy(ctx, ci); err != nil {
 		t.Fatal(err)
@@ -196,23 +202,44 @@ func TestEgressDenyRulesFitEachShape(t *testing.T) {
 	}
 }
 
-// A Remote connector has no API server policy, and a Hosted connector has one
-// for its proxy pod only.
-func TestOnlyHostedHasAnAPIServerPolicy(t *testing.T) {
+// The real reconcile writes the API server policy for a Hosted connector and
+// none for a Remote connector.
+func TestReconcileWritesAnAPIServerPolicyForHostedOnly(t *testing.T) {
+	ctx := context.Background()
 	for _, ci := range []*connectorv1alpha1.ConnectorInstance{hostedInstance("gh", "tenant-acme"), remoteInstance("gl", "tenant-acme")} {
-		ci.Spec.EgressAllow = []string{"api.example.com:443"}
-		found := false
-		for _, u := range ciliumPoliciesOf(t, ci) {
-			if u.GetName() == proxyAPIServerPolicyName(ci) {
-				found = true
-				if ciliumSelects(t, u, serverPod(ci)) {
-					t.Errorf("%s: the API policy selects the server pod", ci.Spec.Shape)
-				}
-			}
+		r := newReconciler(t)
+		if err := r.reconcileProxyAPIServerPolicy(ctx, ci); err != nil {
+			t.Fatal(err)
 		}
-		if want := ci.Spec.Shape == connectorv1alpha1.ConnectorShapeHosted; found != want {
-			t.Errorf("%s: API policy present = %v, want %v", ci.Spec.Shape, found, want)
+		u := ciliumegress.NewPolicy()
+		err := r.Get(ctx, types.NamespacedName{Namespace: ci.Namespace, Name: proxyAPIServerPolicyName(ci)}, u)
+		hosted := ci.Spec.Shape == connectorv1alpha1.ConnectorShapeHosted
+		if hosted && err != nil {
+			t.Errorf("Hosted: no API server policy: %v", err)
 		}
+		if !hosted && !apierrors.IsNotFound(err) {
+			t.Errorf("Remote: API server policy exists: %v", err)
+		}
+		if hosted && ciliumSelects(t, u, serverPod(ci)) {
+			t.Errorf("Hosted: the API server policy selects the server pod")
+		}
+	}
+}
+
+// A policy with the same name and no owner reference is not ours. The
+// reconcile of a Remote connector leaves it, and sends no Delete when the
+// policy is absent.
+func TestReconcileProxyAPIServerPolicy_RemoteKeepsAForeignPolicy(t *testing.T) {
+	ctx := context.Background()
+	ci := remoteInstance("gl", "tenant-acme")
+	ci.UID = "uid-gl"
+	foreign := desiredProxyAPIServerPolicy(ci)
+	r := newReconciler(t, foreign)
+	if err := r.reconcileProxyAPIServerPolicy(ctx, ci); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(foreign), ciliumegress.NewPolicy()); err != nil {
+		t.Errorf("the foreign policy is gone: %v", err)
 	}
 }
 

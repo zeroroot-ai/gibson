@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -212,11 +213,19 @@ func (r *ConnectorInstanceReconciler) reconcileProxyAPIServerPolicy(
 		// The proxy runner makes no Kubernetes API call for a remote URL, so
 		// a Remote connector has no API server policy. Delete one that an
 		// earlier version wrote.
-		stale := ciliumegress.NewPolicy()
-		stale.SetName(proxyAPIServerPolicyName(ci))
-		stale.SetNamespace(ci.Namespace)
-		if err := r.Delete(ctx, stale); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete proxy api server policy: %w", err)
+		live := ciliumegress.NewPolicy()
+		err := r.Get(ctx, client.ObjectKey{Namespace: ci.Namespace, Name: proxyAPIServerPolicyName(ci)}, live)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("get proxy api server policy: %w", err)
+		}
+		// Delete only a policy that this connector owns.
+		if metav1.IsControlledBy(live, ci) {
+			if err := r.Delete(ctx, live); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("delete proxy api server policy: %w", err)
+			}
 		}
 		return nil
 	}
