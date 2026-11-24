@@ -18,6 +18,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 )
 
@@ -138,6 +139,10 @@ func (s *ComponentServiceServer) callConnectorTool(
 		return nil, status.Errorf(codes.PermissionDenied, "the call of %s was denied by a person", tid.Canonical())
 	case errors.Is(err, metatool.ErrBlocked), errors.Is(err, metatool.ErrRunInactive), errors.Is(err, metatool.ErrUnauthorized):
 		return nil, status.Errorf(codes.PermissionDenied, "the call of %s is not allowed", tid.Canonical())
+	case errors.Is(err, metatool.ErrAuthzCheckFailed):
+		s.logger.ErrorContext(ctx, "call tool: the authorization check failed",
+			slog.String("tenant", tenant), slog.String("tool", tid.Canonical()), slog.String("error", err.Error()))
+		return nil, authzCheckStatus(err)
 	case errors.Is(err, metatool.ErrAuditUnavailable):
 		s.logger.ErrorContext(ctx, "call tool: refused, the audit record could not be written", slog.String("error", err.Error()))
 		return nil, status.Error(codes.Unavailable, "the audit record of the call could not be written")
@@ -260,5 +265,23 @@ func (o connectorAuditObserver) Result(ctx context.Context, rec metatool.CallRec
 	if err := (metatool.AuditRecorder{Log: o.s.auditLog}).Result(ctx, rec, callErr); err != nil {
 		o.s.logger.ErrorContext(ctx, "call tool: the result audit record of a connector call was not written",
 			slog.String("tenant", rec.Tenant), slog.String("connector", rec.Connector), slog.String("error", err.Error()))
+	}
+}
+
+// authzCheckStatus maps a failed can_execute check to a gRPC status. A check
+// that errors is not a denial. Only an outage is Unavailable, and a retry can
+// help there. A request that FGA rejects as invalid is a fault of the daemon,
+// so it is Internal. A bad credential or a wrong store is a fault of the
+// deployment, so it is FailedPrecondition. The text names no FGA detail.
+func authzCheckStatus(err error) error {
+	switch {
+	case errors.Is(err, authz.ErrFgaTimeout):
+		return status.Error(codes.DeadlineExceeded, "the authorization check timed out")
+	case errors.Is(err, authz.ErrFgaUnavailable):
+		return status.Error(codes.Unavailable, "the authorization service is unavailable")
+	case errors.Is(err, authz.ErrFgaUnauthenticated), errors.Is(err, authz.ErrFgaNotFound), errors.Is(err, authz.ErrModelNotFound):
+		return status.Error(codes.FailedPrecondition, "the authorization service is not set up for this call")
+	default:
+		return status.Error(codes.Internal, "the authorization check failed")
 	}
 }

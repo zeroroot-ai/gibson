@@ -64,6 +64,11 @@ var ErrConnectorRateLimited = errors.New("metatool: the connector is rate limite
 // requested tool. Callers map it to a permission-denied result.
 var ErrUnauthorized = errors.New("metatool: not authorized to invoke tool")
 
+// ErrAuthzCheckFailed is returned when the can_execute check itself failed. It
+// is not a denial. The error chain also holds the cause of the check, for
+// example an authz sentinel, so a caller can tell an outage from a bad request.
+var ErrAuthzCheckFailed = errors.New("metatool: authorization check failed")
+
 // ConnectorCaller calls one tool of one connector of a tenant through MCP
 // and returns the JSON-decodable result. The daemon is the one MCP client
 // (ADR-0065); component.ConnectorMCP satisfies this.
@@ -141,7 +146,7 @@ func (h *Handler) Authorize(ctx context.Context, caller catalog.Caller, id strin
 	}
 	allowed, err := h.authz.CanExecute(ctx, caller, tid)
 	if err != nil {
-		return toolid.ID{}, fmt.Errorf("metatool: authorization check failed for %q: %w", id, err)
+		return toolid.ID{}, fmt.Errorf("%w for %q: %w", ErrAuthzCheckFailed, id, err)
 	}
 	if !allowed {
 		return toolid.ID{}, fmt.Errorf("%w: %s", ErrUnauthorized, id)
