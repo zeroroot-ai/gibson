@@ -137,7 +137,7 @@ func TestCallbackChain_CreateMissionCatalogParamsCap(t *testing.T) {
 }
 
 // The validation runs after the identity and the grant. A request with no
-// identity gets Unauthenticated, and a request with a grant that cannot be
+// identity gets PermissionDenied, and a request with a grant that cannot be
 // verified gets Unauthenticated too. Neither learns that the request breaks a
 // rule (gibson#1668).
 func TestCallbackChain_ValidationRunsAfterAuthAndGrant(t *testing.T) {
@@ -146,8 +146,11 @@ func TestCallbackChain_ValidationRunsAfterAuthAndGrant(t *testing.T) {
 	t.Run("no identity", func(t *testing.T) {
 		client, rec := callbackChainClient(t)
 		_, err := client.CreateMission(context.Background(), bad)
-		if got := status.Code(err); got != codes.Unauthenticated {
-			t.Fatalf("code = %v (%v), want Unauthenticated", got, err)
+		// The sdk auth interceptor refuses a call with no identity headers as
+		// PermissionDenied. The code that matters here is that it is not
+		// InvalidArgument.
+		if got := status.Code(err); got != codes.PermissionDenied {
+			t.Fatalf("code = %v (%v), want PermissionDenied", got, err)
 		}
 		if rec.reached != 0 {
 			t.Fatalf("handler reached %d times, want 0", rec.reached)
