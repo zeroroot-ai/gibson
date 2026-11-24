@@ -62,6 +62,8 @@ permissions:
 env:
   CHARTS_ROOT: ${{ github.workspace }}/charts
   NS: gibson
+  # The namespace of the tenant of the test (fixLoopTenant in tests/e2e/fix_loop_test.go).
+  TENANT_NS: tenant-primary
   RELEASE: gibson
   CLUSTER: gibson
   NODE: gibson-control-plane
@@ -181,6 +183,26 @@ jobs:
             printf 'EXIT_TEST_ANTHROPIC_API_KEY=%s\n' "$EXIT_TEST_ANTHROPIC_API_KEY"
             printf 'EXIT_TEST_ANTHROPIC_WORKSPACE_ID=%s\n' "$EXIT_TEST_ANTHROPIC_WORKSPACE_ID"
           } > "$E2E_RUNNER_ENV_FILE"
+          # The test disables both connectors in its cleanup, so a later step
+          # sees no connector pod. Record the tenant namespace once a minute
+          # while the test runs. The Diagnostics step prints the record.
+          watch_tenant() {
+            while sleep 60; do
+              {
+                echo "=== $(date -u +%FT%TZ)"
+                kubectl -n "$TENANT_NS" get mcpservers,connectorinstances,deploy,pods -o wide
+                kubectl -n "$TENANT_NS" get events --sort-by=.lastTimestamp | tail -n 30
+                for pod in $(kubectl -n "$TENANT_NS" get pods -o name); do
+                  kubectl -n "$TENANT_NS" get "$pod" \
+                    -o jsonpath='{.metadata.name}{" "}{range .status.containerStatuses[*]}{.name}={.ready}/{.state}{" "}{end}{"\n"}'
+                  kubectl -n "$TENANT_NS" logs "$pod" --all-containers --tail=20 --prefix
+                done
+              } >> "$E2E_OUT/tenant-watch.log" 2>&1 || true
+            done
+          }
+          watch_tenant &
+          watcher=$!
+          trap 'kill "$watcher" 2>/dev/null || true' EXIT
           gibson/.github/scripts/run-e2e-job.sh gibson-e2e-fix-loop 'TestFixLoop$' 250m \
             2>&1 | tee "$E2E_OUT/fix-loop.log"
 
@@ -205,3 +227,7 @@ jobs:
           kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=3000 \
             | grep -iE 'connector|fix-loop|fixloop' | tail -150 || true
           docker logs mock-forge --tail=100 || true
+          for d in $(kubectl -n toolhive-system get deploy -o name); do
+            kubectl -n toolhive-system logs "$d" --tail=200 || true
+          done
+          tail -n 400 "$E2E_OUT/tenant-watch.log" || true
