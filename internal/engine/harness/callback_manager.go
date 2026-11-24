@@ -732,11 +732,20 @@ func (m *CallbackManager) CallConnectorForTenant(
 }
 
 // CallConnectorForMission runs the connector call of a TOOL node of a mission on
-// the one governed path of a connector call (gibson#1469).
+// the one governed path of a connector call (gibson#1469). The node runs as the
+// initiator, the person who started the mission.
 func (m *CallbackManager) CallConnectorForMission(
+	ctx context.Context, tenant, missionID, runID, workID, initiator, connector, tool string, args map[string]any,
+) (any, error) {
+	return m.server.Service().CallConnectorForMission(ctx, tenant, missionID, runID, workID, initiator, connector, tool, args)
+}
+
+// CallConnectorForMissionAsTenant runs the read of a node that the daemon makes
+// for itself, such as the dependency alerts of a scan (gibson#1469).
+func (m *CallbackManager) CallConnectorForMissionAsTenant(
 	ctx context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any,
 ) (any, error) {
-	return m.server.Service().CallConnectorForMission(ctx, tenant, missionID, runID, workID, connector, tool, args)
+	return m.server.Service().CallConnectorForMissionAsTenant(ctx, tenant, missionID, runID, workID, connector, tool, args)
 }
 
 // CallMetaTool serves search_tools and invoke_tool for an agent in pull mode.

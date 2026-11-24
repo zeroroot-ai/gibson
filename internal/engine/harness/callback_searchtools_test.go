@@ -34,28 +34,23 @@ func (f fakeSearchReg) ListTenantComponents(context.Context, string) ([]componen
 type fakeSearchAuthz struct {
 	authz.Authorizer
 	allow map[string]bool
-	// killed lists the objects whose tenant execute kill switch is on.
-	killed     map[string]bool
-	lastUser   string
-	lastObject string
-	// tenantUser is the user of the last check of a tenant tuple.
-	tenantUser string
+	// killed lists the objects whose tenant execute kill switch is on. It stops
+	// every check of the object, as the model does.
+	killed map[string]bool
+	// denied lists the users with a user or team execute deny.
+	denied map[string]bool
+	// err is the error of every check.
+	err                                error
+	lastUser, lastRelation, lastObject string
 }
 
-// Check answers can_execute and the other relations of a user from allow. For the
-// member set of a tenant the catalog asks two tuples of the tenant instead:
-// tenant_enabled, which follows allow, and tenant_execute_disabled, which follows
-// killed (see catalog.FGAAuthorizer).
 func (f *fakeSearchAuthz) Check(_ context.Context, user, relation, object string) (bool, error) {
-	f.lastUser = user
-	f.lastObject = object
-	switch relation {
-	case "tenant_enabled":
-		f.tenantUser = user
-		return f.allow[object], nil
-	case "tenant_execute_disabled":
-		f.tenantUser = user
-		return f.killed[object], nil
+	f.lastUser, f.lastRelation, f.lastObject = user, relation, object
+	if f.err != nil {
+		return false, f.err
+	}
+	if f.denied[user] || f.killed[object] {
+		return false, nil
 	}
 	return f.allow[object], nil
 }

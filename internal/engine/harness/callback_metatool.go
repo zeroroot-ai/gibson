@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -102,9 +103,14 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 }
 
 // metaHandler builds the handler of the two meta-tools over the catalog of the
-// daemon. A mission run and a bank member use the same one.
-func (s *HarnessCallbackService) metaHandler(req *harnesspb.CallToolProtoRequest) *metatool.Handler {
-	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
+// daemon. A mission run and a bank member use the same one, and they differ in
+// the authorizer: a member asks the tenant, and a run asks its person.
+func (s *HarnessCallbackService) metaHandler(req *harnesspb.CallToolProtoRequest, forMember bool) *metatool.Handler {
+	var authorizer catalog.Authorizer = catalog.NewFGAAuthorizer(s.componentAuthorizer)
+	if forMember {
+		// A member is no person, so the tenant answers for it (see memberCaller).
+		authorizer = catalog.NewTenantAuthorizer(s.componentAuthorizer, authorizer)
+	}
 	handler := metatool.NewHandler(
 		catalog.NewEngine(s.toolLister(component.NewCatalogToolLister(s.componentRegistry, s.connectors)), authorizer),
 		authorizer,
@@ -118,10 +124,14 @@ func (s *HarnessCallbackService) metaHandler(req *harnesspb.CallToolProtoRequest
 }
 
 // memberCaller is the caller of a member for the can_execute check. The member
-// has no person behind it, so the subject is the member set of the tenant, as it
-// is for the daemon (TenantGrantSubject). The enable posture of the tenant
-// grants can_execute on a connector to that set, so the tenant switch of a
-// connector stops the member. The loop grant is a second check beside it.
+// has no person behind it, so the subject is the member set of the tenant, and
+// the check asks the tenant for tenant_can_execute (catalog.TenantAuthorizer).
+// The tenant switch of a connector therefore stops the member.
+//
+// A member gets no user or team deny, because it has no user or team. That is
+// bounded: only a tenant admin issues the loop grant of a member, and the grant
+// covers a class of tools and nothing more. The loop grant is a second check
+// beside the tenant check, and a member with no grant calls nothing.
 func memberCaller(m memberCall) catalog.Caller {
 	return catalog.Caller{Subject: TenantGrantSubject(m.tenant), Tenant: m.tenant, Mission: m.bankID}
 }
@@ -139,7 +149,7 @@ func (s *HarnessCallbackService) serveMemberMetaTool(ctx context.Context, req *h
 	}
 	// The rest of the path reads the verified context, never the request.
 	req = &harnesspb.CallToolProtoRequest{Context: m.contextInfo(), Name: req.GetName(), InputJson: req.GetInputJson()}
-	handler := s.metaHandler(req)
+	handler := s.metaHandler(req, true)
 	caller := memberCaller(m)
 	switch req.GetName() {
 	case metatool.SearchToolsName:
@@ -226,7 +236,7 @@ func (s *HarnessCallbackService) serveMetaTool(ctx context.Context, req *harness
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the mission policy could not be loaded"), nil
 	}
 
-	handler := s.metaHandler(req)
+	handler := s.metaHandler(req, false)
 	caller := catalogCaller(ctx, state)
 
 	switch req.GetName() {
@@ -531,13 +541,11 @@ func (s *HarnessCallbackService) RecordToolCall(ctx context.Context, rec metatoo
 		uuid.NewString(), rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText, rec.GrantID, string(rec.ErrCode))
 }
 
-// TenantGrantSubject is the FGA subject of a connector call that the daemon
-// makes for a tenant, with no agent behind it. It is the member set of the
-// tenant. The catalog authorizer answers can_execute for this subject from the
-// tenant_enabled tuple and the tenant execute kill switch of the component
-// (catalog.FGAAuthorizer), because a Check of the userset on can_execute is
-// false for every component. A tenant kill switch on the connector therefore
-// also stops the call of the daemon.
+// TenantGrantSubject is the subject of a connector call that the daemon makes
+// for a tenant, with no person or agent behind it. It is the member set of the
+// tenant, and it is the actor of the audit record. It is not an FGA user for a
+// can_execute check, because a userset is a member of nothing. The check asks
+// the tenant for tenant_can_execute (catalog.TenantAuthorizer).
 func TenantGrantSubject(tenant string) string { return catalog.TenantSetSubject(tenant) }
 
 // CallConnectorForTenant runs one connector call that the daemon makes for a
@@ -558,34 +566,46 @@ func (s *HarnessCallbackService) CallConnectorForTenant(
 // CallConnectorForMission runs the connector call of a TOOL node of a mission
 // (gibson#1469). It takes the same path as CallConnectorForTenant and
 // invoke_tool, metatool.Handler.Call, so a node gets the same can_execute check,
-// the tenant kill switch, the approval mark, the audit records and the flight
-// recorder as an agent does. The records name the work item of the node.
+// the approval mark, the audit records and the flight recorder as an agent does.
+// The records name the work item of the node.
 //
-// The subject of the can_execute check is TenantGrantSubject, the member set of
-// the tenant. That set holds can_execute on a connector only while the tenant
-// has the connector enabled (catalogEnablePosture), so a connector that the
-// tenant did not enable, or that its kill switch stops, is refused. The call is
-// not a call of the daemon, and the handler refuses a tool with the role merge
-// or daemon for a node. The mission policy of the run applies: the deny list of
-// the stored definition and the state of the run. The run must belong to the
-// tenant and to the mission of the node. A policy that cannot be read refuses
-// the call.
+// The node runs as the person who started the mission, as agent dispatch does
+// (authorizeComponentDispatch). The subject of the can_execute check is the
+// initiator, an FGA user, so a user or team execute deny of that person stops
+// the node. A mission with no initiator refuses the call: a node gets no
+// authority from the tenant. The call is not a call of the daemon, and the
+// handler refuses a tool with the role merge or daemon for a node. The mission
+// policy of the run applies: the deny list of the stored definition and the state
+// of the run. The run must belong to the tenant and to the mission of the node. A
+// policy that cannot be read refuses the call.
 func (s *HarnessCallbackService) CallConnectorForMission(
-	ctx context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any,
+	ctx context.Context, tenant, missionID, runID, workID, initiator, connector, tool string, args map[string]any,
 ) (any, error) {
-	if runID == "" {
-		return nil, errors.New("a connector call of a mission node needs the run of the mission")
+	if !strings.HasPrefix(initiator, "user:") || len(initiator) == len("user:") {
+		return nil, errors.New("a connector call of a mission node needs the person who started the mission")
 	}
-	state, err := s.runStateFor(ctx, tenant, runID)
+	policy, err := s.missionNodePolicy(ctx, tenant, missionID, runID)
 	if err != nil {
 		return nil, err
 	}
-	if state.MissionID != missionID {
-		return nil, fmt.Errorf("run %q does not belong to the mission of the node", runID)
-	}
-	policy, err := s.policyFromState(ctx, state)
+	return s.callConnectorAs(ctx, connectorCallAs{
+		tenant: tenant, missionID: missionID, runID: runID, workID: workID, connector: connector, tool: tool,
+		args: args, policy: policy, node: true, initiator: initiator,
+	})
+}
+
+// CallConnectorForMissionAsTenant runs the read of a node that the daemon makes
+// for itself: the dependency alerts of a scan, which the daemon maps to findings
+// and submits to the World (gibson#1469). It is the call of CallConnectorForMission
+// with the tenant as the subject, as CallConnectorForTenant has it, and with the
+// mission policy of the run. It is for the nodes that the daemon ingests, and a
+// TOOL node of a mission never takes it.
+func (s *HarnessCallbackService) CallConnectorForMissionAsTenant(
+	ctx context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any,
+) (any, error) {
+	policy, err := s.missionNodePolicy(ctx, tenant, missionID, runID)
 	if err != nil {
-		return nil, fmt.Errorf("the mission policy of run %q: %w", runID, err)
+		return nil, err
 	}
 	return s.callConnectorAs(ctx, connectorCallAs{
 		tenant: tenant, missionID: missionID, runID: runID, workID: workID, connector: connector, tool: tool,
@@ -593,11 +613,35 @@ func (s *HarnessCallbackService) CallConnectorForMission(
 	})
 }
 
+// missionNodePolicy checks that the run belongs to the tenant and to the mission
+// of the node, and returns the mission policy of the run.
+func (s *HarnessCallbackService) missionNodePolicy(ctx context.Context, tenant, missionID, runID string) (metatool.MissionPolicy, error) {
+	if runID == "" {
+		return metatool.MissionPolicy{}, errors.New("a connector call of a mission node needs the run of the mission")
+	}
+	state, err := s.runStateFor(ctx, tenant, runID)
+	if err != nil {
+		return metatool.MissionPolicy{}, err
+	}
+	if state.MissionID != missionID {
+		return metatool.MissionPolicy{}, fmt.Errorf("run %q does not belong to the mission of the node", runID)
+	}
+	policy, err := s.policyFromState(ctx, state)
+	if err != nil {
+		return metatool.MissionPolicy{}, fmt.Errorf("the mission policy of run %q: %w", runID, err)
+	}
+	return policy, nil
+}
+
 type connectorCallAs struct {
 	tenant, missionID, runID, workID, connector, tool string
 	args                                              map[string]any
 	policy                                            metatool.MissionPolicy
 	daemon, node                                      bool
+	// initiator is the FGA user of the person who started the mission. With it
+	// the can_execute check asks that person. With none, the call is a call of
+	// the daemon for the tenant, and the check asks the tenant.
+	initiator string
 }
 
 // callConnectorAs is the one function behind the two calls above.
@@ -610,6 +654,12 @@ func (s *HarnessCallbackService) callConnectorAs(ctx context.Context, c connecto
 	}
 	tid := toolid.ID{Source: toolid.SourceMCP, Connector: c.connector, Tool: c.tool}
 	subject := TenantGrantSubject(c.tenant)
+	var authorizer catalog.Authorizer = catalog.NewFGAAuthorizer(s.componentAuthorizer)
+	if c.initiator != "" {
+		subject = c.initiator
+	} else {
+		authorizer = catalog.NewTenantAuthorizer(s.componentAuthorizer, authorizer)
+	}
 	tenantID, err := auth.NewTenantID(c.tenant)
 	if err != nil {
 		return nil, fmt.Errorf("connector call for tenant %q: %w", c.tenant, err)
@@ -617,7 +667,6 @@ func (s *HarnessCallbackService) callConnectorAs(ctx context.Context, c connecto
 	ctx = auth.ContextWithTenantString(ctx, c.tenant)
 	ctx = auth.WithIdentity(ctx, auth.Identity{Subject: subject, Tenant: tenantID, CredentialType: auth.CredentialOIDCUser})
 
-	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
 	handler := metatool.NewHandler(nil, authorizer, s.connectors).WithApprovalGate(s.toolApproval)
 	result, err := handler.Call(ctx, metatool.Call{
 		Caller:    catalog.Caller{Subject: subject, Tenant: c.tenant, Mission: c.missionID},

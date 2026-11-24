@@ -296,9 +296,13 @@ func TestDispatchTool_PassesTheNodeNetworkToTheTool(t *testing.T) {
 
 type fakeMissionConnector struct {
 	tenant, mission, run, work, connector, tool string
-	args                                        map[string]any
-	result                                      any
-	err                                         error
+	// initiator is the person of the last call that ran as a person. asTenant
+	// says that the last call ran as the tenant.
+	initiator string
+	asTenant  bool
+	args      map[string]any
+	result    any
+	err       error
 	// errs are the errors of the first calls, in order. The call after the last
 	// one returns result and err.
 	errs []error
@@ -318,12 +322,25 @@ func (f *fakeMissionConnector) callCount() int {
 }
 
 func (f *fakeMissionConnector) CallConnectorForMission(
+	_ context.Context, tenant, missionID, runID, workID, initiator, connector, tool string, args map[string]any,
+) (any, error) {
+	return f.call(tenant, missionID, runID, workID, initiator, false, connector, tool, args)
+}
+
+func (f *fakeMissionConnector) CallConnectorForMissionAsTenant(
 	_ context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any,
+) (any, error) {
+	return f.call(tenant, missionID, runID, workID, "", true, connector, tool, args)
+}
+
+func (f *fakeMissionConnector) call(
+	tenant, missionID, runID, workID, initiator string, asTenant bool, connector, tool string, args map[string]any,
 ) (any, error) {
 	time.Sleep(f.delay)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.tenant, f.mission, f.run, f.work, f.connector, f.tool, f.args = tenant, missionID, runID, workID, connector, tool, args
+	f.initiator, f.asTenant = initiator, asTenant
 	f.calls++
 	if f.calls <= len(f.errs) {
 		return nil, f.errs[f.calls-1]
@@ -339,7 +356,7 @@ func TestDispatchTool_AConnectorToolTakesTheGovernedPath(t *testing.T) {
 	conn := &fakeMissionConnector{result: map[string]any{"alerts": []any{}}}
 	b := newBrainExecutor(nil, slog.Default())
 	b.connectors = conn
-	bind := &missionBinding{ctx: context.Background(), harness: h, tenant: "acme", runID: "run-9"}
+	bind := &missionBinding{ctx: context.Background(), harness: h, tenant: "acme", runID: "run-9", initiator: "user:alice"}
 
 	out, err := b.dispatchTool(bind, brain.DispatchRequest{
 		WorkID: "w1", MissionID: "m1", Kind: "tool", Target: "mcp:github-fixloop:read_file", Input: `{"path":"go.mod"}`,
@@ -358,6 +375,10 @@ func TestDispatchTool_AConnectorToolTakesTheGovernedPath(t *testing.T) {
 	}
 	if conn.args["path"] != "go.mod" {
 		t.Errorf("args = %v", conn.args)
+	}
+	// The node runs as the person who started the mission, never as the tenant.
+	if conn.initiator != "user:alice" || conn.asTenant {
+		t.Errorf("the node ran as initiator %q (as tenant: %v), want user:alice", conn.initiator, conn.asTenant)
 	}
 	if h.gotName != "" {
 		t.Errorf("the harness tool path ran for %q", h.gotName)

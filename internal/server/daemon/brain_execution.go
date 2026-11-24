@@ -826,7 +826,10 @@ func agentWorkFailure(workID, runID string, err error) brain.WorkCompleted {
 // missionConnectorCaller makes the connector call of a TOOL node.
 // harness.CallbackManager satisfies it.
 type missionConnectorCaller interface {
-	CallConnectorForMission(ctx context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any) (any, error)
+	// CallConnectorForMission runs as the initiator, the person who started the mission.
+	CallConnectorForMission(ctx context.Context, tenant, missionID, runID, workID, initiator, connector, tool string, args map[string]any) (any, error)
+	// CallConnectorForMissionAsTenant is the read of a node that the daemon makes for itself.
+	CallConnectorForMissionAsTenant(ctx context.Context, tenant, missionID, runID, workID, connector, tool string, args map[string]any) (any, error)
 }
 
 // maxApprovalWait is the longest that a TOOL node waits for an approval when it
@@ -899,6 +902,19 @@ func (b *brainExecutor) callConnectorNode(
 	bind *missionBinding, missionID, workID string, tid toolid.ID, args map[string]any,
 ) (any, error) {
 	res, err := b.connectors.CallConnectorForMission(bind.ctx, bind.tenant, missionID, bind.runID, workID,
+		bind.initiator, tid.Connector, tid.Tool, args)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // the caller names the tool and wraps it
+	}
+	return res, nil
+}
+
+// callConnectorDaemon makes the read of a node that the daemon makes for itself,
+// with the tenant as the subject. Only the scan alerts node takes it.
+func (b *brainExecutor) callConnectorDaemon(
+	bind *missionBinding, missionID, workID string, tid toolid.ID, args map[string]any,
+) (any, error) {
+	res, err := b.connectors.CallConnectorForMissionAsTenant(bind.ctx, bind.tenant, missionID, bind.runID, workID,
 		tid.Connector, tid.Tool, args)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // the caller names the tool and wraps it
