@@ -54,16 +54,6 @@ func serverPod(ci *connectorv1alpha1.ConnectorInstance) podLabels {
 	}}
 }
 
-// podsOf returns the pods that a connector of this shape runs. A Remote
-// connector has no server pod, because the runner deploys no workload for a
-// remote URL (upstream ToolHive v0.12.1, in the runner source).
-func podsOf(ci *connectorv1alpha1.ConnectorInstance) []podLabels {
-	if ci.Spec.Shape == connectorv1alpha1.ConnectorShapeRemote {
-		return []podLabels{proxyPod(ci)}
-	}
-	return []podLabels{proxyPod(ci), serverPod(ci)}
-}
-
 // ciliumSelects reports whether the endpointSelector of a policy matches the
 // pod.
 func ciliumSelects(t *testing.T, u *unstructured.Unstructured, pod podLabels) bool {
@@ -305,8 +295,9 @@ func TestProxyFindingsFlagTheFaults(t *testing.T) {
 		return u
 	}
 	allPrivate := func() []interface{} {
-		var cidrs []interface{}
-		for _, d := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8", "100.64.0.0/10"} {
+		ranges := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8", "100.64.0.0/10"}
+		cidrs := make([]interface{}, 0, len(ranges))
+		for _, d := range ranges {
 			cidrs = append(cidrs, map[string]interface{}{"cidr": d})
 		}
 		return []interface{}{map[string]interface{}{"toCIDRSet": cidrs}}
