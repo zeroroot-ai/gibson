@@ -56,8 +56,8 @@ func UnaryInterceptor(v protovalidate.Validator) grpc.UnaryServerInterceptor {
 }
 
 // StreamInterceptor returns the streaming
-// equivalent. Validates the first message of each stream by
-// wrapping the ServerStream's RecvMsg.
+// equivalent. It validates every message that the handler receives from a
+// stream, by wrapping the RecvMsg of the ServerStream.
 func StreamInterceptor(v protovalidate.Validator) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		wrapped := &validatingServerStream{ServerStream: ss, validator: v}

@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -55,8 +56,14 @@ func (r *recordingCallback) CreateMission(
 // callback listener, with the validator that Start builds, and returns a client.
 func callbackChainClient(t *testing.T) (harnesspb.HarnessCallbackServiceClient, *recordingCallback) {
 	t.Helper()
+	return callbackChainClientWith(t, &fakeGrantVerifier{})
+}
+
+// callbackChainClientWith is callbackChainClient with the given grant verifier.
+func callbackChainClientWith(t *testing.T, verifier TaskGrantVerifier) (harnesspb.HarnessCallbackServiceClient, *recordingCallback) {
+	t.Helper()
 	s, _ := claimService(t)
-	grantUnary, _ := taskGrantScopeInterceptors(getter(&fakeGrantVerifier{}),
+	grantUnary, _ := taskGrantScopeInterceptors(getter(verifier),
 		&forkGuard{ledger: s.forkLedger, identity: s.sandboxIdentity}, slog.Default())
 	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(s.identityUnaryChain(grantUnary, claimChainValidator(t))...))
 	rec := &recordingCallback{service: s}
@@ -129,6 +136,37 @@ func TestCallbackChain_CreateMissionCatalogParamsCap(t *testing.T) {
 	}
 }
 
+// The validation runs after the identity and the grant. A request with no
+// identity gets Unauthenticated, and a request with a grant that cannot be
+// verified gets Unauthenticated too. Neither learns that the request breaks a
+// rule (gibson#1668).
+func TestCallbackChain_ValidationRunsAfterAuthAndGrant(t *testing.T) {
+	bad := &harnesspb.CreateMissionRequest{CatalogMission: "recon", CatalogParams: pairsOf(65)}
+
+	t.Run("no identity", func(t *testing.T) {
+		client, rec := callbackChainClient(t)
+		_, err := client.CreateMission(context.Background(), bad)
+		if got := status.Code(err); got != codes.Unauthenticated {
+			t.Fatalf("code = %v (%v), want Unauthenticated", got, err)
+		}
+		if rec.reached != 0 {
+			t.Fatalf("handler reached %d times, want 0", rec.reached)
+		}
+	})
+
+	t.Run("grant that cannot be verified", func(t *testing.T) {
+		client, rec := callbackChainClientWith(t, &fakeGrantVerifier{err: errors.New("bad signature")})
+		ctx := metadata.AppendToOutgoingContext(agentCallCtx(), taskGrantHeader, "not-a-real-grant")
+		_, err := client.CreateMission(ctx, bad)
+		if got := status.Code(err); got != codes.Unauthenticated {
+			t.Fatalf("code = %v (%v), want Unauthenticated", got, err)
+		}
+		if rec.reached != 0 {
+			t.Fatalf("handler reached %d times, want 0", rec.reached)
+		}
+	})
+}
+
 // freeLoopbackPort returns a port that no listener holds at the time of the call.
 func freeLoopbackPort(t *testing.T) int {
 	t.Helper()
@@ -165,17 +203,21 @@ func TestCallbackServer_StartRunsTheProtovalidateInterceptor(t *testing.T) {
 	client := harnesspb.NewHarnessCallbackServiceClient(conn)
 
 	req := &harnesspb.CreateMissionRequest{CatalogMission: "recon", CatalogParams: pairsOf(65)}
-	var callErr error
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		_, callErr = client.CreateMission(agentCallCtx(), req, grpc.WaitForReady(true))
-		if status.Code(callErr) != codes.Unavailable {
-			break
+	callCtx, callCancel := context.WithTimeout(agentCallCtx(), 10*time.Second)
+	defer callCancel()
+	type result struct{ err error }
+	called := make(chan result, 1)
+	go func() {
+		_, err := client.CreateMission(callCtx, req, grpc.WaitForReady(true))
+		called <- result{err}
+	}()
+	select {
+	case startErr := <-done:
+		t.Fatalf("Start returned before the call finished: %v", startErr)
+	case r := <-called:
+		if status.Code(r.err) != codes.InvalidArgument {
+			t.Fatalf("code = %v (%v), want InvalidArgument", status.Code(r.err), r.err)
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if status.Code(callErr) != codes.InvalidArgument {
-		t.Fatalf("code = %v (%v), want InvalidArgument", status.Code(callErr), callErr)
 	}
 
 	cancel()
