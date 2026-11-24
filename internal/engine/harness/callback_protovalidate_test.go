@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/grpcvalidate"
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/headers"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
@@ -125,5 +126,62 @@ func TestCallbackChain_CreateMissionCatalogParamsCap(t *testing.T) {
 				t.Fatalf("handler reached %d times, want %d", rec.reached, tc.wantReach)
 			}
 		})
+	}
+}
+
+// freeLoopbackPort returns a port that no listener holds at the time of the call.
+func freeLoopbackPort(t *testing.T) int {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lis.Close()
+	tcp, ok := lis.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address %T is not a TCP address", lis.Addr())
+	}
+	return tcp.Port
+}
+
+// The real server that Start builds refuses a CreateMission with 65
+// catalog_params pairs as InvalidArgument (gibson#1668).
+func TestCallbackServer_StartRunsTheProtovalidateInterceptor(t *testing.T) {
+	port := freeLoopbackPort(t)
+	s := NewCallbackServerWithRegistry(slog.Default(), port, NewCallbackHarnessRegistry(), testEventBus())
+	s.service.forkLedger = newForkLedger(t)
+	s.service.componentRegistry = struct{ component.ComponentRegistry }{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Start(ctx) }()
+
+	conn, err := grpc.NewClient(fmt.Sprintf("127.0.0.1:%d", port),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	client := harnesspb.NewHarnessCallbackServiceClient(conn)
+
+	req := &harnesspb.CreateMissionRequest{CatalogMission: "recon", CatalogParams: pairsOf(65)}
+	var callErr error
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		_, callErr = client.CreateMission(agentCallCtx(), req, grpc.WaitForReady(true))
+		if status.Code(callErr) != codes.Unavailable {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if status.Code(callErr) != codes.InvalidArgument {
+		t.Fatalf("code = %v (%v), want InvalidArgument", status.Code(callErr), callErr)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Start did not return after the context ended")
 	}
 }
