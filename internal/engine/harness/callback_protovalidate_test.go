@@ -136,7 +136,7 @@ func freeLoopbackPort(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lis.Close()
+	defer func() { _ = lis.Close() }()
 	tcp, ok := lis.Addr().(*net.TCPAddr)
 	if !ok {
 		t.Fatalf("listener address %T is not a TCP address", lis.Addr())
