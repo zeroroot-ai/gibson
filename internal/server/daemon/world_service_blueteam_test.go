@@ -413,13 +413,14 @@ func TestResolveFixAttempts_Refusals(t *testing.T) {
 // when the tenant has no connector to read with.
 func TestResolveFixAttempts_MergeRequestClosed(t *testing.T) {
 	seed := func(t *testing.T) (*worldServer, *brain.Registry) {
+		t.Helper()
 		srv, reg := newBlueServer(t, blueAt(10))
 		submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"},
 			brain.FixCloseWaiting{ID: "f1", JobID: "j1", MergeRequest: "g/p!7", Waiting: true, Reason: "down", At: blueAt(1)},
 			brain.FixCloseWaiting{ID: "f1", JobID: "j2", MergeRequest: "g/p!8", Waiting: true, Reason: "down", At: blueAt(2)})
 		return srv, reg
 	}
-	ctx := auth.ContextWithActingUser(worldTenantCtx("acme"), "person-1")
+	actor := func() context.Context { return auth.ContextWithActingUser(worldTenantCtx("acme"), "person-1") }
 	req := &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "merge_request_closed"}
 	waits := func(reg *brain.Registry) int {
 		for _, f := range reg.For("acme").Findings() {
@@ -438,40 +439,40 @@ func TestResolveFixAttempts_MergeRequestClosed(t *testing.T) {
 	t.Run("an open merge request refuses", func(t *testing.T) {
 		srv, reg := seed(t)
 		var seen []string
-		_, err := srv.WithMergeOpen(host(true, true, nil, &seen)).ResolveFixAttempts(ctx, req)
+		_, err := srv.WithMergeOpen(host(true, true, nil, &seen)).ResolveFixAttempts(actor(), req)
 		require.Equal(t, codes.FailedPrecondition, status.Code(err))
 		require.Equal(t, 2, waits(reg))
 	})
 	t.Run("a failed read refuses", func(t *testing.T) {
 		srv, reg := seed(t)
 		var seen []string
-		_, err := srv.WithMergeOpen(host(false, true, errors.New("down"), &seen)).ResolveFixAttempts(ctx, req)
+		_, err := srv.WithMergeOpen(host(false, true, errors.New("down"), &seen)).ResolveFixAttempts(actor(), req)
 		require.Equal(t, codes.Unavailable, status.Code(err))
 		require.Equal(t, 2, waits(reg))
 	})
 	t.Run("closed on the host ends both waits", func(t *testing.T) {
 		srv, reg := seed(t)
 		var seen []string
-		resp, err := srv.WithMergeOpen(host(false, true, nil, &seen)).ResolveFixAttempts(ctx, req)
+		resp, err := srv.WithMergeOpen(host(false, true, nil, &seen)).ResolveFixAttempts(actor(), req)
 		require.NoError(t, err)
 		require.EqualValues(t, 2, resp.EndedWaits)
 		require.ElementsMatch(t, []string{"g/p!7", "g/p!8"}, seen)
 		require.Zero(t, waits(reg))
-		waitsNow, err := srv.ListWaitingOnPerson(ctx, &worldpb.ListWaitingOnPersonRequest{})
+		waitsNow, err := srv.ListWaitingOnPerson(actor(), &worldpb.ListWaitingOnPersonRequest{})
 		require.NoError(t, err)
 		require.Empty(t, waitsNow.Items)
 	})
 	t.Run("no connector trusts the person", func(t *testing.T) {
 		srv, reg := seed(t)
 		var seen []string
-		_, err := srv.WithMergeOpen(host(false, false, nil, &seen)).ResolveFixAttempts(ctx, req)
+		_, err := srv.WithMergeOpen(host(false, false, nil, &seen)).ResolveFixAttempts(actor(), req)
 		require.NoError(t, err)
 		require.Zero(t, waits(reg))
 	})
 	t.Run("no wait is a failed precondition", func(t *testing.T) {
 		srv, reg := newBlueServer(t, blueAt(10))
 		submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"})
-		_, err := srv.ResolveFixAttempts(ctx, req)
+		_, err := srv.ResolveFixAttempts(actor(), req)
 		require.Equal(t, codes.FailedPrecondition, status.Code(err))
 	})
 	t.Run("a retry leaves the close waits", func(t *testing.T) {
@@ -479,7 +480,7 @@ func TestResolveFixAttempts_MergeRequestClosed(t *testing.T) {
 		for i, j := range []string{"a", "b", "c"} {
 			submit(t, reg, "acme", brain.FixAttemptFailed{ID: "f1", JobID: j, Verdict: "failed", At: blueAt(3 + i)})
 		}
-		resp, err := srv.ResolveFixAttempts(ctx, &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "retry"})
+		resp, err := srv.ResolveFixAttempts(actor(), &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "retry"})
 		require.NoError(t, err)
 		require.EqualValues(t, 3, resp.ClearedAttempts)
 		require.Equal(t, 2, waits(reg))

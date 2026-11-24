@@ -196,8 +196,7 @@ func fixAttemptsReason(f brain.FindingSnapshot) string {
 
 // closeWaitReason joins the close waits of a finding into one item: the earliest
 // start, and the merge requests that stay open with the job and the reason of each.
-func closeWaitReason(waits []brain.FixCloseWait) (time.Time, string) {
-	var since time.Time
+func closeWaitReason(waits []brain.FixCloseWait) (since time.Time, reason string) {
 	parts := make([]string, 0, len(waits))
 	for _, w := range waits {
 		if since.IsZero() || (!w.Since.IsZero() && w.Since.Before(since)) {

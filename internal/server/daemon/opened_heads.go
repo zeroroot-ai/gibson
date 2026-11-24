@@ -68,7 +68,7 @@ func (w worldOpenedHeads) OpenedHead(tenant, mergeRequest, jobID string) (opened
 
 // OpenedBy implements openedHeadReader.
 func (w worldOpenedHeads) OpenedBy(tenant, jobID string) []string {
-	if w.reg == nil || jobID == "" {
+	if jobID == "" {
 		return nil
 	}
 	var out []string
