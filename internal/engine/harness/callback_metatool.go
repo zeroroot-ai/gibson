@@ -771,9 +771,9 @@ func authzFaultCode(err error) commonpb.ErrorCode {
 		return commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE
 	case metatool.AuthzFaultNotSetUp:
 		return commonpb.ErrorCode_ERROR_CODE_CONFIG_ERROR
-	default:
-		return commonpb.ErrorCode_ERROR_CODE_INTERNAL
+	case metatool.AuthzFaultInternal:
 	}
+	return commonpb.ErrorCode_ERROR_CODE_INTERNAL
 }
 
 // authzFaultText is the fixed text of a failed authorization check.

@@ -281,7 +281,7 @@ func authzCheckStatus(err error) error {
 		return status.Error(codes.Unavailable, msg)
 	case metatool.AuthzFaultNotSetUp:
 		return status.Error(codes.FailedPrecondition, msg)
-	default:
-		return status.Error(codes.Internal, msg)
+	case metatool.AuthzFaultInternal:
 	}
+	return status.Error(codes.Internal, msg)
 }

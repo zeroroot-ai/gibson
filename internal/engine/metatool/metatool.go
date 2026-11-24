@@ -91,7 +91,7 @@ const (
 // cause stays in the error chain for the server log. Both callers of
 // Handler.Call use this function, so CallTool and invoke_tool answer the same
 // failure in the same way.
-func ClassifyAuthzFailure(err error) (AuthzFault, string) {
+func ClassifyAuthzFailure(err error) (fault AuthzFault, message string) {
 	switch {
 	case errors.Is(err, authz.ErrFgaTimeout):
 		return AuthzFaultTimeout, "the authorization check timed out"
