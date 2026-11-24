@@ -56,7 +56,7 @@ _params: {
 	imageRef?:      string
 	// forgeConnector is an enum, so a caller cannot name another connector for
 	// the node that the daemon ingests.
-	forgeConnector?: "github-fixloop" | "gitlab-fixloop"
+	forgeConnector?: "github-fixloop" | "gitlab-fixloop" @example("github-fixloop")
 }
 
 // Which branch runs. Each is true only when its own parameter is present.
