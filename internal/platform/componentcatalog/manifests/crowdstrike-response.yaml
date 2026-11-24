@@ -13,7 +13,7 @@ spec:
   vendor: crowdstrike
   class: edr
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-crowdstrike@sha256:8e86c461328c03a050c615ba0bd676f2b949120ecbe4af911d3921763b7268de
+  image: ghcr.io/zeroroot-ai/connectors-crowdstrike@sha256:c9674fa2e81fcf8a833ce7c71fbe8fd50587329832c3a3d542334014742d7d13
   transport: streamable-http
   port: 8080
   auth: none

@@ -1,8 +1,8 @@
 # GitLab fix loop connector. Zero Root builds the MCP server in zeroroot-ai/connectors
-# (gitlab-fixloop/, release v0.8.2), because the vendor publishes no server with these tools.
+# (gitlab-fixloop/, release v0.9.0), because the vendor publishes no server with these tools.
 # The image is public, signed and scanned. The catalog pins the digest of the image that the
-# tag 0.8.2 resolves to, not the digest in the release notes (connectors#41).
-# Source of the environment: gitlab-fixloop/README.md of zeroroot-ai/connectors at v0.8.2.
+# tag 0.9.0 resolves to. The release notes list the same digest (connectors#42).
+# Source of the environment: gitlab-fixloop/README.md of zeroroot-ai/connectors at v0.9.0.
 # The server speaks streamable HTTP on :8080 at /mcp.
 id: gitlab-fixloop
 kind: connector
@@ -14,7 +14,7 @@ spec:
   vendor: gitlab
   class: git-host
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-gitlab-fixloop@sha256:da68a30d4900ebac5c3136d1945c051b71494b744573626d3ddedf6caf720de8
+  image: ghcr.io/zeroroot-ai/connectors-gitlab-fixloop@sha256:92939ea954e4813b391bd67d31bdd9c2affd70dd28aabe70d204e70174b1b7f2
   # errorClasses: this image puts the class of a tool error in structuredContent.error.class
   # (connectors v0.8.0). The daemon trusts the class of this connector only.
   errorClasses: true
@@ -40,10 +40,11 @@ spec:
       patterns:
         - https://gitlab.com
       installPatterns: true
-  # The server serves nine tools at 0.8.2: merge_request_state,
+  # The server serves nine tools at 0.9.0: merge_request_state,
   # merge_merge_request, revert_merge_request, deployment_state,
   # open_merge_request, close_merge_request, read_file, list_tree and list_dependency_alerts. The fix agent opens a
-  # fix with open_merge_request and undoes it with close_merge_request.
+  # fix with open_merge_request and undoes it with close_merge_request. The tool close_merge_request
+  # takes an optional comment (connectors#44, release v0.9.0).
   # open_merge_request and close_merge_request never merge. The token needs the api scope.
   # The tools that the manifest does not name need only the grant, because the
   # entry has no response actions.

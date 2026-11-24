@@ -16,7 +16,7 @@ spec:
   vendor: microsoft
   class: identity
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-entra-id@sha256:649970bd5b42411999cd93efbd5fe58e67b0ffb0180231ec081023a179e2ac69
+  image: ghcr.io/zeroroot-ai/connectors-entra-id@sha256:9e21af3df0470242c2e13b9946bbdcdbd35b2ba84cf44404d2059b9f23b92114
   transport: streamable-http
   port: 8080
   auth: none
