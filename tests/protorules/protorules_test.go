@@ -317,7 +317,7 @@ func invalidRequest(t *testing.T, msg protoreflect.MessageDescriptor, xt protore
 
 // TestOneInvalidRequestForEachService sends one request that breaks a stated
 // rule to the validator of each service. The daemon runs the same validator in
-// its interceptor before the handler (internal/server/daemon/grpc_validate.go).
+// its interceptor before the handler (internal/infra/grpcvalidate/grpcvalidate.go).
 func TestOneInvalidRequestForEachService(t *testing.T) {
 	xt := fieldRuleExtension(t)
 	validator, err := protovalidate.New()

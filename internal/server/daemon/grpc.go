@@ -30,6 +30,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/reembed"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
+	"github.com/zeroroot-ai/gibson/internal/infra/grpcvalidate"
 	"github.com/zeroroot-ai/gibson/internal/infra/idempotency"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/bank"
@@ -430,12 +431,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// annotations against incoming proto.Message requests. Single
 	// validator instance, goroutine-safe, CEL-program-cached.
 	// Spec: mission-verb-noun-registry Requirement 10.
-	pvValidator, err := buildProtovalidateValidator()
+	pvValidator, err := grpcvalidate.NewValidator()
 	if err != nil {
 		return nil, fmt.Errorf("failed to build protovalidate validator: %w", err)
 	}
-	unaryInterceptors = append(unaryInterceptors, newProtovalidateUnaryInterceptor(pvValidator))
-	streamInterceptors = append(streamInterceptors, newProtovalidateStreamInterceptor(pvValidator))
+	unaryInterceptors = append(unaryInterceptors, grpcvalidate.UnaryInterceptor(pvValidator))
+	streamInterceptors = append(streamInterceptors, grpcvalidate.StreamInterceptor(pvValidator))
 
 	// 3. Identity interceptor — reads x-gibson-identity-* headers ext-authz
 	// emits and injects a typed Identity into the request context.

@@ -7,6 +7,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/grpcvalidate"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -55,18 +56,7 @@ func withErrorDetail(err error) error {
 		Code:   errorCodeFor(st.Code()),
 		Reason: reasonFor(st.Code()),
 	}
-	return attachDetail(err, st, detail)
-}
-
-// attachDetail returns st with detail in its details. When the detail cannot
-// be attached (st has the code OK, or the detail does not marshal), it
-// returns err as it was: the status is still correct without the detail.
-func attachDetail(err error, st *status.Status, detail *commonpb.ErrorDetail) error {
-	withDetail, derr := st.WithDetails(detail)
-	if derr != nil {
-		return err
-	}
-	return status.ErrorProto(withDetail.Proto())
+	return grpcvalidate.AttachDetail(err, st, detail)
 }
 
 // hasErrorDetail reports whether st already carries an ErrorDetail.

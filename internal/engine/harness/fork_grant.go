@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"time"
 
+	"buf.build/go/protovalidate"
+	"github.com/zeroroot-ai/gibson/internal/infra/grpcvalidate"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
@@ -382,9 +384,13 @@ func (m *minterForkGrants) MintForkGrant(_ context.Context, d ForkDispatch) (str
 // callback listener that builds the identity and binds the request to its
 // grant. CallbackServer.Start and the tests share it, so the order cannot
 // differ. The fork claim sets its tenant first: the sdk auth interceptor
-// refuses a call with no valid tenant.
-func (s *HarnessCallbackService) identityUnaryChain(grant grpc.UnaryServerInterceptor) []grpc.UnaryServerInterceptor {
-	return []grpc.UnaryServerInterceptor{s.claimForkTenantInterceptor(), auth.UnaryServerInterceptor(), grant}
+// refuses a call with no valid tenant. The protovalidate interceptor runs
+// last, so a caller with no identity or grant learns nothing about the rules
+// (gibson#1668).
+func (s *HarnessCallbackService) identityUnaryChain(grant grpc.UnaryServerInterceptor, pv protovalidate.Validator) []grpc.UnaryServerInterceptor {
+	return []grpc.UnaryServerInterceptor{
+		s.claimForkTenantInterceptor(), auth.UnaryServerInterceptor(), grant, grpcvalidate.UnaryInterceptor(pv),
+	}
 }
 
 // claimForkTenantInterceptor gives a ClaimFork call the tenant of its sandbox.
