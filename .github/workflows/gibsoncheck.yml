@@ -291,6 +291,11 @@ jobs:
           bash scripts/check-plugin-modules.sh --selftest
           bash scripts/check-plugin-modules.sh
 
+      # The sandbox recorder of the exit tests keeps only the member diagnostic
+      # lines. The selftest proves on a PR that a transcript line is dropped.
+      - name: Check the sandbox recorder of the exit tests
+        run: bash .github/scripts/record-sandboxes.sh --selftest
+
       # gibson#956: no plugin module adds a declaration that nothing reads.
       # The counter needs the Go toolchain of the root go.mod.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

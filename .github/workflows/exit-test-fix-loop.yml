@@ -44,6 +44,7 @@ on:
       - '.github/actions/aaif-exit-cluster/**'
       - '.github/scripts/run-e2e-job.sh'
       - '.github/workflows/exit-test-fix-loop.yml'
+      - '.github/scripts/record-sandboxes.sh'
   workflow_dispatch:
     inputs:
       charts-ref:
@@ -206,39 +207,13 @@ jobs:
               } >> "$E2E_OUT/tenant-watch.log" 2>&1 || true
             done
           }
-          # A bank member runs in a sandbox of setec. Its namespace has the label
-          # setec.zeroroot.ai/sandbox-namespace, and its pod ends with the cluster
-          # in a few minutes. Record these namespaces and setec-system every 20
-          # seconds. The record holds the status and the events of each pod, and
-          # never the spec, because the spec holds the key of the member. The
-          # log lines pass through a filter that hides an Anthropic key.
-          # The full record is the artifact file sandbox-watch.log.
-          hide_keys() { sed -E 's/sk-ant-[A-Za-z0-9_-]+/sk-ant-HIDDEN/g'; }
-          watch_sandboxes() {
-            while sleep 20; do
-              {
-                echo "=== $(date -u +%FT%TZ)"
-                kubectl get sandboxes.setec.zeroroot.ai -A -o wide
-                kubectl -n setec-system get pods -o wide
-                kubectl -n setec-system get events --sort-by=.lastTimestamp | tail -n 15
-                for ns in $(kubectl get ns -l setec.zeroroot.ai/sandbox-namespace -o name | cut -d/ -f2); do
-                  echo "--- namespace $ns"
-                  kubectl -n "$ns" get pods -o wide
-                  kubectl -n "$ns" get events --sort-by=.lastTimestamp | tail -n 30
-                  for pod in $(kubectl -n "$ns" get pods -o name); do
-                    kubectl -n "$ns" get "$pod" -o jsonpath='{.metadata.name}{" phase="}{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status}/{.reason} {end}{range .status.containerStatuses[*]}{.name}={.ready}/{.state} {end}{"\n"}'
-                    kubectl -n "$ns" logs "$pod" --all-containers --since=25s --prefix 2>&1 | hide_keys
-                  done
-                done
-                for pod in $(kubectl -n setec-system get pods -o name); do
-                  kubectl -n setec-system logs "$pod" --all-containers --since=25s --prefix 2>&1 | tail -n 40 | hide_keys
-                done
-              } >> "$E2E_OUT/sandbox-watch.log" 2>&1 || true
-            done
-          }
+          # A bank member runs in a sandbox of setec. The recorder writes the
+          # sandboxes, the pods, the events and the member diagnostic lines to
+          # sandbox-watch.log every 20 seconds. It never records a spec or the
+          # transcript of a member. See the header of the script.
           watch_tenant &
           watcher=$!
-          watch_sandboxes &
+          "${GITHUB_WORKSPACE}/gibson/.github/scripts/record-sandboxes.sh" watch "$E2E_OUT/sandbox-watch.log" &
           sandbox_watcher=$!
           trap 'kill "$watcher" "$sandbox_watcher" 2>/dev/null || true' EXIT
           gibson/.github/scripts/run-e2e-job.sh gibson-e2e-fix-loop 'TestFixLoop$' 250m \
