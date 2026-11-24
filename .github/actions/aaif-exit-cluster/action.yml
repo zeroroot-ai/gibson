@@ -231,36 +231,12 @@ runs:
             || { echo "::error::connector-install-patterns must be a JSON object of lists"; exit 1; }
           patterns_values="    connectorInstallPatterns: $(printf '%s' "${INSTALL_PATTERNS}" | jq -c .)"$'\n'
         fi
-        # A sandbox resolves names only through setec.netpol.resolvers, and its
-        # network policy subtracts the private ranges from every egress rule.
-        # That is right on EKS, where api.<domain> is a public record. On kind
-        # the API host is a record of CoreDNS behind the ClusterIP of Envoy. A
-        # member then fails with "getaddrinfo ENOTFOUND api.localhost.zeroroot.ai"
-        # and never sends a heartbeat (run 45338071403). The agent class may
-        # reach the kube-dns pods on 53 and the Envoy pods on https by selector,
-        # and it may use the kube-dns ClusterIP as its resolver. The bank exit
-        # test sets the same values. This is the test profile only.
+        # On kind the API host sits behind Envoy, so the agent sandbox class needs
+        # the kube-dns resolver and egress to kube-dns and Envoy. The script holds
+        # the reason and the ops. This is the test profile only.
         sandbox_params=""
         if [ "${WITH_KVM}" = "true" ]; then
-          COREDNS_IP=$(kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}')
-          [ -n "${COREDNS_IP}" ] || { echo "::error::no kube-dns ClusterIP to hand the sandboxes"; exit 1; }
-          cls='gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors'
-          sandbox_params=$(jq -nrc --arg ip "${COREDNS_IP}" --arg cls "${cls}" '
-            [ {n:"gibson-workloads.setec.netpol.resolvers[0]", v:$ip, s:true},
-              {n:($cls+"[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name"), v:"kube-system", s:true},
-              {n:($cls+"[0].podSelector.matchLabels.k8s-app"), v:"kube-dns", s:true},
-              {n:($cls+"[0].ports[0].protocol"), v:"UDP", s:true},
-              {n:($cls+"[0].ports[0].port"), v:"53", s:false},
-              {n:($cls+"[0].ports[1].protocol"), v:"TCP", s:true},
-              {n:($cls+"[0].ports[1].port"), v:"53", s:false},
-              {n:($cls+"[1].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name"), v:"gibson", s:true},
-              {n:($cls+"[1].podSelector.matchLabels.app\\.kubernetes\\.io/name"), v:"gibson-workloads", s:true},
-              {n:($cls+"[1].podSelector.matchLabels.app\\.kubernetes\\.io/component"), v:"envoy", s:true},
-              {n:($cls+"[1].ports[0].port"), v:"https", s:true}
-            ] | map({op:"add", path:"/spec/source/helm/parameters/-",
-                     value:({name:.n, value:.v} + (if .s then {forceString:true} else {} end))})
-            | map(","+tojson) | join("")')
-          echo "the agent class resolves through kube-dns at ${COREDNS_IP} and may reach the kube-dns and Envoy pods"
+          sandbox_params=$("${GITHUB_ACTION_PATH}/../../scripts/agent-class-reaches-api.sh")
         fi
         connector_params=""
         if [ "${BUILD_CONNECTOR_OPERATOR}" = "true" ]; then

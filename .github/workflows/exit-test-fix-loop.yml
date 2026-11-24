@@ -42,6 +42,7 @@ on:
       - 'tests/e2e/fix_loop_cases_test.go'
       - 'tests/e2e/helpers/**'
       - '.github/actions/aaif-exit-cluster/**'
+      - '.github/scripts/agent-class-reaches-api.sh'
       - '.github/scripts/run-e2e-job.sh'
       - '.github/workflows/exit-test-fix-loop.yml'
   workflow_dispatch:
