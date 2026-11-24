@@ -533,3 +533,58 @@ func TestCallTool_ANativeToolCallIsRecordedAndCarriesItsID(t *testing.T) {
 	assert.Equal(t, "nmap", got.Tool)
 	assert.Equal(t, "run-1", got.RunID)
 }
+
+// A direct mTLS peer has a SPIFFE ID as its subject, with no FGA type. The
+// check must name it as "user:<id>", as ext-authz does. FGA rejects the raw
+// ID as an invalid request.
+func TestCallTool_ASpiffeSubjectIsTypedBeforeTheFGACheck(t *testing.T) {
+	env := newConnectorEnv(t, true, nil)
+	az, ok := env.srv.authorizer.(*allowAuthorizer)
+	require.True(t, ok)
+
+	_, err := env.srv.CallTool(agentCtx("spiffe://example.org/platform/e2e-runner"), connectorReq(""))
+	require.NoError(t, err)
+	require.NotEmpty(t, az.seen)
+	for _, triple := range az.seen {
+		assert.NotContains(t, triple, "spiffe://", "the subject of a check must be typed")
+		assert.Contains(t, triple, "user:example.org/platform/e2e-runner|can_execute|")
+	}
+}
+
+// A check that errors is not a denial and not a tool failure. The call returns
+// a status, and the connector does not run.
+func TestCallTool_AFailedAuthorizationCheckReturnsAStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+		msg  string
+	}{
+		{"outage", fmt.Errorf("check: %w", authz.ErrFgaUnavailable), codes.Unavailable,
+			"the authorization service is unavailable"},
+		{"timeout", fmt.Errorf("check: %w", authz.ErrFgaTimeout), codes.DeadlineExceeded,
+			"the authorization check timed out"},
+		{"invalid request", fmt.Errorf("check: %w", authz.ErrInvalidArgument), codes.Internal,
+			"the authorization check failed"},
+		{"bad credentials", fmt.Errorf("check: %w", authz.ErrFgaUnauthenticated), codes.FailedPrecondition,
+			"the authorization service is not set up for this call"},
+		{"unknown fault", errors.New("boom"), codes.Internal, "the authorization check failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newConnectorEnv(t, true, nil)
+			az, ok := env.srv.authorizer.(*allowAuthorizer)
+			require.True(t, ok)
+			az.err = tc.err
+
+			resp, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq(""))
+			assert.Nil(t, resp)
+			assert.Equal(t, tc.code, status.Code(err))
+			// The message is the fixed text and nothing else, so no detail of
+			// the authz store (for example "authz: fga service unavailable")
+			// reaches the caller.
+			assert.Equal(t, tc.msg, status.Convert(err).Message())
+			assert.Empty(t, env.caller.calls)
+		})
+	}
+}

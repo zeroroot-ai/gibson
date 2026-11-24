@@ -28,6 +28,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
 // Reserved meta-tool names. These are presented to the LLM in place of the full
@@ -63,6 +64,46 @@ var ErrConnectorRateLimited = errors.New("metatool: the connector is rate limite
 // ErrUnauthorized is returned by Invoke when the caller may not invoke the
 // requested tool. Callers map it to a permission-denied result.
 var ErrUnauthorized = errors.New("metatool: not authorized to invoke tool")
+
+// ErrAuthzCheckFailed is returned when the can_execute check itself failed. It
+// is not a denial. The error chain also holds the cause of the check, for
+// example an authz sentinel, so a caller can tell an outage from a bad request.
+var ErrAuthzCheckFailed = errors.New("metatool: authorization check failed")
+
+// AuthzFault is the class of a can_execute check that failed. It is not a
+// denial.
+type AuthzFault int
+
+// The classes of a failed check.
+const (
+	// AuthzFaultInternal is a bad request or a fault with no known class.
+	AuthzFaultInternal AuthzFault = iota
+	// AuthzFaultTimeout is a check that ran out of time.
+	AuthzFaultTimeout
+	// AuthzFaultUnavailable is an authz store that did not answer.
+	AuthzFaultUnavailable
+	// AuthzFaultNotSetUp is an authz store with no credential, store or model.
+	AuthzFaultNotSetUp
+)
+
+// ClassifyAuthzFailure returns the class of a failed check and a fixed message
+// for the caller. The message names no detail of the authz store. The full
+// cause stays in the error chain for the server log. Both callers of
+// Handler.Call use this function, so CallTool and invoke_tool answer the same
+// failure in the same way.
+func ClassifyAuthzFailure(err error) (fault AuthzFault, message string) {
+	switch {
+	case errors.Is(err, authz.ErrFgaTimeout):
+		return AuthzFaultTimeout, "the authorization check timed out"
+	case errors.Is(err, authz.ErrFgaUnavailable):
+		return AuthzFaultUnavailable, "the authorization service is unavailable"
+	case errors.Is(err, authz.ErrFgaUnauthenticated), errors.Is(err, authz.ErrFgaNotFound),
+		errors.Is(err, authz.ErrModelNotFound):
+		return AuthzFaultNotSetUp, "the authorization service is not set up for this call"
+	default:
+		return AuthzFaultInternal, "the authorization check failed"
+	}
+}
 
 // ConnectorCaller calls one tool of one connector of a tenant through MCP
 // and returns the JSON-decodable result. The daemon is the one MCP client
@@ -141,7 +182,7 @@ func (h *Handler) Authorize(ctx context.Context, caller catalog.Caller, id strin
 	}
 	allowed, err := h.authz.CanExecute(ctx, caller, tid)
 	if err != nil {
-		return toolid.ID{}, fmt.Errorf("metatool: authorization check failed for %q: %w", id, err)
+		return toolid.ID{}, fmt.Errorf("%w for %q: %w", ErrAuthzCheckFailed, id, err)
 	}
 	if !allowed {
 		return toolid.ID{}, fmt.Errorf("%w: %s", ErrUnauthorized, id)

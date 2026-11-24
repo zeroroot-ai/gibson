@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -111,15 +112,17 @@ const systemComponentName = "_system"
 // catalogCaller builds the catalog caller from the request identity.
 //
 // ext-authz places a typed FGA principal ref in Identity.Subject for a COMPONENT
-// caller ("agent_principal:<id>"), which is exactly what the FGA check wants, so
-// it is used verbatim — no prefixing.
+// caller ("agent_principal:<id>"), which is exactly what the FGA check wants.
+// principal.FGAUser keeps such a ref unchanged. A subject with no type, such as
+// the SPIFFE ID of a direct mTLS peer, becomes "user:<id>", the same shape that
+// ext-authz gives it. FGA rejects an untyped subject as an invalid request.
 func (s *ComponentServiceServer) catalogCaller(ctx context.Context, tenant string) (catalog.Caller, error) {
 	id, err := auth.IdentityFromContext(ctx)
 	if err != nil || id.Subject == "" {
 		return catalog.Caller{}, status.Errorf(codes.Unauthenticated,
 			"caller identity unavailable; discovery requires an authenticated principal")
 	}
-	return catalog.Caller{Subject: id.Subject, Tenant: tenant}, nil
+	return catalog.Caller{Subject: principal.FGAUser(id), Tenant: tenant}, nil
 }
 
 // candidateTags renders the catalog's structured facets as descriptor tags.

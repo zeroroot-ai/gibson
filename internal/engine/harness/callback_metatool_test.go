@@ -23,6 +23,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
 
@@ -850,6 +851,67 @@ func TestMetaInvoke_ConnectorFailuresGetTheCodeOfTheirKind(t *testing.T) {
 			}
 			if got := resp.GetError().GetCode(); got != c.want {
 				t.Fatalf("code = %v, want %v (%v)", got, c.want, resp.GetError())
+			}
+		})
+	}
+}
+
+// errAuthz is an authorizer whose check fails with a fixed error.
+type errAuthz struct{ err error }
+
+func (e errAuthz) CanExecute(context.Context, catalog.Caller, toolid.ID) (bool, error) {
+	return false, e.err
+}
+
+// A can_execute check that fails is not a denial. invoke_tool gives it the same
+// class and the same fixed text as CallTool (metatool.ClassifyAuthzFailure). An
+// outage is UNAVAILABLE, so a member retries it. The reply names no detail of
+// the authz store.
+func TestMetaInvoke_AFailedAuthorizationCheckGetsTheCodeOfItsClass(t *testing.T) {
+	cases := map[string]struct {
+		err      error
+		wantCode commonpb.ErrorCode
+		wantText string
+	}{
+		"an outage": {
+			fmt.Errorf("check: %w", authz.ErrFgaUnavailable), commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+			"the authorization service is unavailable",
+		},
+		"a timeout": {
+			fmt.Errorf("check: %w", authz.ErrFgaTimeout), commonpb.ErrorCode_ERROR_CODE_TIMEOUT,
+			"the authorization check timed out",
+		},
+		"an invalid request": {
+			fmt.Errorf("check: %w", authz.ErrInvalidArgument), commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+			"the authorization check failed",
+		},
+		"a store that is not set up": {
+			fmt.Errorf("check: %w", authz.ErrFgaUnauthenticated), commonpb.ErrorCode_ERROR_CODE_CONFIG_ERROR,
+			"the authorization service is not set up for this call",
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := metatool.NewHandler(nil, errAuthz{err: c.err}, errConnectors{err: errors.New("never called")})
+			svc := newSvc(t)
+			// A sink records the call, so the flight recorder gives it an id.
+			svc.toolCallSink = func(context.Context, string, ToolCallRecord) {}
+			contextInfo := &harnesspb.ContextInfo{MissionId: "m1", MissionRunId: "run-1"}
+			resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil,
+				catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
+				[]byte(`{"id":"mcp:gitlab:create_issue","args":{}}`), nil)
+			if err != nil {
+				t.Fatalf("metaInvoke: %v", err)
+			}
+			if got := resp.GetError().GetCode(); got != c.wantCode {
+				t.Fatalf("code = %v, want %v (%v)", got, c.wantCode, resp.GetError())
+			}
+			if got := resp.GetError().GetMessage(); got != c.wantText {
+				t.Fatalf("message = %q, want %q", got, c.wantText)
+			}
+			// The flight recorder records the call, so the reply carries its id.
+			if resp.GetToolCallId() == "" {
+				t.Fatal("the reply has no tool_call_id")
 			}
 		})
 	}

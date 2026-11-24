@@ -267,6 +267,11 @@ func TestFixLoop(t *testing.T) {
 		if cerr != nil {
 			return nil, fmt.Errorf("CallTool(%s): %w", tool, cerr)
 		}
+		// A tool failure comes back in the reply with no output. Report its code
+		// and message, so the failure reads as what it is.
+		if rerr := resp.GetError(); rerr != nil {
+			return nil, fmt.Errorf("CallTool(%s) failed: %s %s", tool, rerr.GetCode(), rerr.GetMessage())
+		}
 		out := map[string]any{}
 		if uerr := json.Unmarshal([]byte(resp.GetOutputJson()), &out); uerr != nil {
 			return nil, fmt.Errorf("decode the result of %s: %s: %w", tool, resp.GetOutputJson(), uerr)
