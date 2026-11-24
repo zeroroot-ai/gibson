@@ -16,6 +16,9 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 )
 
 // ErrNoGrant reports that a connector has no stored grant. The refresher loop
@@ -285,7 +288,11 @@ func (r *Refresher) clientSecret(ctx context.Context, grant *Grant) (string, err
 	if grant.ClientSecretName == "" {
 		return grant.ClientSecret, nil
 	}
-	raw, err := r.store.Resolve(ctx, grant.ClientSecretName)
+	// The tenant stores the secret with SetSecret, which stores a credential as
+	// cred:<name>. A grant that exists holds the name as the tenant gave it, so
+	// the read adds the prefix.
+	raw, err := r.store.Resolve(ctx,
+		secrets.StoredName(secretsv1.SecretCategory_SECRET_CATEGORY_CRED, grant.ClientSecretName))
 	if err != nil {
 		return "", fmt.Errorf("connectorauth: read the client secret %q: %w", grant.ClientSecretName, err)
 	}

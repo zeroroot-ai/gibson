@@ -145,7 +145,7 @@ func TestGetConnectorCredential_OnlyTheConnectorOperator(t *testing.T) {
 func TestGetConnectorCredential_ReturnsOnlyTheSecretContent(t *testing.T) {
 	store := liveTokenStore(t)
 	store.data[connectorauth.GrantSecretName("gitlab")] = []byte(`{"refresh_token":"never-returned"}`)
-	store.data["gitlab-pat"] = []byte(`{"token":"static-value"}`)
+	store.data["cred:gitlab-pat"] = []byte(`{"token":"static-value"}`)
 	srv := credServer(store)
 
 	req := gitlabCredReq()
@@ -221,7 +221,7 @@ func TestGetConnectorCredential_ErrorsCarryNoSecret(t *testing.T) {
 		}}, req: gitlabCredReq()},
 		"missing property": {store: func() *fakeCredStore {
 			s := liveTokenStore(t)
-			s.data["gitlab-pat"] = []byte(`{"other":"static-value"}`)
+			s.data["cred:gitlab-pat"] = []byte(`{"other":"static-value"}`)
 			return s
 		}(), req: &daemonoperatorv1.GetConnectorCredentialRequest{
 			TenantId: "acme", ConnectorId: "gitlab",
@@ -229,7 +229,7 @@ func TestGetConnectorCredential_ErrorsCarryNoSecret(t *testing.T) {
 		}},
 		"property of a value that is not JSON": {store: func() *fakeCredStore {
 			s := liveTokenStore(t)
-			s.data["gitlab-pat"] = []byte("plain static-value")
+			s.data["cred:gitlab-pat"] = []byte("plain static-value")
 			return s
 		}(), req: &daemonoperatorv1.GetConnectorCredentialRequest{
 			TenantId: "acme", ConnectorId: "gitlab",
@@ -327,13 +327,19 @@ func TestConnectorCredentialReader_Read(t *testing.T) {
 			wantErr: true,
 		},
 		"credential not found": {store: liveTokenStore(t), refs: ref("gitlab-pat", ""), wantErr: true},
+		// A secret stored with no prefix is not read. SetSecret stores cred:<name>.
+		"bare credential is not read": {
+			store:   withData(map[string][]byte{"gitlab-pat": []byte("raw-value")}),
+			refs:    ref("gitlab-pat", ""),
+			wantErr: true,
+		},
 		"raw credential": {
-			store: withData(map[string][]byte{"gitlab-pat": []byte("raw-value")}),
+			store: withData(map[string][]byte{"cred:gitlab-pat": []byte("raw-value")}),
 			refs:  ref("gitlab-pat", ""),
 			want:  map[string]string{connectorCredSecretKey: "Bearer " + testVendorValue, "STATIC": "raw-value"},
 		},
 		"property that is not a string": {
-			store: withData(map[string][]byte{"gitlab-pat": []byte(`{"port":8443}`)}),
+			store: withData(map[string][]byte{"cred:gitlab-pat": []byte(`{"port":8443}`)}),
 			refs:  ref("gitlab-pat", "port"),
 			want:  map[string]string{connectorCredSecretKey: "Bearer " + testVendorValue, "STATIC": "8443"},
 		},

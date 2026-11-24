@@ -68,6 +68,8 @@ func TestLoad_ConnectorConfigPolicy(t *testing.T) {
 		"empty arg":                  {host + "  args: ['']\n", "empty argument"},
 		"low port":                   {host + "  port: 80\n", "from 1024 to 65535"},
 		"high port":                  {host + "  port: 70000\n", "from 1024 to 65535"},
+		"credential of the grant":    {host + "  credentials: [{secret: 'connector/x/grant', env: A}]\n", "not a valid secret name"},
+		"pull secret of the access":  {host + "  imagePullSecret: 'connector/x/access'\n", "not a valid secret name"},
 		"bad pull secret":            {host + "  imagePullSecret: 'a b'\n", "not a valid secret name"},
 	}
 	for name, tc := range cases {

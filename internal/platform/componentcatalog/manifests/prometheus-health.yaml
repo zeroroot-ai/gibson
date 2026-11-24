@@ -41,7 +41,7 @@ spec:
       installPatterns: true
     # A server behind a private CA needs
     # the CA certificates in the pod. The tenant names a secret of its own
-    # store that holds a PEM bundle, stored with no category. The name starts with prometheus-health-ca-. The
+    # store that holds a PEM bundle, stored with SetSecret as a credential. The name starts with prometheus-health-ca-. The
     # value is optional (gibson#1517).
     - name: ca_bundle
       kind: ca_bundle

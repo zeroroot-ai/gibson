@@ -1252,7 +1252,7 @@ func TestTenantOAuthClient_MicrosoftEntriesCompleteAuthorization(t *testing.T) {
 
 			store := newFakeConnectorSecrets()
 			ctx := ctxWithTenant(t, "acme")
-			if err := store.Put(ctx, "entra-client-secret", []byte("the-client-secret\n")); err != nil {
+			if err := store.Put(ctx, "cred:entra-client-secret", []byte("the-client-secret\n")); err != nil {
 				t.Fatal(err)
 			}
 			pending := connectorauth.NewPendingStore(5*time.Minute, func() time.Time { return fixedNow })

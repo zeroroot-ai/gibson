@@ -483,7 +483,7 @@ func TestRefresh_ReadsTheNamedClientSecretEachTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = s.Put(context.Background(), GrantSecretName("entra"), blob)
-	_ = s.Put(context.Background(), "entra-oauth-secret", []byte("first\n"))
+	_ = s.Put(context.Background(), "cred:entra-oauth-secret", []byte("first\n"))
 	r, err := NewRefresher(s, srv.Client(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -491,14 +491,14 @@ func TestRefresh_ReadsTheNamedClientSecretEachTime(t *testing.T) {
 	if _, err := r.Refresh(context.Background(), "entra"); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
-	_ = s.Put(context.Background(), "entra-oauth-secret", []byte("rotated"))
+	_ = s.Put(context.Background(), "cred:entra-oauth-secret", []byte("rotated"))
 	if _, err := r.Refresh(context.Background(), "entra"); err != nil {
 		t.Fatalf("refresh after the rotation: %v", err)
 	}
 	if len(sent) != 2 || sent[0] != "first" || sent[1] != "rotated" {
 		t.Fatalf("client secrets sent = %v", sent)
 	}
-	_ = s.Put(context.Background(), "entra-oauth-secret", []byte(" "))
+	_ = s.Put(context.Background(), "cred:entra-oauth-secret", []byte(" "))
 	if _, err := r.Refresh(context.Background(), "entra"); err == nil {
 		t.Fatal("an empty client secret must fail the refresh")
 	}
