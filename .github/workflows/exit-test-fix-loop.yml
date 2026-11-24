@@ -185,7 +185,10 @@ jobs:
           } > "$E2E_RUNNER_ENV_FILE"
           # The test disables both connectors in its cleanup, so a later step
           # sees no connector pod. Record the tenant namespace once a minute
-          # while the test runs. The Diagnostics step prints the record.
+          # while the test runs. The full record is the artifact file
+          # tenant-watch.log. The Diagnostics step prints only its end.
+          # The artifact is public and GitHub masks nothing in it, so the
+          # tenant namespace of this test must hold only mock credentials.
           watch_tenant() {
             while sleep 60; do
               {
@@ -195,7 +198,10 @@ jobs:
                 for pod in $(kubectl -n "$TENANT_NS" get pods -o name); do
                   kubectl -n "$TENANT_NS" get "$pod" \
                     -o jsonpath='{.metadata.name}{" "}{range .status.containerStatuses[*]}{.name}={.ready}/{.state}{" "}{end}{"\n"}'
-                  kubectl -n "$TENANT_NS" logs "$pod" --all-containers --tail=20 --prefix
+                  kubectl -n "$TENANT_NS" logs "$pod" --all-containers --since=65s --prefix
+                  if [ "$(kubectl -n "$TENANT_NS" get "$pod" -o jsonpath='{.status.containerStatuses[*].restartCount}' | tr -d ' 0')" != "" ]; then
+                    kubectl -n "$TENANT_NS" logs "$pod" --all-containers --previous --tail=50 --prefix
+                  fi
                 done
               } >> "$E2E_OUT/tenant-watch.log" 2>&1 || true
             done
