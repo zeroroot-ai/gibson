@@ -16,155 +16,390 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 )
 
-func failedJob(inputs []string, reason string) jobnode.FailedJob {
-	c := closedJob(inputs, mrDeliverable)
+// failedJob is a job that the verifier refused. The report holds an internal name
+// and an @name, so a test can show that neither reaches the merge request.
+func failedJob(inputs []string) jobnode.FailedJob {
 	return jobnode.FailedJob{
-		TenantID: c.TenantID, MissionRunID: c.MissionRunID, NodeID: c.NodeID, JobID: c.JobID,
-		Inputs: c.Inputs, Deliverables: c.Deliverables, Reason: reason,
+		TenantID: "acme", MissionRunID: "run-1", NodeID: "fix", JobID: "job-1", Inputs: inputs,
+		Verdict: "failed", Class: jobnode.ReasonAcceptanceFailed,
+		Reason: "the check refused it, ask @alice about the internal host db-7.corp",
 	}
 }
 
-// failedLink builds a link over a World where the job holds f-1. It returns
-// the events that the link submitted, and the findings that it reads.
-func failedLink(mrs *fakeMRReader) (*jobGraphLink, *[]brain.Event, map[string]findingRef) {
-	var evs []brain.Event
-	known := heldWorld(map[string]string{"f-1": "s"})("")
-	l := &jobGraphLink{
-		submit:        func(_ string, ev brain.Event) { evs = append(evs, ev) },
-		findings:      func(string) map[string]findingRef { return known },
-		mergeRequests: mrs, now: func() time.Time { return testNow }, logger: testObsLogger().Slog(),
-	}
-	return l, &evs, known
+// failedRig is a link over a World where the job holds f-1 and f-2. The World
+// folds the events that the link submits into the findings that it reads, as the
+// reducer does for the waits.
+type failedRig struct {
+	l     *jobGraphLink
+	evs   []brain.Event
+	known map[string]findingRef
+	now   time.Time
 }
 
-// A failed job closes its merge request through the governed tool. The comment
-// names the job and the reason. The attempt lands on the finding.
-func TestJobGraphLink_AFailedJobsMergeRequestIsClosedWithTheJobAndTheReason(t *testing.T) {
+func newFailedRig(mrs *fakeMRReader, opened openedHeadReader) *failedRig {
+	r := &failedRig{known: heldWorld(map[string]string{"f-1": "s", "f-2": "s"})(""), now: testNow}
+	r.l = &jobGraphLink{
+		findings:      func(string) map[string]findingRef { return r.known },
+		mergeRequests: mrs, opened: opened, now: func() time.Time { return r.now }, logger: testObsLogger().Slog(),
+	}
+	r.l.submit = func(_ string, ev brain.Event) {
+		r.evs = append(r.evs, ev)
+		w, ok := ev.(brain.FixCloseWaiting)
+		if !ok {
+			return
+		}
+		ref := r.known[w.ID]
+		waits := map[string]bool{}
+		for k := range ref.closeWaits {
+			waits[k] = true
+		}
+		if w.Waiting {
+			waits[closeKey(w.JobID, w.MergeRequest)] = true
+		} else {
+			delete(waits, closeKey(w.JobID, w.MergeRequest))
+		}
+		ref.closeWaits = waits
+		r.known[w.ID] = ref
+	}
+	return r
+}
+
+func (r *failedRig) waitEvents() []brain.FixCloseWaiting {
+	var out []brain.FixCloseWaiting
+	for _, ev := range r.evs {
+		if w, ok := ev.(brain.FixCloseWaiting); ok {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// jobOpened is the record of the daemon: the job opened these merge requests.
+func jobOpened(mrs ...string) mapHeads {
+	out := mapHeads{}
+	for _, mr := range mrs {
+		out["acme\x00"+mr+"\x00job-1"] = openedHead{sha: testHeadSHA, sourceBranch: "job/job-1", jobID: "job-1"}
+	}
+	return out
+}
+
+// A failed job closes the merge request that the record of the daemon holds. The
+// comment has the job id, the verdict and a class of reason in fixed words. The
+// report of the verifier, with its @name and its internal host, stays out of it.
+// The attempt lands on the finding with the full report.
+func TestJobGraphLink_AFailedJobsMergeRequestIsClosedWithAFixedComment(t *testing.T) {
 	mrs := jobMR()
-	l, evs, _ := failedLink(mrs)
+	r := newFailedRig(mrs, jobOpened(testMRURL))
 
-	l.JobFailed(context.Background(), failedJob([]string{"f-1"}, "the delivery was refused"))
+	r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
 
-	if len(mrs.closes) != 1 || !strings.HasPrefix(mrs.closes[0], testMRURL+": ") ||
-		!strings.Contains(mrs.closes[0], "job-1") || !strings.Contains(mrs.closes[0], "the delivery was refused") {
-		t.Fatalf("closes = %v, want one with the job and the reason", mrs.closes)
+	if len(mrs.closes) != 1 || !strings.HasPrefix(mrs.closes[0], testMRURL+": ") {
+		t.Fatalf("closes = %v, want one", mrs.closes)
 	}
-	if len(*evs) != 1 {
-		t.Fatalf("events = %+v, want the failed attempt only", *evs)
+	comment := strings.TrimPrefix(mrs.closes[0], testMRURL+": ")
+	const want = "Gibson closed this merge request. Fix job job-1 ended as failed. " +
+		"Reason: the fix did not pass acceptance."
+	if comment != want {
+		t.Errorf("comment = %q", comment)
 	}
-	a, ok := (*evs)[0].(brain.FixAttemptFailed)
-	if !ok || a.ID != "f-1" || a.JobID != "job-1" || a.Reason != "the delivery was refused" || a.Verdict != "failed" {
-		t.Errorf("attempt = %+v", (*evs)[0])
+	if strings.Contains(comment, "@") || strings.Contains(comment, "db-7") {
+		t.Errorf("the comment holds text of the report: %q", comment)
+	}
+	var attempt brain.FixAttemptFailed
+	for _, ev := range r.evs {
+		if a, ok := ev.(brain.FixAttemptFailed); ok {
+			attempt = a
+		}
+	}
+	if attempt.ID != "f-1" || attempt.JobID != "job-1" || attempt.Verdict != "failed" ||
+		!strings.Contains(attempt.Reason, "@alice") {
+		t.Errorf("attempt = %+v, want the full report in the record of the daemon", attempt)
+	}
+	if len(r.waitEvents()) != 0 {
+		t.Errorf("waits = %+v", r.waitEvents())
 	}
 }
 
-// A merge request that is not the work of the job is not closed. An agent names
-// the merge request, so the daemon checks it on the Git host first.
-func TestJobGraphLink_AFailedJobDoesNotCloseAForeignMergeRequest(t *testing.T) {
-	cases := map[string]fixloop.MergeFact{
-		"another branch": {State: fixloop.MROpen, SourceBranch: "feature/x", CreatedAt: testClaimedAt.Add(time.Minute)},
-		"older than the claim": {
-			State: fixloop.MROpen, SourceBranch: "job/job-1", CreatedAt: testClaimedAt.Add(-time.Minute),
-		},
-		"closed already": {State: fixloop.MRClosed, SourceBranch: "job/job-1", CreatedAt: testClaimedAt.Add(time.Minute)},
-		"merged":         {State: fixloop.MRMerged, SourceBranch: "job/job-1", CreatedAt: testClaimedAt.Add(time.Minute)},
+// The daemon closes each merge request of its record, and only those. An agent that
+// opened a merge request and names none still has it closed. A merge request that
+// the agent names and the record does not hold is never closed.
+func TestJobGraphLink_ACloseReadsTheRecordOfTheDaemonAndNotTheAgent(t *testing.T) {
+	mrs := jobMR()
+	r := newFailedRig(mrs, jobOpened(testMRURL, "g/r!9"))
+	// The agent names no merge request: FailedJob has no deliverables at all.
+	r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
+	if len(mrs.closes) != 2 {
+		t.Fatalf("closes = %v, want both merge requests of the record", mrs.closes)
 	}
-	for name, fact := range cases {
+
+	// A job with an empty record closes nothing, whatever the agent names.
+	mrs = jobMR()
+	r = newFailedRig(mrs, jobOpened())
+	r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
+	if len(mrs.closes) != 0 || len(mrs.calls) != 0 {
+		t.Errorf("the Git host was called: %v %v", mrs.calls, mrs.closes)
+	}
+	// A record of another job is not this job's.
+	mrs = jobMR()
+	r = newFailedRig(mrs, mapHeads{"acme\x00" + testMRURL + "\x00job-2": openedHead{jobID: "job-2"}})
+	r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
+	if len(mrs.closes) != 0 {
+		t.Errorf("closed %v", mrs.closes)
+	}
+}
+
+// The branch and the record prove that the job owns the merge request. The age
+// does not enter: a merge request older than the claim, and a claim with no time,
+// still close.
+func TestJobGraphLink_ACloseDoesNotCompareTheAgeOfTheMergeRequest(t *testing.T) {
+	for name, tc := range map[string]struct {
+		created time.Time
+		claimed time.Time
+	}{
+		"older than the claim": {created: testClaimedAt.Add(-time.Hour), claimed: testClaimedAt},
+		"no claim time":        {created: testClaimedAt.Add(time.Minute), claimed: time.Time{}},
+		"no creation time":     {created: time.Time{}, claimed: testClaimedAt},
+	} {
 		t.Run(name, func(t *testing.T) {
-			mrs := &fakeMRReader{fact: fact}
-			l, evs, _ := failedLink(mrs)
-			l.JobFailed(context.Background(), failedJob([]string{"f-1"}, "no"))
-			if len(mrs.closes) != 0 {
-				t.Errorf("closed %v", mrs.closes)
-			}
-			for _, ev := range *evs {
-				if _, ok := ev.(brain.FixCloseWaiting); ok {
-					t.Errorf("a wait for a merge request that needs no close: %+v", ev)
-				}
+			mrs := &fakeMRReader{fact: fixloop.MergeFact{
+				State: fixloop.MROpen, SourceBranch: "job/job-1", CreatedAt: tc.created,
+			}}
+			r := newFailedRig(mrs, jobOpened(testMRURL))
+			ref := r.known["f-1"]
+			ref.claimedAt = tc.claimed
+			r.known["f-1"] = ref
+			r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
+			if len(mrs.closes) != 1 || len(r.waitEvents()) != 0 {
+				t.Errorf("closes = %v waits = %+v", mrs.closes, r.waitEvents())
 			}
 		})
 	}
 }
 
-// A close that fails leaves a wait that names the merge request. RetryPending
-// tries it again, and a good close ends the wait.
-func TestJobGraphLink_AFailedCloseLeavesAWaitAndTheRetryEndsIt(t *testing.T) {
-	mrs := jobMR()
-	mrs.closeFailures = 1
-	l, evs, known := failedLink(mrs)
-
-	l.JobFailed(context.Background(), failedJob([]string{"f-1"}, "no"))
-
-	var wait brain.FixCloseWaiting
-	for _, ev := range *evs {
-		if w, ok := ev.(brain.FixCloseWaiting); ok {
-			wait = w
-		}
+// A refusal that leaves a merge request open shows a wait, and the daemon does not
+// close it. A merge request that is closed or merged needs neither.
+func TestJobGraphLink_ARefusalThatLeavesTheMergeRequestOpenShowsAWait(t *testing.T) {
+	refused := map[string]fixloop.MergeFact{
+		"another branch": {State: fixloop.MROpen, SourceBranch: "feature/x"},
+		"no branch":      {State: fixloop.MROpen, SourceBranchReason: "the branch is in a fork"},
+		"old connector":  {State: fixloop.MROpen},
 	}
-	if !wait.Waiting || wait.ID != "f-1" || wait.MergeRequest != testMRURL || wait.JobID != "job-1" || wait.Reason == "" {
-		t.Fatalf("wait = %+v, want a wait that names the merge request", wait)
+	for name, fact := range refused {
+		t.Run(name, func(t *testing.T) {
+			mrs := &fakeMRReader{fact: fact}
+			r := newFailedRig(mrs, jobOpened(testMRURL))
+			r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
+			if len(mrs.closes) != 0 {
+				t.Errorf("closed %v", mrs.closes)
+			}
+			w := r.waitEvents()
+			if len(w) != 1 || !w[0].Waiting || w[0].MergeRequest != testMRURL || w[0].Reason == "" {
+				t.Errorf("waits = %+v, want one that names the merge request", w)
+			}
+		})
 	}
-
-	// The World shows the wait. The retry closes the merge request and ends it.
-	ref := known["f-1"]
-	ref.closeWaitJob = "job-1"
-	known["f-1"] = ref
-	*evs = nil
-	l.RetryPending(context.Background())
-	if len(mrs.closes) != 1 {
-		t.Fatalf("closes = %v, want the retry to close", mrs.closes)
-	}
-	if len(*evs) != 1 {
-		t.Fatalf("events = %+v, want the end of the wait", *evs)
-	}
-	if end, ok := (*evs)[0].(brain.FixCloseWaiting); !ok || end.Waiting || end.JobID != "job-1" || end.ID != "f-1" {
-		t.Errorf("end = %+v", (*evs)[0])
-	}
-	// A second pass has nothing to do.
-	*evs = nil
-	l.RetryPending(context.Background())
-	if len(*evs) != 0 || len(mrs.closes) != 1 {
-		t.Errorf("a second pass acted: %v %v", *evs, mrs.closes)
+	for name, state := range map[string]string{"closed": fixloop.MRClosed, "merged": fixloop.MRMerged} {
+		t.Run(name, func(t *testing.T) {
+			mrs := &fakeMRReader{fact: fixloop.MergeFact{State: state, SourceBranch: "job/job-1"}}
+			r := newFailedRig(mrs, jobOpened(testMRURL))
+			r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
+			if len(mrs.closes) != 0 || len(r.waitEvents()) != 0 {
+				t.Errorf("closes = %v waits = %+v", mrs.closes, r.waitEvents())
+			}
+		})
 	}
 }
 
-// A job that delivered no merge request records the attempt and closes nothing.
-func TestJobGraphLink_AFailedJobWithNoMergeRequestOnlyRecordsTheAttempt(t *testing.T) {
+// The wait shows on the findings of the job even when the claim is gone.
+func TestJobGraphLink_AWaitShowsWhenTheClaimIsGone(t *testing.T) {
 	mrs := jobMR()
-	l, evs, _ := failedLink(mrs)
-	f := failedJob([]string{"f-1"}, "no")
-	f.Deliverables = nil
-	l.JobFailed(context.Background(), f)
+	mrs.closeFailures = 1
+	r := newFailedRig(mrs, jobOpened(testMRURL))
+	ref := r.known["f-1"]
+	ref.claim = ""
+	r.known["f-1"] = ref
+	r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
+	if w := r.waitEvents(); len(w) != 1 || w[0].ID != "f-1" {
+		t.Fatalf("waits = %+v", w)
+	}
+}
+
+// Two failed jobs whose closes both fail leave two waits. Each ends on its own
+// success, and the retry waits for its back off.
+func TestJobGraphLink_TwoFailedClosesLeaveTwoWaitsThatEndOnTheirOwn(t *testing.T) {
+	mrs := jobMR()
+	mrs.closeFailures = 1
+	opened := mapHeads{}
+	for k, v := range jobOpened(testMRURL) {
+		opened[k] = v
+	}
+	opened["acme\x00g/r!9\x00job-2"] = openedHead{sha: testHeadSHA, sourceBranch: "job/job-2", jobID: "job-2"}
+	r := newFailedRig(mrs, opened)
+
+	r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
+	second := failedJob([]string{"f-1"})
+	second.JobID = "job-2"
+	r.l.JobFailed(context.Background(), second)
+	// job-2 opened a merge request from its own branch. The host answers job-1's
+	// branch, so the second close is refused: that is a second wait as well.
+	if n := len(r.known["f-1"].closeWaits); n != 2 {
+		t.Fatalf("waits = %v, want two", r.known["f-1"].closeWaits)
+	}
+
+	// Before the back off nothing is tried. After it, the closes run.
+	r.l.RetryPending(context.Background())
+	if len(mrs.closes) != 0 {
+		t.Fatalf("a retry ran before the back off: %v", mrs.closes)
+	}
+	r.now = r.now.Add(closeFirstDelay + time.Second)
+	r.l.RetryPending(context.Background())
+	if len(mrs.closes) == 0 {
+		t.Fatal("no retry after the back off")
+	}
+	// The job-1 close succeeded and ended its own wait. The job-2 wait stands.
+	if _, still := r.known["f-1"].closeWaits[closeKey("job-1", testMRURL)]; still {
+		t.Error("the wait of job-1 did not end")
+	}
+	if _, still := r.known["f-1"].closeWaits[closeKey("job-2", "g/r!9")]; !still {
+		t.Error("the wait of job-2 ended with the other")
+	}
+}
+
+// A close that always fails backs off, stops at closeMaxTries, and leaves the wait
+// with the reason and the mark that the daemon gave up. No later pass tries it.
+func TestJobGraphLink_ACloseBacksOffAndGivesUp(t *testing.T) {
+	mrs := jobMR()
+	mrs.closeFailures = 1000
+	r := newFailedRig(mrs, jobOpened(testMRURL))
+	r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
+	for range closeMaxTries + 3 {
+		r.now = r.now.Add(closeMaxDelay + time.Second)
+		r.l.RetryPending(context.Background())
+	}
+	w := r.waitEvents()
+	last := w[len(w)-1]
+	if !last.GaveUp || last.Attempts != closeMaxTries || !strings.Contains(last.Reason, "stopped") {
+		t.Fatalf("last wait = %+v, want the give up after %d tries", last, closeMaxTries)
+	}
+	if len(w) != closeMaxTries {
+		t.Errorf("%d wait events, want %d", len(w), closeMaxTries)
+	}
+	if closeDelay(1) != closeFirstDelay || closeDelay(2) != 2*closeFirstDelay || closeDelay(40) != closeMaxDelay {
+		t.Errorf("delays = %v %v %v", closeDelay(1), closeDelay(2), closeDelay(40))
+	}
+	// The wait stays on the finding.
+	if len(r.known["f-1"].closeWaits) != 1 {
+		t.Errorf("waits = %v, want the wait to stay", r.known["f-1"].closeWaits)
+	}
+	r.l.mu.Lock()
+	left := len(r.l.closes)
+	r.l.mu.Unlock()
+	if left != 0 {
+		t.Errorf("%d closes stay pending after the give up", left)
+	}
+}
+
+// After a restart the retry posts the comment of the first try, whatever the new
+// code would say, so the duplicate check of the connector finds it.
+func TestJobGraphLink_ARestartReusesTheCommentOfTheFirstTry(t *testing.T) {
+	mrs := jobMR()
+	mrs.closeFailures = 1
+	r := newFailedRig(mrs, jobOpened(testMRURL))
+	r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
+	w := r.waitEvents()
+	if len(w) != 1 || w[0].Comment == "" {
+		t.Fatalf("waits = %+v, want the comment in the wait", w)
+	}
+	first := w[0].Comment
+
+	// The World keeps the wait. A new link adopts it. Its code knows no class.
+	fresh := newFailedRig(mrs, nil)
+	fresh.known["f-1"] = findingRef{scope: "s", status: brain.FindingStatusOpen,
+		closeWaits: map[string]bool{closeKey("job-1", testMRURL): true}}
+	fresh.l.Adopt("acme", []brain.FindingSnapshot{{
+		ID: "f-1", Status: brain.FindingStatusOpen,
+		FixFacts: brain.FixFacts{FixCloseWaits: []brain.FixCloseWait{{
+			JobID: "job-1", MissionRunID: "run-1", MergeRequest: testMRURL, Comment: first, Attempts: 1,
+		}}},
+	}})
+	fresh.l.RetryPending(context.Background())
+	if len(mrs.closes) != 1 || mrs.closes[0] != testMRURL+": "+first {
+		t.Fatalf("closes = %v, want the first comment %q", mrs.closes, first)
+	}
+	// A wait that the daemon gave up is not adopted.
+	again := newFailedRig(jobMR(), nil)
+	again.l.Adopt("acme", []brain.FindingSnapshot{{
+		ID: "f-1", Status: brain.FindingStatusOpen,
+		FixFacts: brain.FixFacts{FixCloseWaits: []brain.FixCloseWait{{
+			JobID: "job-1", MergeRequest: testMRURL, GaveUp: true,
+		}}},
+	}})
+	again.l.mu.Lock()
+	n := len(again.l.closes)
+	again.l.mu.Unlock()
+	if n != 0 {
+		t.Errorf("%d closes adopted after a give up", n)
+	}
+}
+
+// A job that delivered nothing and has no record only records the attempt.
+func TestJobGraphLink_AFailedJobWithNoRecordOnlyRecordsTheAttempt(t *testing.T) {
+	mrs := jobMR()
+	r := newFailedRig(mrs, jobOpened())
+	r.l.JobFailed(context.Background(), failedJob([]string{"f-1"}))
 	if len(mrs.closes) != 0 || len(mrs.calls) != 0 {
 		t.Errorf("the Git host was called: %v %v", mrs.calls, mrs.closes)
 	}
-	if len(*evs) != 1 {
-		t.Errorf("events = %+v", *evs)
+	if len(r.evs) != 1 {
+		t.Errorf("events = %+v", r.evs)
 	}
 }
 
-// A restart rebuilds the pending close from the wait on the finding.
-func TestJobGraphLink_AdoptRebuildsAPendingClose(t *testing.T) {
-	mrs := jobMR()
-	l, evs, known := failedLink(mrs)
-	ref := known["f-1"]
-	ref.closeWaitJob = "job-1"
-	known["f-1"] = ref
-	l.Adopt("acme", []brain.FindingSnapshot{{
-		ID: "f-1", Status: brain.FindingStatusOpen,
-		FixFacts: brain.FixFacts{
-			FixCloseWait: brain.FixCloseWait{
-				JobID: "job-1", MissionRunID: "run-1", MergeRequest: testMRURL, ClaimedAt: testClaimedAt,
-			},
-			FixAttempts: []brain.FixAttempt{{JobID: "job-1", Reason: "the delivery was refused"}},
-		},
-	}})
-	l.RetryPending(context.Background())
-	if len(mrs.closes) != 1 || !strings.Contains(mrs.closes[0], "the delivery was refused") {
-		t.Fatalf("closes = %v", mrs.closes)
+// An abandoned job counts as a failed attempt and its merge request is closed. A
+// job that a cancel ended records no attempt, and its merge request is still
+// closed.
+func TestJobGraphLink_AnAbandonedJobIsAnAttemptUnlessCancelled(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cancelled bool
+		attempts  int
+	}{"abandoned": {false, 1}, "cancelled": {true, 0}} {
+		t.Run(name, func(t *testing.T) {
+			mrs := jobMR()
+			r := newFailedRig(mrs, jobOpened(testMRURL))
+			f := failedJob([]string{"f-1"})
+			f.Verdict, f.Class, f.Cancelled = "abandoned", jobnode.ReasonVerifierError, tc.cancelled
+			r.l.JobFailed(context.Background(), f)
+			if len(mrs.closes) != 1 || !strings.Contains(mrs.closes[0], "ended as abandoned") ||
+				!strings.Contains(mrs.closes[0], "could not run") {
+				t.Errorf("closes = %v", mrs.closes)
+			}
+			var got []brain.FixAttemptFailed
+			for _, ev := range r.evs {
+				if a, ok := ev.(brain.FixAttemptFailed); ok {
+					got = append(got, a)
+				}
+			}
+			if len(got) != tc.attempts || (tc.attempts == 1 && got[0].Verdict != "abandoned") {
+				t.Errorf("attempts = %+v, want %d", got, tc.attempts)
+			}
+		})
 	}
-	if len(*evs) != 1 {
-		t.Errorf("events = %+v", *evs)
+}
+
+// The comment is fixed words for each class and each verdict, with no free text.
+func TestFailedJobComment_IsAClosedSet(t *testing.T) {
+	for _, class := range []string{
+		jobnode.ReasonAcceptanceFailed, jobnode.ReasonVerifierError, jobnode.ReasonTimeLimit,
+		jobnode.ReasonCancelled, jobnode.ReasonJobError, "something @alice made up",
+	} {
+		c := failedJobComment("job-1", "failed", class)
+		const prefix = "Gibson closed this merge request. Fix job job-1 ended as failed."
+		if strings.Contains(c, "@") || !strings.HasPrefix(c, prefix) {
+			t.Errorf("class %q: %q", class, c)
+		}
+	}
+	if c := failedJobComment("@alice evil", "x@y", jobnode.ReasonJobError); strings.Contains(c, "@") {
+		t.Errorf("an id and a verdict that are not plain reached the comment: %q", c)
 	}
 }
 
@@ -197,35 +432,5 @@ func TestFixClaims_ABlockedFindingTakesNoNewJob(t *testing.T) {
 	}
 	if err := c.Claim(ctx, "acme", "run-9/fix", "run-9", []string{"f-2"}); err != nil {
 		t.Fatalf("claim of a finding with no failures: %v", err)
-	}
-}
-
-// An abandoned job counts as a failed attempt and its merge request is closed.
-// A job that a cancel ended records no attempt, and its merge request is still
-// closed.
-func TestJobGraphLink_AnAbandonedJobIsAnAttemptUnlessCancelled(t *testing.T) {
-	for name, tc := range map[string]struct {
-		cancelled bool
-		attempts  int
-	}{"abandoned": {false, 1}, "cancelled": {true, 0}} {
-		t.Run(name, func(t *testing.T) {
-			mrs := jobMR()
-			l, evs, _ := failedLink(mrs)
-			f := failedJob([]string{"f-1"}, "the reviewer is down")
-			f.Verdict, f.Cancelled = "abandoned", tc.cancelled
-			l.JobFailed(context.Background(), f)
-			if len(mrs.closes) != 1 {
-				t.Errorf("closes = %v", mrs.closes)
-			}
-			var got []brain.FixAttemptFailed
-			for _, ev := range *evs {
-				if a, ok := ev.(brain.FixAttemptFailed); ok {
-					got = append(got, a)
-				}
-			}
-			if len(got) != tc.attempts || (tc.attempts == 1 && got[0].Verdict != "abandoned") {
-				t.Errorf("attempts = %+v, want %d", got, tc.attempts)
-			}
-		})
 	}
 }

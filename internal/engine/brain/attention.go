@@ -185,9 +185,9 @@ type FixFacts struct {
 	// no new fix job takes the finding (gibson#1674).
 	FixAttempts  []FixAttempt
 	FixBlockedAt time.Time
-	// FixCloseWait is the failed job whose merge request the daemon could not
-	// close. It is the zero value when no close waits (gibson#1674).
-	FixCloseWait FixCloseWait
+	// FixCloseWaits are the merge requests of failed jobs that the daemon could
+	// not close, one for each job and merge request (gibson#1674).
+	FixCloseWaits []FixCloseWait
 
 	// LinkedAt is the time of the status change that set the merge request of the
 	// current fix, which is the time of the link. It is zero for a finding that was

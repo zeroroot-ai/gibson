@@ -90,27 +90,61 @@ func TestFixAttempts_OnlyAnOpenFindingTakesAnAttempt(t *testing.T) {
 	}
 }
 
-// The close wait starts at the first failed close, names the merge request and
-// ends only for the job that set it.
-func TestFixCloseWait_SetsAndEnds(t *testing.T) {
+// A finding holds one close wait for each job and merge request. A second failed
+// job never replaces the wait of the first, and each wait ends on its own. The
+// wait starts at the first failed close and keeps the first comment.
+func TestFixCloseWait_OneForEachJobAndMergeRequest(t *testing.T) {
 	w := NewWorld("t1")
 	Reduce(w, FindingRaised{ID: "f1", At: attemptAt(0)})
-	wait := func(reason string, h int) FixCloseWaiting {
-		return FixCloseWaiting{ID: "f1", JobID: "j1", MergeRequest: "g/p!7", Waiting: true, Reason: reason, At: attemptAt(h)}
+	wait := func(job, mr, reason, comment string, h int) FixCloseWaiting {
+		return FixCloseWaiting{
+			ID: "f1", JobID: job, MergeRequest: mr, Waiting: true, Reason: reason, Comment: comment, At: attemptAt(h),
+		}
 	}
-	Reduce(w, wait("down", 1))
-	Reduce(w, wait("still down", 2))
-	cw := snapshotOf(w, "f1").FixCloseWait
-	if cw.JobID != "j1" || cw.MergeRequest != "g/p!7" || cw.Reason != "still down" || !cw.Since.Equal(attemptAt(1)) {
-		t.Fatalf("wait = %+v", cw)
+	Reduce(w, wait("j1", "g/p!7", "down", "first comment", 1))
+	Reduce(w, wait("j2", "g/p!8", "refused", "second comment", 2))
+	Reduce(w, wait("j1", "g/p!7", "still down", "changed text", 3))
+	waits := snapshotOf(w, "f1").FixCloseWaits
+	if len(waits) != 2 {
+		t.Fatalf("waits = %+v, want two", waits)
 	}
-	Reduce(w, FixCloseWaiting{ID: "f1", JobID: "other", At: attemptAt(3)})
-	if snapshotOf(w, "f1").FixCloseWait.JobID != "j1" {
-		t.Fatal("the end of another job ended the wait")
+	c := waits[0]
+	if c.JobID != "j1" || c.Reason != "still down" || c.Comment != "first comment" || !c.Since.Equal(attemptAt(1)) {
+		t.Fatalf("first wait = %+v", c)
 	}
-	Reduce(w, FixCloseWaiting{ID: "f1", JobID: "j1", At: attemptAt(4)})
-	if snapshotOf(w, "f1").FixCloseWait.JobID != "" {
-		t.Fatal("the wait did not end")
+	if c := waits[1]; c.JobID != "j2" || c.MergeRequest != "g/p!8" || c.Comment != "second comment" {
+		t.Fatalf("second wait = %+v", c)
+	}
+	// The end of an unknown pair changes nothing. Each wait ends on its own.
+	Reduce(w, FixCloseWaiting{ID: "f1", JobID: "j1", MergeRequest: "other", At: attemptAt(4)})
+	if len(snapshotOf(w, "f1").FixCloseWaits) != 2 {
+		t.Fatal("the end of another pair ended a wait")
+	}
+	Reduce(w, FixCloseWaiting{ID: "f1", JobID: "j1", MergeRequest: "g/p!7", At: attemptAt(5)})
+	if got := snapshotOf(w, "f1").FixCloseWaits; len(got) != 1 || got[0].JobID != "j2" {
+		t.Fatalf("after the end of the first: %+v", got)
+	}
+	Reduce(w, FixCloseWaiting{ID: "f1", JobID: "j2", MergeRequest: "g/p!8", At: attemptAt(6)})
+	if len(snapshotOf(w, "f1").FixCloseWaits) != 0 {
+		t.Fatal("the second wait did not end")
+	}
+}
+
+// The action merge_request_closed of a person ends every close wait and leaves
+// the failed attempts. The action retry leaves the close waits.
+func TestFixCloseWait_APersonEndsTheWaits(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, FindingRaised{ID: "f1", At: attemptAt(0)})
+	failAttempt(w, "j1", 1)
+	Reduce(w, FixCloseWaiting{ID: "f1", JobID: "j1", MergeRequest: "a", Waiting: true, At: attemptAt(1)})
+	Reduce(w, FixCloseWaiting{ID: "f1", JobID: "j2", MergeRequest: "b", Waiting: true, At: attemptAt(1)})
+	Reduce(w, FixAttemptsResolved{ID: "f1", Action: FixActionRetry, UserID: "u", At: attemptAt(2)})
+	if s := snapshotOf(w, "f1"); len(s.FixCloseWaits) != 2 || len(s.FixAttempts) != 0 {
+		t.Fatalf("after retry: %+v", s.FixFacts)
+	}
+	Reduce(w, FixAttemptsResolved{ID: "f1", Action: FixActionMergeRequestClosed, UserID: "u", At: attemptAt(3)})
+	if len(snapshotOf(w, "f1").FixCloseWaits) != 0 {
+		t.Fatal("the waits stand after the action")
 	}
 }
 

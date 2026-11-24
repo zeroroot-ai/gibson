@@ -373,3 +373,28 @@ func TestApplicationFindingsCypher_ReturnsThePriorityColumnsTheStructReads(t *te
 		}
 	}
 }
+
+// The read of the open findings leaves out a finding with three failed fix jobs in
+// a row, so the fix agent never ranks it first and burns its attempts on it. A read
+// of another status set keeps it (gibson#1674).
+func TestApplicationFindingsParams_TheOpenReadLeavesOutABlockedFinding(t *testing.T) {
+	for _, want := range []string{"coalesce(f.fix_attempts_blocked, false) = false", "$exclude_blocked"} {
+		if !strings.Contains(applicationFindingsCypher, want) {
+			t.Errorf("the Cypher lacks %q", want)
+		}
+	}
+	for _, tc := range []struct {
+		statuses []string
+		exclude  bool
+	}{
+		{[]string{"open"}, true},
+		{[]string{"fixing"}, false},
+		{[]string{"open", "fixing"}, false},
+		{nil, false},
+	} {
+		got := applicationFindingsParams("app", tc.statuses, 10)
+		if got["exclude_blocked"] != tc.exclude {
+			t.Errorf("statuses %v: exclude_blocked = %v, want %v", tc.statuses, got["exclude_blocked"], tc.exclude)
+		}
+	}
+}

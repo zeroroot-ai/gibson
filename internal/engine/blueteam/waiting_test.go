@@ -321,17 +321,20 @@ func TestWaitingOnPerson_FixAttemptsFailed(t *testing.T) {
 	}
 }
 
-// A failed close shows a wait that names the merge request.
+// Each failed close shows in one item per finding that names each merge request
+// that stays open, with the earliest start.
 func TestWaitingOnPerson_MergeRequestCloseFailed(t *testing.T) {
 	findings := []brain.FindingSnapshot{{
 		ID: "f1", Status: brain.FindingStatusOpen,
-		FixFacts: brain.FixFacts{FixCloseWait: brain.FixCloseWait{
-			JobID: "job-1", MergeRequest: "g/p!7", Reason: "down", Since: at(1),
+		FixFacts: brain.FixFacts{FixCloseWaits: []brain.FixCloseWait{
+			{JobID: "job-1", MergeRequest: "g/p!7", Reason: "down", Since: at(2)},
+			{JobID: "job-2", MergeRequest: "g/p!8", Reason: "refused", Since: at(1), GaveUp: true},
 		}},
 	}}
-	got := WaitingOnPerson(findings, nil, nil, at(2))
-	if len(got) != 1 || got[0].Kind != WaitMergeCloseFailed || got[0].ID != "f1" ||
-		!strings.Contains(got[0].Reason, "g/p!7") || !strings.Contains(got[0].Reason, "job-1") {
+	got := WaitingOnPerson(findings, nil, nil, at(3))
+	if len(got) != 1 || got[0].Kind != WaitMergeCloseFailed || got[0].ID != "f1" || !got[0].Since.Equal(at(1)) ||
+		!strings.Contains(got[0].Reason, "g/p!7") || !strings.Contains(got[0].Reason, "job-1") ||
+		!strings.Contains(got[0].Reason, "g/p!8") || !strings.Contains(got[0].Reason, "stopped the retries") {
 		t.Fatalf("got %+v", got)
 	}
 }

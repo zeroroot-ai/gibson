@@ -4136,7 +4136,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
     self: false,
   },

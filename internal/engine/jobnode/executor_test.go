@@ -27,6 +27,8 @@ type scriptedJobs struct {
 	state    job.State
 	openErr  error
 	closeErr error
+	// onClose, when set, sees the context of each Close call.
+	onClose  func(ctx context.Context)
 	sendErr  error
 	eventErr error
 	// onTurn is what the member does with each turn: the events it appends.
@@ -85,7 +87,10 @@ func (s *scriptedJobs) Send(_ context.Context, _ string, in job.SendInput) (*job
 	return &job.Input{ID: "in", JobID: in.JobID}, nil
 }
 
-func (s *scriptedJobs) Close(_ context.Context, _ string, in job.CloseInput) (*job.Job, error) {
+func (s *scriptedJobs) Close(ctx context.Context, _ string, in job.CloseInput) (*job.Job, error) {
+	if s.onClose != nil {
+		s.onClose(ctx)
+	}
 	if s.closeErr != nil {
 		return nil, s.closeErr
 	}
@@ -465,7 +470,7 @@ func TestRun_AnAbandonedJobWithAMergeRequestIsReportedToJobFailed(t *testing.T) 
 		t.Fatal("want the verifier failure")
 	}
 	if len(obs.failed) != 1 || obs.failed[0].Verdict != job.VerdictAbandoned || obs.failed[0].Cancelled ||
-		!hasMergeRequest(obs.failed[0].Deliverables) || !strings.Contains(obs.failed[0].Reason, "down") {
+		obs.failed[0].Class != ReasonVerifierError || !strings.Contains(obs.failed[0].Reason, "down") {
 		t.Fatalf("failed reports = %+v", obs.failed)
 	}
 	if obs.releasedAtFail != 0 || len(claims.released) != 1 {
@@ -482,8 +487,62 @@ func TestRun_AnAbandonedJobWithAMergeRequestIsReportedToJobFailed(t *testing.T) 
 	if _, err := Run(ctx, in); err == nil {
 		t.Fatal("want the cancel")
 	}
-	if len(obs.failed) != 1 || !obs.failed[0].Cancelled {
+	if len(obs.failed) != 1 || !obs.failed[0].Cancelled || obs.failed[0].Class != ReasonCancelled {
 		t.Fatalf("failed reports = %+v, want one marked cancelled", obs.failed)
+	}
+}
+
+// slowObserver blocks until its context ends, like a Git host that does not answer.
+type slowObserver struct {
+	recordingObserver
+	events *[]string
+}
+
+func (s *slowObserver) JobFailed(ctx context.Context, f FailedJob) {
+	*s.events = append(*s.events, "report")
+	<-ctx.Done()
+	s.failed = append(s.failed, f)
+}
+
+// A slow Git host never leaves the job open. The node closes the job before it
+// reports to the observer, on a context of its own that the report cannot expire,
+// and the claim still ends after the report.
+func TestRun_ASlowReportDoesNotLeaveTheAbandonedJobOpen(t *testing.T) {
+	old := abandonObserveBound
+	abandonObserveBound = 80 * time.Millisecond
+	t.Cleanup(func() { abandonObserveBound = old })
+
+	ops := mergeRequestJobs()
+	var events []string
+	ops.onClose = func(ctx context.Context) {
+		events = append(events, "close")
+		if ctx.Err() != nil {
+			t.Error("the close ran on an expired context")
+		}
+		if d, ok := ctx.Deadline(); !ok || time.Until(d) < 5*time.Second {
+			t.Errorf("the close has no bound of its own: %v %v", d, ok)
+		}
+	}
+	obs := &slowObserver{events: &events}
+	in := input(ops, &scriptedVerifier{err: errors.New("down")}, spec(1, "tool/verify"))
+	in.Closed = obs
+	claims := &recordingClaims{}
+	in.Claims = claims
+	start := time.Now()
+	if _, err := Run(context.Background(), in); err == nil {
+		t.Fatal("want the verifier failure")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("the slow report held the node for %v", time.Since(start))
+	}
+	if len(ops.closed) != 1 || ops.closed[0].Verdict != job.VerdictAbandoned {
+		t.Fatalf("closed = %+v, want the job closed as abandoned", ops.closed)
+	}
+	if len(events) != 2 || events[0] != "close" || events[1] != "report" {
+		t.Errorf("order = %v, want the close before the report", events)
+	}
+	if len(claims.released) != 1 {
+		t.Errorf("released = %v, want the claim ended after the report", claims.released)
 	}
 }
 
@@ -521,8 +580,8 @@ func TestRun_AFailedJobWithAMergeRequestReleasesItsClaimAndLinksNothing(t *testi
 	// The observer hears about the failed job and its merge request before the
 	// claim ends, so it can close the merge request and record the attempt.
 	if len(obs.failed) != 1 || obs.failed[0].Reason != "the delivery was refused" ||
-		!hasMergeRequest(obs.failed[0].Deliverables) {
-		t.Errorf("failed reports = %+v, want one with the merge request and the reason", obs.failed)
+		obs.failed[0].Verdict != job.VerdictFailed || obs.failed[0].Class != ReasonAcceptanceFailed {
+		t.Errorf("failed reports = %+v, want one with the reason and the class", obs.failed)
 	}
 	if obs.releasedAtFail != 0 {
 		t.Errorf("%d claims ended before the failed report", obs.releasedAtFail)

@@ -67,10 +67,11 @@ func applyFixAttemptFailed(w *World, e FixAttemptFailed) {
 	})
 }
 
-// FixAttemptsResolved records that a person ended the fix_attempts_failed wait
-// of a Finding with the action retry (gibson#1674). The reducer clears the failed
-// attempts, so the next fix job can claim the Finding. UserID is the person that
-// the daemon read from the identity of the call.
+// FixAttemptsResolved records that a person acted on a wait of a Finding
+// (gibson#1674). The action retry clears the failed attempts, so the next fix job
+// can claim the Finding. The action merge_request_closed ends each wait of a
+// merge request that the daemon could not close, after the person closed it.
+// UserID is the person that the daemon read from the identity of the call.
 type FixAttemptsResolved struct {
 	ID        string
 	Action    string
@@ -82,15 +83,23 @@ type FixAttemptsResolved struct {
 // Kind identifies the finding.fix_attempts_resolved brain event.
 func (FixAttemptsResolved) Kind() string { return "finding.fix_attempts_resolved" }
 
-// FixActionRetry is the action that clears the failed attempts of a Finding.
-const FixActionRetry = "retry"
+// The actions of a person on the waits of a failed fix job.
+const (
+	// FixActionRetry clears the failed attempts of a Finding.
+	FixActionRetry = "retry"
+	// FixActionMergeRequestClosed ends the waits of the merge requests that the
+	// daemon could not close.
+	FixActionMergeRequestClosed = "merge_request_closed"
+)
 
 func applyFixAttemptsResolved(w *World, e FixAttemptsResolved) {
-	if e.Action != FixActionRetry {
-		return
-	}
 	forFinding(w, e.ID, func(f *Finding) {
-		f.FixAttempts, f.FixBlockedAt = nil, time.Time{}
+		switch e.Action {
+		case FixActionRetry:
+			f.FixAttempts, f.FixBlockedAt = nil, time.Time{}
+		case FixActionMergeRequestClosed:
+			f.FixCloseWaits = nil
+		}
 	})
 }
 
@@ -98,27 +107,36 @@ func applyFixAttemptsResolved(w *World, e FixAttemptsResolved) {
 // jobs in a row. No new fix job takes it, until a person acts.
 func (f FixFacts) FixAttemptsBlocked() bool { return !f.FixBlockedAt.IsZero() }
 
-// FixCloseWait is the failed job whose merge request the daemon could not
-// close. ClaimedAt is the time of the claim of the job. The daemon needs it to
-// check the age of the merge request when it tries the close again.
+// FixCloseWait is a merge request of a failed job that the daemon could not
+// close. A finding holds one for each job and merge request, so a second failed
+// job never replaces the wait of the first.
+//
+// Comment is the text that the first attempt posted or tried to post. Each
+// retry posts the same text, so the duplicate check of the connector finds it
+// after a restart too. Attempts counts the tries. GaveUp is true when the
+// daemon stopped the retries. The wait then stays until a person acts.
 type FixCloseWait struct {
 	JobID        string
 	MissionRunID string
 	MergeRequest string
 	Reason       string
-	ClaimedAt    time.Time
+	Comment      string
+	Attempts     int
+	GaveUp       bool
 	Since        time.Time
 }
 
-// FixCloseWaiting records that the daemon could not close the merge request of
-// a failed fix job, or ends that wait when Waiting is false.
+// FixCloseWaiting records that the daemon could not close a merge request of a
+// failed fix job, or ends that wait when Waiting is false.
 type FixCloseWaiting struct {
 	ID           string
 	JobID        string
 	MergeRequest string
 	Waiting      bool
 	Reason       string
-	ClaimedAt    time.Time
+	Comment      string
+	Attempts     int
+	GaveUp       bool
 	MissionID    string
 	At           time.Time
 }
@@ -127,24 +145,38 @@ type FixCloseWaiting struct {
 func (FixCloseWaiting) Kind() string { return "finding.fix_close_waiting" }
 
 func applyFixCloseWaiting(w *World, e FixCloseWaiting) {
-	if e.ID == "" || e.JobID == "" {
+	if e.ID == "" || e.JobID == "" || e.MergeRequest == "" {
 		return
 	}
 	forFinding(w, e.ID, func(f *Finding) {
+		idx := -1
+		for i, c := range f.FixCloseWaits {
+			if c.JobID == e.JobID && c.MergeRequest == e.MergeRequest {
+				idx = i
+			}
+		}
 		if !e.Waiting {
-			if f.FixCloseWait.JobID == e.JobID {
-				f.FixCloseWait = FixCloseWait{}
+			if idx >= 0 {
+				f.FixCloseWaits = append(f.FixCloseWaits[:idx:idx], f.FixCloseWaits[idx+1:]...)
 			}
 			return
 		}
-		since := e.At
-		if f.FixCloseWait.JobID == e.JobID && !f.FixCloseWait.Since.IsZero() {
-			since = f.FixCloseWait.Since // the wait starts at the first failed close
-		}
-		f.FixCloseWait = FixCloseWait{
+		c := FixCloseWait{
 			JobID: e.JobID, MissionRunID: e.MissionID, MergeRequest: e.MergeRequest, Reason: e.Reason,
-			ClaimedAt: e.ClaimedAt, Since: since,
+			Comment: e.Comment, Attempts: e.Attempts, GaveUp: e.GaveUp, Since: e.At,
 		}
+		if idx < 0 {
+			f.FixCloseWaits = append(f.FixCloseWaits, c)
+			return
+		}
+		old := f.FixCloseWaits[idx]
+		// The wait starts at the first failed close, and the comment is the first one.
+		c.Since = old.Since
+		if old.Comment != "" {
+			c.Comment = old.Comment
+		}
+		f.FixCloseWaits = append([]FixCloseWait(nil), f.FixCloseWaits...)
+		f.FixCloseWaits[idx] = c
 	})
 }
 
@@ -152,5 +184,6 @@ func applyFixCloseWaiting(w *World, e FixCloseWaiting) {
 // the World.
 func (f FixFacts) copyFacts() FixFacts {
 	f.FixAttempts = append([]FixAttempt(nil), f.FixAttempts...)
+	f.FixCloseWaits = append([]FixCloseWait(nil), f.FixCloseWaits...)
 	return f
 }

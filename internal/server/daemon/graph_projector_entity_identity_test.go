@@ -206,3 +206,21 @@ func TestEntityUpsertParams_PlaceBlockIsReserved(t *testing.T) {
 		t.Error("the Cypher does not write place_block")
 	}
 }
+
+// A finding with three failed fix jobs in a row projects fix_attempts_blocked, which
+// the read of the open findings uses, and an entity sighting cannot set it.
+func TestFindingUpsertParams_ProjectsTheBlockOfFailedFixJobs(t *testing.T) {
+	got := findingUpsertParams(brain.FindingSnapshot{ID: "f-1"})
+	if got["fix_attempts_blocked"] != false {
+		t.Errorf("fix_attempts_blocked = %v for a finding with no failures", got["fix_attempts_blocked"])
+	}
+	blocked := findingUpsertParams(brain.FindingSnapshot{
+		ID: "f-1", FixFacts: brain.FixFacts{FixBlockedAt: testNow},
+	})
+	if blocked["fix_attempts_blocked"] != true {
+		t.Errorf("fix_attempts_blocked = %v for a blocked finding", blocked["fix_attempts_blocked"])
+	}
+	if _, ok := findingReservedProps["fix_attempts_blocked"]; !ok {
+		t.Error("an entity sighting can set fix_attempts_blocked")
+	}
+}

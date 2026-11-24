@@ -373,6 +373,7 @@ MERGE (f:Finding {brain_id: $id})
       f.merge_request = $merge_request,
       f.fix_head_sha = $fix_head_sha, f.fix_files = $fix_files,
       f.place_block = $place_block,
+      f.fix_attempts_blocked = $fix_attempts_blocked,
       f.submitted_by = $submitted_by, f.agent_name = $agent_name, f.enrolled_by = $enrolled_by,
       f.updated_at = timestamp()
 WITH f
@@ -539,7 +540,7 @@ var findingReservedProps = map[string]struct{}{
 	"title": {}, "description": {}, "severity": {}, "address": {}, "status": {},
 	"vulnerability_id": {}, "priority": {}, "priority_rule": {}, "priority_reason": {},
 	"merge_request": {}, "submitted_by": {}, "agent_name": {}, "enrolled_by": {},
-	"fix_head_sha": {}, "fix_files": {}, "place_block": {},
+	"fix_head_sha": {}, "fix_files": {}, "place_block": {}, "fix_attempts_blocked": {},
 	"created_at": {}, "verified_at": {}, "verified_status": {}, "id": {},
 }
 
@@ -998,6 +999,10 @@ func findingUpsertParams(f brain.FindingSnapshot) map[string]any {
 		// The wait of the fix loop on a finding with no single Application. The
 		// World owns it, so an entity sighting cannot set or clear it.
 		"place_block": f.PlaceBlock,
+		// Three failed fix jobs in a row (gibson#1674). The World owns it. The read of
+		// the open findings leaves a blocked finding out, so no agent works on it
+		// until a person acts.
+		"fix_attempts_blocked": f.FixAttemptsBlocked(),
 		// The verified submitter (gibson#208): who raised the finding, under
 		// which registered name, and who enrolled that agent.
 		"submitted_by": f.SubmittedBy,

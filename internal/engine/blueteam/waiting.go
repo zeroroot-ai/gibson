@@ -6,6 +6,7 @@ package blueteam
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -121,9 +122,9 @@ func WaitingOnPerson(
 		if f.Status == brain.FindingStatusOpen && f.FixAttemptsBlocked() {
 			add(WaitFixAttemptsFailed, f.ID, f.FixBlockedAt, fixAttemptsReason(f))
 		}
-		if w := f.FixCloseWait; w.JobID != "" {
-			add(WaitMergeCloseFailed, f.ID, w.Since, fmt.Sprintf(
-				"merge request %s of the failed job %s is still open: %s", w.MergeRequest, w.JobID, w.Reason))
+		if len(f.FixCloseWaits) > 0 {
+			since, reason := closeWaitReason(f.FixCloseWaits)
+			add(WaitMergeCloseFailed, f.ID, since, reason)
 		}
 		switch f.Status {
 		case brain.FindingStatusFixing:
@@ -191,6 +192,24 @@ func fixAttemptsReason(f brain.FindingSnapshot) string {
 	}
 	last := f.FixAttempts[n-1]
 	return fmt.Sprintf("%s The last is job %s: %s", reason, last.JobID, last.Reason)
+}
+
+// closeWaitReason joins the close waits of a finding into one item: the earliest
+// start, and the merge requests that stay open with the job and the reason of each.
+func closeWaitReason(waits []brain.FixCloseWait) (time.Time, string) {
+	var since time.Time
+	parts := make([]string, 0, len(waits))
+	for _, w := range waits {
+		if since.IsZero() || (!w.Since.IsZero() && w.Since.Before(since)) {
+			since = w.Since
+		}
+		part := fmt.Sprintf("merge request %s of the failed job %s is still open: %s", w.MergeRequest, w.JobID, w.Reason)
+		if w.GaveUp {
+			part += " (the daemon stopped the retries)"
+		}
+		parts = append(parts, part)
+	}
+	return since, strings.Join(parts, ". ")
 }
 
 func rerunAfterDeploy(f brain.FindingSnapshot) bool {

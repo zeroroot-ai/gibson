@@ -57,8 +57,9 @@ type jobGraphLink struct {
 	// again. The close path never waits for a retry.
 	mu      sync.Mutex
 	pending map[string]*pendingLink
-	// closes holds the failed jobs whose merge request the daemon could not
-	// close, keyed by job id (gibson#1674). RetryPending tries them again.
+	// closes holds the merge requests of failed jobs that the daemon could not
+	// close, keyed by closeKey (gibson#1674). RetryPending tries them again, with a
+	// back off, up to closeMaxTries.
 	closes map[string]*pendingClose
 	// running is true while Run loops. A test reads it.
 	running atomic.Bool
@@ -115,9 +116,9 @@ type findingRef struct {
 	status    string
 	claim     string
 	claimedAt time.Time
-	// closeWaitJob is the failed job whose merge request the daemon could not
-	// close yet, or "" (gibson#1674).
-	closeWaitJob string
+	// closeWaits holds the close waits of the finding, by closeKey of the failed
+	// job and the merge request (gibson#1674).
+	closeWaits map[string]bool
 }
 
 var _ jobnode.CloseObserver = (*jobGraphLink)(nil)
@@ -130,9 +131,12 @@ func newJobGraphLink(
 		findings: func(tenant string) map[string]findingRef {
 			out := map[string]findingRef{}
 			for _, f := range reg.For(tenant).Findings() {
+				waits := make(map[string]bool, len(f.FixCloseWaits))
+				for _, w := range f.FixCloseWaits {
+					waits[closeKey(w.JobID, w.MergeRequest)] = true
+				}
 				out[f.ID] = findingRef{
-					scope: f.ScopeID, status: f.Status, claim: f.FixClaim, claimedAt: f.FixClaimedAt,
-					closeWaitJob: f.FixCloseWait.JobID,
+					scope: f.ScopeID, status: f.Status, claim: f.FixClaim, claimedAt: f.FixClaimedAt, closeWaits: waits,
 				}
 			}
 			return out

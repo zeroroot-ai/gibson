@@ -17,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/blueteam"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
+	"github.com/zeroroot-ai/gibson/internal/engine/fixloop"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
@@ -68,14 +69,19 @@ type blueTeamSources struct {
 	places     FindingPlacesFunc
 	confidence FindingConfidenceFunc
 	actions    ActionAuditFunc
-	now        func() time.Time
+	// mergeOpen confirms a merge request that a person closed (gibson#1674). A nil
+	// source trusts the person.
+	mergeOpen MergeOpenFunc
+	now       func() time.Time
 }
 
 // WithBlueTeamSources sets the stores of the blue team reads and returns s.
 func (s *worldServer) WithBlueTeamSources(
 	places FindingPlacesFunc, confidence FindingConfidenceFunc, actions ActionAuditFunc,
 ) *worldServer {
-	s.blue = blueTeamSources{places: places, confidence: confidence, actions: actions, now: time.Now}
+	s.blue = blueTeamSources{
+		places: places, confidence: confidence, actions: actions, mergeOpen: s.blue.mergeOpen, now: time.Now,
+	}
 	return s
 }
 
@@ -385,10 +391,22 @@ func (s *worldServer) ListWaitingOnPerson(ctx context.Context, req *worldpb.List
 	return resp, nil
 }
 
-// ResolveFixAttempts implements WorldServiceServer. A person ends the
-// fix_attempts_failed wait of a finding with the action retry (gibson#1674). The
-// engine is the one of the tenant of the caller, so a finding of another tenant
-// is not found. The person comes from the identity of the call.
+// MergeOpenFunc reads a merge request on the Git host of the tenant. open is true
+// when the merge request is open on the host. known is false when the tenant has
+// no connector that serves the read, so the daemon cannot confirm. A read that
+// fails is the error.
+type MergeOpenFunc func(ctx context.Context, tenant, missionID, mergeRequest string) (open, known bool, err error)
+
+// WithMergeOpen sets the read that confirms a merge request that a person closed.
+func (s *worldServer) WithMergeOpen(f MergeOpenFunc) *worldServer {
+	s.blue.mergeOpen = f
+	return s
+}
+
+// ResolveFixAttempts implements WorldServiceServer. A person acts on a wait of a
+// failed fix job (gibson#1674). The engine is the one of the tenant of the
+// caller, so a finding of another tenant is not found. The person comes from the
+// identity of the call.
 func (s *worldServer) ResolveFixAttempts(
 	ctx context.Context, req *worldpb.ResolveFixAttemptsRequest,
 ) (*worldpb.ResolveFixAttemptsResponse, error) {
@@ -396,8 +414,10 @@ func (s *worldServer) ResolveFixAttempts(
 	if err != nil {
 		return nil, err
 	}
-	if req.GetAction() != brain.FixActionRetry {
-		return nil, status.Errorf(codes.InvalidArgument, "unknown action %q (want %s)", req.GetAction(), brain.FixActionRetry)
+	action := req.GetAction()
+	if action != brain.FixActionRetry && action != brain.FixActionMergeRequestClosed {
+		return nil, status.Errorf(codes.InvalidArgument, "unknown action %q (want %s or %s)",
+			action, brain.FixActionRetry, brain.FixActionMergeRequestClosed)
 	}
 	userID, ok := auth.ActingUserFromContext(ctx)
 	if !ok {
@@ -411,20 +431,55 @@ func (s *worldServer) ResolveFixAttempts(
 			break
 		}
 	}
-	switch {
-	case found == nil:
+	if found == nil {
 		return nil, status.Errorf(codes.NotFound, "finding %q not found", req.GetFindingId())
-	case !found.FixAttemptsBlocked():
-		return nil, status.Errorf(codes.FailedPrecondition, "finding %q has no fix_attempts_failed wait", req.GetFindingId())
 	}
-	cleared := len(found.FixAttempts)
-	ev := brain.FixAttemptsResolved{
-		ID: found.ID, Action: req.GetAction(), UserID: userID, At: s.clockNow(),
+	resp := &worldpb.ResolveFixAttemptsResponse{}
+	switch action {
+	case brain.FixActionRetry:
+		if !found.FixAttemptsBlocked() {
+			return nil, status.Errorf(codes.FailedPrecondition, "finding %q has no fix_attempts_failed wait", found.ID)
+		}
+		resp.ClearedAttempts = pagetoken.Int32(len(found.FixAttempts))
+	case brain.FixActionMergeRequestClosed:
+		if len(found.FixCloseWaits) == 0 {
+			return nil, status.Errorf(codes.FailedPrecondition, "finding %q has no merge_request_close_failed wait", found.ID)
+		}
+		if err := s.confirmClosed(ctx, found.FixCloseWaits); err != nil {
+			return nil, err
+		}
+		resp.EndedWaits = pagetoken.Int32(len(found.FixCloseWaits))
 	}
+	ev := brain.FixAttemptsResolved{ID: found.ID, Action: action, UserID: userID, At: s.clockNow()}
 	if err := e.SubmitAndWait(ctx, ev); err != nil {
-		return nil, status.Errorf(codes.Internal, "record the retry: %v", err)
+		return nil, status.Errorf(codes.Internal, "record the action: %v", err)
 	}
-	return &worldpb.ResolveFixAttemptsResponse{ClearedAttempts: pagetoken.Int32(cleared)}, nil
+	return resp, nil
+}
+
+// confirmClosed reads each merge request of the waits on the Git host. It refuses
+// while one is open. It trusts the person only when the tenant has no connector to
+// read with. A read that fails refuses too, so a person never ends a wait on a
+// guess that the daemon could check.
+func (s *worldServer) confirmClosed(ctx context.Context, waits []brain.FixCloseWait) error {
+	if s.blue.mergeOpen == nil {
+		return nil
+	}
+	tenant, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+	for _, w := range waits {
+		open, known, err := s.blue.mergeOpen(ctx, tenant.String(), w.MissionRunID, w.MergeRequest)
+		switch {
+		case err != nil:
+			return status.Errorf(codes.Unavailable,
+				"the daemon could not read merge request %s on the Git host: %v", w.MergeRequest, err)
+		case known && open:
+			return status.Errorf(codes.FailedPrecondition, "merge request %s is still open on the Git host", w.MergeRequest)
+		}
+	}
+	return nil
 }
 
 // auditActionReader reads the audit records of ListActionsByGrant from the
@@ -505,7 +560,21 @@ func (d *daemonImpl) blueTeamWorldServer(s *worldServer) *worldServer {
 		}
 		return auditActionReader(audit.NewQuery(d.platformDB))(ctx, tenant, from, to)
 	}
-	return s.WithBlueTeamSources(places, confidence, actions)
+	s = s.WithBlueTeamSources(places, confidence, actions)
+	return s.WithMergeOpen(func(ctx context.Context, tenant, missionID, mergeRequest string) (bool, bool, error) {
+		host := d.mergeHost
+		if host == nil {
+			return false, false, nil
+		}
+		fact, err := host.MergeRequest(ctx, tenant, missionID, mergeRequest)
+		switch {
+		case errors.Is(err, fixloop.ErrNoConnector):
+			return false, false, nil
+		case err != nil:
+			return false, true, fmt.Errorf("read the merge request: %w", err)
+		}
+		return fact.State == fixloop.MROpen || fact.State == fixloop.MRRefused, true, nil
+	})
 }
 
 // actionGroupKey orders the groups of ListActionsByGrant for paging: the

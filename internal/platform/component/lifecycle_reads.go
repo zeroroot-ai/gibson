@@ -126,6 +126,7 @@ const applicationFindingsCypher = `
 MATCH (app:Application {key: $application})
 MATCH (f:Finding)-[:AFFECTS]->(place)
 WHERE ($statuses = [] OR f.status IN $statuses)
+  AND (NOT $exclude_blocked OR coalesce(f.fix_attempts_blocked, false) = false)
   AND (` + applicationReachesPlace + `)
 WITH app, f, place
 OPTIONAL MATCH (f)-[:FIXED_BY]->(mr:MergeRequest)
@@ -183,16 +184,27 @@ func (q *PoolGraphRAGQuerier) ApplicationFindings(
 		statuses = []string{}
 	}
 
-	rows, err := q.readGraph(ctx, tenant, applicationFindingsCypher, map[string]any{
-		"application": application,
-		"statuses":    statuses,
-		"limit":       int64(limit),
-	})
+	rows, err := q.readGraph(
+		ctx, tenant, applicationFindingsCypher, applicationFindingsParams(application, statuses, limit))
 	if err != nil {
 		return nil, err
 	}
 
 	return encodeApplicationFindings(rows)
+}
+
+// applicationFindingsParams builds the parameters of applicationFindingsCypher.
+func applicationFindingsParams(application string, statuses []string, limit int) map[string]any {
+	return map[string]any{
+		"application": application,
+		"statuses":    statuses,
+		"limit":       int64(limit),
+		// A read of the open findings is the work list of an agent. A finding with three
+		// failed fix jobs in a row is not work until a person acts, so the list leaves it
+		// out (gibson#1674). A read of any other status set keeps it. The dashboard reads
+		// the findings through the World, which lists it.
+		"exclude_blocked": len(statuses) == 1 && statuses[0] == "open",
+	}
 }
 
 // encodeApplicationFindings maps graph rows onto the wire shape.

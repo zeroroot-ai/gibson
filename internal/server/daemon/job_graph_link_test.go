@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -906,6 +907,19 @@ type mapHeads map[string]openedHead
 func (m mapHeads) OpenedHead(tenant, mr, run string) (openedHead, bool) {
 	h, ok := m[tenant+"\x00"+mr+"\x00"+run]
 	return h, ok
+}
+
+// OpenedBy returns each merge request that the store holds for the tenant and the job.
+func (m mapHeads) OpenedBy(tenant, jobID string) []string {
+	var out []string
+	for k, h := range m {
+		parts := strings.Split(k, "\x00")
+		if len(parts) == 3 && parts[0] == tenant && h.jobID == jobID {
+			out = append(out, parts[1])
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // openedBy is the head that open_merge_request returned for the merge request of the

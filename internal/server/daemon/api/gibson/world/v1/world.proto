@@ -281,18 +281,23 @@ service WorldService {
     };
   }
 
-  // ResolveFixAttempts is the action of a person on a fix_attempts_failed wait
-  // (gibson#1674). Three fix jobs failed in a row on the finding, and the finding
-  // takes no new job. A retry ends the wait: it clears the failed attempts, and the
-  // next fix job can claim the finding again. The finding must belong to the
-  // tenant of the caller. The daemon records who acted. The caller never names it.
-  // Like a settlement of a bet, it is gated at writer, not bare member.
+  // ResolveFixAttempts is the action of a person on a wait of a failed fix job
+  // (gibson#1674). The action retry ends a fix_attempts_failed wait: three fix jobs
+  // failed in a row, the finding takes no new job, and the retry clears the failed
+  // attempts so the next job can claim the finding. The action
+  // merge_request_closed ends a merge_request_close_failed wait, after the person
+  // closed the merge request that the daemon could not close. The daemon reads the
+  // merge request on the Git host when the connector is there, and it refuses while
+  // the merge request is open. The finding must belong to the tenant of the caller.
+  // The daemon records who acted. The caller never names it. A person acts, so the
+  // call is for a USER identity only: an agent can never clear its own block. Like a
+  // settlement of a bet, it is gated at writer, not bare member.
   rpc ResolveFixAttempts(ResolveFixAttemptsRequest) returns (ResolveFixAttemptsResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "writer",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3  // USER | SERVICE
+      allowed_identities: 1  // USER
     };
   }
 }
@@ -970,13 +975,17 @@ message ListWaitingOnPersonResponse {
 message ResolveFixAttemptsRequest {
   // finding_id is the id of the finding that has the fix_attempts_failed wait.
   string finding_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
-  // action is what the person decides. The only action is retry. The finding
+  // action is what the person decides: retry or merge_request_closed. The finding
   // states of ADR-0178 have no state for a dismissed finding or an accepted risk,
   // so no such action exists.
-  string action = 2 [(buf.validate.field).string = { in: ["retry"] }];
+  string action = 2 [(buf.validate.field).string = { in: ["retry", "merge_request_closed"] }];
 }
 
 message ResolveFixAttemptsResponse {
-  // cleared_attempts is the number of failed attempts that the retry cleared.
+  // cleared_attempts is the number of failed attempts that a retry cleared. It is
+  // zero for the action merge_request_closed.
   int32 cleared_attempts = 1;
+  // ended_waits is the number of merge_request_close_failed waits that the action
+  // merge_request_closed ended. It is zero for a retry.
+  int32 ended_waits = 2;
 }

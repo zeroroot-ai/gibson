@@ -3742,7 +3742,7 @@ var Registry = map[string]Entry{
 		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser | IdentityService,
+		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
 		Self:              false,
 	},

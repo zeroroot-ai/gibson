@@ -152,12 +152,17 @@ type WorldServiceClient interface {
 	// ListWaitingOnPerson returns each item that waits on a person, with the wait
 	// time so far (gibson#1500).
 	ListWaitingOnPerson(ctx context.Context, in *ListWaitingOnPersonRequest, opts ...grpc.CallOption) (*ListWaitingOnPersonResponse, error)
-	// ResolveFixAttempts is the action of a person on a fix_attempts_failed wait
-	// (gibson#1674). Three fix jobs failed in a row on the finding, and the finding
-	// takes no new job. A retry ends the wait: it clears the failed attempts, and the
-	// next fix job can claim the finding again. The finding must belong to the
-	// tenant of the caller. The daemon records who acted. The caller never names it.
-	// Like a settlement of a bet, it is gated at writer, not bare member.
+	// ResolveFixAttempts is the action of a person on a wait of a failed fix job
+	// (gibson#1674). The action retry ends a fix_attempts_failed wait: three fix jobs
+	// failed in a row, the finding takes no new job, and the retry clears the failed
+	// attempts so the next job can claim the finding. The action
+	// merge_request_closed ends a merge_request_close_failed wait, after the person
+	// closed the merge request that the daemon could not close. The daemon reads the
+	// merge request on the Git host when the connector is there, and it refuses while
+	// the merge request is open. The finding must belong to the tenant of the caller.
+	// The daemon records who acted. The caller never names it. A person acts, so the
+	// call is for a USER identity only: an agent can never clear its own block. Like a
+	// settlement of a bet, it is gated at writer, not bare member.
 	ResolveFixAttempts(ctx context.Context, in *ResolveFixAttemptsRequest, opts ...grpc.CallOption) (*ResolveFixAttemptsResponse, error)
 }
 
@@ -498,12 +503,17 @@ type WorldServiceServer interface {
 	// ListWaitingOnPerson returns each item that waits on a person, with the wait
 	// time so far (gibson#1500).
 	ListWaitingOnPerson(context.Context, *ListWaitingOnPersonRequest) (*ListWaitingOnPersonResponse, error)
-	// ResolveFixAttempts is the action of a person on a fix_attempts_failed wait
-	// (gibson#1674). Three fix jobs failed in a row on the finding, and the finding
-	// takes no new job. A retry ends the wait: it clears the failed attempts, and the
-	// next fix job can claim the finding again. The finding must belong to the
-	// tenant of the caller. The daemon records who acted. The caller never names it.
-	// Like a settlement of a bet, it is gated at writer, not bare member.
+	// ResolveFixAttempts is the action of a person on a wait of a failed fix job
+	// (gibson#1674). The action retry ends a fix_attempts_failed wait: three fix jobs
+	// failed in a row, the finding takes no new job, and the retry clears the failed
+	// attempts so the next job can claim the finding. The action
+	// merge_request_closed ends a merge_request_close_failed wait, after the person
+	// closed the merge request that the daemon could not close. The daemon reads the
+	// merge request on the Git host when the connector is there, and it refuses while
+	// the merge request is open. The finding must belong to the tenant of the caller.
+	// The daemon records who acted. The caller never names it. A person acts, so the
+	// call is for a USER identity only: an agent can never clear its own block. Like a
+	// settlement of a bet, it is gated at writer, not bare member.
 	ResolveFixAttempts(context.Context, *ResolveFixAttemptsRequest) (*ResolveFixAttemptsResponse, error)
 	mustEmbedUnimplementedWorldServiceServer()
 }
