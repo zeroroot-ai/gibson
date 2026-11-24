@@ -92,7 +92,7 @@ func TestFixPass_RunsTheFixAgentWithItsContext(t *testing.T) {
 		"connector":   "connector/gitlab-fixloop",
 		"project":     "examplebank/customer-portal",
 		"finding":     "finding-42",
-		"target":      "target-7",
+		"target":      "{{target.id}}",
 		"base_branch": "main",
 		"repository":  "customer-portal",
 		"timeout":     "45m",
@@ -114,12 +114,12 @@ func TestFixPass_RunsTheFixAgentWithItsContext(t *testing.T) {
 func TestFixPass_OptionalParametersTakeDefaults(t *testing.T) {
 	t.Parallel()
 	def := renderPass(t, func(p map[string]string) {
-		for _, k := range []string{"finding", "target", "baseBranch", "repository", "codingTimeout", "mergeWait"} {
+		for _, k := range []string{"finding", "baseBranch", "repository", "codingTimeout", "mergeWait"} {
 			delete(p, k)
 		}
 	})
 	ctx := def.GetNodes()["pass"].GetAgentConfig().GetTask().GetContext()
-	for _, k := range []string{"finding", "target", "base_branch", "repository"} {
+	for _, k := range []string{"finding", "base_branch", "repository"} {
 		if _, ok := ctx[k]; ok {
 			t.Errorf("context key %q is set, want it left out", k)
 		}

@@ -122,7 +122,7 @@ func TestRenderCatalogMission_RendersWhatTheListingDeclared(t *testing.T) {
 	for _, m := range listed.GetMissions() {
 		params := make(map[string]string, len(m.GetDeclaredParams()))
 		for _, name := range m.GetDeclaredParams() {
-			params[name] = "v-" + name
+			params[name] = placeholderParam(name)
 			if name == "forgeConnector" && m.GetName() == "scan" {
 				params[name] = "github-fixloop" // an enum
 			}
@@ -160,7 +160,7 @@ func TestRenderCatalogMission_UnknownParameterIsRefusedNotDropped(t *testing.T) 
 
 	params := map[string]string{"host": "evil.example.com"}
 	for _, d := range declared {
-		params[d] = "v-" + d
+		params[d] = placeholderParam(d)
 	}
 
 	_, err := srv.RenderCatalogMission(context.Background(),
@@ -206,7 +206,7 @@ func TestRenderCatalogMission_AParameterCannotSupplyTheTarget(t *testing.T) {
 
 			params := map[string]string{smuggled: "evil.example.com"}
 			for _, d := range declared {
-				params[d] = "v-" + d
+				params[d] = placeholderParam(d)
 			}
 			_, err := srv.RenderCatalogMission(context.Background(),
 				&daemonpb.RenderCatalogMissionRequest{Name: mission, Params: params})
@@ -305,7 +305,7 @@ func TestRenderCatalogMission_AgreesWithTheAgentPath(t *testing.T) {
 	declared, _ := cueruntime.DeclaredParams(src)
 	params := make(map[string]string, len(declared))
 	for _, d := range declared {
-		params[d] = "v-" + d
+		params[d] = placeholderParam(d)
 	}
 
 	resp, err := catalogServer().RenderCatalogMission(context.Background(),
@@ -442,4 +442,14 @@ func TestRunCatalogMission_RefusesACallerWithNoIdentity(t *testing.T) {
 	if status_grpc.Code(err) != codes.Unauthenticated || called {
 		t.Errorf("err = %v, daemon called = %v, want Unauthenticated and no call", err, called)
 	}
+}
+
+// placeholderParam is a value that renders and that a test uses when it cares
+// about nothing else. The two durations of the fix-pass mission must be Go
+// durations, because the mission derives its node timeout from them.
+func placeholderParam(name string) string {
+	if name == "codingTimeout" || name == "mergeWait" {
+		return "40m"
+	}
+	return "v-" + name
 }

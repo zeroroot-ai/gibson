@@ -64,7 +64,6 @@ var paramsByMission = map[string]map[string]string{
 		"forgeConnector": "gitlab-fixloop",
 		"project":        "examplebank/customer-portal",
 		"finding":        "finding-42",
-		"target":         "target-7",
 		"baseBranch":     "main",
 		"repository":     "customer-portal",
 		"codingTimeout":  "45m",

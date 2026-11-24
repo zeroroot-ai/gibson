@@ -37,7 +37,7 @@
               "stringValue": "customer-portal"
             },
             "target": {
-              "stringValue": "target-7"
+              "stringValue": "{{target.id}}"
             },
             "timeout": {
               "stringValue": "45m"

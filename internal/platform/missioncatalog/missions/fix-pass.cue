@@ -40,7 +40,6 @@
 //   project         the project path on the Git host (required)
 //   finding         one Finding to fix. Without it the agent takes the highest
 //                   priority first.
-//   target          the target id of the coding mission
 //   baseBranch      the branch that the merge request targets
 //   repository      the directory name of the worktree
 //   codingTimeout   the wait for the coding job, a Go duration. Default 45m.
@@ -58,7 +57,6 @@ _params: {
 	forgeConnector: string
 	project:        string
 	finding?:       string
-	target?:        string
 	baseBranch?:    string
 	repository?:    string
 	codingTimeout?: string
@@ -101,13 +99,14 @@ _context: {
 	"bank":        {stringValue: _params.bank}
 	"connector":   {stringValue: "connector/\(_params.forgeConnector)"}
 	"project":     {stringValue: _params.project}
+	// The target of the coding mission is the target of this run. The daemon
+	// binds the placeholder at submit, from the target that the caller owns. No
+	// parameter can name a target (gibson#497).
+	"target": {stringValue: "{{target.id}}"}
 	"timeout":     {stringValue: _codingTimeout}
 	"merge_wait":  {stringValue: _mergeWait}
 	if _params.finding != _|_ {
 		"finding": {stringValue: _params.finding}
-	}
-	if _params.target != _|_ {
-		"target": {stringValue: _params.target}
 	}
 	if _params.baseBranch != _|_ {
 		"base_branch": {stringValue: _params.baseBranch}
