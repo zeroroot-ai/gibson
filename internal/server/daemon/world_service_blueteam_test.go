@@ -493,12 +493,12 @@ func TestResolveFixAttempts_AWaitThatLandsDuringTheConfirmationSurvives(t *testi
 	srv, reg := newBlueServer(t, blueAt(10))
 	submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"},
 		brain.FixCloseWaiting{ID: "f1", JobID: "j1", MergeRequest: "g/p!7", Waiting: true, Reason: "down", At: blueAt(1)})
-	srv.WithMergeOpen(func(_ context.Context, _, _, mr string) (bool, bool, error) {
+	srv.WithMergeOpen(func(ctx context.Context, _, _, mr string) (bool, bool, error) {
 		// A second failed job leaves its wait while the first read runs.
 		if mr == "g/p!7" {
-			submit(t, reg, "acme", brain.FixCloseWaiting{
+			require.NoError(t, reg.For("acme").SubmitAndWait(ctx, brain.FixCloseWaiting{
 				ID: "f1", JobID: "j2", MergeRequest: "g/p!8", Waiting: true, Reason: "down", At: blueAt(2),
-			})
+			}))
 		}
 		return false, true, nil
 	})
