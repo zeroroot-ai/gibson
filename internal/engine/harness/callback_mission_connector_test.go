@@ -49,8 +49,8 @@ func TestCallConnectorForMission_AGrantedNodeCallsTheConnector(t *testing.T) {
 	if m, ok := out.(map[string]any); !ok || m["ok"] != true {
 		t.Fatalf("result = %#v", out)
 	}
-	if authzer.lastUser != "tenant:acme#member" || authzer.lastObject != "component:connector/github-fixloop" {
-		t.Errorf("can_execute was checked for %q on %q", authzer.lastUser, authzer.lastObject)
+	if authzer.tenantUser != "tenant:acme" || authzer.lastObject != "component:connector/github-fixloop" {
+		t.Errorf("can_execute was checked for %q on %q", authzer.tenantUser, authzer.lastObject)
 	}
 	if len(*called) != 1 || (*called)[0] != "acme/github-fixloop/read_file" {
 		t.Errorf("connector calls = %v", *called)

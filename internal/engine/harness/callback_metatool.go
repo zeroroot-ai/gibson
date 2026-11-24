@@ -533,10 +533,12 @@ func (s *HarnessCallbackService) RecordToolCall(ctx context.Context, rec metatoo
 
 // TenantGrantSubject is the FGA subject of a connector call that the daemon
 // makes for a tenant, with no agent behind it. It is the member set of the
-// tenant: the subject that the tenant enable posture grants can_execute on a
-// connector (catalogEnablePosture). A tenant kill switch on the connector
-// therefore also stops the call of the daemon.
-func TenantGrantSubject(tenant string) string { return "tenant:" + tenant + "#member" }
+// tenant. The catalog authorizer answers can_execute for this subject from the
+// tenant_enabled tuple and the tenant execute kill switch of the component
+// (catalog.FGAAuthorizer), because a Check of the userset on can_execute is
+// false for every component. A tenant kill switch on the connector therefore
+// also stops the call of the daemon.
+func TenantGrantSubject(tenant string) string { return catalog.TenantSetSubject(tenant) }
 
 // CallConnectorForTenant runs one connector call that the daemon makes for a
 // tenant, such as the revert of a fix after a failed health signal

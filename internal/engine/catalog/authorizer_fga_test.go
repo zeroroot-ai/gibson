@@ -186,3 +186,92 @@ func TestFGAAuthorizerMCPCheckErrorPropagates(t *testing.T) {
 		t.Fatalf("want (false, error), got (%v, %v)", ok, err)
 	}
 }
+
+// tupleChecker answers a Check from a set of tuples. A userset subject is a
+// member of nothing, as in the FGA model: it passes only a tuple that names it,
+// and it never passes can_execute. This is the behavior that run 45352739081 saw
+// on a live OpenFGA.
+type tupleChecker struct {
+	tuples map[string]bool
+	err    error
+	seen   []string
+}
+
+func (c *tupleChecker) Check(_ context.Context, user, relation, object string) (bool, error) {
+	key := user + "|" + relation + "|" + object
+	c.seen = append(c.seen, key)
+	if c.err != nil {
+		return false, c.err
+	}
+	return c.tuples[key], nil
+}
+
+// The daemon calls a connector for a tenant as the member set of the tenant. The
+// call is allowed when the tenant enabled the connector and its execute kill
+// switch is off. The check never asks can_execute of the userset, which is false
+// for every component.
+func TestFGAAuthorizerTenantSetCaller(t *testing.T) {
+	enabled := "tenant:acme|tenant_enabled|component:connector/github"
+	disabled := "tenant:acme|tenant_execute_disabled|component:connector/github"
+	cases := []struct {
+		name   string
+		tuples map[string]bool
+		caller Caller
+		want   bool
+	}{
+		{"enabled", map[string]bool{enabled: true}, Caller{Subject: "tenant:acme#member", Tenant: "acme"}, true},
+		{"not enabled", map[string]bool{}, Caller{Subject: "tenant:acme#member", Tenant: "acme"}, false},
+		{"kill switch on", map[string]bool{enabled: true, disabled: true}, Caller{Subject: "tenant:acme#member", Tenant: "acme"}, false},
+		// Another tenant enabled the connector. The call of acme gets nothing from it.
+		{"only another tenant enabled it", map[string]bool{"tenant:beta|tenant_enabled|component:connector/github": true},
+			Caller{Subject: "tenant:acme#member", Tenant: "acme"}, false},
+		// The subject names another tenant than the call. It takes the plain
+		// userset check, which is false.
+		{"subject of another tenant", map[string]bool{enabled: true, "tenant:beta|tenant_enabled|component:connector/github": true},
+			Caller{Subject: "tenant:beta#member", Tenant: "acme"}, false},
+		{"tenant with a separator", map[string]bool{"tenant:a#b|tenant_enabled|component:connector/github": true},
+			Caller{Subject: "tenant:a#b#member", Tenant: "a#b"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fga := &tupleChecker{tuples: tc.tuples}
+			ok, err := NewFGAAuthorizer(fga).CanExecute(context.Background(), tc.caller, mustMCP(t, "github", "list"))
+			if err != nil || ok != tc.want {
+				t.Fatalf("CanExecute = (%v, %v), want (%v, nil)", ok, err, tc.want)
+			}
+		})
+	}
+}
+
+// An error of the tenant check is no answer. The call fails closed with the error.
+func TestFGAAuthorizerTenantSetCallerFailsClosed(t *testing.T) {
+	boom := errors.New("fga down")
+	fga := &tupleChecker{err: boom}
+	ok, err := NewFGAAuthorizer(fga).CanExecute(context.Background(),
+		Caller{Subject: "tenant:acme#member", Tenant: "acme"}, mustNative(t, "nmap"))
+	if ok || !errors.Is(err, boom) {
+		t.Fatalf("CanExecute = (%v, %v), want (false, fga down)", ok, err)
+	}
+
+	// The kill switch read fails after the tenant enabled the tool.
+	fga = &tupleChecker{tuples: map[string]bool{"tenant:acme|tenant_enabled|component:tool/nmap": true}}
+	second := &failSecond{tupleChecker: fga, err: boom}
+	ok, err = NewFGAAuthorizer(second).CanExecute(context.Background(),
+		Caller{Subject: "tenant:acme#member", Tenant: "acme"}, mustNative(t, "nmap"))
+	if ok || !errors.Is(err, boom) {
+		t.Fatalf("CanExecute = (%v, %v), want (false, fga down)", ok, err)
+	}
+}
+
+// failSecond fails the check of tenant_execute_disabled.
+type failSecond struct {
+	*tupleChecker
+	err error
+}
+
+func (f *failSecond) Check(ctx context.Context, user, relation, object string) (bool, error) {
+	if relation == "tenant_execute_disabled" {
+		return false, f.err
+	}
+	return f.tupleChecker.Check(ctx, user, relation, object)
+}

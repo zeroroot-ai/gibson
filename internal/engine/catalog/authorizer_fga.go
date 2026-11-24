@@ -60,6 +60,44 @@ func NewFGAAuthorizer(fga Checker) *FGAAuthorizer {
 
 var _ Authorizer = (*FGAAuthorizer)(nil)
 
+// TenantSetSubject is the subject of a call that the daemon makes for a tenant
+// with no person or agent behind it, such as the read of a scan or the revert
+// of a fix. It names the member set of the tenant.
+func TenantSetSubject(tenant string) string { return "tenant:" + tenant + "#member" }
+
+// isTenantSetCaller reports a caller that is exactly the member set of its own
+// tenant. The tenant of the caller and the tenant of the subject must be the
+// same, and neither may hold a character that builds another FGA reference.
+func isTenantSetCaller(caller Caller) bool {
+	return caller.Tenant != "" && !strings.ContainsAny(caller.Tenant, ":# \t\n") &&
+		caller.Subject == TenantSetSubject(caller.Tenant)
+}
+
+// tenantCanExecute answers can_execute for the member set of a tenant. The model
+// gives can_execute to a user: (direct_execute and in_tenant_catalog) but not
+// any_execute_deny, and both parts walk `member from <tenant>`. A userset
+// subject is a member of nothing, so a Check of tenant:<id>#member on
+// can_execute is false for every component, enabled or not (run 45352739081).
+// The member set may execute a component exactly when the tenant has it enabled
+// and its execute kill switch is off. Both are tuples of the tenant itself, so
+// the check asks for those two and grants nothing new. An error is no answer,
+// and the call fails closed.
+func (a *FGAAuthorizer) tenantCanExecute(ctx context.Context, tenant, object string, id toolid.ID) (bool, error) {
+	ref := "tenant:" + tenant
+	enabled, err := a.fga.Check(ctx, ref, "tenant_enabled", object)
+	if err != nil {
+		return false, fmt.Errorf("catalog: authz check for %q: %w", id.Canonical(), err)
+	}
+	if !enabled {
+		return false, nil
+	}
+	off, err := a.fga.Check(ctx, ref, "tenant_execute_disabled", object)
+	if err != nil {
+		return false, fmt.Errorf("catalog: authz check for %q: %w", id.Canonical(), err)
+	}
+	return !off, nil
+}
+
 // CanExecute implements [Authorizer].
 func (a *FGAAuthorizer) CanExecute(ctx context.Context, caller Caller, id toolid.ID) (bool, error) {
 	if id.Source == toolid.SourceSkill {
@@ -67,6 +105,14 @@ func (a *FGAAuthorizer) CanExecute(ctx context.Context, caller Caller, id toolid
 	}
 	if caller.Subject == "" {
 		return false, fmt.Errorf("catalog: authz check for %q: caller subject is required", id.Canonical())
+	}
+	if isTenantSetCaller(caller) {
+		switch id.Source {
+		case toolid.SourceMCP:
+			return a.tenantCanExecute(ctx, caller.Tenant, authz.ConnectorComponentObject(id.Connector), id)
+		case toolid.SourceNative:
+			return a.tenantCanExecute(ctx, caller.Tenant, authz.ComponentObject(authz.KindTool, id.Tool), id)
+		}
 	}
 	switch id.Source {
 	case toolid.SourceMCP:
