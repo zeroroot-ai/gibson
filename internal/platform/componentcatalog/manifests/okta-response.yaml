@@ -13,7 +13,7 @@ spec:
   vendor: okta
   class: identity
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-okta@sha256:fdb00b175f5ee055805dbc00834cac4947ab821a428e6d5478d49060574f5066
+  image: ghcr.io/zeroroot-ai/connectors-okta@sha256:0a73c84861dbeb6b38461f5bdf23e99f373ab46eeb9ecfa598a3e056b6cedf00
   transport: streamable-http
   port: 8080
   auth: none

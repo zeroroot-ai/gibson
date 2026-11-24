@@ -13,7 +13,7 @@ spec:
   vendor: sentinelone
   class: edr
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-sentinelone@sha256:c4c48e268c91bafbd76af19514f612674f1c2f07259387c9d7b2ca2b176076c8
+  image: ghcr.io/zeroroot-ai/connectors-sentinelone@sha256:eed8760a40949331d62a8acdf7dfe5523ebf2c7331b8181bf14cf9e49706de88
   transport: streamable-http
   port: 8080
   auth: none

@@ -68,9 +68,9 @@ env:
   CLUSTER: gibson
   NODE: gibson-control-plane
   E2E_OUT: ${{ github.workspace }}/e2e-out
-  # mock-forge of zeroroot-ai/connectors at tag 0.8.2, by the digest of the tag (checked with
-  # docker buildx imagetools inspect). The digest in the release notes differs (connectors#41).
-  MOCK_FORGE_IMAGE: ghcr.io/zeroroot-ai/connectors-mock-forge@sha256:adec8c6974d0bf8664f358d7e9aba16dcb3eb2f720493e25d95d42d51e62e6bd
+  # mock-forge of zeroroot-ai/connectors at tag 0.9.0, by the digest of the tag (checked with
+  # docker buildx imagetools inspect). The release notes list the same digest (connectors#42).
+  MOCK_FORGE_IMAGE: ghcr.io/zeroroot-ai/connectors-mock-forge@sha256:6fa53378d29ff161c8bf53e1170573b81837906c2d7abff6e86047e6197769c1
 
 jobs:
   fix-loop:

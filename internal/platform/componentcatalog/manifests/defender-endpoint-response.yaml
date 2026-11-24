@@ -15,7 +15,7 @@ spec:
   vendor: microsoft
   class: edr
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-defender-endpoint@sha256:87e8bed6356316b2780b26c25e6940768a2665ab41f2f27023af9eef9d007bde
+  image: ghcr.io/zeroroot-ai/connectors-defender-endpoint@sha256:2264b16b88230d233f82d293cd9ef370007140a9fa64572236f8de250cdafdbf
   transport: streamable-http
   port: 8080
   auth: none

@@ -13,7 +13,7 @@ spec:
   vendor: puppet
   class: patch
   shape: Hosted
-  image: ghcr.io/zeroroot-ai/connectors-puppet@sha256:a321b6e3f7871fd30baab4cf38991b4b79cbb5695c0bdce2d4d0890ae1272b6f
+  image: ghcr.io/zeroroot-ai/connectors-puppet@sha256:dc7953f1d04a9a5ff1b579320729dab733c3827257bad9d12890b9e667cd8d77
   transport: streamable-http
   port: 8080
   auth: none
