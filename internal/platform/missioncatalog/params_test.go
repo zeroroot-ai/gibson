@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/cueruntime"
+	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog/catalogtest"
 )
 
 // completeParams builds a full parameter set for one mission from its own
@@ -19,12 +20,11 @@ import (
 // rather than as a test that quietly stops covering it.
 func completeParams(t *testing.T, mission string) map[string]string {
 	t.Helper()
-	names := declaredParams(t, mission)
-	out := make(map[string]string, len(names))
-	for _, n := range names {
-		out[n] = placeholderValue(n)
+	src, err := Source(mission)
+	if err != nil {
+		t.Fatalf("Source(%s): %v", mission, err)
 	}
-	return out
+	return catalogtest.Params(t, src)
 }
 
 // ParamNames reads the mission's own CUE. It used to read a Go struct shared by
@@ -177,15 +177,27 @@ func declaredParams(t *testing.T, mission string) []string {
 	return names
 }
 
-// placeholderValue is the value that a test gives a parameter when it needs one that
-// renders and cares about nothing else. A parameter that is an enum takes one of
-// its members.
-func placeholderValue(name string) string {
-	if name == "forgeConnector" {
-		return "github-fixloop"
+// Every checked-in mission has an example value for each parameter, and the set
+// renders. A mission that adds a typed parameter without an @example attribute
+// in its CUE fails here, so the author fixes the mission and no test.
+func TestEveryMissionHasAnExampleForEachParameter(t *testing.T) {
+	t.Parallel()
+
+	for _, mission := range Names() {
+		src, err := Source(mission)
+		if err != nil {
+			t.Fatalf("Source(%s): %v", mission, err)
+		}
+		params, err := catalogtest.ExampleParams(src)
+		if err != nil {
+			t.Errorf("%s: %v", mission, err)
+			continue
+		}
+		if got, want := len(params), len(declaredParams(t, mission)); got != want {
+			t.Errorf("%s: %d example values for %d parameters", mission, got, want)
+		}
+		if _, err := Render(context.Background(), mission, params); err != nil {
+			t.Errorf("%s: the example values do not render: %v", mission, err)
+		}
 	}
-	if name == "codingTimeout" || name == "mergeWait" {
-		return "40m"
-	}
-	return "v-" + name
 }

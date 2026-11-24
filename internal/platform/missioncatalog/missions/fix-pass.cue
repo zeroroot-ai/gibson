@@ -59,8 +59,10 @@ _params: {
 	finding?:       string
 	baseBranch?:    string
 	repository?:    string
-	codingTimeout?: string
-	mergeWait?:     string
+	// The two durations are Go durations, because the mission derives its node
+	// timeout from them. A bare string would not render.
+	codingTimeout?: string @example("40m")
+	mergeWait?:     string @example("40m")
 }
 
 // The durations. The defaults are the defaults of fix-agent 0.2.0.

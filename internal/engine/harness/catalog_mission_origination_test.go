@@ -16,8 +16,8 @@ import (
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/mission/cueruntime"
 	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
+	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog/catalogtest"
 )
 
 // catalogParams is a complete parameter set for one checked-in mission, built
@@ -35,21 +35,7 @@ func catalogParams(t *testing.T, mission string) map[string]string {
 	if err != nil {
 		t.Fatalf("Source(%s): %v", mission, err)
 	}
-	names, err := cueruntime.DeclaredParams(src)
-	if err != nil {
-		t.Fatalf("DeclaredParams(%s): %v", mission, err)
-	}
-	out := make(map[string]string, len(names))
-	for _, name := range names {
-		out[name] = "v-" + name
-		if name == "forgeConnector" {
-			out[name] = "github-fixloop" // an enum: the connectors that the scan ingests
-		}
-		if name == "codingTimeout" || name == "mergeWait" {
-			out[name] = "40m" // a Go duration: the fix-pass mission derives its node timeout from it
-		}
-	}
-	return out
+	return catalogtest.Params(t, src)
 }
 
 func catalogReq(name string, params map[string]string) *harnesspb.CreateMissionRequest {

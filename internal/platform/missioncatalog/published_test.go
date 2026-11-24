@@ -170,9 +170,14 @@ func TestPublishedParams_AgreeWithRender(t *testing.T) {
 		t.Fatalf("the file lists %d missions, and the catalog holds %d", len(doc.Missions), len(Names()))
 	}
 	for name, m := range doc.Missions {
-		params := make(map[string]string, len(m.Params)+1)
+		params := completeParams(t, name)
+		if len(params) != len(m.Params) {
+			t.Fatalf("%s: the file lists %d parameters, and the mission declares %d", name, len(m.Params), len(params))
+		}
 		for _, p := range m.Params {
-			params[p] = placeholderValue(p)
+			if _, ok := params[p]; !ok {
+				t.Errorf("%s: the file lists %q, which the mission does not declare", name, p)
+			}
 		}
 		if _, err := Render(t.Context(), name, params); err != nil {
 			t.Errorf("%s: a request built from the published names does not render: %v", name, err)

@@ -22,6 +22,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/cueruntime"
 	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
+	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog/catalogtest"
 )
 
 func catalogServer() *DaemonServer {
@@ -120,12 +121,9 @@ func TestRenderCatalogMission_RendersWhatTheListingDeclared(t *testing.T) {
 	}
 
 	for _, m := range listed.GetMissions() {
-		params := make(map[string]string, len(m.GetDeclaredParams()))
-		for _, name := range m.GetDeclaredParams() {
-			params[name] = placeholderParam(name)
-			if name == "forgeConnector" && m.GetName() == "scan" {
-				params[name] = "github-fixloop" // an enum
-			}
+		params := exampleParams(t, m.GetName())
+		if len(params) != len(m.GetDeclaredParams()) {
+			t.Fatalf("%s: %d example values for %d declared parameters", m.GetName(), len(params), len(m.GetDeclaredParams()))
 		}
 
 		resp, rerr := srv.RenderCatalogMission(context.Background(),
@@ -155,13 +153,8 @@ func TestRenderCatalogMission_UnknownParameterIsRefusedNotDropped(t *testing.T) 
 
 	srv := catalogServer()
 	name := missioncatalog.Names()[0]
-	src, _ := missioncatalog.Source(name)
-	declared, _ := cueruntime.DeclaredParams(src)
-
-	params := map[string]string{"host": "evil.example.com"}
-	for _, d := range declared {
-		params[d] = placeholderParam(d)
-	}
+	params := exampleParams(t, name)
+	params["host"] = "evil.example.com"
 
 	_, err := srv.RenderCatalogMission(context.Background(),
 		&daemonpb.RenderCatalogMissionRequest{Name: name, Params: params})
@@ -204,10 +197,8 @@ func TestRenderCatalogMission_AParameterCannotSupplyTheTarget(t *testing.T) {
 					mission, smuggled)
 			}
 
-			params := map[string]string{smuggled: "evil.example.com"}
-			for _, d := range declared {
-				params[d] = placeholderParam(d)
-			}
+			params := exampleParams(t, mission)
+			params[smuggled] = "evil.example.com"
 			_, err := srv.RenderCatalogMission(context.Background(),
 				&daemonpb.RenderCatalogMissionRequest{Name: mission, Params: params})
 			if err == nil {
@@ -301,12 +292,7 @@ func TestRenderCatalogMission_AgreesWithTheAgentPath(t *testing.T) {
 	t.Parallel()
 
 	name := missioncatalog.Names()[0]
-	src, _ := missioncatalog.Source(name)
-	declared, _ := cueruntime.DeclaredParams(src)
-	params := make(map[string]string, len(declared))
-	for _, d := range declared {
-		params[d] = placeholderParam(d)
-	}
+	params := exampleParams(t, name)
 
 	resp, err := catalogServer().RenderCatalogMission(context.Background(),
 		&daemonpb.RenderCatalogMissionRequest{Name: name, Params: params})
@@ -444,12 +430,13 @@ func TestRunCatalogMission_RefusesACallerWithNoIdentity(t *testing.T) {
 	}
 }
 
-// placeholderParam is a value that renders and that a test uses when it cares
-// about nothing else. The two durations of the fix-pass mission must be Go
-// durations, because the mission derives its node timeout from them.
-func placeholderParam(name string) string {
-	if name == "codingTimeout" || name == "mergeWait" {
-		return "40m"
+// exampleParams is a complete parameter set for one checked-in mission. The
+// example values come from the mission's own CUE (gibson#1692).
+func exampleParams(t *testing.T, mission string) map[string]string {
+	t.Helper()
+	src, err := missioncatalog.Source(mission)
+	if err != nil {
+		t.Fatalf("Source(%s): %v", mission, err)
 	}
-	return "v-" + name
+	return catalogtest.Params(t, src)
 }
