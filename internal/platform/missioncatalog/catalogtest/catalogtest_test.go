@@ -7,6 +7,7 @@
 package catalogtest
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -68,5 +69,64 @@ func TestExampleParams_TypedParameterWithoutExampleFails(t *testing.T) {
 	_, err := ExampleParams(cases["two typed"])
 	if err == nil || !strings.Contains(err.Error(), "alpha, zeta") {
 		t.Errorf("the error must name both parameters, sorted: %v", err)
+	}
+}
+
+// stopTB records a Fatal call and stops the helper, as a real test does.
+type stopTB struct {
+	testing.TB
+	fatal string
+}
+
+func (s *stopTB) Helper() {}
+
+func (s *stopTB) Fatal(args ...any) {
+	s.fatal = fmt.Sprint(args...)
+	panic(s)
+}
+
+func TestParams_ReturnsTheExamplesAndStopsTheTestOnAnError(t *testing.T) {
+	t.Parallel()
+
+	got := Params(t, `_params: {a: string}`)
+	if got["a"] != "v-a" {
+		t.Errorf("a = %q, want v-a", got["a"])
+	}
+
+	stop := &stopTB{TB: t}
+	func() {
+		defer func() { _ = recover() }()
+		Params(stop, `_params: {kind: "a" | "b"}`)
+	}()
+	if !strings.Contains(stop.fatal, "kind") {
+		t.Errorf("the test was not stopped with an error that names the parameter: %q", stop.fatal)
+	}
+}
+
+func TestExampleParams_SkipsWhatIsNotANamedParameter(t *testing.T) {
+	t.Parallel()
+
+	src := `
+_params: {
+	// a comment is not a parameter
+	[string]: string
+	named: string @other("x") @example("n")
+}
+other: {x: 1}
+`
+	got, err := ExampleParams(src)
+	if err != nil {
+		t.Fatalf("ExampleParams: %v", err)
+	}
+	if len(got) != 1 || got["named"] != "n" {
+		t.Errorf("got %v, want only named=n", got)
+	}
+}
+
+func TestExampleParams_ParamsThatIsNotAStructFails(t *testing.T) {
+	t.Parallel()
+
+	if _, err := ExampleParams(`_params: "x"`); err == nil {
+		t.Fatal("want an error")
 	}
 }
