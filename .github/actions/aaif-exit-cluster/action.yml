@@ -208,6 +208,7 @@ runs:
         SHARED_SKILL_REF: ${{ inputs.shared-skill-reference }}
         INSTALL_PATTERNS: ${{ inputs.connector-install-patterns }}
         BUILD_CONNECTOR_OPERATOR: ${{ inputs.build-connector-operator }}
+        WITH_KVM: ${{ inputs.with-kvm }}
       run: |
         set -euo pipefail
         # The operator source of Agent Skills: one entry in the daemon config.
@@ -230,6 +231,13 @@ runs:
             || { echo "::error::connector-install-patterns must be a JSON object of lists"; exit 1; }
           patterns_values="    connectorInstallPatterns: $(printf '%s' "${INSTALL_PATTERNS}" | jq -c .)"$'\n'
         fi
+        # On kind the API host sits behind Envoy, so the agent sandbox class needs
+        # the kube-dns resolver and egress to kube-dns and Envoy. The script holds
+        # the reason and the ops. This is the test profile only.
+        sandbox_params=""
+        if [ "${WITH_KVM}" = "true" ]; then
+          sandbox_params=$("${GITHUB_ACTION_PATH}/../../scripts/agent-class-reaches-api.sh")
+        fi
         connector_params=""
         if [ "${BUILD_CONNECTOR_OPERATOR}" = "true" ]; then
           connector_params=',{"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.repository","value":"ghcr.io/zeroroot-ai/connector-operator","forceString":true}},{"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.tag","value":"'"${TAG}"'","forceString":true}},{"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.digest","value":"","forceString":true}},{"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}'
@@ -251,7 +259,7 @@ runs:
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.repository","value":"ghcr.io/zeroroot-ai/tenant-operator","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.tag","value":"'"${TAG}"'","forceString":true}},
             {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.digest","value":"","forceString":true}},
-            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}'"${shared_params}${connector_params}"'
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}'"${shared_params}${connector_params}${sandbox_params}"'
           ]'
 
         wait_image() { # kind name jsonpath suffix

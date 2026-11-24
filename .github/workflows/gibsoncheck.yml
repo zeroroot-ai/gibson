@@ -285,6 +285,12 @@ jobs:
       - name: Check the bringup diagnostics dumper
         run: bash scripts/ci/dump-bringup-diagnostics.sh --selftest
 
+      # The agent sandbox class patch is shared by the action and two exit test
+      # workflows. The selftest compares it with a golden file on a PR, so a
+      # change to it shows before the one run that needs it.
+      - name: Check the agent class patch of the exit tests
+        run: bash .github/scripts/agent-class-reaches-api.sh --selftest
+
       # gibson#790: a plugin depends on the public SDK only, never on gibson.
       - name: Check the plugin modules
         run: |

@@ -37,6 +37,7 @@ on:
       - 'pkg/platform/migrations/**'
       - 'tests/e2e/sandboxed_agent_dispatch_test.go'
       - 'tests/e2e/helpers/**'
+      - '.github/scripts/agent-class-reaches-api.sh'
       - '.github/workflows/exit-test-sandboxed-dispatch.yml'
   workflow_dispatch:
     inputs:
@@ -223,42 +224,16 @@ jobs:
           # The e2eRunner values also set GIBSON_TEST_FIXTURES_ENABLED on the
           # daemon (charts#142): the chart has no gibson.extraEnv seam, so the
           # parameter that used to be here never reached the daemon.
-          # A sandbox resolves names only through setec.netpol.resolvers with
-          # dnsPolicy None, and its NetworkPolicy subtracts reservedCIDRs from
-          # every egress rule: it reaches the open web and nothing in private
-          # space. That is the product's posture and it is right on EKS, where
-          # api.<domain> is a public record on a public load balancer. On this
-          # kind cluster the API host sits behind Envoy's ClusterIP and the
-          # record is CoreDNS's (hosted#146), and the CNI evaluates egress
-          # after kube-proxy's DNAT, so an ipBlock for a ClusterIP never
-          # matches (gibson#13, run 35464107572). Test profile only: the agent
-          # class may reach the kube-dns pods on 53 and the Envoy pods on
-          # https by selector (setec#76), and with that allowance the class
-          # may use the kube-dns ClusterIP as its resolver.
-          # The Envoy pods are labelled app.kubernetes.io/name=gibson-workloads
-          # and app.kubernetes.io/component=envoy (the chart's common labels);
-          # a selector on name=envoy matched nothing and the connect timed out
-          # (run 35475259037).
-          COREDNS_IP=$(kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}')
-          [ -n "$COREDNS_IP" ] || { echo "::error::no kube-dns ClusterIP to hand the sandboxes"; exit 1; }
-          echo "the agent class resolves through kube-dns at $COREDNS_IP and may reach the kube-dns and Envoy pods"
+          # The agent sandbox class needs the kube-dns resolver and egress to
+          # kube-dns and Envoy on kind. The script holds the reason and the ops.
+          # Test profile only.
+          SANDBOX_OPS=$("${GITHUB_WORKSPACE}/gibson/.github/scripts/agent-class-reaches-api.sh")
           kubectl -n argocd patch application gibson --type json -p '[
               {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n"},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-dispatch","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.netpol.resolvers[0]","value":"'"$COREDNS_IP"'","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name","value":"kube-system","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[0].podSelector.matchLabels.k8s-app","value":"kube-dns","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[0].ports[0].protocol","value":"UDP","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[0].ports[0].port","value":"53"}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[0].ports[1].protocol","value":"TCP","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[0].ports[1].port","value":"53"}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[1].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name","value":"gibson","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[1].podSelector.matchLabels.app\\.kubernetes\\.io/name","value":"gibson-workloads","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[1].podSelector.matchLabels.app\\.kubernetes\\.io/component","value":"envoy","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[1].ports[0].port","value":"https","forceString":true}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}'"${SANDBOX_OPS}"'
             ]'
 
           # Argo reconciles the spec change; wait for the StatefulSet to carry
