@@ -119,6 +119,7 @@ func TestFixAttemptEvents_SurviveTheCodec(t *testing.T) {
 	for _, ev := range []Event{
 		FixAttemptFailed{ID: "f1", JobID: "j1", Verdict: "failed", Reason: "r", MissionID: "m1", At: attemptAt(1)},
 		FixCloseWaiting{ID: "f1", JobID: "j1", MergeRequest: "g/p!7", Waiting: true, MissionID: "m1", At: attemptAt(1)},
+		FixAttemptsResolved{ID: "f1", Action: FixActionRetry, UserID: "u1", MissionID: "m1", At: attemptAt(1)},
 	} {
 		data, err := EncodeEvent(ev)
 		if err != nil {
@@ -134,5 +135,27 @@ func TestFixAttemptEvents_SurviveTheCodec(t *testing.T) {
 		if !EventTime(got).Equal(attemptAt(1)) {
 			t.Errorf("%s: time = %v", ev.Kind(), EventTime(got))
 		}
+	}
+}
+
+// A retry clears the failed attempts and the block, so the finding takes a claim
+// again. Another action changes nothing.
+func TestFixAttempts_ARetryClearsTheBlock(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, FindingRaised{ID: "f1", At: attemptAt(0)})
+	for i, j := range []string{"j1", "j2", "j3"} {
+		failAttempt(w, j, i+1)
+	}
+	Reduce(w, FixAttemptsResolved{ID: "f1", Action: "dismiss", UserID: "u1", At: attemptAt(4)})
+	if !snapshotOf(w, "f1").FixAttemptsBlocked() {
+		t.Fatal("an unknown action ended the block")
+	}
+	Reduce(w, FixAttemptsResolved{ID: "f1", Action: FixActionRetry, UserID: "u1", At: attemptAt(5)})
+	if s := snapshotOf(w, "f1"); s.FixAttemptsBlocked() || len(s.FixAttempts) != 0 {
+		t.Fatalf("after the retry: %+v", s.FixFacts)
+	}
+	Reduce(w, FixClaimed{ID: "f1", Claim: "run-9/fix", At: attemptAt(6)})
+	if got := w.FixClaimOf("f1"); got != "run-9/fix" {
+		t.Fatalf("claim after the retry = %q", got)
 	}
 }

@@ -254,6 +254,8 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		return e.MissionID != "" && e.MissionID == missionID
 	case FixCloseWaiting:
 		return e.MissionID != "" && e.MissionID == missionID
+	case FixAttemptsResolved:
+		return e.MissionID != "" && e.MissionID == missionID
 	case MergeRequestOpened:
 		return e.MissionID != "" && e.MissionID == missionID
 	case FixClaimExpired:

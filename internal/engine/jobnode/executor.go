@@ -62,8 +62,15 @@ type FailedJob struct {
 	// Inputs are the ids the spec started from (JobSpec.inputs), verbatim.
 	Inputs       []string
 	Deliverables []job.Deliverable
-	// Reason is the last report of the verifier.
+	// Verdict is job.VerdictFailed or job.VerdictAbandoned.
+	Verdict job.Verdict
+	// Reason is the last report of the verifier for a failed job, and the cause
+	// for an abandoned job.
 	Reason string
+	// Cancelled is true when an abandoned job ended because its context was
+	// cancelled, for example when a person cancels the mission. A cancelled job
+	// is no failed attempt at the fix.
+	Cancelled bool
 }
 
 // ErrFindingBlocked means that a Finding that the spec names has too many failed
@@ -86,7 +93,7 @@ type FixClaims interface {
 }
 
 // CloseObserver is told once for each job the node closes as accomplished, and
-// once for each job it closes as failed. The daemon backs it with the graph
+// once for each job it closes as failed or abandoned. The daemon backs it with the graph
 // link. It is required, so a daemon that forgets to wire it fails at the first
 // job and not silently at the graph.
 type CloseObserver interface {
@@ -360,7 +367,8 @@ func closeWith(ctx context.Context, in Input, jobID string, verdict job.Verdict,
 	if verdict == job.VerdictFailed {
 		in.Closed.JobFailed(ctx, FailedJob{
 			TenantID: in.TenantID, MissionRunID: in.MissionRunID, NodeID: in.NodeID,
-			JobID: jobID, Inputs: in.Spec.GetInputs(), Deliverables: result.Deliverables, Reason: report,
+			JobID: jobID, Inputs: in.Spec.GetInputs(), Deliverables: result.Deliverables,
+			Verdict: job.VerdictFailed, Reason: report,
 		})
 	}
 	// A job that ends with no merge request leaves its findings to the next
@@ -386,14 +394,42 @@ func closeWith(ctx context.Context, in Input, jobID string, verdict job.Verdict,
 // bound that keeps the caller's values but drops its cancellation, because
 // the caller's own bound may be the thing that ended.
 func abandon(ctx context.Context, in Input, jobID string, pass int32, report string, cause error) (Outcome, error) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	detached := context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(detached, 10*time.Second)
 	defer cancel()
+	// An abandoned job can hold a merge request too. The observer hears about it
+	// before the claims end, as for a failed job (gibson#1674). It gets a bound
+	// of its own, because it reads the Git host and closes the merge request.
+	in.reportAbandoned(detached, jobID, report, cause)
 	in.release(ctx)
 	if _, err := in.Ops.Close(ctx, in.TenantID, job.CloseInput{JobID: jobID, Verdict: job.VerdictAbandoned, Closer: in.Opener}); err != nil {
 		return Outcome{Passes: pass, Report: report}, fmt.Errorf("jobnode: %w (and the job could not be abandoned: %w)", cause, err)
 	}
 	return Outcome{Passes: pass, Report: report}, fmt.Errorf("jobnode: %w", cause)
 }
+
+// reportAbandoned tells the observer about an abandoned job with the
+// deliverables that the job holds. A job that cannot be read reports none.
+func (in Input) reportAbandoned(ctx context.Context, jobID, report string, cause error) {
+	ctx, cancel := context.WithTimeout(ctx, abandonObserveBound)
+	defer cancel()
+	var deliverables []job.Deliverable
+	if j, err := in.Ops.Get(ctx, in.TenantID, jobID); err == nil && j != nil {
+		deliverables = job.DeliverablesOf(j)
+	}
+	reason := cause.Error()
+	if report != "" {
+		reason = report + " (" + reason + ")"
+	}
+	in.Closed.JobFailed(ctx, FailedJob{
+		TenantID: in.TenantID, MissionRunID: in.MissionRunID, NodeID: in.NodeID, JobID: jobID,
+		Inputs: in.Spec.GetInputs(), Deliverables: deliverables, Verdict: job.VerdictAbandoned, Reason: reason,
+		Cancelled: errors.Is(cause, context.Canceled),
+	})
+}
+
+// abandonObserveBound bounds the report of an abandoned job to the observer.
+const abandonObserveBound = 60 * time.Second
 
 // claim names the fix job of this node run.
 func (in Input) claim() string { return ClaimName(in.MissionRunID, in.NodeID) }

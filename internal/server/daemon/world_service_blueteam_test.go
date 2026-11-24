@@ -22,6 +22,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 var blueT0 = time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
@@ -343,4 +344,65 @@ func TestBlueTeamViews_TheReadIsBoundedWhateverTheOldestFinding(t *testing.T) {
 	require.NoError(t, err)
 	floor := now.Add(-brain.MaxViewLookback).UTC().Format(time.RFC3339)
 	require.Equal(t, []string{floor, floor}, ranges)
+}
+
+// Three failed fix jobs in a row show a fix_attempts_failed wait. A retry of a
+// person ends it, records the person, and lets a job claim the finding again
+// (gibson#1674).
+func TestResolveFixAttempts_RetryEndsTheWait(t *testing.T) {
+	srv, reg := newBlueServer(t, blueAt(10))
+	submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"})
+	for i, j := range []string{"j1", "j2", "j3"} {
+		submit(t, reg, "acme", brain.FixAttemptFailed{ID: "f1", JobID: j, Verdict: "failed", Reason: "no", At: blueAt(i + 1)})
+	}
+	ctx := auth.ContextWithActingUser(worldTenantCtx("acme"), "person-1")
+
+	waits, err := srv.ListWaitingOnPerson(ctx, &worldpb.ListWaitingOnPersonRequest{})
+	require.NoError(t, err)
+	require.Len(t, waits.Items, 1)
+	require.Equal(t, "fix_attempts_failed", waits.Items[0].Kind)
+
+	resp, err := srv.ResolveFixAttempts(ctx, &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "retry"})
+	require.NoError(t, err)
+	require.EqualValues(t, 3, resp.ClearedAttempts)
+
+	waits, err = srv.ListWaitingOnPerson(ctx, &worldpb.ListWaitingOnPersonRequest{})
+	require.NoError(t, err)
+	require.Empty(t, waits.Items)
+	submit(t, reg, "acme", brain.FixClaimed{ID: "f1", Claim: "run-9/fix", At: blueAt(11)})
+	var holder string
+	reg.For("acme").ReadWorld(func(w *brain.World) { holder = w.FixClaimOf("f1") })
+	require.Equal(t, "run-9/fix", holder)
+
+	// A second retry has no wait to end.
+	_, err = srv.ResolveFixAttempts(ctx, &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "retry"})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+// The call acts only on a finding of the tenant of the caller, needs an acting
+// user, and knows one action.
+func TestResolveFixAttempts_Refusals(t *testing.T) {
+	srv, reg := newBlueServer(t, blueAt(10))
+	submit(t, reg, "acme", brain.FindingRaised{ID: "f1", Title: "t", ScopeID: "s", Severity: "high"})
+	for i, j := range []string{"j1", "j2", "j3"} {
+		submit(t, reg, "acme", brain.FixAttemptFailed{ID: "f1", JobID: j, Verdict: "failed", Reason: "no", At: blueAt(i + 1)})
+	}
+	req := &worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "retry"}
+
+	// Another tenant does not see the finding.
+	_, err := srv.ResolveFixAttempts(auth.ContextWithActingUser(worldTenantCtx("other"), "person-1"), req)
+	require.Equal(t, codes.NotFound, status.Code(err))
+	// No acting user.
+	_, err = srv.ResolveFixAttempts(worldTenantCtx("acme"), req)
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+	// An action that does not exist.
+	_, err = srv.ResolveFixAttempts(auth.ContextWithActingUser(worldTenantCtx("acme"), "person-1"),
+		&worldpb.ResolveFixAttemptsRequest{FindingId: "f1", Action: "dismiss"})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	// The wait still stands.
+	var blocked bool
+	for _, f := range reg.For("acme").Findings() {
+		blocked = blocked || f.FixAttemptsBlocked()
+	}
+	require.True(t, blocked)
 }

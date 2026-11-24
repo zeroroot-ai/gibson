@@ -34,3 +34,6 @@ gibson.world.v1.TimelineEvent.replay_seq | #1497 | hold until 2027-01-31: the bl
 gibson.tenant.v1.LoopGrant.granted_at | #1630 | hold until 2027-01-31: the loop grant page of the dashboard reads it; not built yet
 gibson.tenant.v1.LoopGrant.harness_calls | #1630 | hold until 2027-01-31: the loop grant page of the dashboard reads it; not built yet
 gibson.tenant.v1.LoopGrant.tool_classes | #1630 | hold until 2027-01-31: the loop grant page of the dashboard reads it; not built yet
+gibson.world.v1.ResolveFixAttemptsRequest.finding_id | #1674 | hold until 2027-01-31: the retry action of the blue team console calls it, and the dashboard follow-up issue builds that action
+gibson.world.v1.ResolveFixAttemptsRequest.action | #1674 | hold until 2027-01-31: the retry action of the blue team console calls it, and the dashboard follow-up issue builds that action
+gibson.world.v1.ResolveFixAttemptsResponse.cleared_attempts | #1674 | hold until 2027-01-31: the retry action of the blue team console shows it, and the dashboard follow-up issue builds that action

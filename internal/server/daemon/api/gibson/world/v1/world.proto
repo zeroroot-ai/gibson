@@ -280,6 +280,21 @@ service WorldService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+
+  // ResolveFixAttempts is the action of a person on a fix_attempts_failed wait
+  // (gibson#1674). Three fix jobs failed in a row on the finding, and the finding
+  // takes no new job. A retry ends the wait: it clears the failed attempts, and the
+  // next fix job can claim the finding again. The finding must belong to the
+  // tenant of the caller. The daemon records who acted. The caller never names it.
+  // Like a settlement of a bet, it is gated at writer, not bare member.
+  rpc ResolveFixAttempts(ResolveFixAttemptsRequest) returns (ResolveFixAttemptsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "writer",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 // MissionView is one mission as the World holds it.
@@ -950,4 +965,18 @@ message ListWaitingOnPersonResponse {
   repeated WaitingItem items = 1;
   // next_page_token continues the list. Empty means this is the last page.
   string next_page_token = 2;
+}
+
+message ResolveFixAttemptsRequest {
+  // finding_id is the id of the finding that has the fix_attempts_failed wait.
+  string finding_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // action is what the person decides. The only action is retry. The finding
+  // states of ADR-0178 have no state for a dismissed finding or an accepted risk,
+  // so no such action exists.
+  string action = 2 [(buf.validate.field).string = { in: ["retry"] }];
+}
+
+message ResolveFixAttemptsResponse {
+  // cleared_attempts is the number of failed attempts that the retry cleared.
+  int32 cleared_attempts = 1;
 }

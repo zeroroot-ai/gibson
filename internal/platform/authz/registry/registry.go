@@ -3737,6 +3737,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.world.v1.WorldService/ResolveFixAttempts": {
+		Service:           "gibson.world.v1.WorldService",
+		Relation:          "writer",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.world.v1.WorldService/SettleBetByHITL": {
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "writer",

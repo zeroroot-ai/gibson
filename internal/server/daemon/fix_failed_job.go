@@ -16,7 +16,11 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 )
 
-// fix_failed_job.go handles a fix job that closes as failed (gibson#1674).
+// fix_failed_job.go handles a fix job that closes as failed or abandoned
+// (gibson#1674). An abandoned job counts as a failed attempt: it also spends
+// budget and model time, and three abandoned jobs in a row (for example a
+// verifier that is down) deserve a person as much as three refused fixes. A
+// job that a cancel ended counts as no attempt.
 //
 // The job can still have opened a merge request. The daemon links nothing to
 // the finding, so no slot, no close and no revert would ever reach that merge
@@ -52,12 +56,18 @@ func (l *jobGraphLink) JobFailed(ctx context.Context, f jobnode.FailedJob) {
 	held := heldFindings(c, known, claim)
 	now := l.clock()
 	reason := clipReason(f.Reason)
+	verdict := string(f.Verdict)
+	if verdict == "" {
+		verdict = string(job.VerdictFailed)
+	}
 	for _, id := range held {
-		if known[id].status != brain.FindingStatusOpen {
+		// A job that a cancel ended is no attempt at the fix. Its merge request
+		// is still closed below.
+		if f.Cancelled || known[id].status != brain.FindingStatusOpen {
 			continue
 		}
 		l.submit(f.TenantID, brain.FixAttemptFailed{
-			ID: id, JobID: f.JobID, Verdict: string(job.VerdictFailed), Reason: reason, MissionID: f.MissionRunID, At: now,
+			ID: id, JobID: f.JobID, Verdict: verdict, Reason: reason, MissionID: f.MissionRunID, At: now,
 		})
 	}
 	mrKey, _, _ := deliveredMergeRequest(c)
@@ -130,7 +140,7 @@ func (l *jobGraphLink) closeOrphan(ctx context.Context, p *pendingClose) error {
 // failedJobComment is the comment that the daemon posts on the merge request.
 // It names the job and the reason.
 func failedJobComment(p *pendingClose) string {
-	return fmt.Sprintf("Gibson closed this merge request. Fix job %s failed. Reason: %s", p.jobID, p.reason)
+	return fmt.Sprintf("Gibson closed this merge request. Fix job %s did not finish the fix. Reason: %s", p.jobID, p.reason)
 }
 
 // markCloseWaiting keeps the failed job for RetryPending and records the wait

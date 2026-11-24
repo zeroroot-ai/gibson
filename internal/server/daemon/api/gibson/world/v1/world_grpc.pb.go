@@ -40,6 +40,7 @@ const (
 	WorldService_ListOpenFindings_FullMethodName    = "/gibson.world.v1.WorldService/ListOpenFindings"
 	WorldService_ListActionsByGrant_FullMethodName  = "/gibson.world.v1.WorldService/ListActionsByGrant"
 	WorldService_ListWaitingOnPerson_FullMethodName = "/gibson.world.v1.WorldService/ListWaitingOnPerson"
+	WorldService_ResolveFixAttempts_FullMethodName  = "/gibson.world.v1.WorldService/ResolveFixAttempts"
 )
 
 // WorldServiceClient is the client API for WorldService service.
@@ -151,6 +152,13 @@ type WorldServiceClient interface {
 	// ListWaitingOnPerson returns each item that waits on a person, with the wait
 	// time so far (gibson#1500).
 	ListWaitingOnPerson(ctx context.Context, in *ListWaitingOnPersonRequest, opts ...grpc.CallOption) (*ListWaitingOnPersonResponse, error)
+	// ResolveFixAttempts is the action of a person on a fix_attempts_failed wait
+	// (gibson#1674). Three fix jobs failed in a row on the finding, and the finding
+	// takes no new job. A retry ends the wait: it clears the failed attempts, and the
+	// next fix job can claim the finding again. The finding must belong to the
+	// tenant of the caller. The daemon records who acted. The caller never names it.
+	// Like a settlement of a bet, it is gated at writer, not bare member.
+	ResolveFixAttempts(ctx context.Context, in *ResolveFixAttemptsRequest, opts ...grpc.CallOption) (*ResolveFixAttemptsResponse, error)
 }
 
 type worldServiceClient struct {
@@ -371,6 +379,16 @@ func (c *worldServiceClient) ListWaitingOnPerson(ctx context.Context, in *ListWa
 	return out, nil
 }
 
+func (c *worldServiceClient) ResolveFixAttempts(ctx context.Context, in *ResolveFixAttemptsRequest, opts ...grpc.CallOption) (*ResolveFixAttemptsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveFixAttemptsResponse)
+	err := c.cc.Invoke(ctx, WorldService_ResolveFixAttempts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorldServiceServer is the server API for WorldService service.
 // All implementations must embed UnimplementedWorldServiceServer
 // for forward compatibility.
@@ -480,6 +498,13 @@ type WorldServiceServer interface {
 	// ListWaitingOnPerson returns each item that waits on a person, with the wait
 	// time so far (gibson#1500).
 	ListWaitingOnPerson(context.Context, *ListWaitingOnPersonRequest) (*ListWaitingOnPersonResponse, error)
+	// ResolveFixAttempts is the action of a person on a fix_attempts_failed wait
+	// (gibson#1674). Three fix jobs failed in a row on the finding, and the finding
+	// takes no new job. A retry ends the wait: it clears the failed attempts, and the
+	// next fix job can claim the finding again. The finding must belong to the
+	// tenant of the caller. The daemon records who acted. The caller never names it.
+	// Like a settlement of a bet, it is gated at writer, not bare member.
+	ResolveFixAttempts(context.Context, *ResolveFixAttemptsRequest) (*ResolveFixAttemptsResponse, error)
 	mustEmbedUnimplementedWorldServiceServer()
 }
 
@@ -552,6 +577,9 @@ func (UnimplementedWorldServiceServer) ListActionsByGrant(context.Context, *List
 }
 func (UnimplementedWorldServiceServer) ListWaitingOnPerson(context.Context, *ListWaitingOnPersonRequest) (*ListWaitingOnPersonResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListWaitingOnPerson not implemented")
+}
+func (UnimplementedWorldServiceServer) ResolveFixAttempts(context.Context, *ResolveFixAttemptsRequest) (*ResolveFixAttemptsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveFixAttempts not implemented")
 }
 func (UnimplementedWorldServiceServer) mustEmbedUnimplementedWorldServiceServer() {}
 func (UnimplementedWorldServiceServer) testEmbeddedByValue()                      {}
@@ -952,6 +980,24 @@ func _WorldService_ListWaitingOnPerson_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldService_ResolveFixAttempts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveFixAttemptsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).ResolveFixAttempts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_ResolveFixAttempts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).ResolveFixAttempts(ctx, req.(*ResolveFixAttemptsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorldService_ServiceDesc is the grpc.ServiceDesc for WorldService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1042,6 +1088,10 @@ var WorldService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListWaitingOnPerson",
 			Handler:    _WorldService_ListWaitingOnPerson_Handler,
+		},
+		{
+			MethodName: "ResolveFixAttempts",
+			Handler:    _WorldService_ResolveFixAttempts_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

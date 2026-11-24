@@ -2655,6 +2655,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.world.v1.WorldService/ResolveFixAttempts":
+    relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.world.v1.WorldService/SettleBetByHITL":
     relation: "writer"
     object_type: "tenant"

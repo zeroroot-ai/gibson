@@ -94,6 +94,10 @@ func findingSubject(ev Event) (id, mergeRequest string, ok bool) {
 		return e.ID, "", true
 	case *FixAttemptFailed:
 		return e.ID, "", true
+	case FixAttemptsResolved:
+		return e.ID, "", true
+	case *FixAttemptsResolved:
+		return e.ID, "", true
 	case FixCloseWaiting:
 		return e.ID, e.MergeRequest, true
 	case *FixCloseWaiting:

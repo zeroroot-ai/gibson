@@ -451,6 +451,42 @@ func TestRun_AnAbandonedJobIsNotReported(t *testing.T) {
 	}
 }
 
+// An abandoned job that holds a merge request is reported as failed work with the
+// abandoned verdict, before its claim ends, so the observer can close the merge
+// request. A job that a cancel ended says so (gibson#1674).
+func TestRun_AnAbandonedJobWithAMergeRequestIsReportedToJobFailed(t *testing.T) {
+	obs := &recordingObserver{}
+	in := input(mergeRequestJobs(), &scriptedVerifier{err: errors.New("down")}, spec(1, "tool/verify"))
+	in.Closed = obs
+	claims := &recordingClaims{}
+	in.Claims = claims
+	obs.claims = claims
+	if _, err := Run(context.Background(), in); err == nil {
+		t.Fatal("want the verifier failure")
+	}
+	if len(obs.failed) != 1 || obs.failed[0].Verdict != job.VerdictAbandoned || obs.failed[0].Cancelled ||
+		!hasMergeRequest(obs.failed[0].Deliverables) || !strings.Contains(obs.failed[0].Reason, "down") {
+		t.Fatalf("failed reports = %+v", obs.failed)
+	}
+	if obs.releasedAtFail != 0 || len(claims.released) != 1 {
+		t.Errorf("released at the report = %d, after = %d", obs.releasedAtFail, len(claims.released))
+	}
+
+	obs = &recordingObserver{}
+	silent := mergeRequestJobs()
+	silent.onTurn = func(int) []*job.Event { return nil } // the member never answers
+	in = input(silent, &scriptedVerifier{}, spec(1, ""))
+	in.Closed = obs
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Run(ctx, in); err == nil {
+		t.Fatal("want the cancel")
+	}
+	if len(obs.failed) != 1 || !obs.failed[0].Cancelled {
+		t.Fatalf("failed reports = %+v, want one marked cancelled", obs.failed)
+	}
+}
+
 // TestRun_AFailedVerdictIsNotReported: the deliverable did not pass acceptance.
 func TestRun_AFailedVerdictIsNotReported(t *testing.T) {
 	obs := &recordingObserver{}

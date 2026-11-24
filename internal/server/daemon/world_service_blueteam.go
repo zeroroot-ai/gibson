@@ -385,6 +385,48 @@ func (s *worldServer) ListWaitingOnPerson(ctx context.Context, req *worldpb.List
 	return resp, nil
 }
 
+// ResolveFixAttempts implements WorldServiceServer. A person ends the
+// fix_attempts_failed wait of a finding with the action retry (gibson#1674). The
+// engine is the one of the tenant of the caller, so a finding of another tenant
+// is not found. The person comes from the identity of the call.
+func (s *worldServer) ResolveFixAttempts(
+	ctx context.Context, req *worldpb.ResolveFixAttemptsRequest,
+) (*worldpb.ResolveFixAttemptsResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.GetAction() != brain.FixActionRetry {
+		return nil, status.Errorf(codes.InvalidArgument, "unknown action %q (want %s)", req.GetAction(), brain.FixActionRetry)
+	}
+	userID, ok := auth.ActingUserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated,
+			"ResolveFixAttempts requires an authenticated acting user; the wait was not ended")
+	}
+	var found *brain.FindingSnapshot
+	for _, f := range e.Findings() {
+		if f.ID == req.GetFindingId() {
+			found = &f
+			break
+		}
+	}
+	switch {
+	case found == nil:
+		return nil, status.Errorf(codes.NotFound, "finding %q not found", req.GetFindingId())
+	case !found.FixAttemptsBlocked():
+		return nil, status.Errorf(codes.FailedPrecondition, "finding %q has no fix_attempts_failed wait", req.GetFindingId())
+	}
+	cleared := len(found.FixAttempts)
+	ev := brain.FixAttemptsResolved{
+		ID: found.ID, Action: req.GetAction(), UserID: userID, At: s.clockNow(),
+	}
+	if err := e.SubmitAndWait(ctx, ev); err != nil {
+		return nil, status.Errorf(codes.Internal, "record the retry: %v", err)
+	}
+	return &worldpb.ResolveFixAttemptsResponse{ClearedAttempts: pagetoken.Int32(cleared)}, nil
+}
+
 // auditActionReader reads the audit records of ListActionsByGrant from the
 // durable audit table of one tenant.
 func auditActionReader(q *audit.Query) ActionAuditFunc {

@@ -55,16 +55,23 @@ func ResultOf(j *Job) (Result, error) {
 	out := Result{
 		JobID: j.ID, BankID: j.BankID, MemberID: j.MemberID,
 		Verdict: j.Verdict, Score: j.Score,
-		Deliverables:    make([]Deliverable, 0, len(j.Deliverables)),
+		Deliverables:    DeliverablesOf(j),
 		ClaudeSessionID: j.ClaudeSessionID, Attempts: j.Attempts,
 		OpenedAt: j.OpenedAt, ClosedAt: j.ClosedAt,
 	}
+	return out, nil
+}
+
+// DeliverablesOf returns what the job delivered so far, for a job that is not
+// closed too.
+func DeliverablesOf(j *Job) []Deliverable {
+	out := make([]Deliverable, 0, len(j.Deliverables))
 	for _, d := range j.Deliverables {
-		out.Deliverables = append(out.Deliverables, Deliverable{
+		out = append(out, Deliverable{
 			Kind: deliverableKindName(d.GetKind()), Ref: d.GetRef(), URL: d.GetUrl(),
 		})
 	}
-	return out, nil
+	return out
 }
 
 // Encode renders the result as the JSON the session store holds.

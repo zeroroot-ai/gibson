@@ -199,3 +199,33 @@ func TestFixClaims_ABlockedFindingTakesNoNewJob(t *testing.T) {
 		t.Fatalf("claim of a finding with no failures: %v", err)
 	}
 }
+
+// An abandoned job counts as a failed attempt and its merge request is closed.
+// A job that a cancel ended records no attempt, and its merge request is still
+// closed.
+func TestJobGraphLink_AnAbandonedJobIsAnAttemptUnlessCancelled(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cancelled bool
+		attempts  int
+	}{"abandoned": {false, 1}, "cancelled": {true, 0}} {
+		t.Run(name, func(t *testing.T) {
+			mrs := jobMR()
+			l, evs, _ := failedLink(mrs)
+			f := failedJob([]string{"f-1"}, "the reviewer is down")
+			f.Verdict, f.Cancelled = "abandoned", tc.cancelled
+			l.JobFailed(context.Background(), f)
+			if len(mrs.closes) != 1 {
+				t.Errorf("closes = %v", mrs.closes)
+			}
+			var got []brain.FixAttemptFailed
+			for _, ev := range *evs {
+				if a, ok := ev.(brain.FixAttemptFailed); ok {
+					got = append(got, a)
+				}
+			}
+			if len(got) != tc.attempts || (tc.attempts == 1 && got[0].Verdict != "abandoned") {
+				t.Errorf("attempts = %+v, want %d", got, tc.attempts)
+			}
+		})
+	}
+}

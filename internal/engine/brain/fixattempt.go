@@ -67,6 +67,33 @@ func applyFixAttemptFailed(w *World, e FixAttemptFailed) {
 	})
 }
 
+// FixAttemptsResolved records that a person ended the fix_attempts_failed wait
+// of a Finding with the action retry (gibson#1674). The reducer clears the failed
+// attempts, so the next fix job can claim the Finding. UserID is the person that
+// the daemon read from the identity of the call.
+type FixAttemptsResolved struct {
+	ID        string
+	Action    string
+	UserID    string
+	MissionID string
+	At        time.Time
+}
+
+// Kind identifies the finding.fix_attempts_resolved brain event.
+func (FixAttemptsResolved) Kind() string { return "finding.fix_attempts_resolved" }
+
+// FixActionRetry is the action that clears the failed attempts of a Finding.
+const FixActionRetry = "retry"
+
+func applyFixAttemptsResolved(w *World, e FixAttemptsResolved) {
+	if e.Action != FixActionRetry {
+		return
+	}
+	forFinding(w, e.ID, func(f *Finding) {
+		f.FixAttempts, f.FixBlockedAt = nil, time.Time{}
+	})
+}
+
 // FixAttemptsBlocked reports whether the Finding has MaxFixAttempts failed fix
 // jobs in a row. No new fix job takes it, until a person acts.
 func (f FixFacts) FixAttemptsBlocked() bool { return !f.FixBlockedAt.IsZero() }
