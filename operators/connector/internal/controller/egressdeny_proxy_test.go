@@ -5,6 +5,8 @@ package controller
 
 import (
 	"fmt"
+	"net/netip"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -81,9 +83,137 @@ func ciliumSelects(t *testing.T, u *unstructured.Unstructured, pod podLabels) bo
 	return s.Matches(pod.labels)
 }
 
+// Addresses of the fixture. The pod and the service ranges are the cluster
+// ranges. The issuer pod is inside the pod range.
+var (
+	testClusterCIDRs = []string{"10.244.0.0/16", "10.96.0.0/12"}
+	issuerAddr       = netip.MustParseAddr("10.244.1.7")
+	// b3Addrs are addresses that review B3 denies to a proxy: the cloud
+	// metadata address, loopback, a private host outside the cluster ranges,
+	// CGNAT and link-local.
+	b3Addrs = []netip.Addr{
+		netip.MustParseAddr("169.254.169.254"), netip.MustParseAddr("127.0.0.1"),
+		netip.MustParseAddr("10.200.0.1"), netip.MustParseAddr("192.168.1.1"),
+		netip.MustParseAddr("172.20.0.5"), netip.MustParseAddr("100.64.0.9"),
+	}
+)
+
+// denies reports whether an egressDeny rule of the policy covers the address:
+// the address is in a cidr and in none of its except prefixes.
+func denies(t *testing.T, u *unstructured.Unstructured, addr netip.Addr) bool {
+	t.Helper()
+	deny, _, _ := unstructured.NestedSlice(u.Object, "spec", "egressDeny")
+	for _, r := range deny {
+		sets, _ := r.(map[string]interface{})["toCIDRSet"].([]interface{})
+		for _, raw := range sets {
+			rule := raw.(map[string]interface{})
+			if !netip.MustParsePrefix(rule["cidr"].(string)).Contains(addr) {
+				continue
+			}
+			carved := false
+			ex, _ := rule["except"].([]interface{})
+			for _, e := range ex {
+				if netip.MustParsePrefix(e.(string)).Contains(addr) {
+					carved = true
+				}
+			}
+			if !carved {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// proxyFindings lists each fault of the policies for the pod. A deny rule that
+// selects the pod and covers the issuer blocks the pod. A pod that has a
+// deny-free path to an address of review B3 drops that protection.
+func proxyFindings(t *testing.T, policies []*unstructured.Unstructured, pod podLabels) []string {
+	t.Helper()
+	return append(issuerBlocks(t, policies, pod), b3Gaps(t, policies, pod)...)
+}
+
+// issuerBlocks lists each policy whose deny rule selects the pod and covers
+// the issuer.
+func issuerBlocks(t *testing.T, policies []*unstructured.Unstructured, pod podLabels) []string {
+	t.Helper()
+	var out []string
+	for _, u := range policies {
+		if ciliumSelects(t, u, pod) && denies(t, u, issuerAddr) {
+			out = append(out, fmt.Sprintf("%s selects the %s and denies the issuer %s", u.GetName(), pod.role, issuerAddr))
+		}
+	}
+	return out
+}
+
+// b3Gaps lists each address of review B3 that no deny rule covers for the pod.
+func b3Gaps(t *testing.T, policies []*unstructured.Unstructured, pod podLabels) []string {
+	t.Helper()
+	var out []string
+	for _, addr := range b3Addrs {
+		covered := false
+		for _, u := range policies {
+			if ciliumSelects(t, u, pod) && denies(t, u, addr) {
+				covered = true
+			}
+		}
+		if !covered {
+			out = append(out, fmt.Sprintf("no deny rule covers %s for the %s (review B3)", addr, pod.role))
+		}
+	}
+	return out
+}
+
+// ciliumPoliciesOf returns each CiliumNetworkPolicy that the operator writes
+// for a connector.
+func ciliumPoliciesOf(t *testing.T, ci *connectorv1alpha1.ConnectorInstance) []*unstructured.Unstructured {
+	t.Helper()
+	egress, err := desiredCiliumEgressPolicy(ci, testClusterCIDRs)
+	if err != nil {
+		t.Fatalf("egress policy: %v", err)
+	}
+	return []*unstructured.Unstructured{
+		egress,
+		desiredProxyAPIServerPolicy(ci),
+		desiredProxyIssuerPolicy(ci, "spire"),
+	}
+}
+
+// The deny rules of the connector never block the proxy pod from the issuer,
+// and they cover the addresses of review B3 for each pod that has a host list
+// (gibson#1694). A Hosted proxy pod has no deny rule. A Remote proxy pod has
+// the carve-out.
+func TestEgressDenyRulesFitEachShape(t *testing.T) {
+	for name, ci := range map[string]*connectorv1alpha1.ConnectorInstance{
+		"Hosted": hostedInstance("gh", "tenant-acme"),
+		"Remote": remoteInstance("gl", "tenant-acme"),
+	} {
+		ci.Spec.EgressAllow = []string{"api.example.com:443"}
+		pols := ciliumPoliciesOf(t, ci)
+		proxy := proxyPod(ci)
+		for _, u := range pols {
+			if ciliumSelects(t, u, proxy) && denies(t, u, issuerAddr) {
+				t.Errorf("%s: %s denies the issuer for the proxy pod", name, u.GetName())
+			}
+		}
+		if ci.Spec.Shape == connectorv1alpha1.ConnectorShapeHosted {
+			if v := denyViolations(t, pols, proxy); len(v) > 0 {
+				t.Errorf("%s: %v", name, v)
+			}
+		}
+		// The pod that holds the host list drops no protection of review B3.
+		holder := proxy
+		if ci.Spec.Shape == connectorv1alpha1.ConnectorShapeHosted {
+			holder = serverPod(ci)
+		}
+		if v := b3Gaps(t, pols, holder); len(v) > 0 {
+			t.Errorf("%s: %v", name, v)
+		}
+	}
+}
+
 // denyViolations lists each policy with an egressDeny rule that selects the
-// pod. A deny rule wins over every allow rule, so it must not select a pod
-// that has to reach the kube-apiserver or the issuer.
+// pod, for a shape whose proxy pod must have no deny rule.
 func denyViolations(t *testing.T, policies []*unstructured.Unstructured, pod podLabels) []string {
 	t.Helper()
 	var out []string
@@ -96,42 +226,12 @@ func denyViolations(t *testing.T, policies []*unstructured.Unstructured, pod pod
 	return out
 }
 
-// ciliumPoliciesOf returns each CiliumNetworkPolicy that the operator writes
-// for a connector.
-func ciliumPoliciesOf(t *testing.T, ci *connectorv1alpha1.ConnectorInstance) []*unstructured.Unstructured {
-	t.Helper()
-	egress, err := desiredCiliumEgressPolicy(ci, []string{"10.244.0.0/16", "10.96.0.0/12"})
-	if err != nil {
-		t.Fatalf("egress policy: %v", err)
-	}
-	return []*unstructured.Unstructured{
-		egress,
-		desiredProxyAPIServerPolicy(ci),
-		desiredProxyIssuerPolicy(ci, "spire"),
-	}
-}
-
-// The deny rule of the connector never selects the proxy pod, because the
-// proxy pod must reach the kube-apiserver, the SPIRE issuer and the server
-// pod, and they are private addresses (gibson#1694).
-func TestNoEgressDenySelectsTheProxyPod(t *testing.T) {
-	for name, ci := range map[string]*connectorv1alpha1.ConnectorInstance{
-		"Hosted": hostedInstance("gh", "tenant-acme"),
-		"Remote": remoteInstance("gl", "tenant-acme"),
-	} {
-		ci.Spec.EgressAllow = []string{"api.example.com:443"}
-		if v := denyViolations(t, ciliumPoliciesOf(t, ci), proxyPod(ci)); len(v) > 0 {
-			t.Errorf("%s: %v", name, v)
-		}
-	}
-}
-
 // Each pod that must reach a private address has an allow rule for it, and
-// each pod that runs third-party code has the deny rule.
+// the pod that runs third-party code has no API or issuer access.
 func TestEgressPoliciesSelectTheRightPods(t *testing.T) {
-	hosted := hostedInstance("gh", "tenant-acme")
-	remote := remoteInstance("gl", "tenant-acme")
-	for _, ci := range []*connectorv1alpha1.ConnectorInstance{hosted, remote} {
+	for _, ci := range []*connectorv1alpha1.ConnectorInstance{
+		hostedInstance("gh", "tenant-acme"), remoteInstance("gl", "tenant-acme"),
+	} {
 		ci.Spec.EgressAllow = []string{"api.example.com:443"}
 		pols := ciliumPoliciesOf(t, ci)
 		egress, apiserver, issuer := pols[0], pols[1], pols[2]
@@ -139,54 +239,98 @@ func TestEgressPoliciesSelectTheRightPods(t *testing.T) {
 		if !ciliumSelects(t, apiserver, proxy) || !ciliumSelects(t, issuer, proxy) {
 			t.Errorf("%s: the proxy pod has no rule for the kube-apiserver or the issuer", ci.Spec.Shape)
 		}
-		for _, pod := range podsOf(ci) {
-			if pod.role == "server pod" {
-				if ciliumSelects(t, apiserver, pod) || ciliumSelects(t, issuer, pod) {
-					t.Errorf("%s: the server pod runs third-party code and gets API or issuer access", ci.Spec.Shape)
-				}
+		if ci.Spec.Shape == connectorv1alpha1.ConnectorShapeHosted {
+			if ciliumSelects(t, apiserver, serverPod(ci)) || ciliumSelects(t, issuer, serverPod(ci)) {
+				t.Errorf("Hosted: the server pod runs third-party code and gets API or issuer access")
 			}
-		}
-		deny, _, _ := unstructured.NestedSlice(egress.Object, "spec", "egressDeny")
-		switch ci.Spec.Shape {
-		case connectorv1alpha1.ConnectorShapeHosted:
-			if !ciliumSelects(t, egress, serverPod(ci)) || len(deny) == 0 {
-				t.Errorf("Hosted: the server pod is not under the host list and the deny rule")
+			if !ciliumSelects(t, egress, serverPod(ci)) || ciliumSelects(t, egress, proxy) {
+				t.Errorf("Hosted: the host list policy must select the server pod and not the proxy pod")
 			}
-			if ciliumSelects(t, egress, proxy) {
-				t.Errorf("Hosted: the host list policy selects the proxy pod")
-			}
-		case connectorv1alpha1.ConnectorShapeRemote:
-			if !ciliumSelects(t, egress, proxy) {
-				t.Errorf("Remote: the proxy calls the vendor host and has no allow rule for it")
-			}
-			if len(deny) != 0 {
-				t.Errorf("Remote: the egress policy carries a deny rule")
-			}
+		} else if !ciliumSelects(t, egress, proxy) {
+			t.Errorf("Remote: the proxy calls the vendor host and has no allow rule for it")
 		}
 	}
 }
 
-// The failing fixture. The selector of gibson#1694 matched every pod with the
-// label toolhive-name. The check must flag it for each shape.
-func TestDenyCheckFlagsTheOldSelector(t *testing.T) {
-	for _, ci := range []*connectorv1alpha1.ConnectorInstance{
-		hostedInstance("gh", "tenant-acme"), remoteInstance("gl", "tenant-acme"),
+// The Remote deny covers the metadata, loopback and outside private
+// addresses, and does not cover the issuer in the pod range or an address in
+// the service range.
+func TestRemoteProxyDenyCarvesOutTheClusterRanges(t *testing.T) {
+	ci := remoteInstance("gl", "tenant-acme")
+	ci.Spec.EgressAllow = []string{"api.example.com:443"}
+	egress, err := desiredCiliumEgressPolicy(ci, testClusterCIDRs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range b3Addrs {
+		if !denies(t, egress, a) {
+			t.Errorf("the deny does not cover %s", a)
+		}
+	}
+	for _, a := range []string{"10.244.1.7", "10.244.255.254", "10.96.0.1", "10.100.3.3"} {
+		if denies(t, egress, netip.MustParseAddr(a)) {
+			t.Errorf("the deny covers the cluster address %s", a)
+		}
+	}
+}
+
+// A cluster range that is not a CIDR gives an error, and so no proxy.
+func TestRemoteProxyDenyRefusesABadClusterRange(t *testing.T) {
+	ci := remoteInstance("gl", "tenant-acme")
+	ci.Spec.EgressAllow = []string{"api.example.com:443"}
+	if _, err := desiredCiliumEgressPolicy(ci, []string{"10.244.0.0/16", "not-a-cidr"}); err == nil {
+		t.Error("a bad cluster range gave no error")
+	}
+}
+
+// The failing fixtures. Each one is a policy that the check must flag.
+func TestProxyFindingsFlagTheFaults(t *testing.T) {
+	ci := remoteInstance("gl", "tenant-acme")
+	ci.Spec.EgressAllow = []string{"api.example.com:443"}
+	proxy := proxyPod(ci)
+	base, err := desiredCiliumEgressPolicy(ci, testClusterCIDRs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := func(deny []interface{}, selector map[string]interface{}) *unstructured.Unstructured {
+		u := base.DeepCopy()
+		spec := u.Object["spec"].(map[string]interface{})
+		delete(spec, "egressDeny")
+		if deny != nil {
+			spec["egressDeny"] = deny
+		}
+		if selector != nil {
+			spec["endpointSelector"] = selector
+		}
+		return u
+	}
+	allPrivate := func() []interface{} {
+		var cidrs []interface{}
+		for _, d := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8", "100.64.0.0/10"} {
+			cidrs = append(cidrs, map[string]interface{}{"cidr": d})
+		}
+		return []interface{}{map[string]interface{}{"toCIDRSet": cidrs}}
+	}
+	for name, c := range map[string]struct {
+		policy *unstructured.Unstructured
+		want   string
+	}{
+		"deny without carve-out blocks the issuer": {set(allPrivate(), nil), "denies the issuer"},
+		"no deny drops review B3":                  {set(nil, nil), "review B3"},
+		"the old selector with the old deny":       {set(allPrivate(), map[string]interface{}{"matchLabels": map[string]interface{}{"toolhive-name": ci.Name}}), "denies the issuer"},
 	} {
-		ci.Spec.EgressAllow = []string{"api.example.com:443"}
-		old, err := desiredCiliumEgressPolicy(ci, nil)
-		if err != nil {
-			t.Fatal(err)
+		found := false
+		for _, f := range proxyFindings(t, []*unstructured.Unstructured{c.policy}, proxy) {
+			if strings.Contains(f, c.want) {
+				found = true
+			}
 		}
-		spec := old.Object["spec"].(map[string]interface{})
-		spec["endpointSelector"] = map[string]interface{}{
-			"matchLabels": map[string]interface{}{"toolhive-name": ci.Name},
+		if !found {
+			t.Errorf("%s: the check did not flag %q", name, c.want)
 		}
-		spec["egressDeny"] = []interface{}{map[string]interface{}{
-			"toCIDRSet": []interface{}{map[string]interface{}{"cidr": "10.0.0.0/8"}},
-		}}
-		if v := denyViolations(t, []*unstructured.Unstructured{old}, proxyPod(ci)); len(v) == 0 {
-			t.Errorf("%s: the check does not flag the old selector", ci.Spec.Shape)
-		}
+	}
+	if len(proxyFindings(t, []*unstructured.Unstructured{base}, proxy)) != 0 {
+		t.Errorf("the check flags the real policy: %v", proxyFindings(t, []*unstructured.Unstructured{base}, proxy))
 	}
 }
 

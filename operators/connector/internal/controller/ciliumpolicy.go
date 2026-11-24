@@ -44,11 +44,11 @@ func ciliumEgressPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {
 // desiredCiliumEgressPolicy is the egress policy of a connector with a
 // non-empty host list. The allow rules name each host.
 //
-// A Cilium deny rule wins over every allow rule. So the deny rule must never
-// select a pod that has to reach a private address, and the ToolHive proxy
-// pod has to reach three: the kube-apiserver, the SPIRE OIDC provider and the
-// MCP server pod (gibson#1694). The shape of the connector decides the
-// selector:
+// A Cilium deny rule wins over every allow rule. So a deny rule must never
+// cover an address that the ToolHive proxy pod has to reach: the
+// kube-apiserver, the SPIRE OIDC provider and the MCP server pod
+// (gibson#1694). The shape of the connector decides the selector and the
+// deny rule:
 //
 //   - Hosted: the policy selects the MCP server pod, which runs the
 //     third-party code. It carries the allow rules and the deny rule. The deny
@@ -57,10 +57,15 @@ func ciliumEgressPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {
 //     (review B3).
 //   - Remote: no MCP server pod exists, because the runner of ToolHive v0.12.1
 //     deploys no workload for a remote URL. The proxy pod itself calls the
-//     vendor host. The policy selects the proxy pod and carries the allow
-//     rules only. A deny rule here would block the kube-apiserver and the
-//     issuer again. The proxy runs the code of ToolHive and not third-party
-//     code, and the vendor host comes from the catalog.
+//     vendor host. The policy selects the proxy pod. It keeps the deny rule
+//     of review B3 with the pod and the service ranges carved out
+//     (ciliumegress.ProxyDenyRules). So the cloud metadata address, loopback
+//     and private hosts outside the cluster stay denied. Inside the cluster
+//     ranges, the proxy reaches only what an allow rule names: the issuer
+//     policy and the owned NetworkPolicy. The remaining gap is a vendor host
+//     name that resolves to a cluster address. The toFQDNs rule allows the
+//     address that Cilium resolved for an allowed name, and the carve-out
+//     does not deny it.
 func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance, clusterCIDRs []string) (*unstructured.Unstructured, error) {
 	egress, err := ciliumegress.Rules(ci.Spec.EgressAllow)
 	if err != nil {
@@ -68,7 +73,12 @@ func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance, clusterC
 	}
 	spec := map[string]interface{}{"egress": egress}
 	if ci.Spec.Shape == connectorv1alpha1.ConnectorShapeRemote {
+		deny, err := ciliumegress.ProxyDenyRules(clusterCIDRs)
+		if err != nil {
+			return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
+		}
 		spec["endpointSelector"] = proxyPodSelector(ci)
+		spec["egressDeny"] = deny
 	} else {
 		deny, err := ciliumegress.DenyRules(clusterCIDRs)
 		if err != nil {

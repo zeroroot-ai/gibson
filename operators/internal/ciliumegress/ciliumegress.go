@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -141,3 +142,64 @@ func DenyRules(clusterCIDRs []string) ([]interface{}, error) {
 
 // ErrBadCIDR reports a cluster range that is not a CIDR.
 var ErrBadCIDR = errors.New("a cluster range is not a CIDR")
+
+// ProxyDenyRules returns the egressDeny rules of a pod that holds a host list
+// and also has to reach addresses inside the cluster, such as the ToolHive
+// proxy pod of a Remote connector (gibson#1694). It denies each range of
+// DeniedRanges, but it carves each cluster range that lies inside a denied
+// range out of that range with the except field of the CIDR rule. So the
+// cloud metadata address, loopback, link-local, CGNAT and the private
+// addresses outside the cluster stay denied, and the pod and the service
+// ranges are not denied.
+//
+// The except field works inside egressDeny. In Cilium v1.20.5, EgressDenyRule
+// embeds EgressCommonRule, whose ToCIDRSet is a list of CIDRRule, and
+// CIDRRule.ExceptCIDRs ("except") needs each prefix inside the cidr of its
+// rule (pkg/policy/api/egress.go, cidr.go and rule_validation.go in the
+// upstream source). The selector code builds the allow and the deny selector
+// from the same rule (pkg/policy/types/selector.go).
+//
+// A cluster range that is wider than a denied range holds it, so the denied
+// range is dropped. A cluster range that is outside every denied range needs
+// no carve-out. A cluster range that is not a CIDR is an error.
+//
+// A host name that resolves to a cluster address is still allowed by a
+// toFQDNs rule, because Cilium allows the resolved address of an allowed
+// name. That is the remaining gap.
+func ProxyDenyRules(clusterCIDRs []string) ([]interface{}, error) {
+	cluster := make([]netip.Prefix, 0, len(clusterCIDRs))
+	for _, c := range clusterCIDRs {
+		p, err := netip.ParsePrefix(strings.TrimSpace(c))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %q", ErrBadCIDR, c)
+		}
+		cluster = append(cluster, p.Masked())
+	}
+	rules := make([]interface{}, 0, len(DeniedRanges))
+	for _, d := range DeniedRanges {
+		denied := netip.MustParsePrefix(d)
+		var except []interface{}
+		whole := false
+		for _, c := range cluster {
+			switch {
+			case c.Addr().Is4() != denied.Addr().Is4():
+			case c.Bits() <= denied.Bits() && c.Contains(denied.Addr()):
+				whole = true
+			case c.Bits() > denied.Bits() && denied.Contains(c.Addr()):
+				except = append(except, c.String())
+			}
+		}
+		if whole {
+			continue
+		}
+		rule := map[string]interface{}{"cidr": denied.String()}
+		if len(except) > 0 {
+			rule["except"] = except
+		}
+		rules = append(rules, rule)
+	}
+	if len(rules) == 0 {
+		return nil, nil
+	}
+	return []interface{}{map[string]interface{}{"toCIDRSet": rules}}, nil
+}
