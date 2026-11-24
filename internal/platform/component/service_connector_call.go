@@ -18,7 +18,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
-	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 )
 
@@ -274,14 +273,15 @@ func (o connectorAuditObserver) Result(ctx context.Context, rec metatool.CallRec
 // so it is Internal. A bad credential or a wrong store is a fault of the
 // deployment, so it is FailedPrecondition. The text names no FGA detail.
 func authzCheckStatus(err error) error {
-	switch {
-	case errors.Is(err, authz.ErrFgaTimeout):
-		return status.Error(codes.DeadlineExceeded, "the authorization check timed out")
-	case errors.Is(err, authz.ErrFgaUnavailable):
-		return status.Error(codes.Unavailable, "the authorization service is unavailable")
-	case errors.Is(err, authz.ErrFgaUnauthenticated), errors.Is(err, authz.ErrFgaNotFound), errors.Is(err, authz.ErrModelNotFound):
-		return status.Error(codes.FailedPrecondition, "the authorization service is not set up for this call")
+	fault, msg := metatool.ClassifyAuthzFailure(err)
+	switch fault {
+	case metatool.AuthzFaultTimeout:
+		return status.Error(codes.DeadlineExceeded, msg)
+	case metatool.AuthzFaultUnavailable:
+		return status.Error(codes.Unavailable, msg)
+	case metatool.AuthzFaultNotSetUp:
+		return status.Error(codes.FailedPrecondition, msg)
 	default:
-		return status.Error(codes.Internal, "the authorization check failed")
+		return status.Error(codes.Internal, msg)
 	}
 }

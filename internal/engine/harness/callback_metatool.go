@@ -404,6 +404,13 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		s.logger.ErrorContext(ctx, "meta-tool invoke refused: the audit record could not be written", "id", in.ID, "tenant", caller.Tenant, "err", err)
 		// gibson:no-tool-executed — no call happens without its record.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the audit record of the call could not be written"), nil
+	case errors.Is(err, metatool.ErrAuthzCheckFailed):
+		// The check failed. It did not deny. The class and the fixed text are
+		// the same as CallTool gives (metatool.ClassifyAuthzFailure). An outage
+		// is UNAVAILABLE, so a member retries it. The cause goes to the log only.
+		s.logger.WarnContext(ctx, "meta-tool invoke refused: the authorization check failed", "id", in.ID, "tenant", caller.Tenant, "err", err)
+		// gibson:no-tool-executed — the check failed before any dispatch.
+		return metaToolErr(authzFaultCode(err), authzFaultText(err)), nil
 	}
 	code := commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT
 	switch {
@@ -751,4 +758,24 @@ func withToolCallID(resp *harnesspb.CallToolProtoResponse, id string) *harnesspb
 		resp.ToolCallId = id
 	}
 	return resp
+}
+
+// authzFaultCode is the error code of a failed authorization check on the
+// invoke_tool path.
+func authzFaultCode(err error) commonpb.ErrorCode {
+	fault, _ := metatool.ClassifyAuthzFailure(err)
+	switch fault {
+	case metatool.AuthzFaultTimeout:
+		return commonpb.ErrorCode_ERROR_CODE_TIMEOUT
+	case metatool.AuthzFaultUnavailable:
+		return commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE
+	default:
+		return commonpb.ErrorCode_ERROR_CODE_INTERNAL
+	}
+}
+
+// authzFaultText is the fixed text of a failed authorization check.
+func authzFaultText(err error) string {
+	_, msg := metatool.ClassifyAuthzFailure(err)
+	return msg
 }
