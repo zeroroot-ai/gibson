@@ -91,7 +91,7 @@ func agentCallCtx() context.Context {
 
 func pairsOf(n int) map[string]string {
 	m := make(map[string]string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		m[fmt.Sprintf("p%d", i)] = "v"
 	}
 	return m

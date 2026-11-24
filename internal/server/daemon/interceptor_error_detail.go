@@ -56,7 +56,7 @@ func withErrorDetail(err error) error {
 		Code:   errorCodeFor(st.Code()),
 		Reason: reasonFor(st.Code()),
 	}
-	return grpcvalidate.AttachDetail(err, st, detail)
+	return grpcvalidate.AttachDetail(err, st, detail) //nolint:wrapcheck // a wrap would hide the gRPC status
 }
 
 // hasErrorDetail reports whether st already carries an ErrorDetail.
